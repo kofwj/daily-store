@@ -2,13 +2,13 @@
 {% block title %}报表 · {{ store.name }}{% endblock %}
 {% block body %}
 <div class="card">
-  <h1>报表 · {{ store.name }}</h1>
+  <h1>报表 · {{ store.short_name or store.name }}</h1>
   <form method="get" class="row">
     <div class="field">
       <label>门店</label>
       <select name="store_id" onchange="this.form.submit()">
         {% for s in stores %}
-        <option value="{{ s.id }}" {% if s.id == store.id %}selected{% endif %}>{{ s.name }}</option>
+        <option value="{{ s.id }}" {% if s.id == store.id %}selected{% endif %}>{{ s.short_name or s.name }}</option>
         {% endfor %}
       </select>
     </div>
@@ -32,16 +32,40 @@
       <a class="btn ghost" href="{{ url_for('report_csv', store_id=store.id, start=start.isoformat(), end=end.isoformat()) }}">导出 CSV</a>
     </div>
   </form>
-  <p class="muted">区间 {{ start }} ～ {{ end }} · 已提交 {{ submitted|length }} 天 · 表中为日值，合计是区间求和。</p>
 </div>
 
+{# ===== 摘要卡 ===== #}
+<div class="kpi-row report-kpis">
+  <div class="kpi">
+    <div class="muted">区间</div>
+    <div class="kpi-num">{{ start.strftime('%m/%d') }}~{{ end.strftime('%m/%d') }}</div>
+    <div class="muted">{{ view }} · 已交 {{ submitted_dates|length }}/{{ working_days }} 个工作日</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">覆盖率</div>
+    <div class="kpi-num">{{ coverage }}%</div>
+    <div class="progress thin"><span style="width: {{ [coverage, 100]|min }}%"></span></div>
+  </div>
+  {% for k in kpi_cards %}
+  <div class="kpi {{ 'kpi-ok' if k.progress is not none and k.progress >= 100 else '' }}">
+    <div class="muted">{{ k.name }}</div>
+    <div class="kpi-num">{{ k.total }}{% if k.target %} / {{ k.target }}{% endif %}</div>
+    <div class="muted">
+      {% if k.progress is not none %}{{ '%.0f'|format(k.progress) }}% {% if k.left and k.left > 0 %}· 差 {{ k.left }}{% endif %}{% else %}未设目标{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{# ===== 指标明细（按分组） ===== #}
 <div class="card" style="overflow:auto">
-  <table class="data">
+  <table class="data report-grid">
     <thead>
       <tr>
         <th>指标</th>
         {% for d in dates %}<th>{{ d[5:] }}</th>{% endfor %}
         <th>合计</th>
+        <th>日均</th>
         <th>月目标</th>
         <th>进度</th>
       </tr>
@@ -59,28 +83,61 @@
           {% endif %}
         </th>
         {% endfor %}
-        <th></th>
-        <th></th>
-        <th></th>
+        <th></th><th></th><th></th><th></th>
       </tr>
       {% endif %}
     </thead>
     <tbody>
-      {% for row in rows %}
-      <tr>
-        <td>{{ row.name }}</td>
-        {% for v in row.days %}<td>{{ v }}</td>{% endfor %}
+      {% for grp in grouped %}
+      {% if grp.code != 'basic' %}
+      <tr class="group-row"><td colspan="{{ 4 + dates|length + 1 }}">{{ grp.header }}</td></tr>
+      {% endif %}
+      {% for row in grp.rows %}
+      <tr class="{{ 'row-kpi' if row.code in ['bisuan','bisuan_high','ai_contract'] or row.code.startswith('coin_cut_new') else '' }}">
+        <td class="left">{{ row.name }}{% if row.code in ['bisuan','bisuan_high','ai_contract'] or row.code.startswith('coin_cut_new') %} <span class="kpi-dot" title="考核指标">★</span>{% endif %}</td>
+        {% for v in row.days %}<td class="{{ 'day-val' if v else 'day-zero' }}">{{ v if v else '·' }}</td>{% endfor %}
         <td><b>{{ row.total }}</b></td>
+        <td class="muted">{{ row.avg or '—' }}</td>
         <td>{{ row.target or '—' }}</td>
         <td>
           {% if row.progress is not none %}
           {{ '%.0f'|format(row.progress) }}%
-          <div class="progress"><span style="width: {{ [row.progress, 100]|min }}%"></span></div>
+          <div class="progress thin"><span style="width: {{ [row.progress, 100]|min }}%"></span></div>
           {% else %}—{% endif %}
         </td>
+      </tr>
+      {% endfor %}
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted" style="margin-top:8px">「·」表示当日为 0；未提交的日期表头没有删除按钮。日均 = 区间合计 ÷ 已提交天数。</p>
+</div>
+
+{# ===== 多店对比（管理员） ===== #}
+{% if g.user['role'] == 'admin' and store_compare %}
+<div class="card" style="overflow:auto">
+  <h2>各店对比（{{ start.strftime('%m/%d') }}~{{ end.strftime('%m/%d') }}）</h2>
+  <table class="data compare-grid">
+    <thead>
+      <tr>
+        <th>门店</th>
+        <th>已交</th>
+        {% for k in kpi_cards %}<th>{{ k.name }}</th><th>完成</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for sc in store_compare %}
+      <tr>
+        <td class="left">{{ sc.store.short_name or sc.store.name }}</td>
+        <td>{{ sc.submitted }}/{{ working_days }}</td>
+        {% for k in kpi_cards %}
+        <td><b>{{ sc['k_' + k.code] }}</b></td>
+        <td class="muted">{{ '%.0f'|format(sc['p_' + k.code]) if sc['p_' + k.code] is not none else '—' }}</td>
+        {% endfor %}
       </tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+{% endif %}
 {% endblock %}

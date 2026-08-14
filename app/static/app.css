@@ -331,29 +331,57 @@ table.data th:first-child, table.data td:first-child { text-align: left; }
 .status.wait { background: var(--warn-bg); color: var(--warn); }
 
 .bulletin-wrap { overflow: auto; padding: 8px; }
-.bulletin-shot { display: inline-block; min-width: 100%; background: #fff; padding: 12px; }
-.bulletin-shot-title { font-size: 16px; font-weight: 700; margin: 0 0 4px; text-align: center; }
-.bulletin-shot-date { font-size: 12px; color: var(--muted); margin: 0 0 10px; text-align: center; }
+.bulletin-shot { display: inline-block; min-width: 100%; background: #fff; padding: 12px; box-shadow: 0 1px 3px rgba(15, 23, 42, .06); }
+.bulletin-shot-title {
+  font-size: 18px; font-weight: 800; letter-spacing: 2px;
+  margin: 0 0 2px; text-align: center; color: #0f172a;
+}
+.bulletin-shot-date {
+  font-size: 12px; color: #64748b; margin: 0 0 10px; text-align: center;
+  letter-spacing: 1px;
+}
 .shot-preview { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
-table.bulletin { border-collapse: collapse; min-width: 980px; font-size: 12px; }
+table.bulletin { border-collapse: collapse; min-width: 980px; font-size: 12px; box-shadow: 0 1px 2px rgba(15,23,42,.08); }
 table.bulletin th, table.bulletin td {
-  border: 1px solid #d0d5dd;
+  border: 1px solid #dbe1ea;
   padding: 6px 7px;
   text-align: center;
   white-space: nowrap;
 }
-table.bulletin td.name { text-align: left; }
-table.bulletin th.g-profile { background: #e0f2fe; color: #0c4a6e; font-weight: 650; }
-table.bulletin th.g-follow { background: #fee2e2; color: #991b1b; font-weight: 650; }
-table.bulletin th.g-month { background: #e0f2fe; color: #0c4a6e; font-weight: 650; }
-table.bulletin th.g-day { background: #fef9c3; color: #854d0e; font-weight: 650; }
-table.bulletin td.flag-yes { background: #16a34a; color: #fff; font-weight: 650; }
-table.bulletin td.flag-no { background: #dc2626; color: #fff; font-weight: 650; }
-table.bulletin td.scale { color: #111827; font-variant-numeric: tabular-nums; }
-table.bulletin tfoot td { font-weight: 700; }
-table.bulletin tr.total td { background: #f8fafc; }
-table.bulletin tr.total td.name { text-align: center; }
-table.bulletin tr.wait td.name { background: #fffbeb; }
+table.bulletin td.name { text-align: left; font-weight: 600; color: #1e293b; }
+/* 通栏组头：蓝灰系由深到浅，两组数字用较深蓝突出 */
+table.bulletin th.g-profile { background: #f1f5f9; color: #475569; font-weight: 700; font-size: 12px; letter-spacing: .5px; }
+table.bulletin th.g-follow { background: #e2e8f0; color: #475569; font-weight: 700; }
+table.bulletin th.g-month { background: #334155; color: #fff; font-weight: 800; font-size: 12.5px; letter-spacing: .5px; }
+table.bulletin th.g-day { background: #1e293b; color: #fff; font-weight: 800; font-size: 12.5px; letter-spacing: .5px; }
+/* 第二行小表头跟随分组底色浅化 */
+table.bulletin thead tr:nth-child(2) th.g-profile { background: #f8fafc; }
+table.bulletin thead tr:nth-child(2) th.g-follow { background: #f1f5f9; }
+table.bulletin thead tr:nth-child(2) th.g-month { background: #475569; }
+table.bulletin thead tr:nth-child(2) th.g-day { background: #334155; }
+/* 跟进：深蓝=是（已跟进），浅灰=否 */
+table.bulletin td.flag-yes { background: #dbeafe; color: #1e40af; font-weight: 700; font-size: 12px; }
+table.bulletin td.flag-no { background: #f1f5f9; color: #94a3b8; font-weight: 600; }
+/* 数字：等宽对齐 */
+table.bulletin td.scale { color: #111827; font-variant-numeric: tabular-nums; font-weight: 600; }
+/* 合计行：深蓝底白字 */
+table.bulletin tfoot td { font-weight: 800; }
+table.bulletin tr.total td {
+  background: #1e293b; color: #f8fafc;
+  border-color: #334155; font-size: 12.5px;
+}
+table.bulletin tr.total td.name { text-align: center; letter-spacing: 1px; }
+table.bulletin td.total-num { font-variant-numeric: tabular-nums; font-weight: 800; }
+table.bulletin tr.total td.flag-yes { background: #334155; color: #93c5fd; }
+table.bulletin tr.total td.flag-no { background: #334155; color: #94a3b8; }
+/* 未提交：整行弱化 + 门店名标签 */
+table.bulletin tr.wait td { background: #f8fafc; color: #94a3b8; }
+table.bulletin tr.wait td.name { color: #64748b; }
+.miss-tag {
+  display: inline-block; margin-left: 6px; padding: 1px 6px;
+  font-size: 10px; font-weight: 700; letter-spacing: .5px;
+  color: #475569; background: #e2e8f0; border-radius: 4px;
+}
 
 .profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
 .store-profile { border-top: 1px solid var(--line); padding: 14px 0; }
@@ -451,3 +479,36 @@ details.extra summary { cursor: pointer; font-weight: 600; }
   cursor: pointer;
 }
 .del-day:hover { background: #fee4e2; border-color: var(--err); }
+
+/* ===== 报表页 ===== */
+.report-kpis { margin-top: 0; margin-bottom: 14px; }
+.report-kpis .kpi { background: #fff; }
+.report-kpis .kpi-num { font-size: 20px; font-weight: 800; margin: 2px 0; letter-spacing: -0.02em; }
+.report-kpis .kpi-ok .kpi-num { color: var(--ok); }
+.progress.thin { height: 4px; border-radius: 999px; margin-top: 6px; }
+.progress.thin span { background: var(--info); }
+
+/* 指标明细表 */
+table.report-grid { font-size: 12.5px; }
+table.report-grid th { background: #f8fafc; color: #475569; font-weight: 650; padding: 6px 5px; font-size: 11.5px; }
+table.report-grid td { padding: 5px 6px; }
+table.report-grid td.day-zero { color: #cbd5e1; }
+table.report-grid td.day-val { font-variant-numeric: tabular-nums; }
+table.report-grid tr.group-row td {
+  background: #eef2ff; color: #4338ca; font-weight: 700; font-size: 12px;
+  padding: 5px 8px; letter-spacing: .5px;
+}
+table.report-grid tr.row-kpi td { background: #f8faff; }
+table.report-grid tr.row-kpi td:first-child { color: #1e3a8a; font-weight: 650; }
+.kpi-dot { color: #f59e0b; font-size: 11px; margin-left: 3px; }
+
+/* 多店对比 */
+table.compare-grid { font-size: 12.5px; }
+table.compare-grid th { background: #f1f5f9; color: #475569; padding: 6px 8px; font-size: 11.5px; }
+table.compare-grid td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; }
+table.compare-grid tr:hover td { background: #f8fafc; }
+
+@media (max-width: 800px) {
+  .report-kpis { grid-template-columns: 1fr 1fr; }
+  .report-kpis .kpi:nth-child(2) { grid-column: span 2; }
+}

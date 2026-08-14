@@ -19,12 +19,15 @@ def _hex(rgb: tuple) -> str:
 
 
 def scale_color(value: int, max_value: int, kind: str) -> str:
-    """月累：红→蓝；当日：浅黄→琥珀。0 也占色阶最低档。"""
+    """色阶：低→高 用蓝灰渐变（月累深一档、当日浅一档），0 为最浅灰。
+
+    整体只有蓝/灰两种色调，避免彩色干扰；保证深色文字可读。
+    """
     t = 0.0 if max_value <= 0 else max(0.0, min(1.0, float(value) / max_value))
     if kind == "month":
-        low, mid, high = (248, 113, 113), (254, 240, 138), (59, 130, 246)
+        low, mid, high = (226, 232, 240), (148, 163, 184), (71, 85, 105)
     else:
-        low, mid, high = (254, 249, 195), (253, 224, 71), (245, 158, 11)
+        low, mid, high = (241, 245, 249), (203, 213, 225), (148, 163, 184)
     if t < 0.5:
         p = t * 2
         rgb = (_lerp(low[0], mid[0], p), _lerp(low[1], mid[1], p), _lerp(low[2], mid[2], p))

@@ -366,21 +366,7 @@ def create_app() -> Flask:
                 grid[row["metric_code"]][row["biz_date"]] = int(row["day_value"] or 0)
                 totals[row["metric_code"]] += int(row["day_value"] or 0)
 
-            rows = []
-            for m in metrics:
-                month_target = int(m["monthly_target"] or 0)
-                total = totals[m["code"]]
-                rows.append(
-                    {
-                        "code": m["code"],
-                        "name": m["name"],
-                        "section": m["section"],
-                        "target": month_target,
-                        "total": total,
-                        "progress": (total / month_target * 100) if month_target else None,
-                        "days": [grid[m["code"]].get(d, 0) for d in dates],
-                    }
-                )
+            # 提交状态 + 区间总天数（工作日口径：周一~周五）
             submitted = {
                 row["biz_date"]
                 for row in conn.execute(
@@ -391,6 +377,108 @@ def create_app() -> Flask:
                     (store["id"], start.isoformat(), end.isoformat()),
                 )
             }
+            submitted_dates = sorted(submitted & set(dates))
+            all_days = [
+                (start + timedelta(days=i)).isoformat()
+                for i in range((end - start).days + 1)
+            ]
+            working_days = [
+                d for d in all_days
+                if date.fromisoformat(d).weekday() < 5
+            ]
+            coverage = (
+                round(len(submitted_dates) / len(working_days) * 100)
+                if working_days
+                else 0
+            )
+
+            # 三个考核 KPI：从 kpi_targets 读目标（与月度考核页一致），区间累计
+            from .metrics_seed import rollup_amount
+
+            kpi_targets = db.list_kpi_targets(conn)
+            kpi_cards = []
+            for code, name, note in KPI_TARGETS:
+                if code == "ai_contract":
+                    total = totals.get("ai_contract", 0)
+                else:
+                    total = rollup_amount(totals, code)
+                target = kpi_targets.get(code, 0)
+                kpi_cards.append(
+                    {
+                        "code": code,
+                        "name": name,
+                        "note": note,
+                        "total": total,
+                        "target": target,
+                        "progress": (total / target * 100) if target else None,
+                        "left": max(0, target - total) if target else None,
+                    }
+                )
+
+            # 指标行：按 SECTIONS 分组；KPI 成员标记高亮；普通指标目标读 metrics.monthly_target
+            from .metrics_seed import SECTIONS, section_by_code
+
+            rows = []
+            for m in metrics:
+                total = totals[m["code"]]
+                month_target = int(m["monthly_target"] or 0)
+                rows.append(
+                    {
+                        "code": m["code"],
+                        "name": m["name"],
+                        "section": m["section"],
+                        "target": month_target,
+                        "total": total,
+                        "progress": (total / month_target * 100) if month_target else None,
+                        "days": [grid[m["code"]].get(d, 0) for d in dates],
+                        "avg": round(total / max(1, len(submitted_dates)), 1) if submitted_dates else 0,
+                    }
+                )
+
+            # 分组视图：SECTIONS 顺序 + 每组的 KPI/普通行
+            grouped = []
+            for section in SECTIONS:
+                sec_rows = [r for r in rows if r["section"] == section["code"]]
+                if not sec_rows:
+                    continue
+                grouped.append(
+                    {
+                        "code": section["code"],
+                        "header": section["header"] or section["code"],
+                        "rows": sec_rows,
+                    }
+                )
+
+            # 多店对比（管理员）：各店 KPI 区间合计 / 目标完成率 / 已交天数
+            store_compare = []
+            if g.user["role"] == "admin":
+                for s in db.list_all_stores(conn):
+                    sfacts = db.facts_in_range(conn, s["id"], start, end)
+                    stot: Dict[str, int] = {}
+                    for row in sfacts:
+                        stot[row["metric_code"]] = stot.get(row["metric_code"], 0) + int(row["day_value"] or 0)
+                    s_sub = {
+                        row["biz_date"]
+                        for row in conn.execute(
+                            """
+                            SELECT biz_date FROM daily_reports
+                            WHERE store_id=? AND biz_date>=? AND biz_date<=?
+                            """,
+                            (s["id"], start.isoformat(), end.isoformat()),
+                        )
+                    }
+                    scard = {"store": s, "submitted": len(s_sub & set(dates))}
+                    for code, _n, _t in KPI_TARGETS:
+                        if code == "ai_contract":
+                            v = int(stot.get("ai_contract", 0) or 0)
+                        else:
+                            v = rollup_amount(stot, code)
+                        scard[f"k_{code}"] = v
+                        tg = kpi_targets.get(code, 0)
+                        scard[f"p_{code}"] = (v / tg * 100) if tg else None
+                    store_compare.append(scard)
+                store_compare.sort(key=lambda x: -x.get("submitted", 0))
+
             return render_template(
                 "report.html",
                 store=store,
@@ -400,7 +488,13 @@ def create_app() -> Flask:
                 end=end,
                 dates=dates,
                 rows=rows,
+                grouped=grouped,
                 submitted=submitted,
+                submitted_dates=submitted_dates,
+                coverage=coverage,
+                working_days=len(working_days),
+                kpi_cards=kpi_cards,
+                store_compare=store_compare,
             )
 
     @app.route("/report.csv")

@@ -50,12 +50,12 @@
       <tr class="{{ 'wait' if not row.submitted else '' }}">
         <td>{{ row.region_group }}</td>
         <td>{{ row.city }}</td>
-        <td class="name">{{ row.name }}</td>
+        <td class="name">{{ row.name }}{% if not row.submitted %} <span class="miss-tag">未交</span>{% endif %}</td>
         <td>{{ row.mobile_code }}</td>
         <td>{{ row.area_manager }}</td>
         <td>{{ row.store_manager }}</td>
-        <td class="{{ 'flag-yes' if row.follow_ai else 'flag-no' }}">{{ row.follow_ai_text }}</td>
-        <td class="{{ 'flag-yes' if row.follow_bisuan else 'flag-no' }}">{{ row.follow_bisuan_text }}</td>
+        <td class="{{ 'flag-yes' if row.follow_ai else 'flag-no' }}">{{ '✓ 是' if row.follow_ai else '— 否' }}</td>
+        <td class="{{ 'flag-yes' if row.follow_bisuan else 'flag-no' }}">{{ '✓ 是' if row.follow_bisuan else '— 否' }}</td>
         <td class="scale" style="background:{{ row.month_ai_color }}">{{ row.month_ai_text }}</td>
         <td class="scale" style="background:{{ row.month_bisuan_color }}">{{ row.month_bisuan_text }}</td>
         <td class="scale" style="background:{{ row.day_ai_color }}">{{ row.day_ai_text }}</td>
@@ -69,10 +69,10 @@
         <td colspan="6" class="name">{{ totals.name }}</td>
         <td class="{{ 'flag-yes' if totals.follow_ai else 'flag-no' }}">{{ totals.follow_ai_text }}</td>
         <td class="{{ 'flag-yes' if totals.follow_bisuan else 'flag-no' }}">{{ totals.follow_bisuan_text }}</td>
-        <td class="scale" style="background:{{ totals.month_ai_color }}">{{ totals.month_ai_text }}</td>
-        <td class="scale" style="background:{{ totals.month_bisuan_color }}">{{ totals.month_bisuan_text }}</td>
-        <td class="scale" style="background:{{ totals.day_ai_color }}">{{ totals.day_ai_text }}</td>
-        <td class="scale" style="background:{{ totals.day_bisuan_color }}">{{ totals.day_bisuan_text }}</td>
+        <td class="total-num">{{ totals.month_ai_text }}</td>
+        <td class="total-num">{{ totals.month_bisuan_text }}</td>
+        <td class="total-num">{{ totals.day_ai_text }}</td>
+        <td class="total-num">{{ totals.day_bisuan_text }}</td>
       </tr>
     </tfoot>
     {% endif %}
