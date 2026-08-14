@@ -404,6 +404,8 @@ table.bulletin tr.wait td.flag-no { background: #ffedd5; }
 .settings-nav a:hover, .settings-nav a.active { background: #fff; color: var(--ink); border: 1px solid var(--line); }
 .settings-nav a.active { font-weight: 600; }
 .settings-main .narrow { max-width: 360px; }
+.rules-form { max-width: 620px; }
+.rules-form h2 { margin-top: 18px; }
 .table-wrap { overflow: auto; }
 table.settings-table td.left { text-align: left; }
 table.settings-table input[type="text"],
@@ -500,6 +502,14 @@ details.extra summary { cursor: pointer; font-weight: 600; }
 }
 .store-editor-grid p { margin: 0; }
 .store-editor-grid .span-2 { grid-column: 1 / -1; }
+.rules-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.rules-grid p { margin: 0; }
+.rules-grid .span-2 { grid-column: 1 / -1; }
 
 @media (max-width: 800px) {
   .settings { grid-template-columns: 1fr; }

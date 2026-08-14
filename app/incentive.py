@@ -3,81 +3,116 @@
 口径：
 - AI手机 = Ai手机合约
 - 芝麻直降 = 新用户直降·芝麻免充
+
+奖罚阈值 / 金额可从配置读（app.meta['incentive_rules']），季度可改；
+不配时用下方 DEFAULTS。
 """
 
 from __future__ import annotations
 
+import copy
+import json
 from typing import Any, Dict
 
 
-def judge_with_advisor(ai: int, sesame: int) -> Dict[str, Any]:
+DEFAULTS: Dict[str, int] = {
+    # 有顾问：AI + 芝麻 ≥ 总量阈值才可能达标
+    "total_threshold": 10,   # 总量达标线
+    "ai_best": 3,            # AI ≥ 此值 → 高效完成
+    "ai_pass": 1,            # AI ≥ 此值 → 已破 0
+    "reward_best": 500,      # 高效完成奖门店
+    "reward_pass": 200,      # 总量达标奖门店
+    "reward_sesame_penalty": 100,  # 总量靠芝麻 → 罚顾问
+    # 有顾问未达标：
+    "ai_5": 5,              # AI ≥ 此值 → 顾问免责，罚门店
+    "penal_store_ai5": 200,  # 店长带队拖后腿罚门店
+    "penal_store_mid": 100,  # 整体欠佳罚门店
+    "penal_advisor_mid": 50, # 整体欠佳罚顾问
+    "penal_store_zero": 200, # AI 挂 0 罚门店
+    "penal_advisor_zero": 100,  # AI 挂 0 罚顾问
+    # 无顾问：
+    "reward_no_advisor": 200,    # AI、芝麻均破 0 → 奖门店
+    "penal_store_one": 50,     # 单项破 0 → 罚门店
+    "penal_store_none": 100,   # 双未破 0 → 罚门店
+}
+
+
+def rules_from(raw: str = "") -> Dict[str, int]:
+    """从 app_meta 存的 JSON 读配置，缺的用默认。"""
+    rules = copy.deepcopy(DEFAULTS)
+    try:
+        data = json.loads(raw) if raw else {}
+    except (TypeError, ValueError):
+        data = {}
+    for key, default in DEFAULTS.items():
+        try:
+            v = int(data.get(key, default))
+        except (TypeError, ValueError):
+            v = default
+        rules[key] = v
+    return rules
+
+
+def judge_with_advisor(ai: int, sesame: int, r: Dict[str, int] | None = None) -> Dict[str, Any]:
+    r = r or DEFAULTS
     ai = int(ai or 0)
     sesame = int(sesame or 0)
     total = ai + sesame
-    if total >= 10:
-        if ai >= 3:
+    if total >= r["total_threshold"]:
+        if ai >= r["ai_best"]:
             return _result(
-                True,
-                "双达标",
-                "总量达标且 AI≥3，高效完成",
-                store_reward=500,
+                True, "双达标", "总量达标且 AI≥高线，高效完成",
+                store_reward=r["reward_best"],
             )
-        if ai >= 1:
+        if ai >= r["ai_pass"]:
             return _result(
-                True,
-                "总量达标",
-                "总量达标且 AI 已破 0",
-                store_reward=200,
+                True, "总量达标", "总量达标且 AI 已破 0",
+                store_reward=r["reward_pass"],
             )
         return _result(
-            True,
-            "总量靠芝麻",
-            "总量达标但 AI 未破 0，顾问主业失职",
-            advisor_penalty=100,
+            True, "总量靠芝麻", "总量达标但 AI 未破 0，顾问主业失职",
+            advisor_penalty=r["reward_sesame_penalty"],
         )
-    if ai >= 5:
+    if ai >= r["ai_5"]:
         return _result(
-            False,
-            "顾问搭载好、总量不够",
-            "AI≥5 但总量未到 10，店长带队拖后腿，顾问免责",
-            store_penalty=200,
+            False, "顾问搭载好、总量不够",
+            "AI≥高线 但总量未达标，店长带队拖后腿，顾问免责",
+            store_penalty=r["penal_store_ai5"],
         )
-    if ai >= 1:
+    if ai >= r["ai_pass"]:
         return _result(
-            False,
-            "整体欠佳",
-            "总量未达标且 AI 只有 1–4",
-            store_penalty=100,
-            advisor_penalty=50,
+            False, "整体欠佳", "总量未达标且 AI 只有中段",
+            store_penalty=r["penal_store_mid"],
+            advisor_penalty=r["penal_advisor_mid"],
         )
     return _result(
-        False,
-        "整体极差",
-        "总量未达标且 AI 挂 0，顶格处罚",
-        store_penalty=200,
-        advisor_penalty=100,
+        False, "整体极差", "总量未达标且 AI 挂 0，顶格处罚",
+        store_penalty=r["penal_store_zero"],
+        advisor_penalty=r["penal_advisor_zero"],
     )
 
 
-def judge_without_advisor(ai: int, sesame: int) -> Dict[str, Any]:
+def judge_without_advisor(ai: int, sesame: int, r: Dict[str, int] | None = None) -> Dict[str, Any]:
+    r = r or DEFAULTS
     ai = int(ai or 0)
     sesame = int(sesame or 0)
-    ai_ok = ai >= 1
-    sesame_ok = sesame >= 1
+    ai_ok = ai >= r["ai_pass"]
+    sesame_ok = sesame >= r["ai_pass"]
     if ai_ok and sesame_ok:
-        return _result(True, "双破 0", "AI、芝麻均已破 0", store_reward=200)
+        return _result(True, "双破 0", "AI、芝麻均已破 0", store_reward=r["reward_no_advisor"])
     if ai_ok or sesame_ok:
-        return _result(False, "单项未破 0", "只有一项破 0", store_penalty=50)
-    return _result(False, "双未破 0", "AI、芝麻都是 0", store_penalty=100)
+        return _result(False, "单项未破 0", "只有一项破 0", store_penalty=r["penal_store_one"])
+    return _result(False, "双未破 0", "AI、芝麻都是 0", store_penalty=r["penal_store_none"])
 
 
-def judge(has_advisor: bool, ai: int, sesame: int) -> Dict[str, Any]:
+def judge(has_advisor: bool, ai: int, sesame: int, rules: Dict[str, int] = None) -> Dict[str, Any]:
+    r = rules or DEFAULTS
     if has_advisor:
-        row = judge_with_advisor(ai, sesame)
+        row = judge_with_advisor(ai, sesame, r)
         row["scheme"] = "有运营商顾问"
-        row["goal"] = "AI + 芝麻 ≥ 10"
+        row["goal"] = f"AI + 芝麻 ≥ {r['total_threshold']}"
     else:
-        row = judge_without_advisor(ai, sesame)
+        row = judge_without_advisor(ai, sesame, r)
         row["scheme"] = "无运营商顾问"
         row["goal"] = "AI、芝麻均破 0"
     row["ai"] = int(ai or 0)

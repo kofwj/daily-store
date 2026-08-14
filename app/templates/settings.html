@@ -10,6 +10,7 @@
     <a href="{{ url_for('settings', tab='targets') }}" class="{{ 'active' if tab=='targets' else '' }}">月目标</a>
     <a href="{{ url_for('settings', tab='permissions') }}" class="{{ 'active' if tab=='permissions' else '' }}">权限</a>
     <a href="{{ url_for('settings', tab='broadcast') }}" class="{{ 'active' if tab=='broadcast' else '' }}">播报</a>
+    <a href="{{ url_for('settings', tab='rules') }}" class="{{ 'active' if tab=='rules' else '' }}">考核规则</a>
     {% endif %}
   </aside>
 
@@ -257,6 +258,39 @@
           </label>
         </p>
         <div class="toolbar"><button type="submit">保存播报设置</button></div>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if tab == 'rules' and g.user['role'] == 'admin' %}
+    <div class="card">
+      <h1>考核规则</h1>
+      <p class="muted">季度改阈值和奖罚金额，保存后立即生效。考核项不变，只改数字。</p>
+      <form method="post" class="rules-form">
+        <input type="hidden" name="action" value="save_rules">
+        <input type="hidden" name="tab" value="rules">
+        <h2>有运营商顾问</h2>
+        <div class="rules-grid">
+          <p><label>达标总量 AI+芝麻 ≥</label><input type="number" min="0" name="r_total_threshold" value="{{ incentive_rules['total_threshold'] }}"></p>
+          <p><label>AI≥ 高效线</label><input type="number" min="0" name="r_ai_best" value="{{ incentive_rules['ai_best'] }}"></p>
+          <p><label>AI≥ 破0线</label><input type="number" min="0" name="r_ai_pass" value="{{ incentive_rules['ai_pass'] }}"></p>
+          <p class="span-2"><label>AI≥ 顾问免责线（未达标时）</label><input type="number" min="0" name="r_ai_5" value="{{ incentive_rules['ai_5'] }}"></p>
+          <p><label>高效完成奖门店</label><input type="number" min="0" name="r_reward_best" value="{{ incentive_rules['reward_best'] }}"></p>
+          <p><label>总量达标奖门店</label><input type="number" min="0" name="r_reward_pass" value="{{ incentive_rules['reward_pass'] }}"></p>
+          <p><label>总量靠芝麻罚顾问</label><input type="number" min="0" name="r_reward_sesame_penalty" value="{{ incentive_rules['reward_sesame_penalty'] }}"></p>
+          <p><label>顾问免责罚门店</label><input type="number" min="0" name="r_penal_store_ai5" value="{{ incentive_rules['penal_store_ai5'] }}"></p>
+          <p><label>整体欠佳罚门店</label><input type="number" min="0" name="r_penal_store_mid" value="{{ incentive_rules['penal_store_mid'] }}"></p>
+          <p><label>整体欠佳罚顾问</label><input type="number" min="0" name="r_penal_advisor_mid" value="{{ incentive_rules['penal_advisor_mid'] }}"></p>
+          <p><label>AI挂0罚门店</label><input type="number" min="0" name="r_penal_store_zero" value="{{ incentive_rules['penal_store_zero'] }}"></p>
+          <p><label>AI挂0罚顾问</label><input type="number" min="0" name="r_penal_advisor_zero" value="{{ incentive_rules['penal_advisor_zero'] }}"></p>
+        </div>
+        <h2>无运营商顾问</h2>
+        <div class="rules-grid">
+          <p><label>双破0奖门店</label><input type="number" min="0" name="r_reward_no_advisor" value="{{ incentive_rules['reward_no_advisor'] }}"></p>
+          <p><label>单项破0罚门店</label><input type="number" min="0" name="r_penal_store_one" value="{{ incentive_rules['penal_store_one'] }}"></p>
+          <p><label>双未破0罚门店</label><input type="number" min="0" name="r_penal_store_none" value="{{ incentive_rules['penal_store_none'] }}"></p>
+        </div>
+        <div class="toolbar"><button type="submit">保存考核规则</button></div>
       </form>
     </div>
     {% endif %}

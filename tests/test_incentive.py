@@ -1,4 +1,4 @@
-from app.incentive import judge, judge_with_advisor, judge_without_advisor, money_text
+from app.incentive import DEFAULTS, judge, judge_with_advisor, judge_without_advisor, money_text
 
 
 def test_with_advisor_table():
@@ -23,6 +23,14 @@ def test_without_advisor_table():
     assert judge_without_advisor(2, 0)["store_penalty"] == 50
     assert judge_without_advisor(0, 3)["store_penalty"] == 50
     assert judge_without_advisor(0, 0)["store_penalty"] == 100
+
+
+def test_custom_rules_change_threshold():
+    rules = dict(DEFAULTS)
+    rules["total_threshold"] = 12
+    rules["reward_best"] = 800
+    assert judge(True, 3, 7, rules)["passed"] is False
+    assert judge(True, 5, 7, rules)["store_reward"] == 800
 
 
 def test_money_text():

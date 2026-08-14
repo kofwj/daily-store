@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import os
 import re
 from datetime import date, datetime, timedelta
@@ -125,12 +126,15 @@ def create_app() -> Flask:
         prev = db.prev_month_cum(conn, store_id, biz_date)
         return broadcast.add_day_to_prev(prev, today)
 
+    def incentive_rules(conn) -> Dict[str, int]:
+        return incentive.rules_from(db.get_setting(conn, "incentive_rules", ""))
+
     def store_forecast(conn, store, as_of: date) -> Dict[str, Any]:
         month_vals = db.month_cum_through(conn, store["id"], as_of)
         ai = int(month_vals.get("ai_contract", 0) or 0)
         sesame = int(month_vals.get("coin_cut_new_sesame", 0) or 0)
         advisor_name = (store["advisor_name"] if "advisor_name" in store.keys() else "") or ""
-        judged = incentive.judge(bool(advisor_name.strip()), ai, sesame)
+        judged = incentive.judge(bool(advisor_name.strip()), ai, sesame, incentive_rules(conn))
         judged.update(
             {
                 "store_id": store["id"],
@@ -170,7 +174,7 @@ def create_app() -> Flask:
 
     def settings_tab() -> str:
         tab = request.values.get("tab") or "account"
-        allowed = {"account", "stores", "people", "targets", "permissions", "broadcast"}
+        allowed = {"account", "stores", "people", "targets", "permissions", "broadcast", "rules"}
         if tab not in allowed:
             return "account"
         if g.user["role"] != "admin" and tab != "account":
@@ -1012,6 +1016,17 @@ def create_app() -> Flask:
                         compact = "1" if request.form.get("broadcast_compact") == "1" else "0"
                         db.set_setting(conn, "broadcast_compact", compact)
                         flash("播报设置已保存", "ok")
+                    elif action == "save_rules":
+                        defaults = incentive.DEFAULTS
+                        rules = {}
+                        for key in defaults:
+                            raw = request.form.get(f"r_{key}", "").strip()
+                            try:
+                                rules[key] = max(0, int(raw or defaults[key]))
+                            except ValueError:
+                                rules[key] = defaults[key]
+                        db.set_setting(conn, "incentive_rules", json.dumps(rules, ensure_ascii=False))
+                        flash("考核规则已保存，立即生效", "ok")
                     else:
                         flash("未知操作", "error")
                 except Exception as exc:  # noqa: BLE001 — 表单校验用
@@ -1072,8 +1087,8 @@ def create_app() -> Flask:
                 store_label=store_label,
                 filler_edit_month=db.get_setting(conn, "filler_edit_month", "0") == "1",
                 broadcast_compact=db.get_setting(conn, "broadcast_compact", "1") == "1",
+                incentive_rules=incentive_rules(conn),
             )
-
     @app.context_processor
     def inject_now():
         return {"today_iso": db.today_local().isoformat(), "now": datetime.now(db.TZ)}
