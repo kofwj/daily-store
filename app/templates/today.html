@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}今日填报 · {{ store.name }}{% endblock %}
+{% block body_class %}today-page{% endblock %}
+{% block body %}
+<div class="card today-head">
+  <h1>{{ store.name }}</h1>
+  <form method="get" class="row">
+    <div class="field">
+      <label>门店</label>
+      <select name="store_id" onchange="this.form.submit()">
+        {% for s in stores %}
+        <option value="{{ s.id }}" {% if s.id == store.id %}selected{% endif %}>{{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>日期</label>
+      <input type="date" name="date" value="{{ biz_date.isoformat() }}" onchange="this.form.submit()">
+    </div>
+  </form>
+  {% if report %}
+  <p class="muted">已由 {{ report.submitter_name or '未知' }} 于 {{ report.submitted_at }} 提交，可覆盖保存。</p>
+  {% else %}
+  <p class="muted">只填今天的数，累自动算。上面三块是月度考核进度。</p>
+  {% endif %}
+  {% if kpi_cards %}
+  <div class="kpi-row">
+    {% for k in kpi_cards %}
+    <div class="kpi">
+      <div class="muted">{{ k.name }}</div>
+      <div class="kpi-num">{{ k.cum }}{% if k.target %} / {{ k.target }}{% endif %}</div>
+      <div class="muted">今日 {{ k.day }}{% if k.progress is not none %} · {{ '%.0f'|format(k.progress) }}%{% endif %}</div>
+    </div>
+    {% endfor %}
+    {% if forecast %}
+    <div class="kpi forecast-kpi {{ 'ok' if forecast.passed else 'bad' }}">
+      <div class="muted">预计考核 · {{ forecast.scheme }}</div>
+      <div class="kpi-num">{{ forecast.money_text }}</div>
+      <div class="muted">{{ forecast.label }} · AI {{ forecast.ai }} · 芝麻 {{ forecast.sesame }}{% if forecast.has_advisor %} · 合计 {{ forecast.total }}/10{% endif %}</div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+{% if report %}
+<div class="card" id="broadcast">
+  <h2>一键复制到微信群</h2>
+  <p class="muted">点按钮后去微信长按输入框粘贴。</p>
+  <textarea id="broadcastText" readonly>{{ broadcast_text }}</textarea>
+  <div class="toolbar">
+    <button type="button" class="copy-btn" onclick="copyBroadcast()">复制全文</button>
+    <span class="chip" id="copyHint">未复制</span>
+  </div>
+</div>
+{% endif %}
+
+<form method="post" id="dailyForm">
+  <input type="hidden" name="store_id" value="{{ store.id }}">
+  <input type="hidden" name="date" value="{{ biz_date.isoformat() }}">
+  <div class="card today-form">
+    <h2>今天的数字</h2>
+    {% for section in grouped %}
+      {% if section.header %}
+      <div class="section-title">{{ section.header }}</div>
+      {% endif %}
+      {% for item in section.rows %}
+      <div class="metric">
+        <div class="metric-label">
+          <div class="name">{{ item.name }}</div>
+          <div class="cum">累 {{ item.cum }}</div>
+        </div>
+        <div class="stepper">
+          <button type="button" class="ghost step" data-delta="-1" aria-label="减一">−</button>
+          <input type="number" min="0" step="1" name="m_{{ item.code }}" value="{{ item.day }}" inputmode="numeric" pattern="[0-9]*">
+          <button type="button" class="ghost step" data-delta="1" aria-label="加一">+</button>
+        </div>
+      </div>
+      {% endfor %}
+    {% endfor %}
+    <p>
+      <label class="check">
+        <input type="checkbox" name="compact" value="1" {% if compact %}checked{% endif %}>
+        数字化里日=0 且累=0 的行不进群消息
+      </label>
+    </p>
+    <p>
+      <label>备注（不进群，只给自己看）</label>
+      <input type="text" name="note" value="{{ report.note if report else '' }}" maxlength="200">
+    </p>
+    <div class="toolbar desktop-save">
+      <button type="submit">保存并生成播报</button>
+    </div>
+  </div>
+  <div class="sticky-save">
+    <button type="submit">保存并生成播报</button>
+  </div>
+</form>
+
+{% if not report %}
+<div class="card">
+  <h2>一键复制到微信群</h2>
+  <p class="muted">先保存今天的数字，这里才会出现可复制的全文。</p>
+</div>
+{% endif %}
+
+<script>
+function bumpInput(input, delta) {
+  const next = Math.max(0, (parseInt(input.value || '0', 10) || 0) + delta);
+  input.value = String(next);
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+document.querySelectorAll('.stepper .step').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const input = btn.parentElement.querySelector('input');
+    if (input) bumpInput(input, Number(btn.dataset.delta));
+  });
+});
+function copyBroadcast() {
+  const el = document.getElementById('broadcastText');
+  if (!el) return;
+  const text = el.value;
+  const hint = document.getElementById('copyHint');
+  const done = () => { if (hint) hint.textContent = '已复制，去微信粘贴'; };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(fallback);
+  } else {
+    fallback();
+  }
+  function fallback() {
+    el.focus();
+    el.select();
+    el.setSelectionRange(0, 99999);
+    try { document.execCommand('copy'); done(); } catch (e) {
+      if (hint) hint.textContent = '请长按文本框全选复制';
+    }
+  }
+}
+{% if report and request.args.get('copied') == '1' %}
+window.addEventListener('DOMContentLoaded', copyBroadcast);
+{% endif %}
+</script>
+{% endblock %}

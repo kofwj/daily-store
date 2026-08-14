@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}设置{% endblock %}
+{% block body %}
+<div class="settings">
+  <aside class="settings-nav">
+    <a href="{{ url_for('settings', tab='account') }}" class="{{ 'active' if tab=='account' else '' }}">账号</a>
+    {% if g.user['role'] == 'admin' %}
+    <a href="{{ url_for('settings', tab='stores') }}" class="{{ 'active' if tab=='stores' else '' }}">门店</a>
+    <a href="{{ url_for('settings', tab='people') }}" class="{{ 'active' if tab=='people' else '' }}">人员</a>
+    <a href="{{ url_for('settings', tab='targets') }}" class="{{ 'active' if tab=='targets' else '' }}">月目标</a>
+    {% endif %}
+  </aside>
+
+  <div class="settings-main">
+    {% if tab == 'account' %}
+    <div class="card">
+      <h1>账号</h1>
+      <p class="muted">{{ g.user.display_name }} · {{ g.user.username }}{% if g.user.role == 'admin' %} · 管理员{% endif %}</p>
+      <form method="post" class="narrow">
+        <input type="hidden" name="action" value="change_pin">
+        <input type="hidden" name="tab" value="account">
+        <p><label>当前口令</label><input name="old_pin" type="password" inputmode="numeric" required></p>
+        <p><label>新口令（{% if g.user.role == 'filler' %}6 位{% else %}至少 4 位{% endif %}）</label><input name="new_pin" type="password" inputmode="numeric" minlength="{{ 6 if g.user.role == 'filler' else 4 }}" required></p>
+        <p><label>再输一遍</label><input name="new_pin2" type="password" inputmode="numeric" minlength="{{ 6 if g.user.role == 'filler' else 4 }}" required></p>
+        <button type="submit">保存口令</button>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if tab == 'stores' and g.user['role'] == 'admin' %}
+    <div class="card">
+      <h1>门店档案</h1>
+      <p class="muted">通报表档案。运营商顾问写姓名：有名字走「AI+芝麻≥10」方案，空着走双破 0。</p>
+      <form method="post">
+        <input type="hidden" name="action" value="save_profiles">
+        <input type="hidden" name="tab" value="stores">
+        <div class="table-wrap">
+          <table class="data settings-table">
+            <thead>
+              <tr>
+                <th>门店</th>
+                <th>移动编码</th>
+                <th>区域经理</th>
+                <th>店长</th>
+                <th>运营商顾问</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for s in stores %}
+              <tr>
+                <td class="left">
+                  <div>{{ store_label(s) }}</div>
+                  <div class="muted">{{ s.name }}</div>
+                </td>
+                <td><input name="mobile_code_{{ s.id }}" value="{{ s.mobile_code }}"></td>
+                <td><input name="area_manager_{{ s.id }}" value="{{ s.area_manager }}"></td>
+                <td><input name="store_manager_{{ s.id }}" value="{{ s.store_manager }}"></td>
+                <td><input name="advisor_name_{{ s.id }}" value="{{ s.advisor_name }}" placeholder="无顾问留空"></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="toolbar"><button type="submit">保存档案</button></div>
+      </form>
+    </div>
+
+    <details class="card extra">
+      <summary>添加门店</summary>
+      <form method="post" class="narrow" style="margin-top:14px">
+        <input type="hidden" name="action" value="add_store">
+        <input type="hidden" name="tab" value="stores">
+        <p><label>店名</label><input name="store_name" required placeholder="TZ南通市某某vivo体验店"></p>
+        <p><label>简称</label><input name="short_name" required placeholder="如 如皋宁海路"></p>
+        <p><label>内部编码</label><input name="store_code" required placeholder="rg-xxx"></p>
+        <p><label>移动编码</label><input name="mobile_code" placeholder="20001744"></p>
+        <p><label>区域经理</label><input name="area_manager"></p>
+        <p><label>店长</label><input name="store_manager"></p>
+        <p><label>运营商顾问</label><input name="advisor_name" placeholder="无顾问留空"></p>
+        <button type="submit">添加</button>
+      </form>
+    </details>
+    {% endif %}
+
+    {% if tab == 'people' and g.user['role'] == 'admin' %}
+    <div class="card">
+      <h1>人员</h1>
+      <p class="muted">一家店一个填报员。忘了口令就在这一行重置，默认 123456。</p>
+      <div class="table-wrap">
+        <table class="data settings-table people-table">
+          <thead>
+            <tr>
+              <th>姓名</th>
+              <th>账号</th>
+              <th>角色</th>
+              <th>门店</th>
+              <th>重置口令</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in people %}
+            {% set u = p.user %}
+            <tr class="{{ 'off' if not u.active else '' }}">
+              <td class="left">{{ u.display_name }}</td>
+              <td class="left"><code>{{ u.username }}</code></td>
+              <td>{{ '管理员' if u.role=='admin' else '填报员' }}{% if not u.active %} · 已停用{% endif %}</td>
+              <td class="left">
+                {% if u.role == 'admin' %}
+                <span class="muted">全部门店</span>
+                {% else %}
+                <form method="post" class="inline-store">
+                  <input type="hidden" name="action" value="set_stores">
+                  <input type="hidden" name="tab" value="people">
+                  <input type="hidden" name="user_id" value="{{ u.id }}">
+                  <select name="store_ids" onchange="this.form.submit()">
+                    <option value="">未分配</option>
+                    {% for s in stores %}
+                    <option value="{{ s.id }}" {% if s.id == p.store_id %}selected{% endif %}>{{ store_label(s) }}</option>
+                    {% endfor %}
+                  </select>
+                </form>
+                {% endif %}
+              </td>
+              <td>
+                <form method="post" class="inline-reset">
+                  <input type="hidden" name="action" value="reset_pin">
+                  <input type="hidden" name="tab" value="people">
+                  <input type="hidden" name="user_id" value="{{ u.id }}">
+                  <input name="pin" type="password" inputmode="numeric" placeholder="{{ '6 位' if u.role == 'filler' else '至少 4 位' }}" minlength="{{ 6 if u.role == 'filler' else 4 }}" required>
+                  <button class="ghost" type="submit">重置</button>
+                </form>
+              </td>
+              <td>
+                {% if u.id != g.user.id %}
+                <form method="post">
+                  <input type="hidden" name="action" value="toggle_user">
+                  <input type="hidden" name="tab" value="people">
+                  <input type="hidden" name="user_id" value="{{ u.id }}">
+                  <input type="hidden" name="active" value="{{ 0 if u.active else 1 }}">
+                  <button class="ghost" type="submit">{{ '停用' if u.active else '启用' }}</button>
+                </form>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>添加人员</h2>
+      <form method="post" class="add-user">
+        <input type="hidden" name="action" value="add_user">
+        <input type="hidden" name="tab" value="people">
+        <input type="hidden" name="role" value="filler">
+        <p><label>账号</label><input name="username" required maxlength="8" placeholder="不超过 8 位"></p>
+        <p><label>显示名</label><input name="display_name" required placeholder="如 如皋宁海路"></p>
+        <p><label>口令</label><input name="pin" type="password" inputmode="numeric" required minlength="6" placeholder="6 位"></p>
+        <p>
+          <label>门店</label>
+          <select name="store_ids" required>
+            <option value="" disabled selected>选择门店</option>
+            {% for s in stores %}
+            <option value="{{ s.id }}">{{ store_label(s) }}</option>
+            {% endfor %}
+          </select>
+        </p>
+        <p class="add-user-action"><button type="submit">添加填报员</button></p>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if tab == 'targets' and g.user['role'] == 'admin' %}
+    <div class="card">
+      <h1>月目标</h1>
+      <p class="muted">只考核三项：比算新增、Ai手机合约、金币直降。比算新增 = 比算新增 + 比算新增[高]；金币直降只计新用户三项。0 表示不考核。</p>
+      <form method="post" class="narrow">
+        <input type="hidden" name="action" value="set_targets">
+        <input type="hidden" name="tab" value="targets">
+        {% for k in kpis %}
+        <p>
+          <label>{{ k.name }}{% if k.note %} · {{ k.note }}{% endif %}</label>
+          <input type="number" min="0" name="t_{{ k.code }}" value="{{ k.target }}">
+        </p>
+        {% endfor %}
+        <div class="toolbar"><button type="submit">保存月目标</button></div>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

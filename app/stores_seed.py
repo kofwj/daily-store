@@ -1,0 +1,203 @@
+"""南通 TZ 门店目录。只改这里，启动时会补齐店名、档案和排序。"""
+
+from __future__ import annotations
+
+from typing import Dict, List, Optional
+
+# 顺序即看板 / 通报 / 下拉顺序。档案来自 8/13 通报表。
+STORES: List[Dict] = [
+    {
+        "code": "haimen-jinhua",
+        "login": "jinhua",
+        "short_name": "海门金花",
+        "name": "TZ南通市海门金花vivo体验店",
+        "region_group": "通泰",
+        "city": "南通市",
+        "mobile_code": "20284034",
+        "area_manager": "黄雍青",
+        "store_manager": "陈娟娟",
+        "follow_ai": True,
+        "follow_bisuan": True,
+    },
+    {
+        "code": "qidong-renmin",
+        "login": "qidong",
+        "short_name": "启东人民",
+        "name": "TZ南通市启东汇龙镇人民中路专卖店",
+        "region_group": "通泰",
+        "city": "南通市",
+        "mobile_code": "20006824",
+        "area_manager": "黄雍青",
+        "store_manager": "肖亚",
+        "follow_ai": True,
+        "follow_bisuan": False,
+    },
+    {
+        "code": "tongzhou-jinsha",
+        "login": "jinsha",
+        "short_name": "通州金沙",
+        "name": "TZ南通市通州区金沙专卖店",
+        "region_group": "通泰",
+        "city": "南通市",
+        "mobile_code": "20009630",
+        "area_manager": "黄雍青",
+        "store_manager": "奚其梅",
+        "follow_ai": True,
+        "follow_bisuan": True,
+    },
+    {
+        "code": "tongzhou-wanda",
+        "login": "tzwanda",
+        "short_name": "通州万达",
+        "name": "TZ南通市通州区万达vivo体验店",
+        "region_group": "通泰",
+        "city": "南通市",
+        "mobile_code": "20694946",
+        "area_manager": "黄雍青",
+        "store_manager": "郭英",
+        "follow_ai": True,
+        "follow_bisuan": True,
+    },
+    {
+        "code": "haian-renmin",
+        "login": "haian",
+        "short_name": "海安人民",
+        "name": "TZ南通市海安人民中路vivo专卖店",
+        "region_group": "通泰",
+        "city": "南通市",
+        "mobile_code": "20003350",
+        "area_manager": "鞠一凡",
+        "store_manager": "储成恽",
+        "follow_ai": True,
+        "follow_bisuan": True,
+    },
+    {
+        "code": "haian-wanda",
+        "login": "hawanda",
+        "short_name": "海安万达",
+        "name": "TZ南通市海安万达广场vivo体验店",
+        "region_group": "通泰",
+        "city": "南通市",
+        "mobile_code": "20389153",
+        "area_manager": "鞠一凡",
+        "store_manager": "张晓志",
+        "follow_ai": True,
+        "follow_bisuan": True,
+    },
+    {
+        "code": "rg-ninghai",
+        "login": "rgning",
+        "short_name": "如皋宁海路",
+        "name": "TZ南通市如皋市如城镇宁海路体验店",
+        "region_group": "通泰",
+        "city": "南通市",
+        "mobile_code": "20001744",
+        "area_manager": "鞠一凡",
+        "store_manager": "冒国云",
+        "follow_ai": False,
+        "follow_bisuan": True,
+    },
+    {
+        "code": "nt-dayoujing",
+        "login": "dayou",
+        "short_name": "崇川大有镜",
+        "name": "TZ南通大有镜vivo体验店",
+        "region_group": "通泰",
+        "city": "南通市",
+        "mobile_code": "20868539",
+        "area_manager": "袁茹燕",
+        "store_manager": "李丹",
+        "follow_ai": False,
+        "follow_bisuan": False,
+    },
+    {
+        "code": "gangzha-wanda",
+        "login": "gzwanda",
+        "short_name": "港闸万达",
+        "name": "TZ南通港闸区万达vivo体验店",
+        "region_group": "通泰",
+        "city": "南通市",
+        "mobile_code": "20122957",
+        "area_manager": "袁茹燕",
+        "store_manager": "顾静",
+        "follow_ai": True,
+        "follow_bisuan": False,
+    },
+    {
+        "code": "nt-kaifaqu",
+        "login": "kaifaqu",
+        "short_name": "开发区上海路",
+        "name": "TZ南通开发区vivo体验店",
+        "region_group": "通泰",
+        "city": "南通市",
+        "mobile_code": "20832069",
+        "area_manager": "袁茹燕",
+        "store_manager": "周伟01",
+        "follow_ai": True,
+        "follow_bisuan": False,
+    },
+    {
+        "code": "chongchuan-changqiao",
+        "login": "changq",
+        "short_name": "崇川长桥",
+        "name": "TZ南通市崇川区长桥vivo专卖店",
+        "region_group": "通泰",
+        "city": "南通市",
+        "mobile_code": "20006861",
+        "area_manager": "袁茹燕",
+        "store_manager": "马周霞",
+        "follow_ai": False,
+        "follow_bisuan": False,
+    },
+]
+
+NINGHAI_CODE = "rg-ninghai"
+PROFILE_FIELDS = (
+    "region_group",
+    "city",
+    "mobile_code",
+    "area_manager",
+    "store_manager",
+    "follow_ai",
+    "follow_bisuan",
+)
+
+
+def store_by_code(code: str) -> Dict:
+    for item in STORES:
+        if item["code"] == code:
+            return item
+    raise KeyError(code)
+
+
+def store_name(code: str) -> str:
+    return store_by_code(code)["name"]
+
+
+def store_codes() -> List[str]:
+    return [item["code"] for item in STORES]
+
+
+def store_names() -> List[str]:
+    return [item["name"] for item in STORES]
+
+
+def filler_accounts() -> List[Dict]:
+    return [
+        {
+            "login": item["login"],
+            "short_name": item["short_name"],
+            "code": item["code"],
+            "name": item["name"],
+        }
+        for item in STORES
+    ]
+
+
+def find_store(code: Optional[str] = None, name: Optional[str] = None) -> Optional[Dict]:
+    for item in STORES:
+        if code and item["code"] == code:
+            return item
+        if name and item["name"] == name:
+            return item
+    return None

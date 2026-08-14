@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ '多店看板' if is_admin else '看板' }}{% endblock %}
+{% block body %}
+<div class="card">
+  <h1>{{ '多店看板' if is_admin else '看板' }}</h1>
+  <form method="get" class="row">
+    <div class="field">
+      <label>日期</label>
+      <input type="date" name="date" value="{{ biz_date.isoformat() }}" onchange="this.form.submit()">
+    </div>
+  </form>
+  <p class="muted">{% if is_admin %}看各店今天交了没有、重点业务日/累，以及本月预计考核。{% else %}只看自己门店今天交了没有、重点业务日/累，以及本月预计考核。{% endif %}</p>
+</div>
+<div class="grid-2">
+  {% for card in cards %}
+  <div class="store-card {{ 'done' if card.submitted else 'wait' }}">
+    <h2>{{ card.store.name }}</h2>
+    {% if card.submitted %}
+    <p><span class="status done">已交</span> <span class="muted">{{ card.submitter_name }} · {{ card.submitted_at }}</span></p>
+    {% else %}
+    <p><span class="status wait">还没交</span></p>
+    {% endif %}
+    <ul>
+      {% for h in card.highlights %}
+      <li>{{ h.name }}：日{{ h.day }} / 累{{ h.cum }}</li>
+      {% endfor %}
+    </ul>
+    <div class="forecast {{ 'ok' if card.forecast.passed else 'bad' }}">
+      <div class="muted">预计考核 · {{ card.forecast.scheme }}</div>
+      <div><span class="status {{ 'done' if card.forecast.passed else 'wait' }}">{{ card.forecast.label }}</span> {{ card.forecast.money_text }}</div>
+      <div class="muted">AI {{ card.forecast.ai }} · 芝麻 {{ card.forecast.sesame }}{% if card.forecast.has_advisor %} · 合计 {{ card.forecast.total }} / 10{% endif %}{% if card.forecast.advisor_name %} · 顾问 {{ card.forecast.advisor_name }}{% endif %}</div>
+    </div>
+    <a href="{{ url_for('today', store_id=card.store.id, date=biz_date.isoformat()) }}">去填报</a>
+    ·
+    <a href="{{ url_for('report', store_id=card.store.id) }}">看报表</a>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

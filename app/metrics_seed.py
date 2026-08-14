@@ -1,0 +1,159 @@
+"""指标字典与播报版式。只改这里，表单和播报会一起变。"""
+
+from __future__ import annotations
+
+from typing import Dict, List, Tuple
+
+# 播报分组：与现有微信群格式对齐
+# header 为 None 表示基础项，直接跟在店名后面
+SECTIONS: List[Dict] = [
+    {
+        "code": "basic",
+        "header": None,
+        "blank_before": False,
+        "metrics": [
+            ("phone_sales", "当天手机销量"),
+            ("id_check", "查询身份证数"),
+            ("lead", "商机录入"),
+            ("reserve", "储备"),
+        ],
+    },
+    {
+        "code": "focus",
+        "header": "重点业务",
+        "blank_before": True,
+        "metrics": [
+            ("bisuan", "比算新增"),
+            ("bisuan_high", "比算新增[高]"),
+            ("ai_contract", "Ai手机合约"),
+        ],
+    },
+    {
+        "code": "new_card",
+        "header": "新增类",
+        "blank_before": True,
+        "metrics": [
+            ("anxin_sub", "安心/副卡"),
+            ("other_card", "其他卡类"),
+        ],
+    },
+    {
+        "code": "family",
+        "header": "家庭类",
+        "blank_before": False,
+        "metrics": [
+            ("broadband", "宽带"),
+            ("tv", "电视"),
+            ("fttr", "FTTR"),
+            ("gigabit", "千兆"),
+            ("security", "安防"),
+        ],
+    },
+    {
+        "code": "contract",
+        "header": "合约",
+        "blank_before": True,
+        "metrics": [
+            ("coin_cut_old", "老用户直降"),
+            ("coin_cut_new_recharge", "新用户直降·充值"),
+            ("coin_cut_new_sesame", "新用户直降·芝麻免充"),
+            ("coin_cut_new_savings", "新用户直降·储蓄卡冻结"),
+            ("coin_cut_xtc", "小天才直降"),
+            ("phone_discount", "购机让利"),
+            ("gift_2g", "送2G流量"),
+            ("welcome_back", "底部迎回"),
+            ("renwoxuan", "任我选会员"),
+            ("min_spend", "个人/全家保底"),
+        ],
+    },
+    {
+        "code": "digital",
+        "header": "数字化",
+        "blank_before": True,
+        "metrics": [
+            ("fangzha", "防诈宝"),
+            ("he_msg", "和留言"),
+            ("cloud_disk", "云盘"),
+            ("direct_pack", "定向包"),
+            ("crbt", "彩铃"),
+            ("migu", "咪咕视频"),
+            ("safe_mgr", "安全管家"),
+            ("watch_pack", "观赛包"),
+            ("addon", "叠加包"),
+            ("fund", "基金通"),
+            ("health", "健康无忧"),
+            ("pet", "萌宠无忧"),
+            ("new_call", "新通话"),
+        ],
+    },
+]
+
+
+def all_metrics() -> List[Tuple[str, str, str, int]]:
+    """(code, name, section, sort)."""
+    rows: List[Tuple[str, str, str, int]] = []
+    sort = 10
+    for section in SECTIONS:
+        for code, name in section["metrics"]:
+            rows.append((code, name, section["code"], sort))
+            sort += 10
+    return rows
+
+
+def metric_name_map() -> Dict[str, str]:
+    return {code: name for code, name, _section, _sort in all_metrics()}
+
+
+def metric_codes() -> List[str]:
+    return [code for code, _name, _section, _sort in all_metrics()]
+
+
+def section_by_code(code: str) -> Dict:
+    for section in SECTIONS:
+        if section["code"] == code:
+            return section
+    raise KeyError(code)
+
+
+COIN_NEW_PARTS = ("coin_cut_new_recharge", "coin_cut_new_sesame", "coin_cut_new_savings")
+COIN_ALL_PARTS = ("coin_cut_old",) + COIN_NEW_PARTS + ("coin_cut_xtc",)
+
+# 群播报仍合成一行；月指标只计新用户三项
+ROLLUPS = {
+    "coin_cut": {
+        "name": "新用户直降",
+        "parts": COIN_NEW_PARTS,
+        "legacy": ("coin_cut_new",),
+    },
+    "coin_cut_all": {
+        "name": "金币直降",
+        "parts": COIN_ALL_PARTS,
+        "legacy": ("coin_cut", "coin_cut_new"),
+    },
+    "bisuan_total": {
+        "name": "比算新增",
+        "parts": ("bisuan", "bisuan_high"),
+        "legacy": (),
+    },
+}
+
+# 月指标只盯这三项；目标存在 kpi_targets
+KPI_TARGETS = (
+    ("bisuan_total", "比算新增", "日常分「比算新增」和「比算新增[高]」填，考核看合计"),
+    ("ai_contract", "Ai手机合约", ""),
+    ("coin_cut", "金币直降", "只计新用户：充值 + 芝麻免充 + 储蓄卡冻结"),
+)
+
+
+def rollup_pair(values: Dict, key: str) -> Tuple[int, int]:
+    spec = ROLLUPS[key]
+    codes = spec["parts"] + spec["legacy"]
+    day = sum(int((values.get(code) or (0, 0))[0] or 0) for code in codes)
+    cum = sum(int((values.get(code) or (0, 0))[1] or 0) for code in codes)
+    return day, cum
+
+
+def rollup_amount(values: Dict[str, int], key: str) -> int:
+    spec = ROLLUPS[key]
+    codes = spec["parts"] + spec["legacy"]
+    return sum(int(values.get(code, 0) or 0) for code in codes)

@@ -1,0 +1,33 @@
+name: store-daily
+
+services:
+  app:
+    build: .
+    environment:
+      STORE_DAILY_DB: /app/data/store_daily.db
+      STORE_DAILY_DATA: /app/data
+      STORE_DAILY_SECRET: ${STORE_DAILY_SECRET:?set STORE_DAILY_SECRET in .env}
+      STORE_DAILY_SECURE: ${STORE_DAILY_SECURE:-0}
+    volumes:
+      - ./data:/app/data
+    expose:
+      - "5055"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5055/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      # 局域网要绑 0.0.0.0；127.0.0.1 只有 VPS 自己打得开
+      - "${CADDY_BIND:-0.0.0.0}:${CADDY_PORT:-8099}:80"
+    volumes:
+      - ${CADDYFILE:-./caddy/Caddyfile.lan}:/etc/caddy/Caddyfile:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped

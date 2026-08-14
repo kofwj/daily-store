@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% block title %}门店日报{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  {% if g.user %}
+  <header class="top">
+    <div class="brand">门店日报</div>
+    <nav class="nav">
+      <a href="{{ url_for('today') }}" class="{{ 'active' if request.endpoint == 'today' else '' }}"><span class="full">今日填报</span><span class="short">填报</span></a>
+      <a href="{{ url_for('report') }}" class="{{ 'active' if request.endpoint == 'report' else '' }}">报表</a>
+      {% if g.user['role'] == 'admin' %}
+      <a href="{{ url_for('bulletin_page') }}" class="{{ 'active' if request.endpoint == 'bulletin_page' else '' }}"><span class="full">通报表</span><span class="short">通报</span></a>
+      {% endif %}
+      <a href="{{ url_for('board') }}" class="{{ 'active' if request.endpoint == 'board' else '' }}">{{ '多店看板' if g.user['role'] == 'admin' else '看板' }}</a>
+      {% if g.user['role'] == 'admin' %}
+      <a href="{{ url_for('incentive_page') }}" class="{{ 'active' if request.endpoint == 'incentive_page' else '' }}"><span class="full">月度考核</span><span class="short">考核</span></a>
+      {% endif %}
+      <a href="{{ url_for('settings') }}" class="{{ 'active' if request.endpoint == 'settings' else '' }}">设置</a>
+      <a href="{{ url_for('logout') }}">退出</a>
+    </nav>
+    <div class="who">{{ g.user['display_name'] }}</div>
+  </header>
+  {% endif %}
+  <main class="wrap">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+      <ul class="flash">
+        {% for cat, msg in messages %}
+        <li class="{{ cat }}">{{ msg }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    {% endwith %}
+    {% block body %}{% endblock %}
+  </main>
+</body>
+</html>

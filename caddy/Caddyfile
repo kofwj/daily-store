@@ -1,0 +1,13 @@
+# 公网直连（有 80/443）时用这个。家用隧道请用 Caddyfile.tunnel。
+
+{$APP_DOMAIN} {
+	encode gzip
+
+	handle /health {
+		reverse_proxy app:5055
+	}
+
+	handle {
+		reverse_proxy app:5055
+	}
+}

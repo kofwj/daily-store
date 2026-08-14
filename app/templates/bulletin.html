@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}通报表{% endblock %}
+{% block body %}
+<div class="card">
+  <h1>通报表</h1>
+  <form method="get" class="row">
+    <div class="field">
+      <label>日期</label>
+      <input type="date" name="date" value="{{ biz_date.isoformat() }}" onchange="this.form.submit()">
+    </div>
+    <div class="toolbar">
+      <button type="button" onclick="copyBulletinImage()">复制图片</button>
+      <button type="button" class="ghost" onclick="downloadBulletinImage()">下载图片</button>
+      <a class="btn ghost" href="{{ url_for('bulletin_csv', date=biz_date.isoformat()) }}">导出 CSV</a>
+      <span class="chip" id="copyHint">可贴进微信</span>
+    </div>
+  </form>
+  <p class="muted">电脑 Chrome / Edge 点「复制图片」再回微信粘贴。手机或不支持复制时会下载图片，或长按下方预览发给微信。</p>
+</div>
+
+<div class="card bulletin-wrap">
+  <div id="bulletinShot" class="bulletin-shot">
+    <div class="bulletin-shot-title">南通vivo零售运营中心移动业务通报表</div>
+    <div class="bulletin-shot-date">{{ biz_date.isoformat() }}</div>
+    <table class="bulletin">
+    <thead>
+      <tr>
+        <th colspan="6" class="g-profile">门店概况</th>
+        <th colspan="2" class="g-follow">跟进</th>
+        <th colspan="2" class="g-month">{{ month_label }}</th>
+        <th colspan="2" class="g-day">{{ day_label }}</th>
+      </tr>
+      <tr>
+        <th class="g-profile">大区</th>
+        <th class="g-profile">地市</th>
+        <th class="g-profile">门店名称</th>
+        <th class="g-profile">移动编码</th>
+        <th class="g-profile">区域经理</th>
+        <th class="g-profile">店长</th>
+        <th class="g-follow">AI跟进</th>
+        <th class="g-follow">笔算破零跟进</th>
+        <th class="g-month">AI手机合约</th>
+        <th class="g-month">笔算业务</th>
+        <th class="g-day">AI手机合约</th>
+        <th class="g-day">笔算业务</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr class="{{ 'wait' if not row.submitted else '' }}">
+        <td>{{ row.region_group }}</td>
+        <td>{{ row.city }}</td>
+        <td class="name">{{ row.name }}</td>
+        <td>{{ row.mobile_code }}</td>
+        <td>{{ row.area_manager }}</td>
+        <td>{{ row.store_manager }}</td>
+        <td class="{{ 'flag-yes' if row.follow_ai else 'flag-no' }}">{{ row.follow_ai_text }}</td>
+        <td class="{{ 'flag-yes' if row.follow_bisuan else 'flag-no' }}">{{ row.follow_bisuan_text }}</td>
+        <td class="scale" style="background:{{ row.month_ai_color }}">{{ row.month_ai_text }}</td>
+        <td class="scale" style="background:{{ row.month_bisuan_color }}">{{ row.month_bisuan_text }}</td>
+        <td class="scale" style="background:{{ row.day_ai_color }}">{{ row.day_ai_text }}</td>
+        <td class="scale" style="background:{{ row.day_bisuan_color }}">{{ row.day_bisuan_text }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    {% if totals %}
+    <tfoot>
+      <tr class="total">
+        <td colspan="6" class="name">{{ totals.name }}</td>
+        <td class="{{ 'flag-yes' if totals.follow_ai else 'flag-no' }}">{{ totals.follow_ai_text }}</td>
+        <td class="{{ 'flag-yes' if totals.follow_bisuan else 'flag-no' }}">{{ totals.follow_bisuan_text }}</td>
+        <td class="scale" style="background:{{ totals.month_ai_color }}">{{ totals.month_ai_text }}</td>
+        <td class="scale" style="background:{{ totals.month_bisuan_color }}">{{ totals.month_bisuan_text }}</td>
+        <td class="scale" style="background:{{ totals.day_ai_color }}">{{ totals.day_ai_text }}</td>
+        <td class="scale" style="background:{{ totals.day_bisuan_color }}">{{ totals.day_bisuan_text }}</td>
+      </tr>
+    </tfoot>
+    {% endif %}
+  </table>
+  </div>
+</div>
+
+<div class="card" id="shotPreviewCard" hidden>
+  <h2>图片预览</h2>
+  <p class="muted">手机长按图片可转发到微信。电脑也可右键另存。</p>
+  <img id="shotPreview" class="shot-preview" alt="通报表截图">
+</div>
+<script src="{{ url_for('static', filename='html2canvas.min.js') }}"></script>
+<script>
+const SHOT_NAME = 'bulletin_{{ biz_date.isoformat() }}.png';
+
+function setHint(text) {
+  const hint = document.getElementById('copyHint');
+  if (hint) hint.textContent = text;
+}
+
+function showPreview(blob, url) {
+  const card = document.getElementById('shotPreviewCard');
+  const img = document.getElementById('shotPreview');
+  img.src = url;
+  card.hidden = false;
+}
+
+function renderBulletinCanvas() {
+  const el = document.getElementById('bulletinShot');
+  return html2canvas(el, {
+    backgroundColor: '#ffffff',
+    scale: Math.min(2, window.devicePixelRatio || 2),
+    useCORS: true,
+    logging: false,
+  });
+}
+
+function canvasToBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('截图失败')), 'image/png');
+  });
+}
+
+function downloadBlob(blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = SHOT_NAME;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+async function makeShot() {
+  setHint('正在截图…');
+  const canvas = await renderBulletinCanvas();
+  const blob = await canvasToBlob(canvas);
+  const url = URL.createObjectURL(blob);
+  showPreview(blob, url);
+  return blob;
+}
+
+async function copyBulletinImage() {
+  try {
+    const blob = await makeShot();
+    if (navigator.clipboard && window.ClipboardItem) {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        setHint('图片已复制，去微信粘贴');
+        return;
+      } catch (err) {}
+    }
+    downloadBlob(blob);
+    setHint('当前网页不能复制图片，已下载，发给微信即可');
+  } catch (err) {
+    setHint('截图失败，请再试或点下载');
+  }
+}
+
+async function downloadBulletinImage() {
+  try {
+    const blob = await makeShot();
+    downloadBlob(blob);
+    setHint('已下载，发给微信即可');
+  } catch (err) {
+    setHint('下载失败，请再试');
+  }
+}
+</script>
+{% endblock %}

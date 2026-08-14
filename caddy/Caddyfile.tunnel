@@ -1,0 +1,23 @@
+# Cloudflare Tunnel 回源：CF 终结 HTTPS，Caddy 只听 HTTP。
+# 隧道 Public Hostname 指到本机 Caddy 端口（默认 127.0.0.1:8099），
+# 不要指到 app:5055，也不要和 invest-tracker 的 :80 抢。
+
+{
+	auto_https off
+}
+
+:80 {
+	encode gzip
+
+	handle /health {
+		reverse_proxy app:5055
+	}
+
+	handle {
+		reverse_proxy app:5055 {
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-Host {host}
+			header_up X-Real-IP {remote_host}
+		}
+	}
+}

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}登录 · 门店日报{% endblock %}
+{% block body_class %}login-page{% endblock %}
+{% block body %}
+<div class="login-shell">
+  <div class="login-mark">
+    <span class="login-logo">vivo</span>
+    <div>
+      <div class="login-kicker">南通零售运营中心</div>
+      <h1>门店日报</h1>
+    </div>
+  </div>
+  <div class="card login">
+    <p class="login-lead">只填当天数字，累计自动算，复制后发个人微信群。</p>
+    <form method="post">
+      <label class="login-field" for="username">
+        <span>账号</span>
+        <input id="username" name="username" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" required>
+      </label>
+      <label class="login-field" for="pin">
+        <span>口令</span>
+        <input id="pin" name="pin" type="password" inputmode="numeric" autocomplete="current-password" required>
+      </label>
+      <button type="submit">进入</button>
+    </form>
+    <p class="login-help">忘了口令，让管理员在「设置 → 人员」里重置。</p>
+  </div>
+</div>
+{% endblock %}

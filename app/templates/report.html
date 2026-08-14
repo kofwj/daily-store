@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}报表 · {{ store.name }}{% endblock %}
+{% block body %}
+<div class="card">
+  <h1>报表 · {{ store.name }}</h1>
+  <form method="get" class="row">
+    <div class="field">
+      <label>门店</label>
+      <select name="store_id" onchange="this.form.submit()">
+        {% for s in stores %}
+        <option value="{{ s.id }}" {% if s.id == store.id %}selected{% endif %}>{{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>视图</label>
+      <select name="view" onchange="this.form.submit()">
+        <option value="day" {% if view=='day' %}selected{% endif %}>日报</option>
+        <option value="week" {% if view=='week' %}selected{% endif %}>周报</option>
+        <option value="month" {% if view=='month' %}selected{% endif %}>月报</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>起始</label>
+      <input type="date" name="start" value="{{ start.isoformat() }}" onchange="this.form.submit()">
+    </div>
+    <div class="field">
+      <label>结束</label>
+      <input type="date" name="end" value="{{ end.isoformat() }}" {% if view=='day' %}disabled{% endif %} onchange="this.form.submit()">
+    </div>
+    <div>
+      <a class="btn ghost" href="{{ url_for('report_csv', store_id=store.id, start=start.isoformat(), end=end.isoformat()) }}">导出 CSV</a>
+    </div>
+  </form>
+  <p class="muted">区间 {{ start }} ～ {{ end }} · 已提交 {{ submitted|length }} 天 · 表中为日值，合计是区间求和。</p>
+</div>
+
+<div class="card" style="overflow:auto">
+  <table class="data">
+    <thead>
+      <tr>
+        <th>指标</th>
+        {% for d in dates %}<th>{{ d[5:] }}</th>{% endfor %}
+        <th>合计</th>
+        <th>月目标</th>
+        <th>进度</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>{{ row.name }}</td>
+        {% for v in row.days %}<td>{{ v }}</td>{% endfor %}
+        <td><b>{{ row.total }}</b></td>
+        <td>{{ row.target or '—' }}</td>
+        <td>
+          {% if row.progress is not none %}
+          {{ '%.0f'|format(row.progress) }}%
+          <div class="progress"><span style="width: {{ [row.progress, 100]|min }}%"></span></div>
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
