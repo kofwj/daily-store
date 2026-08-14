@@ -45,6 +45,25 @@
         <th>月目标</th>
         <th>进度</th>
       </tr>
+      {% if g.user['role'] == 'admin' %}
+      <tr>
+        <th></th>
+        {% for d in dates %}
+        <th>
+          {% if d in submitted %}
+          <form method="post" action="{{ url_for('report_delete') }}" onsubmit="return confirm('删除 {{ d }} 的日报？此操作不可恢复。')">
+            <input type="hidden" name="store_id" value="{{ store.id }}">
+            <input type="hidden" name="date" value="{{ d }}">
+            <button class="ghost del-day" type="submit" title="删除该日日报">删</button>
+          </form>
+          {% endif %}
+        </th>
+        {% endfor %}
+        <th></th>
+        <th></th>
+        <th></th>
+      </tr>
+      {% endif %}
     </thead>
     <tbody>
       {% for row in rows %}

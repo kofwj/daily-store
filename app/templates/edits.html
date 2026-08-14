@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}修改审计{% endblock %}
+{% block body %}
+<div class="card">
+  <h1>修改审计</h1>
+  <p class="muted">谁在什么时候把哪家店哪天的日报改成了什么。锁定后的修改、历史日期覆盖、删除都会记录在这里。</p>
+  <form method="get" class="row">
+    <div class="field">
+      <label>近 N 天</label>
+      <select name="days" onchange="this.form.submit()">
+        {% for d in [1, 3, 7, 14, 30, 90] %}
+        <option value="{{ d }}" {% if d == days %}selected{% endif %}>{{ d }} 天</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>门店</label>
+      <select name="store_id" onchange="this.form.submit()">
+        <option value="">全部</option>
+        {% for s in stores %}
+        <option value="{{ s.id }}" {% if s.id|string == store_id %}selected{% endif %}>{{ s.short_name or s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+</div>
+
+<div class="card" style="overflow:auto">
+  {% if rows %}
+  <table class="data">
+    <thead>
+      <tr>
+        <th>时间</th>
+        <th>门店</th>
+        <th>操作人</th>
+        <th>日期</th>
+        <th>改动</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.edited_at }}</td>
+        <td>{{ r.store_name }}</td>
+        <td><code>{{ r.user_name }}</code></td>
+        <td>{{ r.biz_date }}{% if r.note %} <span class="muted">（{{ r.note }}）</span>{% endif %}</td>
+        <td class="left">{{ r.diff }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">近 {{ days }} 天还没有修改记录。</p>
+  {% endif %}
+</div>
+{% endblock %}

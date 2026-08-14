@@ -58,6 +58,11 @@
 <form method="post" id="dailyForm">
   <input type="hidden" name="store_id" value="{{ store.id }}">
   <input type="hidden" name="date" value="{{ biz_date.isoformat() }}">
+  {% if not is_today and g.user['role'] != 'admin' and not can_edit %}
+  <div class="flash warn">历史日期：店员只能改<b>当天</b>。如要改历史，请联系管理员。</div>
+  {% elif not is_today and g.user['role'] != 'admin' %}
+  <div class="flash ok">本月补录模式已开启：可修改本月内的数据（{{ biz_date }}）。</div>
+  {% endif %}
   <div class="card today-form">
     <h2>今天的数字</h2>
     {% for section in grouped %}
@@ -89,11 +94,11 @@
       <input type="text" name="note" value="{{ report.note if report else '' }}" maxlength="200">
     </p>
     <div class="toolbar desktop-save">
-      <button type="submit">保存并生成播报</button>
+      <button type="submit" {% if not can_edit %}disabled title="店员只能改当天或本月（需管理员开启）"{% endif %}>保存并生成播报</button>
     </div>
   </div>
   <div class="sticky-save">
-    <button type="submit">保存并生成播报</button>
+    <button type="submit" {% if not can_edit %}disabled title="店员只能改当天或本月（需管理员开启）"{% endif %}>保存并生成播报</button>
   </div>
 </form>
 

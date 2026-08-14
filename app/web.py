@@ -98,7 +98,7 @@ def create_app() -> Flask:
                 return date.fromisoformat(raw + "-01")
             except ValueError:
                 pass
-        return fallback or date.today()
+        return fallback or db.today_local()
 
     def accessible_stores(conn) -> List[Any]:
         return db.list_user_stores(conn, g.user)
@@ -170,7 +170,7 @@ def create_app() -> Flask:
 
     def settings_tab() -> str:
         tab = request.values.get("tab") or "account"
-        allowed = {"account", "stores", "people", "targets"}
+        allowed = {"account", "stores", "people", "targets", "permissions"}
         if tab not in allowed:
             return "account"
         if g.user["role"] != "admin" and tab != "account":
@@ -210,8 +210,26 @@ def create_app() -> Flask:
                 flash("还没有可填的门店，请管理员先建店", "error")
                 return render_template("empty.html")
             biz_date = parse_date(request.values.get("date"))
+            today = db.today_local()
             metrics = db.list_metrics(conn)
             if request.method == "POST":
+                filler_month = db.get_setting(conn, "filler_edit_month", "0") == "1"
+                if g.user["role"] != "admin":
+                    if biz_date != today and not (
+                        filler_month and biz_date.year == today.year and biz_date.month == today.month
+                    ):
+                        flash("只能改当天（管理员开启『本月可改』后可补录本月）。历史跨月需找管理员修改。", "error")
+                        return redirect(url_for("today", store_id=store["id"]))
+                    if db.is_locked(biz_date) and not (filler_month and biz_date.year == today.year and biz_date.month == today.month):
+                        flash(
+                            f"当天数据已锁定（{db.LOCK_HOUR:02d}:{db.LOCK_MINUTE:02d} 后不可改），找管理员解锁修改。",
+                            "error",
+                        )
+                        return redirect(url_for("today", store_id=store["id"], date=biz_date.isoformat()))
+                existing = db.get_report(conn, store["id"], biz_date)
+                if existing and existing["submitted_by"] and existing["submitted_by"] != g.user["id"] and g.user["role"] != "admin":
+                    flash("该日已有其他人提交，覆盖前请与对方确认。", "error")
+                    return redirect(url_for("today", store_id=store["id"], date=biz_date.isoformat()))
                 values = {}
                 for m in metrics:
                     raw = request.form.get(f"m_{m['code']}", "0")
@@ -221,6 +239,7 @@ def create_app() -> Flask:
                         values[m["code"]] = 0
                 compact = request.form.get("compact") == "1"
                 note = (request.form.get("note") or "").strip()
+                before = db.day_values(conn, store["id"], biz_date)
                 db.save_daily(
                     conn,
                     store_id=store["id"],
@@ -230,6 +249,16 @@ def create_app() -> Flask:
                     compact=compact,
                     note=note,
                 )
+                if existing:
+                    db.record_edit(
+                        conn,
+                        biz_date=biz_date,
+                        store_id=store["id"],
+                        user_id=g.user["id"],
+                        before=before,
+                        after=values,
+                        note="覆盖保存",
+                    )
                 flash("已保存，累计已按本月重算。点「复制全文」贴进微信群。", "ok")
                 return redirect(
                     url_for(
@@ -244,6 +273,7 @@ def create_app() -> Flask:
             day_vals = db.day_values(conn, store["id"], biz_date)
             pairs = values_for_broadcast(conn, store["id"], biz_date)
             kpi_targets = db.list_kpi_targets(conn)
+            filler_month = db.get_setting(conn, "filler_edit_month", "0") == "1"
             report = db.get_report(conn, store["id"], biz_date)
             compact = bool(report["compact"]) if report else False
             text = broadcast.render_broadcast(
@@ -288,6 +318,13 @@ def create_app() -> Flask:
                 store=store,
                 stores=stores,
                 biz_date=biz_date,
+                is_today=biz_date == today,
+                filler_month=filler_month,
+                can_edit=(
+                    g.user["role"] == "admin"
+                    or biz_date == today
+                    or (filler_month and biz_date.year == today.year and biz_date.month == today.month)
+                ),
                 grouped=grouped,
                 report=report,
                 broadcast_text=text,
@@ -303,7 +340,7 @@ def create_app() -> Flask:
             store, stores = pick_store(conn, request.args.get("store_id"))
             if store is None:
                 return render_template("empty.html")
-            today_d = date.today()
+            today_d = db.today_local()
             view = request.args.get("view") or "month"
             if view == "week":
                 start = parse_date(request.args.get("start"), today_d - timedelta(days=today_d.weekday()))
@@ -373,8 +410,8 @@ def create_app() -> Flask:
             store, _stores = pick_store(conn, request.args.get("store_id"))
             if store is None:
                 return Response("no store", status=400)
-            start = parse_date(request.args.get("start"), date.today().replace(day=1))
-            end = parse_date(request.args.get("end"), date.today())
+            start = parse_date(request.args.get("start"), db.today_local().replace(day=1))
+            end = parse_date(request.args.get("end"), db.today_local())
             facts = db.facts_in_range(conn, store["id"], start, end)
             buf = io.StringIO()
             writer = csv.writer(buf)
@@ -390,6 +427,49 @@ def create_app() -> Flask:
                 mimetype="text/csv; charset=utf-8",
                 headers={"Content-Disposition": f"attachment; filename={filename}"},
             )
+
+    @app.route("/report/delete", methods=["POST"])
+    @admin_required
+    def report_delete():
+        """删除某店某一天的日报（连事实一起删）。锁定时间内管理员可删。"""
+        store_id = request.form.get("store_id") or request.args.get("store_id")
+        day = request.form.get("date") or request.args.get("date")
+        try:
+            sid = int(store_id or 0)
+            biz_date = date.fromisoformat(day) if day else None
+        except (ValueError, TypeError):
+            biz_date = None
+        if sid <= 0 or biz_date is None:
+            return Response("bad request", status=400)
+        with db.get_db() as conn:
+            if not db.user_can_access_store(conn, g.user, sid):
+                return Response("forbidden", status=403)
+            report = db.get_report(conn, sid, biz_date)
+            if report is None:
+                flash("该日没有日报，无需删除。", "error")
+            else:
+                before = db.day_values(conn, sid, biz_date)
+                db.record_edit(
+                    conn,
+                    biz_date=biz_date,
+                    store_id=sid,
+                    user_id=g.user["id"],
+                    before=before,
+                    after={},
+                    note="删除日报",
+                )
+                conn.execute(
+                    "DELETE FROM daily_facts WHERE store_id=? AND biz_date=?",
+                    (sid, biz_date.isoformat()),
+                )
+                conn.execute(
+                    "DELETE FROM daily_reports WHERE store_id=? AND biz_date=?",
+                    (sid, biz_date.isoformat()),
+                )
+                flash("已删除该日日报（已记录审计）。", "ok")
+        return redirect(
+            url_for("report", store_id=sid, view="month", start=biz_date.replace(day=1).isoformat())
+        )
 
     @app.route("/board")
     @login_required
@@ -462,7 +542,7 @@ def create_app() -> Flask:
     @app.route("/incentive")
     @admin_required
     def incentive_page():
-        today_d = date.today()
+        today_d = db.today_local()
         month = parse_date(request.args.get("month"), today_d.replace(day=1)).replace(day=1)
         if month.month == 12:
             month_end = date(month.year + 1, 1, 1) - timedelta(days=1)
@@ -494,6 +574,56 @@ def create_app() -> Flask:
                 rows=rows,
                 totals=totals,
             )
+
+    @app.route("/edits")
+    @admin_required
+    def edits_page():
+        """审计日志：谁在什么时候把哪家店哪天的日报改成了什么。"""
+        store_id = request.args.get("store_id", "")
+        days = request.args.get("days", "7")
+        try:
+            days_int = max(1, min(int(days), 90))
+        except ValueError:
+            days_int = 7
+        where = ""
+        params: List[Any] = []
+        if store_id and store_id.isdigit():
+            where = "AND e.store_id=?"
+            params.append(int(store_id))
+        with db.get_db() as conn:
+            rows = [
+                dict(r)
+                for r in conn.execute(
+                    f"""
+                    SELECT e.*, s.name AS store_name, u.username AS user_name
+                    FROM report_edits e
+                    JOIN stores s ON s.id=e.store_id
+                    JOIN users u ON u.id=e.user_id
+                    WHERE e.edited_at >= datetime('now', '-{days_int} days')
+                    {where}
+                    ORDER BY e.id DESC
+                    LIMIT 300
+                    """,
+                    params,
+                )
+            ]
+            all_stores = db.list_all_stores(conn)
+        for r in rows:
+            import json as _json
+            try:
+                before = _json.loads(r["before_json"] or "{}")
+                after = _json.loads(r["after_json"] or "{}")
+            except ValueError:
+                before, after = {}, {}
+            r["diff"] = _build_diff(before, after)
+            r["store_name"] = r["store_name"] or "?"
+        return render_template(
+            "edits.html",
+            rows=rows,
+            days=days_int,
+            store_id=store_id,
+            stores=all_stores,
+        )
 
     @app.route("/bulletin.csv")
     @admin_required
@@ -628,6 +758,10 @@ def create_app() -> Flask:
                             except ValueError:
                                 pass
                         flash("月目标已保存", "ok")
+                    elif action == "save_permissions":
+                        filler_month = "1" if request.form.get("filler_edit_month") == "1" else "0"
+                        db.set_setting(conn, "filler_edit_month", filler_month)
+                        flash("权限设置已保存", "ok")
                     else:
                         flash("未知操作", "error")
                 except Exception as exc:  # noqa: BLE001 — 表单校验用
@@ -667,13 +801,31 @@ def create_app() -> Flask:
                 kpis=kpis,
                 user_map=user_map,
                 store_label=store_label,
+                filler_edit_month=db.get_setting(conn, "filler_edit_month", "0") == "1",
             )
 
     @app.context_processor
     def inject_now():
-        return {"today_iso": date.today().isoformat(), "now": datetime.now()}
+        return {"today_iso": db.today_local().isoformat(), "now": datetime.now(db.TZ)}
 
     return app
+
+
+def _build_diff(before: Dict[str, int], after: Dict[str, int]) -> str:
+    """把 before/after 值差异拼成可读文本，如「手机销量 1→7」"""
+    from .metrics_seed import metric_name_map
+
+    names = metric_name_map()
+    parts = []
+    keys = sorted(set(before) | set(after))
+    for k in keys:
+        b = int(before.get(k, 0) or 0)
+        a = int(after.get(k, 0) or 0)
+        if b == a:
+            continue
+        name = names.get(k, k)
+        parts.append(f"{name} {b}→{a}")
+    return "；".join(parts) or "（无变化）"
 
 
 app = create_app()

@@ -6,6 +6,7 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from hashlib import pbkdf2_hmac
 from pathlib import Path
 from secrets import token_hex
@@ -24,9 +25,21 @@ ADMIN_PIN_MIN = 4
 DEFAULT_FILLER_PIN = "123456"
 FILLER_PIN_RESET_KEY = "filler_default_pin_v1"
 
+# 业务时区：北京时间。datetime.now(TZ) 统一，不依赖容器/宿主时区设置。
+TZ = ZoneInfo("Asia/Shanghai")
+
+# 锁定时间点：当天 HH:MM 之后，店员不能再改/删当天的日报；管理员不受限。
+LOCK_HOUR = int(os.environ.get("STORE_DAILY_LOCK_HOUR", "23"))
+LOCK_MINUTE = int(os.environ.get("STORE_DAILY_LOCK_MINUTE", "0"))
+
 
 def _now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def today_local() -> date:
+    """业务时区（北京时间）的今天。"""
+    return datetime.now(TZ).date()
 
 
 def hash_pin(pin: str, salt: Optional[str] = None) -> str:
@@ -132,6 +145,18 @@ CREATE TABLE IF NOT EXISTS daily_facts (
     UNIQUE (biz_date, store_id, metric_code)
 );
 
+CREATE TABLE IF NOT EXISTS report_edits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    biz_date TEXT NOT NULL,
+    store_id INTEGER NOT NULL REFERENCES stores(id),
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    edited_at TEXT NOT NULL,
+    before_json TEXT NOT NULL DEFAULT '',
+    after_json TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_edits_store_date ON report_edits(store_id, biz_date);
+
 CREATE INDEX IF NOT EXISTS idx_facts_store_date ON daily_facts(store_id, biz_date);
 CREATE INDEX IF NOT EXISTS idx_reports_date ON daily_reports(biz_date);
 
@@ -190,6 +215,18 @@ def _ensure_app_meta(conn: sqlite3.Connection) -> None:
     )
 
 
+def get_setting(conn: sqlite3.Connection, key: str, default: str = "") -> str:
+    row = conn.execute("SELECT value FROM app_meta WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        "INSERT INTO app_meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (key, value),
+    )
+
+
 def _reset_filler_pins_once(conn: sqlite3.Connection) -> None:
     done = conn.execute(
         "SELECT value FROM app_meta WHERE key=?", (FILLER_PIN_RESET_KEY,)
@@ -201,6 +238,49 @@ def _reset_filler_pins_once(conn: sqlite3.Connection) -> None:
     conn.execute(
         "INSERT INTO app_meta(key, value) VALUES (?, ?)",
         (FILLER_PIN_RESET_KEY, _now()),
+    )
+
+
+def is_locked(biz_date: date, now: Optional[datetime] = None) -> bool:
+    """当天日期在锁定时间点之后即锁定；非当天日期不锁。
+
+    传入 now 用于测试（naive 或 aware 均可）；默认用业务时区（北京时间）。
+    """
+    local_now = now or datetime.now(TZ)
+    if local_now.tzinfo is not None:
+        local_now = local_now.astimezone(TZ).replace(tzinfo=None)
+    local_today = today_local()
+    if biz_date != local_today:
+        return False
+    return (local_now.hour, local_now.minute) >= (LOCK_HOUR, LOCK_MINUTE)
+
+
+def record_edit(
+    conn: sqlite3.Connection,
+    *,
+    biz_date: date,
+    store_id: int,
+    user_id: int,
+    before: Dict[str, int],
+    after: Dict[str, int],
+    note: str = "",
+) -> None:
+    import json as _json
+
+    conn.execute(
+        """
+        INSERT INTO report_edits(biz_date, store_id, user_id, edited_at, before_json, after_json, note)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            biz_date.isoformat(),
+            store_id,
+            user_id,
+            _now(),
+            _json.dumps(before, ensure_ascii=False, sort_keys=True),
+            _json.dumps(after, ensure_ascii=False, sort_keys=True),
+            note,
+        ),
     )
 
 

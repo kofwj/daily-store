@@ -4,10 +4,13 @@ services:
   app:
     build: .
     environment:
+      TZ: Asia/Shanghai
       STORE_DAILY_DB: /app/data/store_daily.db
       STORE_DAILY_DATA: /app/data
       STORE_DAILY_SECRET: ${STORE_DAILY_SECRET:?set STORE_DAILY_SECRET in .env}
       STORE_DAILY_SECURE: ${STORE_DAILY_SECURE:-0}
+      STORE_DAILY_LOCK_HOUR: ${STORE_DAILY_LOCK_HOUR:-23}
+      STORE_DAILY_LOCK_MINUTE: ${STORE_DAILY_LOCK_MINUTE:-0}
     volumes:
       - ./data:/app/data
     expose:

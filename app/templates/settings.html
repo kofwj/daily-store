@@ -8,6 +8,7 @@
     <a href="{{ url_for('settings', tab='stores') }}" class="{{ 'active' if tab=='stores' else '' }}">门店</a>
     <a href="{{ url_for('settings', tab='people') }}" class="{{ 'active' if tab=='people' else '' }}">人员</a>
     <a href="{{ url_for('settings', tab='targets') }}" class="{{ 'active' if tab=='targets' else '' }}">月目标</a>
+    <a href="{{ url_for('settings', tab='permissions') }}" class="{{ 'active' if tab=='permissions' else '' }}">权限</a>
     {% endif %}
   </aside>
 
@@ -186,6 +187,24 @@
         </p>
         {% endfor %}
         <div class="toolbar"><button type="submit">保存月目标</button></div>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if tab == 'permissions' and g.user['role'] == 'admin' %}
+    <div class="card">
+      <h1>权限设置</h1>
+      <p class="muted">控制店员能改哪些日期的数据。默认店员只能改<b>当天</b>；开启后可在<b>本月内</b>补录或修正（跨月仍需管理员）。锁定时间（23:00）后当天不可改，本月补录不受锁定影响。</p>
+      <form method="post" class="narrow">
+        <input type="hidden" name="action" value="save_permissions">
+        <input type="hidden" name="tab" value="permissions">
+        <p>
+          <label class="check">
+            <input type="checkbox" name="filler_edit_month" value="1" {% if filler_edit_month %}checked{% endif %}>
+            允许店员修改本月数据（补录/修正）
+          </label>
+        </p>
+        <div class="toolbar"><button type="submit">保存权限设置</button></div>
       </form>
     </div>
     {% endif %}
