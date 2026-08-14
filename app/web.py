@@ -170,7 +170,7 @@ def create_app() -> Flask:
 
     def settings_tab() -> str:
         tab = request.values.get("tab") or "account"
-        allowed = {"account", "stores", "people", "targets", "permissions"}
+        allowed = {"account", "stores", "people", "targets", "permissions", "broadcast"}
         if tab not in allowed:
             return "account"
         if g.user["role"] != "admin" and tab != "account":
@@ -237,7 +237,7 @@ def create_app() -> Flask:
                         values[m["code"]] = max(0, int(raw or 0))
                     except ValueError:
                         values[m["code"]] = 0
-                compact = request.form.get("compact") == "1"
+                compact = db.get_setting(conn, "broadcast_compact", "1") == "1"
                 note = (request.form.get("note") or "").strip()
                 before = db.day_values(conn, store["id"], biz_date)
                 db.save_daily(
@@ -275,7 +275,7 @@ def create_app() -> Flask:
             kpi_targets = db.list_kpi_targets(conn)
             filler_month = db.get_setting(conn, "filler_edit_month", "0") == "1"
             report = db.get_report(conn, store["id"], biz_date)
-            compact = bool(report["compact"]) if report else False
+            compact = db.get_setting(conn, "broadcast_compact", "1") == "1"
             text = broadcast.render_broadcast(
                 store["name"], biz_date, pairs, compact=compact
             )
@@ -900,6 +900,10 @@ def create_app() -> Flask:
                         filler_month = "1" if request.form.get("filler_edit_month") == "1" else "0"
                         db.set_setting(conn, "filler_edit_month", filler_month)
                         flash("权限设置已保存", "ok")
+                    elif action == "save_broadcast":
+                        compact = "1" if request.form.get("broadcast_compact") == "1" else "0"
+                        db.set_setting(conn, "broadcast_compact", compact)
+                        flash("播报设置已保存", "ok")
                     else:
                         flash("未知操作", "error")
                 except Exception as exc:  # noqa: BLE001 — 表单校验用
@@ -940,6 +944,7 @@ def create_app() -> Flask:
                 user_map=user_map,
                 store_label=store_label,
                 filler_edit_month=db.get_setting(conn, "filler_edit_month", "0") == "1",
+                broadcast_compact=db.get_setting(conn, "broadcast_compact", "1") == "1",
             )
 
     @app.context_processor

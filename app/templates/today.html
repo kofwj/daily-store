@@ -84,12 +84,6 @@
       {% endfor %}
     {% endfor %}
     <p>
-      <label class="check">
-        <input type="checkbox" name="compact" value="1" {% if compact %}checked{% endif %}>
-        数字化里日=0 且累=0 的行不进群消息
-      </label>
-    </p>
-    <p>
       <label>备注（不进群，只给自己看）</label>
       <input type="text" name="note" value="{{ report.note if report else '' }}" maxlength="200">
     </p>

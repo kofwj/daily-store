@@ -9,6 +9,7 @@
     <a href="{{ url_for('settings', tab='people') }}" class="{{ 'active' if tab=='people' else '' }}">人员</a>
     <a href="{{ url_for('settings', tab='targets') }}" class="{{ 'active' if tab=='targets' else '' }}">月目标</a>
     <a href="{{ url_for('settings', tab='permissions') }}" class="{{ 'active' if tab=='permissions' else '' }}">权限</a>
+    <a href="{{ url_for('settings', tab='broadcast') }}" class="{{ 'active' if tab=='broadcast' else '' }}">播报</a>
     {% endif %}
   </aside>
 
@@ -205,6 +206,24 @@
           </label>
         </p>
         <div class="toolbar"><button type="submit">保存权限设置</button></div>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if tab == 'broadcast' and g.user['role'] == 'admin' %}
+    <div class="card">
+      <h1>播报设置</h1>
+      <p class="muted">控制「保存并生成播报」贴进微信群的内容。全部门店共用，填报员不用再勾选。</p>
+      <form method="post" class="narrow">
+        <input type="hidden" name="action" value="save_broadcast">
+        <input type="hidden" name="tab" value="broadcast">
+        <p>
+          <label class="check">
+            <input type="checkbox" name="broadcast_compact" value="1" {% if broadcast_compact %}checked{% endif %}>
+            数字化里日=0 且累=0 的行不进群消息
+          </label>
+        </p>
+        <div class="toolbar"><button type="submit">保存播报设置</button></div>
       </form>
     </div>
     {% endif %}

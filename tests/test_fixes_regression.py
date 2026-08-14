@@ -27,6 +27,34 @@ def app_client(tmp_db):
     return app.test_client()
 
 
+def test_broadcast_compact_is_admin_setting(app_client):
+    from datetime import date as _date
+
+    app_client.post("/login", data={"username": "admin", "pin": "1234"})
+    today_html = app_client.get("/today").get_data(as_text=True)
+    assert "数字化里日=0" not in today_html
+    settings = app_client.get("/settings?tab=broadcast").get_data(as_text=True)
+    assert "数字化里日=0 且累=0 的行不进群消息" in settings
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+    day = _date.today().isoformat()
+    saved = app_client.post(
+        "/today",
+        data={"store_id": str(sid), "date": day, "m_cloud_disk": "0", "m_phone_sales": "1"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "云盘：日0；累0" not in saved
+    app_client.post("/settings", data={"action": "save_broadcast", "tab": "broadcast"}, follow_redirects=True)
+    with db.get_db() as conn:
+        assert db.get_setting(conn, "broadcast_compact", "1") == "0"
+    again = app_client.post(
+        "/today",
+        data={"store_id": str(sid), "date": day, "m_cloud_disk": "0", "m_phone_sales": "1"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "云盘：日0；累0" in again
+
+
 def test_1_set_stores_persists(app_client):
     app_client.post("/login", data={"username": "admin", "pin": "1234"})
     with db.get_db() as conn:
