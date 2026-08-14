@@ -4,7 +4,7 @@ from app.bulletin import apply_scales, bisuan_total, build_row, csv_rows, fmt_co
 
 
 def test_fmt_count_hides_zero():
-    assert fmt_count(0) == ""
+    assert fmt_count(0) == "0"
     assert fmt_count(4) == "4"
     assert fmt_count(1.0) == "1"
     assert fmt_count(1.2) == "1.2"
@@ -40,7 +40,7 @@ def test_bulletin_row_and_tsv_match_sheet():
     assert row["follow_bisuan_text"] == "是"
     assert row["follow_ai"] is False
     assert row["follow_bisuan"] is True
-    assert row["month_ai_text"] == ""
+    assert row["month_ai_text"] == "0"
     assert row["month_bisuan_text"] == "10"
     assert row["day_bisuan_text"] == "3"
     assert row["ai_zero"] is True

@@ -382,13 +382,11 @@ def create_app() -> Flask:
                 (start + timedelta(days=i)).isoformat()
                 for i in range((end - start).days + 1)
             ]
-            working_days = [
-                d for d in all_days
-                if date.fromisoformat(d).weekday() < 5
-            ]
+            # 区间总天数：日报每天都要填，不区分工作日
+            total_days = all_days
             coverage = (
-                round(len(submitted_dates) / len(working_days) * 100)
-                if working_days
+                round(len(submitted_dates) / len(total_days) * 100)
+                if total_days
                 else 0
             )
 
@@ -492,7 +490,7 @@ def create_app() -> Flask:
                 submitted=submitted,
                 submitted_dates=submitted_dates,
                 coverage=coverage,
-                working_days=len(working_days),
+                total_days=len(total_days),
                 kpi_cards=kpi_cards,
                 store_compare=store_compare,
             )
@@ -613,25 +611,113 @@ def create_app() -> Flask:
     @login_required
     def board():
         biz_date = parse_date(request.args.get("date"))
+        view = request.args.get("view") or "today"
+        if view not in ("today", "month"):
+            view = "today"
         with db.get_db() as conn:
             stores = accessible_stores(conn)
-            cards = db.dashboard_today(conn, [s["id"] for s in stores], biz_date)
-            detail = []
-            for card in cards:
-                pairs = values_for_broadcast(conn, card["store"]["id"], biz_date)
-                highs = []
+            kpi_targets = db.list_kpi_targets(conn)
+            month_start, _month_end = db.month_bounds(biz_date)
+            rows = []
+            for store in stores:
+                sid = store["id"]
+                pairs = values_for_broadcast(conn, sid, biz_date)
+                kpis = []
+                day_sum = 0
                 for code, name, _note in KPI_TARGETS:
                     if code == "ai_contract":
                         day, cum = pairs.get("ai_contract", (0, 0))
                     else:
                         day, cum = rollup_pair(pairs, code)
-                    highs.append({"name": name, "day": day, "cum": cum})
-                forecast = store_forecast(conn, card["store"], biz_date)
-                detail.append({**card, "highlights": highs, "forecast": forecast})
+                    target = kpi_targets.get(code, 0)
+                    day_sum += int(day)
+                    kpis.append(
+                        {
+                            "code": code,
+                            "name": name,
+                            "day": int(day),
+                            "month": int(cum),
+                            "target": target,
+                            "progress": (int(cum) / target * 100) if target else None,
+                        }
+                    )
+                rep = db.get_report(conn, sid, biz_date)
+                reported_this_month = (
+                    conn.execute(
+                        "SELECT 1 FROM daily_reports WHERE store_id=? AND biz_date>=? AND biz_date<=? LIMIT 1",
+                        (sid, month_start, biz_date.isoformat()),
+                    ).fetchone()
+                    is not None
+                )
+                rows.append(
+                    {
+                        "store": store,
+                        "submitted_today": rep is not None,
+                        "submitter_name": rep["submitter_name"] if rep else None,
+                        "submitted_at": rep["submitted_at"] if rep else None,
+                        "reported_this_month": reported_this_month,
+                        "forecast": store_forecast(conn, store, biz_date),
+                        "kpis": kpis,
+                        "day_sum": day_sum,
+                        "month_sum": sum(k["month"] for k in kpis),
+                    }
+                )
+            # 每列最高值（今天/本月）用来标榜首
+            max_day = {k: 0 for k, _n, _x in KPI_TARGETS}
+            max_month = {k: 0 for k, _n, _x in KPI_TARGETS}
+            for r in rows:
+                for k in r["kpis"]:
+                    max_day[k["code"]] = max(max_day[k["code"]], k["day"])
+                    max_month[k["code"]] = max(max_month[k["code"]], k["month"])
+            # 排序：今日视图按今日三 KPI 之和降序，本月视图按本月累计降序
+            rows.sort(
+                key=lambda r: (
+                    -(r["day_sum"] if view == "today" else r["month_sum"]),
+                    r["store"]["name"],
+                )
+            )
+            for rank, r in enumerate(rows, 1):
+                r["rank"] = rank
+                for k in r["kpis"]:
+                    k["top_day"] = k["day"] > 0 and k["day"] == max_day[k["code"]]
+                    k["top_month"] = k["month"] > 0 and k["month"] == max_month[k["code"]]
+            # 本区合计 + 覆盖率
+            n = len(rows)
+            sum_day = {k: 0 for k, _n, _x in KPI_TARGETS}
+            sum_month = {k: 0 for k, _n, _x in KPI_TARGETS}
+            done_today = sum(1 for r in rows if r["submitted_today"])
+            done_month = sum(1 for r in rows if r["reported_this_month"])
+            for r in rows:
+                for k in r["kpis"]:
+                    sum_day[k["code"]] += k["day"]
+                    sum_month[k["code"]] += k["month"]
+            grand = [
+                {
+                    "code": code,
+                    "name": name,
+                    "note": note,
+                    "day": sum_day[code],
+                    "month": sum_month[code],
+                    "target": kpi_targets.get(code, 0) * n,
+                    "progress": (
+                        sum_month[code] / (kpi_targets.get(code, 0) * n) * 100
+                    )
+                    if kpi_targets.get(code, 0) and n
+                    else None,
+                }
+                for code, name, note in KPI_TARGETS
+            ]
             return render_template(
                 "board.html",
                 biz_date=biz_date,
-                cards=detail,
+                view=view,
+                rows=rows,
+                grand=grand,
+                coverage_today=round(done_today / n * 100) if n else 0,
+                coverage_month=round(done_month / n * 100) if n else 0,
+                done_today=done_today,
+                done_month=done_month,
+                n=n,
                 is_admin=g.user["role"] == "admin",
             )
 
@@ -663,10 +749,16 @@ def create_app() -> Flask:
     @admin_required
     def bulletin_page():
         biz_date = parse_date(request.args.get("date"))
+        city = (request.args.get("city") or "").strip()
         with db.get_db() as conn:
             stores = accessible_stores(conn)
+            cities = sorted({(s["city"] or "南通市") for s in stores})
+            if not city:
+                city = "南通市" if "南通市" in cities else (cities[0] if cities else "")
+            stores = [s for s in stores if (s["city"] or "南通市") == city] if city else stores
             rows = bulletin_rows(conn, stores, biz_date)
             copy_text = bulletin.tsv(rows, biz_date)
+            title_city = city.replace("市", "") if city else ""
             return render_template(
                 "bulletin.html",
                 biz_date=biz_date,
@@ -675,6 +767,9 @@ def create_app() -> Flask:
                 month_label=bulletin.month_label(biz_date),
                 day_label=bulletin.day_label(biz_date),
                 copy_text=copy_text,
+                city=city,
+                cities=cities,
+                bulletin_title=f"{title_city}vivo零售运营中心移动业务通报表" if title_city else "移动业务通报表",
             )
 
     @app.route("/incentive")
@@ -767,8 +862,11 @@ def create_app() -> Flask:
     @admin_required
     def bulletin_csv():
         biz_date = parse_date(request.args.get("date"))
+        city = (request.args.get("city") or "").strip()
         with db.get_db() as conn:
             stores = accessible_stores(conn)
+            if city:
+                stores = [s for s in stores if (s["city"] or "南通市") == city]
             rows = bulletin_rows(conn, stores, biz_date)
             buf = io.StringIO()
             writer = csv.writer(buf)
@@ -803,18 +901,19 @@ def create_app() -> Flask:
                         raise ValueError("需要管理员权限")
                     if action == "add_store":
                         name = (request.form.get("store_name") or "").strip()
-                        code = (request.form.get("store_code") or "").strip()
-                        if not name or not code:
-                            raise ValueError("门店名和编码都要填")
+                        short_name = (request.form.get("short_name") or "").strip()
+                        if not name or not short_name:
+                            raise ValueError("店名和简称都要填")
                         db.create_store(
                             conn,
                             name,
-                            code,
                             mobile_code=request.form.get("mobile_code") or "",
                             area_manager=request.form.get("area_manager") or "",
                             store_manager=request.form.get("store_manager") or "",
                             advisor_name=request.form.get("advisor_name") or "",
-                            short_name=request.form.get("short_name") or "",
+                            short_name=short_name,
+                            region_group=request.form.get("region_group") or "通泰",
+                            city=request.form.get("city") or "南通市",
                         )
                         flash("门店已加", "ok")
                     elif action == "edit_store":
@@ -840,6 +939,8 @@ def create_app() -> Flask:
                                 area_manager=request.form.get(f"area_manager_{sid}") or "",
                                 store_manager=request.form.get(f"store_manager_{sid}") or "",
                                 advisor_name=request.form.get(f"advisor_name_{sid}") or "",
+                                region_group=request.form.get(f"region_group_{sid}") or store["region_group"],
+                                city=request.form.get(f"city_{sid}") or store["city"],
                             )
                         flash("门店档案已保存", "ok")
                     elif action == "add_user":

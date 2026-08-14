@@ -41,6 +41,8 @@
             <thead>
               <tr>
                 <th>门店</th>
+                <th>大区</th>
+                <th>地市</th>
                 <th>移动编码</th>
                 <th>区域经理</th>
                 <th>店长</th>
@@ -54,6 +56,8 @@
                   <div>{{ store_label(s) }}</div>
                   <div class="muted">{{ s.name }}</div>
                 </td>
+                <td><input name="region_group_{{ s.id }}" value="{{ s.region_group }}"></td>
+                <td><input name="city_{{ s.id }}" value="{{ s.city }}"></td>
                 <td><input name="mobile_code_{{ s.id }}" value="{{ s.mobile_code }}"></td>
                 <td><input name="area_manager_{{ s.id }}" value="{{ s.area_manager }}"></td>
                 <td><input name="store_manager_{{ s.id }}" value="{{ s.store_manager }}"></td>
@@ -72,9 +76,10 @@
       <form method="post" class="narrow" style="margin-top:14px">
         <input type="hidden" name="action" value="add_store">
         <input type="hidden" name="tab" value="stores">
-        <p><label>店名</label><input name="store_name" required placeholder="TZ南通市某某vivo体验店"></p>
-        <p><label>简称</label><input name="short_name" required placeholder="如 如皋宁海路"></p>
-        <p><label>内部编码</label><input name="store_code" required placeholder="rg-xxx"></p>
+        <p><label>店名</label><input name="store_name" required placeholder="TZ泰州兴化吾悦vivo体验店"></p>
+        <p><label>简称</label><input name="short_name" required placeholder="如 兴化吾悦"></p>
+        <p><label>大区</label><input name="region_group" value="通泰" required></p>
+        <p><label>地市</label><input name="city" required placeholder="南通市 / 泰州市"></p>
         <p><label>移动编码</label><input name="mobile_code" placeholder="20001744"></p>
         <p><label>区域经理</label><input name="area_manager"></p>
         <p><label>店长</label><input name="store_manager"></p>

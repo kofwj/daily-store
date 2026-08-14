@@ -828,10 +828,20 @@ def user_store_ids(conn: sqlite3.Connection, user_id: int) -> List[int]:
     ]
 
 
+def alloc_store_code(conn: sqlite3.Connection) -> str:
+    """系统内部唯一编码，不给管理员手填。"""
+    n = int(conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM stores").fetchone()[0])
+    code = f"s{n}"
+    while conn.execute("SELECT 1 FROM stores WHERE code=?", (code,)).fetchone():
+        n += 1
+        code = f"s{n}"
+    return code
+
+
 def create_store(
     conn: sqlite3.Connection,
     name: str,
-    code: str,
+    code: str = "",
     *,
     region_group: str = "通泰",
     city: str = "南通市",
@@ -844,6 +854,7 @@ def create_store(
     short_name: str = "",
 ) -> int:
     nxt = conn.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 AS n FROM stores").fetchone()["n"]
+    store_code = (code or "").strip() or alloc_store_code(conn)
     conn.execute(
         """
         INSERT INTO stores(
@@ -853,7 +864,7 @@ def create_store(
         """,
         (
             name.strip(),
-            code.strip(),
+            store_code,
             int(nxt),
             region_group.strip() or "通泰",
             city.strip() or "南通市",
@@ -879,10 +890,15 @@ def update_store_profile(
     area_manager: str,
     store_manager: str,
     advisor_name: str = "",
-    region_group: str = "通泰",
-    city: str = "南通市",
+    region_group: Optional[str] = None,
+    city: Optional[str] = None,
 ) -> None:
     name = (advisor_name or "").strip()
+    row = conn.execute("SELECT region_group, city FROM stores WHERE id=?", (store_id,)).fetchone()
+    if row is None:
+        raise ValueError("没有这家店")
+    next_region = (region_group if region_group is not None else row["region_group"] or "").strip() or "通泰"
+    next_city = (city if city is not None else row["city"] or "").strip() or "南通市"
     conn.execute(
         """
         UPDATE stores SET
@@ -896,8 +912,8 @@ def update_store_profile(
             store_manager.strip(),
             name,
             1 if name else 0,
-            region_group.strip() or "通泰",
-            city.strip() or "南通市",
+            next_region,
+            next_city,
             store_id,
         ),
     )
