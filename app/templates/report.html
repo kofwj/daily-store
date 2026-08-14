@@ -4,6 +4,17 @@
 <div class="card">
   <h1>报表 · {{ store.short_name or store.name }}</h1>
   <form method="get" class="row">
+    {% if g.user['role'] == 'admin' and cities %}
+    <div class="field">
+      <label>地市</label>
+      <select name="city" onchange="this.form.submit()">
+        <option value="" {% if not city %}selected{% endif %}>全部地市</option>
+        {% for c in cities %}
+        <option value="{{ c }}" {% if c == city %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
     <div class="field">
       <label>门店</label>
       <select name="store_id" onchange="this.form.submit()">
@@ -29,7 +40,7 @@
       <input type="date" name="end" value="{{ end.isoformat() }}" {% if view=='day' %}disabled{% endif %} onchange="this.form.submit()">
     </div>
     <div>
-      <a class="btn ghost" href="{{ url_for('report_csv', store_id=store.id, start=start.isoformat(), end=end.isoformat()) }}">导出 CSV</a>
+      <a class="btn ghost" href="{{ url_for('report_csv', store_id=store.id, start=start.isoformat(), end=end.isoformat(), city=city) }}">导出 CSV</a>
     </div>
   </form>
 </div>
@@ -127,6 +138,7 @@
             <input type="hidden" name="view" value="{{ view }}">
             <input type="hidden" name="start" value="{{ start.isoformat() }}">
             <input type="hidden" name="end" value="{{ end.isoformat() }}">
+            <input type="hidden" name="city" value="{{ city }}">
             <input type="number" min="0" step="1" name="value" value="{{ v }}" title="点格子改数，回车保存">
           </form>
           {% else %}
@@ -155,29 +167,58 @@
 
 {# ===== 多店对比（管理员） ===== #}
 {% if g.user['role'] == 'admin' and store_compare %}
-<div class="card" style="overflow:auto">
-  <h2>各店对比（{{ start.strftime('%m/%d') }}~{{ end.strftime('%m/%d') }}）</h2>
-  <table class="data compare-grid">
-    <thead>
-      <tr>
-        <th>门店</th>
-        <th>已交</th>
-        {% for k in kpi_cards %}<th>{{ k.name }}</th><th>完成</th>{% endfor %}
-      </tr>
-    </thead>
-    <tbody>
-      {% for sc in store_compare %}
-      <tr>
-        <td class="left">{{ sc.store.short_name or sc.store.name }}</td>
-        <td>{{ sc.submitted }}/{{ total_days }}</td>
-        {% for k in kpi_cards %}
-        <td><b>{{ sc['k_' + k.code] }}</b></td>
-        <td class="muted">{{ '%.0f'|format(sc['p_' + k.code]) if sc['p_' + k.code] is not none else '—' }}</td>
+<div class="card compare-card">
+  <div class="compare-head">
+    <h2>各店对比</h2>
+    <span class="muted">{{ start.strftime('%m/%d') }}~{{ end.strftime('%m/%d') }}{% if city %} · {{ city }}{% endif %} · 按三项考核合计排序</span>
+  </div>
+  <div class="table-wrap">
+    <table class="data compare-grid">
+      <thead>
+        <tr>
+          <th class="left">门店</th>
+          <th>已交</th>
+          <th>销量</th>
+          <th>商机</th>
+          {% for k in kpi_cards %}<th>{{ k.name }}</th>{% endfor %}
+          <th>考核</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sc in store_compare %}
+        <tr>
+          <td class="left store-cell">
+            <a class="store-name" href="{{ url_for('report', store_id=sc.store.id, view=view, start=start.isoformat(), end=end.isoformat(), city=city) }}">{{ sc.store.short_name or sc.store.name }}</a>
+            <div class="muted tiny">{{ sc.store.store_manager or '未设店长' }}{% if sc.forecast.advisor_name %} · 顾问 {{ sc.forecast.advisor_name }}{% endif %}</div>
+          </td>
+          <td>
+            <div>{{ sc.submitted }}/{{ total_days }}</div>
+            <div class="progress thin"><span style="width: {{ [sc.coverage, 100]|min }}%"></span></div>
+            <div class="muted tiny">{{ sc.coverage }}%</div>
+          </td>
+          <td class="{{ 'best' if sc.top_phone else '' }}">{{ sc.phone_sales }}</td>
+          <td class="{{ 'best' if sc.top_lead else '' }}">{{ sc.lead }}</td>
+          {% for k in sc.kpis %}
+          <td class="kpi-cell {{ 'lag' if k.target and k.total < k.target else '' }} {{ 'best' if k.top else '' }}">
+            <div class="kpi-val">{{ k.total }}</div>
+            {% if k.target %}
+            <div class="progress thin"><span style="width: {{ [k.progress or 0, 100]|min }}%"></span></div>
+            <div class="muted tiny">{{ '%.0f'|format(k.progress) }}% / {{ k.target }} · 日均 {{ k.avg }}</div>
+            {% else %}
+            <div class="muted tiny">日均 {{ k.avg }}</div>
+            {% endif %}
+          </td>
+          {% endfor %}
+          <td class="forecast-cell">
+            <span class="status {{ 'done' if sc.forecast.passed else 'wait' }}">{{ sc.forecast.label }}</span>
+            <div class="muted tiny">{{ sc.forecast.money_text }}</div>
+          </td>
+        </tr>
         {% endfor %}
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+      </tbody>
+    </table>
+  </div>
+  <p class="muted tiny" style="margin-top:8px">蓝字是该列最高。红字未达单店月目标。点店名切到这家店的明细。</p>
 </div>
 {% endif %}
 {% endblock %}

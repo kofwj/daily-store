@@ -605,10 +605,21 @@ table.report-grid tr.row-kpi td:first-child { color: #1e3a8a; font-weight: 650; 
 .kpi-dot { color: #f59e0b; font-size: 11px; margin-left: 3px; }
 
 /* 多店对比 */
+.compare-card { margin-top: 14px; }
+.compare-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.compare-head h2 { margin: 0; }
 table.compare-grid { font-size: 12.5px; }
+table.compare-grid th, table.compare-grid td { text-align: left; vertical-align: top; }
 table.compare-grid th { background: #f1f5f9; color: #475569; padding: 6px 8px; font-size: 11.5px; }
-table.compare-grid td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; }
+table.compare-grid td { padding: 8px; border-bottom: 1px solid #f1f5f9; }
 table.compare-grid tr:hover td { background: #f8fafc; }
+table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
 
 @media (max-width: 800px) {
   .report-kpis { grid-template-columns: 1fr 1fr; }
