@@ -3,25 +3,23 @@
 {% block body %}
 <div class="card">
   <h1>通报表</h1>
-  <form method="get" class="row">
-    <div class="field">
-      <label>日期</label>
+  <form method="get" class="page-filters">
+    <label class="filter">
+      <span>日期</span>
       <input type="date" name="date" value="{{ biz_date.isoformat() }}" onchange="this.form.submit()">
-    </div>
-    <div class="field">
-      <label>地市</label>
+    </label>
+    <label class="filter">
+      <span>地市</span>
       <select name="city" onchange="this.form.submit()">
         {% for c in cities %}
         <option value="{{ c }}" {% if c == city %}selected{% endif %}>{{ c }}</option>
         {% endfor %}
       </select>
-    </div>
-    <div class="toolbar">
-      <button type="button" onclick="copyBulletinImage()">复制图片</button>
-      <button type="button" class="ghost" onclick="downloadBulletinImage()">下载图片</button>
-      <a class="btn ghost" href="{{ url_for('bulletin_csv', date=biz_date.isoformat(), city=city) }}">导出 CSV</a>
-      <span class="chip" id="copyHint">可贴进微信</span>
-    </div>
+    </label>
+    <button type="button" onclick="copyBulletinImage()">复制图片</button>
+    <button type="button" class="ghost" onclick="downloadBulletinImage()">下载图片</button>
+    <a class="btn ghost" href="{{ url_for('bulletin_csv', date=biz_date.isoformat(), city=city) }}">导出 CSV</a>
+    <span class="chip" id="copyHint">可贴进微信</span>
   </form>
   <p class="muted">电脑 Chrome / Edge 点「复制图片」再回微信粘贴。手机或不支持复制时会下载图片，或长按下方预览发给微信。</p>
 </div>

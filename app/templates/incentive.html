@@ -3,11 +3,11 @@
 {% block body %}
 <div class="card">
   <h1>月度考核</h1>
-  <form method="get" class="row">
-    <div class="field">
-      <label>月份</label>
+  <form method="get" class="page-filters">
+    <label class="filter">
+      <span>月份</span>
       <input type="month" name="month" value="{{ month.strftime('%Y-%m') }}" onchange="this.form.submit()">
-    </div>
+    </label>
   </form>
   <p class="muted">
     截至 {{ as_of }}。有顾问店看「AI + 芝麻 ≥ 10」；无顾问店看两项都破 0。

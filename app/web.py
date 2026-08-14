@@ -335,6 +335,7 @@ def create_app() -> Flask:
                 compact=compact,
                 kpi_cards=kpi_cards,
                 forecast=forecast,
+                is_admin=g.user["role"] == "admin",
             )
 
     @app.route("/report")
@@ -466,6 +467,7 @@ def create_app() -> Flask:
                 coverage=coverage,
                 total_days=len(total_days),
                 kpi_cards=kpi_cards,
+                month_start=start.replace(day=1),
             )
 
     @app.route("/report.csv")

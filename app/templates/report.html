@@ -1,155 +1,161 @@
 {% extends "base.html" %}
-{% block title %}报表 · {{ store.name }}{% endblock %}
+{% block title %}报表 · {{ store.short_name or store.name }}{% endblock %}
 {% block body %}
-<div class="card">
-  <h1>报表 · {{ store.short_name or store.name }}</h1>
-  <form method="get" class="row">
-    <div class="field">
-      <label>门店</label>
-      <select name="store_id" onchange="this.form.submit()">
-        {% for s in stores %}
-        <option value="{{ s.id }}" {% if s.id == store.id %}selected{% endif %}>{{ s.short_name or s.name }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="field">
-      <label>视图</label>
-      <select name="view" onchange="this.form.submit()">
-        <option value="day" {% if view=='day' %}selected{% endif %}>日报</option>
-        <option value="week" {% if view=='week' %}selected{% endif %}>周报</option>
-        <option value="month" {% if view=='month' %}selected{% endif %}>月报</option>
-      </select>
-    </div>
-    <div class="field">
-      <label>起始</label>
-      <input type="date" name="start" value="{{ start.isoformat() }}" onchange="this.form.submit()">
-    </div>
-    <div class="field">
-      <label>结束</label>
-      <input type="date" name="end" value="{{ end.isoformat() }}" {% if view=='day' %}disabled{% endif %} onchange="this.form.submit()">
-    </div>
+<div class="report-page">
+  <div class="report-head">
     <div>
-      <a class="btn ghost" href="{{ url_for('report_csv', store_id=store.id, start=start.isoformat(), end=end.isoformat()) }}">导出 CSV</a>
+      <h1>{{ store.short_name or store.name }}</h1>
+      <p class="muted">{{ store.name }}</p>
     </div>
-  </form>
-</div>
+    <form method="get" class="page-filters">
+      {% if g.user['role'] == 'admin' and stores|length > 1 %}
+      <label class="filter">
+        <span>门店</span>
+        <select name="store_id" onchange="this.form.submit()">
+          {% for s in stores %}
+          <option value="{{ s.id }}" {% if s.id == store.id %}selected{% endif %}>{{ s.short_name or s.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
+      <label class="filter">
+        <span>{{ '月份' if view=='month' else ('起始' if view=='week' else '日期') }}</span>
+        <input type="date" name="start" value="{{ start.isoformat() }}" onchange="this.form.submit()">
+      </label>
+      {% if view == 'week' %}
+      <label class="filter">
+        <span>结束</span>
+        <input type="date" name="end" value="{{ end.isoformat() }}" onchange="this.form.submit()">
+      </label>
+      {% endif %}
+      <input type="hidden" name="view" value="{{ view }}">
+      {% if view != 'week' %}
+      <input type="hidden" name="end" value="{{ end.isoformat() }}">
+      {% endif %}
+      <div class="seg">
+        <a class="{{ 'active' if view=='month' else '' }}" href="{{ url_for('report', store_id=store.id, view='month', start=month_start.isoformat()) }}">月报</a>
+        <a class="{{ 'active' if view=='week' else '' }}" href="{{ url_for('report', store_id=store.id, view='week', start=start.isoformat()) }}">周报</a>
+        <a class="{{ 'active' if view=='day' else '' }}" href="{{ url_for('report', store_id=store.id, view='day', start=start.isoformat()) }}">日报</a>
+      </div>
+      <a class="btn ghost" href="{{ url_for('report_csv', store_id=store.id, start=start.isoformat(), end=end.isoformat()) }}">导出 CSV</a>
+    </form>
+  </div>
 
-{# ===== 摘要卡 ===== #}
-<div class="kpi-row report-kpis">
-  <div class="kpi">
-    <div class="muted">区间</div>
-    <div class="kpi-num">{{ start.strftime('%m/%d') }}~{{ end.strftime('%m/%d') }}</div>
-    <div class="muted">{{ view }} · 已交 {{ submitted_dates|length }}/{{ total_days }} 天</div>
+  <div class="kpi-row report-kpis">
+    <div class="kpi">
+      <div class="muted">区间</div>
+      <div class="kpi-num">{{ start.strftime('%m/%d') }}~{{ end.strftime('%m/%d') }}</div>
+      <div class="muted">已交 {{ submitted_dates|length }}/{{ total_days }} 天</div>
+    </div>
+    <div class="kpi">
+      <div class="muted">覆盖率</div>
+      <div class="kpi-num">{{ coverage }}%</div>
+      <div class="progress thin"><span style="width: {{ [coverage, 100]|min }}%"></span></div>
+    </div>
+    {% for k in kpi_cards %}
+    <div class="kpi">
+      <div class="muted">{{ k.name }}</div>
+      <div class="kpi-num">{{ k.total }}</div>
+      <div class="muted">区间合计</div>
+    </div>
+    {% endfor %}
   </div>
-  <div class="kpi">
-    <div class="muted">覆盖率</div>
-    <div class="kpi-num">{{ coverage }}%</div>
-    <div class="progress thin"><span style="width: {{ [coverage, 100]|min }}%"></span></div>
-  </div>
-  {% for k in kpi_cards %}
-  <div class="kpi">
-    <div class="muted">{{ k.name }}</div>
-    <div class="kpi-num">{{ k.total }}</div>
-    <div class="muted">区间合计</div>
-  </div>
-  {% endfor %}
-</div>
 
-{# ===== 指标明细 ===== #}
-<div class="card" style="overflow:auto">
   {% if view == 'month' %}
-  <p class="muted report-hint">月报只看合计。要改某一天，切到「周报」或「日报」。</p>
-  <table class="data report-grid report-month">
-    <thead>
-      <tr>
-        <th>指标</th>
-        <th>合计</th>
-        <th>日均</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for grp in grouped %}
-      {% if grp.code != 'basic' %}
-      <tr class="group-row"><td colspan="3">{{ grp.header }}</td></tr>
-      {% endif %}
-      {% for row in grp.rows %}
-      <tr class="{{ 'row-kpi' if row.code in ['bisuan','bisuan_high','ai_contract'] or row.code.startswith('coin_cut_new') else '' }}">
-        <td class="left">{{ row.name }}{% if row.code in ['bisuan','bisuan_high','ai_contract'] or row.code.startswith('coin_cut_new') %} <span class="kpi-dot" title="考核指标">★</span>{% endif %}</td>
-        <td><b>{{ row.total }}</b></td>
-        <td class="muted">{{ row.avg or '—' }}</td>
-      </tr>
-      {% endfor %}
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="report-month-grid">
+    {% for grp in grouped %}
+    <section class="card report-section">
+      <h2>{{ grp.header if grp.header and grp.code != 'basic' else '基础' }}</h2>
+      <table class="data report-grid report-month">
+        <thead>
+          <tr>
+            <th>指标</th>
+            <th>合计</th>
+            <th>日均</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in grp.rows %}
+          <tr class="{{ 'row-kpi' if row.code in ['bisuan','bisuan_high','ai_contract'] or row.code.startswith('coin_cut_new') else '' }}">
+            <td class="left">{{ row.name }}{% if row.code in ['bisuan','bisuan_high','ai_contract'] or row.code.startswith('coin_cut_new') %} <span class="kpi-dot" title="考核指标">★</span>{% endif %}</td>
+            <td><b>{{ row.total }}</b></td>
+            <td class="muted">{{ row.avg or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% endfor %}
+  </div>
+  <p class="muted report-note">日均 = 区间合计 ÷ 已提交天数。要改某一天，切到周报或日报。</p>
   {% else %}
-  <table class="data report-grid">
-    <thead>
-      <tr>
-        <th>指标</th>
-        {% for d in dates %}<th>{{ d[5:] }}</th>{% endfor %}
-        <th>合计</th>
-        <th>日均</th>
-      </tr>
+  <div class="card" style="overflow:auto">
+    <table class="data report-grid">
+      <thead>
+        <tr>
+          <th>指标</th>
+          {% for d in dates %}<th>{{ d[5:] }}</th>{% endfor %}
+          <th>合计</th>
+          <th>日均</th>
+        </tr>
+        {% if g.user['role'] == 'admin' %}
+        <tr>
+          <th></th>
+          {% for d in dates %}
+          <th>
+            {% if d in submitted %}
+            <form method="post" action="{{ url_for('report_delete') }}" onsubmit="return confirm('删除 {{ d }} 的日报？此操作不可恢复。')">
+              <input type="hidden" name="store_id" value="{{ store.id }}">
+              <input type="hidden" name="date" value="{{ d }}">
+              <button class="ghost del-day" type="submit" title="删除该日日报">删</button>
+            </form>
+            {% endif %}
+          </th>
+          {% endfor %}
+          <th></th><th></th>
+        </tr>
+        {% endif %}
+      </thead>
+      <tbody>
+        {% for grp in grouped %}
+        {% if grp.code != 'basic' %}
+        <tr class="group-row"><td colspan="{{ 3 + dates|length }}">{{ grp.header }}</td></tr>
+        {% endif %}
+        {% for row in grp.rows %}
+        <tr class="{{ 'row-kpi' if row.code in ['bisuan','bisuan_high','ai_contract'] or row.code.startswith('coin_cut_new') else '' }}">
+          <td class="left">{{ row.name }}{% if row.code in ['bisuan','bisuan_high','ai_contract'] or row.code.startswith('coin_cut_new') %} <span class="kpi-dot" title="考核指标">★</span>{% endif %}</td>
+          {% for v in row.days %}
+          <td class="{{ 'day-val' if v else 'day-zero' }}">
+            {% if g.user['role'] == 'admin' %}
+            <form method="post" action="{{ url_for('report_cell') }}" class="cell-edit" onsubmit="return confirm('把 {{ dates[loop.index0] }} 的「{{ row.name }}」改成这个数？只改这一格。')">
+              <input type="hidden" name="store_id" value="{{ store.id }}">
+              <input type="hidden" name="date" value="{{ dates[loop.index0] }}">
+              <input type="hidden" name="metric_code" value="{{ row.code }}">
+              <input type="hidden" name="view" value="{{ view }}">
+              <input type="hidden" name="start" value="{{ start.isoformat() }}">
+              <input type="hidden" name="end" value="{{ end.isoformat() }}">
+              <input type="number" min="0" step="1" name="value" value="{{ v }}" title="点格子改数，回车保存">
+            </form>
+            {% else %}
+            {{ v if v else '·' }}
+            {% endif %}
+          </td>
+          {% endfor %}
+          <td><b>{{ row.total }}</b></td>
+          <td class="muted">{{ row.avg or '—' }}</td>
+        </tr>
+        {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="muted" style="margin-top:8px">
       {% if g.user['role'] == 'admin' %}
-      <tr>
-        <th></th>
-        {% for d in dates %}
-        <th>
-          {% if d in submitted %}
-          <form method="post" action="{{ url_for('report_delete') }}" onsubmit="return confirm('删除 {{ d }} 的日报？此操作不可恢复。')">
-            <input type="hidden" name="store_id" value="{{ store.id }}">
-            <input type="hidden" name="date" value="{{ d }}">
-            <button class="ghost del-day" type="submit" title="删除该日日报">删</button>
-          </form>
-          {% endif %}
-        </th>
-        {% endfor %}
-        <th></th><th></th>
-      </tr>
+      管理员点某个格子改数，回车只保存这一格，其它数字不动，会记进审计。日均 = 区间合计 ÷ 已提交天数。
+      {% else %}
+      「·」表示当日为 0。日均 = 区间合计 ÷ 已提交天数。
       {% endif %}
-    </thead>
-    <tbody>
-      {% for grp in grouped %}
-      {% if grp.code != 'basic' %}
-      <tr class="group-row"><td colspan="{{ 3 + dates|length }}">{{ grp.header }}</td></tr>
-      {% endif %}
-      {% for row in grp.rows %}
-      <tr class="{{ 'row-kpi' if row.code in ['bisuan','bisuan_high','ai_contract'] or row.code.startswith('coin_cut_new') else '' }}">
-        <td class="left">{{ row.name }}{% if row.code in ['bisuan','bisuan_high','ai_contract'] or row.code.startswith('coin_cut_new') %} <span class="kpi-dot" title="考核指标">★</span>{% endif %}</td>
-        {% for v in row.days %}
-        <td class="{{ 'day-val' if v else 'day-zero' }}">
-          {% if g.user['role'] == 'admin' %}
-          <form method="post" action="{{ url_for('report_cell') }}" class="cell-edit" onsubmit="return confirm('把 {{ dates[loop.index0] }} 的「{{ row.name }}」改成这个数？只改这一格。')">
-            <input type="hidden" name="store_id" value="{{ store.id }}">
-            <input type="hidden" name="date" value="{{ dates[loop.index0] }}">
-            <input type="hidden" name="metric_code" value="{{ row.code }}">
-            <input type="hidden" name="view" value="{{ view }}">
-            <input type="hidden" name="start" value="{{ start.isoformat() }}">
-            <input type="hidden" name="end" value="{{ end.isoformat() }}">
-            <input type="number" min="0" step="1" name="value" value="{{ v }}" title="点格子改数，回车保存">
-          </form>
-          {% else %}
-          {{ v if v else '·' }}
-          {% endif %}
-        </td>
-        {% endfor %}
-        <td><b>{{ row.total }}</b></td>
-        <td class="muted">{{ row.avg or '—' }}</td>
-      </tr>
-      {% endfor %}
-      {% endfor %}
-    </tbody>
-  </table>
+    </p>
+  </div>
   {% endif %}
-  <p class="muted" style="margin-top:8px">
-    {% if view == 'month' %}
-    日均 = 区间合计 ÷ 已提交天数。要改某一天，切到周报或日报。
-    {% elif g.user['role'] == 'admin' %}
-    管理员点某个格子改数，回车只保存这一格，其它数字不动，会记进审计。日均 = 区间合计 ÷ 已提交天数。
-    {% else %}
-    「·」表示当日为 0。日均 = 区间合计 ÷ 已提交天数。
-    {% endif %}
-  </p>
 </div>
 {% endblock %}

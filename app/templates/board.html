@@ -13,13 +13,13 @@
         {% endif %}
       </p>
     </div>
-    <form method="get" class="board-filters">
-      <label class="board-date">
+    <form method="get" class="page-filters">
+      <label class="filter">
         <span>日期</span>
         <input type="date" name="date" value="{{ biz_date.isoformat() }}" onchange="this.form.submit()">
       </label>
       {% if is_admin and cities %}
-      <label class="board-date">
+      <label class="filter">
         <span>地市</span>
         <select name="city" onchange="this.form.submit()">
           <option value="" {% if not city %}selected{% endif %}>全部地市</option>

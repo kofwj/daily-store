@@ -4,19 +4,21 @@
 {% block body %}
 <div class="card today-head">
   <h1>{{ store.name }}</h1>
-  <form method="get" class="row">
-    <div class="field">
-      <label>门店</label>
+  <form method="get" class="page-filters">
+    {% if is_admin and stores|length > 1 %}
+    <label class="filter">
+      <span>门店</span>
       <select name="store_id" onchange="this.form.submit()">
         {% for s in stores %}
         <option value="{{ s.id }}" {% if s.id == store.id %}selected{% endif %}>{{ s.name }}</option>
         {% endfor %}
       </select>
-    </div>
-    <div class="field">
-      <label>日期</label>
+    </label>
+    {% endif %}
+    <label class="filter">
+      <span>日期</span>
       <input type="date" name="date" value="{{ biz_date.isoformat() }}" onchange="this.form.submit()">
-    </div>
+    </label>
   </form>
   {% if report %}
   <p class="muted">已由 {{ report.submitter_name or '未知' }} 于 {{ report.submitted_at }} 提交，可覆盖保存。</p>

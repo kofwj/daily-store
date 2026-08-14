@@ -4,24 +4,24 @@
 <div class="card">
   <h1>修改审计</h1>
   <p class="muted">谁在什么时候把哪家店哪天的日报改成了什么。锁定后的修改、历史日期覆盖、删除都会记录在这里。</p>
-  <form method="get" class="row">
-    <div class="field">
-      <label>近 N 天</label>
+  <form method="get" class="page-filters">
+    <label class="filter">
+      <span>近 N 天</span>
       <select name="days" onchange="this.form.submit()">
         {% for d in [1, 3, 7, 14, 30, 90] %}
         <option value="{{ d }}" {% if d == days %}selected{% endif %}>{{ d }} 天</option>
         {% endfor %}
       </select>
-    </div>
-    <div class="field">
-      <label>门店</label>
+    </label>
+    <label class="filter">
+      <span>门店</span>
       <select name="store_id" onchange="this.form.submit()">
         <option value="">全部</option>
         {% for s in stores %}
         <option value="{{ s.id }}" {% if s.id|string == store_id %}selected{% endif %}>{{ s.short_name or s.name }}</option>
         {% endfor %}
       </select>
-    </div>
+    </label>
   </form>
 </div>
 
