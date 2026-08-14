@@ -55,8 +55,34 @@
   {% endfor %}
 </div>
 
-{# ===== 指标明细（按分组） ===== #}
+{# ===== 指标明细 ===== #}
 <div class="card" style="overflow:auto">
+  {% if view == 'month' %}
+  <p class="muted report-hint">月报只看合计。要改某一天，切到「周报」或「日报」。</p>
+  <table class="data report-grid report-month">
+    <thead>
+      <tr>
+        <th>指标</th>
+        <th>合计</th>
+        <th>日均</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for grp in grouped %}
+      {% if grp.code != 'basic' %}
+      <tr class="group-row"><td colspan="3">{{ grp.header }}</td></tr>
+      {% endif %}
+      {% for row in grp.rows %}
+      <tr class="{{ 'row-kpi' if row.code in ['bisuan','bisuan_high','ai_contract'] or row.code.startswith('coin_cut_new') else '' }}">
+        <td class="left">{{ row.name }}{% if row.code in ['bisuan','bisuan_high','ai_contract'] or row.code.startswith('coin_cut_new') %} <span class="kpi-dot" title="考核指标">★</span>{% endif %}</td>
+        <td><b>{{ row.total }}</b></td>
+        <td class="muted">{{ row.avg or '—' }}</td>
+      </tr>
+      {% endfor %}
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
   <table class="data report-grid">
     <thead>
       <tr>
@@ -115,9 +141,15 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endif %}
   <p class="muted" style="margin-top:8px">
-    {% if g.user['role'] == 'admin' %}管理员点某个格子改数，回车只保存这一格，其它数字不动，会记进审计。{% else %}「·」表示当日为 0。{% endif %}
-    日均 = 区间合计 ÷ 已提交天数。
+    {% if view == 'month' %}
+    日均 = 区间合计 ÷ 已提交天数。要改某一天，切到周报或日报。
+    {% elif g.user['role'] == 'admin' %}
+    管理员点某个格子改数，回车只保存这一格，其它数字不动，会记进审计。日均 = 区间合计 ÷ 已提交天数。
+    {% else %}
+    「·」表示当日为 0。日均 = 区间合计 ÷ 已提交天数。
+    {% endif %}
   </p>
 </div>
 
