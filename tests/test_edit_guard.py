@@ -16,6 +16,7 @@ def tmp_db(tmp_path, monkeypatch):
     monkeypatch.setenv("STORE_DAILY_DATA", str(tmp_path))
     monkeypatch.setattr(db, "DB_PATH", Path(path))
     monkeypatch.setattr(db, "DATA_DIR", Path(tmp_path))
+    monkeypatch.setattr(db, "is_locked", lambda *a, **k: False)
     db.init_db()
     return path
 

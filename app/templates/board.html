@@ -67,7 +67,7 @@
     </div>
     <div class="board-missing-list">
       {% for r in missing %}
-      <a class="miss-chip" href="{{ url_for('today', store_id=r.store.id, date=biz_date.isoformat()) }}">{{ r.store.short_name or r.store.name }}</a>
+      <a class="miss-chip" href="{{ url_for('today', store_id=r.store.id, date=biz_date.isoformat()) }}">{{ r.store.name }}</a>
       {% endfor %}
     </div>
   </div>
@@ -96,11 +96,7 @@
           <tr>
             <td class="rank-col">{{ r.rank }}</td>
             <td class="left store-cell">
-              <a class="store-name" href="{{ url_for('today', store_id=r.store.id, date=biz_date.isoformat()) }}">{{ r.store.short_name or r.store.name }}</a>
-              <div class="store-links">
-                <a href="{{ url_for('today', store_id=r.store.id, date=biz_date.isoformat()) }}">填报</a>
-                <a href="{{ url_for('report', store_id=r.store.id) }}">报表</a>
-              </div>
+              <span class="store-name">{{ r.store.name }}</span>
             </td>
             {% for k in r.kpis %}
             <td class="kpi-cell {{ 'lag' if view=='month' and k.target and k.month < k.target else '' }} {{ 'best' if (k.top_day if view=='today' else k.top_month) else '' }}">
