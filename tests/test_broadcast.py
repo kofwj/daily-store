@@ -18,6 +18,7 @@ def test_render_matches_wechat_log():
         "other_card": (0, 5),
         "broadband": (3, 10),
         "tv": (3, 10),
+        "tv_member": (0, 0),
         "fttr": (0, 1),
         "gigabit": (0, 2),
         "security": (0, 0),
@@ -42,13 +43,17 @@ def test_render_matches_wechat_log():
         "new_call": (0, 0),
     }
     text = render_broadcast("TZ南通市如皋市如城镇宁海路体验店", biz, values, compact=False)
-    assert text.startswith("8/13\nTZ南通市如皋市如城镇宁海路体验店\n")
-    assert "当天手机销量：日1；累13" in text
-    assert "查询身份证数：日1；累4" in text
-    assert "\n重点业务\n比算新增：日0；累5\n比算新增[高]：日3；累3\n" in text
-    assert "\n新增类\n安心/副卡：日0；累0\n其他卡类：日0；累5\n家庭类\n宽带：日3；累10\n" in text
-    assert "定向包：日1；累1" in text
-    assert text.endswith("新通话：日0；累0\n")
+    assert text.startswith("8月13日\nTZ南通市如皋市如城镇宁海路体验店\n")
+    assert "当天手机销量：日1，累13" in text
+    assert "查询身份证数：日1，累4" in text
+    assert "\n重点业务\n比算新增：日0，累5\n比算新增[高]：日3，累3\n" in text
+    assert "\n新增类\n安心/副卡：日0，累0\n其他卡类：日0，累5\n" in text
+    assert "\n家庭类\n宽带：日3，累10\n" in text
+    assert "电视会员：日0，累0" in text
+    assert "\n终端合约\n金币直降：日0，累1\n购机让利：日2，累8\n" in text
+    assert "老用户直降" not in text
+    assert "定向包：日1，累1" in text
+    assert text.endswith("个人/全家保底：日0，累0\n")
 
 
 def test_compact_hides_zero_digital_rows():
@@ -61,11 +66,11 @@ def test_compact_hides_zero_digital_rows():
         "migu": (0, 0),
     }
     text = render_broadcast("TZ南通市如皋市如城镇宁海路体验店", biz, values, compact=True)
-    assert "定向包：日1；累1" in text
-    assert "防诈宝：日0；累3" in text
+    assert "定向包：日1，累1" in text
+    assert "防诈宝：日0，累3" in text
     assert "云盘" not in text
     assert "咪咕视频" not in text
-    assert "当天手机销量：日1；累13" in text
+    assert "当天手机销量：日1，累13" in text
 
 
 def test_add_day_to_prev_is_month_running_total():
@@ -81,9 +86,11 @@ def test_metric_codes_cover_all_seed_items():
     assert "direct_pack" in metric_codes()
     assert "coin_cut_old" in metric_codes()
     assert "coin_cut_new_recharge" in metric_codes()
+    assert "coin_cut_new_full" in metric_codes()
+    assert "tv_member" in metric_codes()
     assert "coin_cut_new" not in metric_codes()
     assert "coin_cut" not in metric_codes()
-    assert len(metric_codes()) == 37
+    assert len(metric_codes()) == 39
 
 
 def test_broadcast_rolls_coin_cut_parts_into_one_line():
@@ -95,11 +102,13 @@ def test_broadcast_rolls_coin_cut_parts_into_one_line():
             "coin_cut_new_recharge": (1, 2),
             "coin_cut_new_sesame": (1, 1),
             "coin_cut_new_savings": (0, 0),
+            "coin_cut_new_full": (2, 3),
             "coin_cut_xtc": (0, 1),
             "phone_discount": (0, 0),
         },
     )
-    assert "金币直降：日3；累8" in text
+    assert "金币直降：日5，累11" in text
     assert "老用户直降" not in text
     assert "芝麻免充" not in text
+    assert "全品类" not in text
     assert "小天才直降" not in text

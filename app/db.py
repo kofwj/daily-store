@@ -298,6 +298,7 @@ def _seed_metrics(conn: sqlite3.Connection) -> None:
         "coin_cut_new_recharge",
         "coin_cut_new_sesame",
         "coin_cut_new_savings",
+        "coin_cut_new_full",
     }
     for code, name, section, sort in all_metrics():
         if code in existing:

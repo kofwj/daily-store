@@ -311,6 +311,7 @@ def test_broadcast_from_saved_facts(tmp_db):
 
         pairs = add_day_to_prev(prev, today)
         text = render_broadcast(store["name"], date(2026, 8, 13), pairs)
-        assert "当天手机销量：日1；累13" in text
-        assert "宽带：日3；累10" in text
-        assert "购机让利：日2；累8" in text
+        assert "当天手机销量：日1，累13" in text
+        assert "宽带：日3，累10" in text
+        assert "购机让利：日2，累8" in text
+        assert "金币直降：日0，累1" in text

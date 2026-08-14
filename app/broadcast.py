@@ -11,11 +11,11 @@ DayCum = Tuple[int, int]
 
 
 def format_biz_date(biz_date: date) -> str:
-    return f"{biz_date.month}/{biz_date.day}"
+    return f"{biz_date.month}月{biz_date.day}日"
 
 
 def _line(name: str, day: int, cum: int) -> str:
-    return f"{name}：日{int(day)}；累{int(cum)}"
+    return f"{name}：日{int(day)}，累{int(cum)}"
 
 
 def render_broadcast(

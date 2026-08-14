@@ -43,7 +43,7 @@ def test_broadcast_compact_is_admin_setting(app_client):
         data={"store_id": str(sid), "date": day, "m_cloud_disk": "0", "m_phone_sales": "1"},
         follow_redirects=True,
     ).get_data(as_text=True)
-    assert "云盘：日0；累0" not in saved
+    assert "云盘：日0，累0" not in saved
     app_client.post("/settings", data={"action": "save_broadcast", "tab": "broadcast"}, follow_redirects=True)
     with db.get_db() as conn:
         assert db.get_setting(conn, "broadcast_compact", "1") == "0"
@@ -52,7 +52,7 @@ def test_broadcast_compact_is_admin_setting(app_client):
         data={"store_id": str(sid), "date": day, "m_cloud_disk": "0", "m_phone_sales": "1"},
         follow_redirects=True,
     ).get_data(as_text=True)
-    assert "云盘：日0；累0" in again
+    assert "云盘：日0，累0" in again
 
 
 def test_add_store_uses_city_and_hides_internal_code(app_client):

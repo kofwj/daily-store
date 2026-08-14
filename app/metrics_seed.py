@@ -40,10 +40,11 @@ SECTIONS: List[Dict] = [
     {
         "code": "family",
         "header": "家庭类",
-        "blank_before": False,
+        "blank_before": True,
         "metrics": [
             ("broadband", "宽带"),
             ("tv", "电视"),
+            ("tv_member", "电视会员"),
             ("fttr", "FTTR"),
             ("gigabit", "千兆"),
             ("security", "安防"),
@@ -51,19 +52,18 @@ SECTIONS: List[Dict] = [
     },
     {
         "code": "contract",
-        "header": "合约",
+        "header": "终端合约",
         "blank_before": True,
         "metrics": [
             ("coin_cut_old", "老用户直降"),
             ("coin_cut_new_recharge", "新用户直降·充值"),
             ("coin_cut_new_sesame", "新用户直降·芝麻免充"),
             ("coin_cut_new_savings", "新用户直降·储蓄卡冻结"),
+            ("coin_cut_new_full", "新用户直降·全品类"),
             ("coin_cut_xtc", "小天才直降"),
             ("phone_discount", "购机让利"),
             ("gift_2g", "送2G流量"),
             ("welcome_back", "底部迎回"),
-            ("renwoxuan", "任我选会员"),
-            ("min_spend", "个人/全家保底"),
         ],
     },
     {
@@ -84,6 +84,8 @@ SECTIONS: List[Dict] = [
             ("health", "健康无忧"),
             ("pet", "萌宠无忧"),
             ("new_call", "新通话"),
+            ("renwoxuan", "任我选会员"),
+            ("min_spend", "个人/全家保底"),
         ],
     },
 ]
@@ -115,10 +117,15 @@ def section_by_code(code: str) -> Dict:
     raise KeyError(code)
 
 
-COIN_NEW_PARTS = ("coin_cut_new_recharge", "coin_cut_new_sesame", "coin_cut_new_savings")
+COIN_NEW_PARTS = (
+    "coin_cut_new_recharge",
+    "coin_cut_new_sesame",
+    "coin_cut_new_savings",
+    "coin_cut_new_full",
+)
 COIN_ALL_PARTS = ("coin_cut_old",) + COIN_NEW_PARTS + ("coin_cut_xtc",)
 
-# 群播报仍合成一行；月指标只计新用户三项
+# 群播报把老用户/新用户/全品类/小天才合成「金币直降」一行；月指标只计新用户四项
 ROLLUPS = {
     "coin_cut": {
         "name": "新用户直降",
@@ -141,7 +148,7 @@ ROLLUPS = {
 KPI_TARGETS = (
     ("bisuan_total", "比算新增", "日常分「比算新增」和「比算新增[高]」填，考核看合计"),
     ("ai_contract", "Ai手机合约", ""),
-    ("coin_cut", "金币直降", "只计新用户：充值 + 芝麻免充 + 储蓄卡冻结"),
+    ("coin_cut", "金币直降", "只计新用户：充值 + 芝麻免充 + 储蓄卡冻结 + 全品类"),
 )
 
 

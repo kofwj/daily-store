@@ -214,7 +214,7 @@
     {% if tab == 'targets' and g.user['role'] == 'admin' %}
     <div class="card">
       <h1>月目标</h1>
-      <p class="muted">只考核三项：比算新增、Ai手机合约、金币直降。比算新增 = 比算新增 + 比算新增[高]；金币直降只计新用户三项。0 表示不考核。</p>
+      <p class="muted">只考核三项：比算新增、Ai手机合约、金币直降。比算新增 = 比算新增 + 比算新增[高]；金币直降只计新用户：充值 + 芝麻免充 + 储蓄卡冻结 + 全品类。0 表示不考核。</p>
       <form method="post" class="narrow">
         <input type="hidden" name="action" value="set_targets">
         <input type="hidden" name="tab" value="targets">

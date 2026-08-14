@@ -277,7 +277,7 @@ def create_app() -> Flask:
             report = db.get_report(conn, store["id"], biz_date)
             compact = db.get_setting(conn, "broadcast_compact", "1") == "1"
             text = broadcast.render_broadcast(
-                store["name"], biz_date, pairs, compact=compact
+                store_label(store), biz_date, pairs, compact=compact
             )
             grouped = []
             for section in SECTIONS:
