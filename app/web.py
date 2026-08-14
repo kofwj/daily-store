@@ -344,21 +344,6 @@ def create_app() -> Flask:
             store, stores = pick_store(conn, request.args.get("store_id"))
             if store is None:
                 return render_template("empty.html")
-            cities = []
-            seen_cities = []
-            for s in stores:
-                city_name = (s["city"] or "").strip() or "未分地市"
-                if city_name not in seen_cities:
-                    seen_cities.append(city_name)
-            cities = seen_cities
-            city = (request.args.get("city") or "").strip()
-            if city and city not in cities:
-                city = ""
-            if city:
-                stores = [s for s in stores if ((s["city"] or "").strip() or "未分地市") == city]
-                if store["id"] not in {s["id"] for s in stores} and stores:
-                    store = stores[0]
-                    session["store_id"] = store["id"]
             today_d = db.today_local()
             view = request.args.get("view") or "month"
             if view == "week":
@@ -466,76 +451,6 @@ def create_app() -> Flask:
                     }
                 )
 
-            # 多店对比（管理员）：覆盖率、基础量、三项 KPI、考核预估
-            store_compare = []
-            span_days = max(1, len(total_days))
-            if g.user["role"] == "admin":
-                compare_stores = stores if city else db.list_all_stores(conn)
-                for s in compare_stores:
-                    sfacts = db.facts_in_range(conn, s["id"], start, end)
-                    stot: Dict[str, int] = {}
-                    for row in sfacts:
-                        stot[row["metric_code"]] = stot.get(row["metric_code"], 0) + int(row["day_value"] or 0)
-                    s_sub = {
-                        row["biz_date"]
-                        for row in conn.execute(
-                            """
-                            SELECT biz_date FROM daily_reports
-                            WHERE store_id=? AND biz_date>=? AND biz_date<=?
-                            """,
-                            (s["id"], start.isoformat(), end.isoformat()),
-                        )
-                    }
-                    submitted_n = len(s_sub)
-                    kpis = []
-                    kpi_sum = 0
-                    for code, name, _note in KPI_TARGETS:
-                        if code == "ai_contract":
-                            v = int(stot.get("ai_contract", 0) or 0)
-                        else:
-                            v = rollup_amount(stot, code)
-                        tg = kpi_targets.get(code, 0)
-                        kpi_sum += v
-                        kpis.append(
-                            {
-                                "code": code,
-                                "name": name,
-                                "total": v,
-                                "avg": round(v / max(1, submitted_n), 1) if submitted_n else 0,
-                                "target": tg,
-                                "progress": (v / tg * 100) if tg else None,
-                            }
-                        )
-                    store_compare.append(
-                        {
-                            "store": s,
-                            "submitted": submitted_n,
-                            "coverage": round(submitted_n / span_days * 100) if span_days else 0,
-                            "phone_sales": int(stot.get("phone_sales", 0) or 0),
-                            "lead": int(stot.get("lead", 0) or 0),
-                            "bisuan": int(stot.get("bisuan", 0) or 0),
-                            "bisuan_high": int(stot.get("bisuan_high", 0) or 0),
-                            "sesame": int(stot.get("coin_cut_new_sesame", 0) or 0),
-                            "kpis": kpis,
-                            "kpi_sum": kpi_sum,
-                            "forecast": store_forecast(conn, s, end),
-                        }
-                    )
-                store_compare.sort(key=lambda x: (-x["kpi_sum"], -x["submitted"], store_label(x["store"])))
-                max_kpi = {k: 0 for k, _n, _x in KPI_TARGETS}
-                max_phone = 0
-                max_lead = 0
-                for sc in store_compare:
-                    max_phone = max(max_phone, sc["phone_sales"])
-                    max_lead = max(max_lead, sc["lead"])
-                    for k in sc["kpis"]:
-                        max_kpi[k["code"]] = max(max_kpi[k["code"]], k["total"])
-                for sc in store_compare:
-                    sc["top_phone"] = sc["phone_sales"] > 0 and sc["phone_sales"] == max_phone
-                    sc["top_lead"] = sc["lead"] > 0 and sc["lead"] == max_lead
-                    for k in sc["kpis"]:
-                        k["top"] = k["total"] > 0 and k["total"] == max_kpi[k["code"]]
-
             return render_template(
                 "report.html",
                 store=store,
@@ -551,9 +466,6 @@ def create_app() -> Flask:
                 coverage=coverage,
                 total_days=len(total_days),
                 kpi_cards=kpi_cards,
-                store_compare=store_compare,
-                cities=cities,
-                city=city,
             )
 
     @app.route("/report.csv")
@@ -635,7 +547,6 @@ def create_app() -> Flask:
         view = request.form.get("view") or "month"
         start = request.form.get("start") or ""
         end = request.form.get("end") or ""
-        city = (request.form.get("city") or "").strip()
         try:
             sid = int(store_id)
             biz_date = date.fromisoformat(day)
@@ -667,8 +578,6 @@ def create_app() -> Flask:
             kwargs["start"] = start
         if end and view != "day":
             kwargs["end"] = end
-        if city:
-            kwargs["city"] = city
         return redirect(url_for("report", **kwargs))
 
     @app.route("/board")
@@ -680,6 +589,16 @@ def create_app() -> Flask:
             view = "today"
         with db.get_db() as conn:
             stores = accessible_stores(conn)
+            cities = []
+            for s in stores:
+                city_name = (s["city"] or "").strip() or "未分地市"
+                if city_name not in cities:
+                    cities.append(city_name)
+            city = (request.args.get("city") or "").strip()
+            if city and city not in cities:
+                city = ""
+            if city:
+                stores = [s for s in stores if ((s["city"] or "").strip() or "未分地市") == city]
             kpi_targets = db.list_kpi_targets(conn)
             month_start, _month_end = db.month_bounds(biz_date)
             rows = []
@@ -786,6 +705,8 @@ def create_app() -> Flask:
                 done_month=done_month,
                 n=n,
                 is_admin=g.user["role"] == "admin",
+                cities=cities,
+                city=city,
             )
 
     def bulletin_rows(conn, stores, biz_date: date):

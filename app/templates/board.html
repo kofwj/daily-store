@@ -18,10 +18,21 @@
         <span>日期</span>
         <input type="date" name="date" value="{{ biz_date.isoformat() }}" onchange="this.form.submit()">
       </label>
+      {% if is_admin and cities %}
+      <label class="board-date">
+        <span>地市</span>
+        <select name="city" onchange="this.form.submit()">
+          <option value="" {% if not city %}selected{% endif %}>全部地市</option>
+          {% for c in cities %}
+          <option value="{{ c }}" {% if c == city %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
       <input type="hidden" name="view" value="{{ view }}">
       <div class="seg">
-        <a class="{{ 'active' if view=='today' else '' }}" href="{{ url_for('board', date=biz_date.isoformat(), view='today') }}">今日</a>
-        <a class="{{ 'active' if view=='month' else '' }}" href="{{ url_for('board', date=biz_date.isoformat(), view='month') }}">本月</a>
+        <a class="{{ 'active' if view=='today' else '' }}" href="{{ url_for('board', date=biz_date.isoformat(), view='today', city=city) }}">今日</a>
+        <a class="{{ 'active' if view=='month' else '' }}" href="{{ url_for('board', date=biz_date.isoformat(), view='month', city=city) }}">本月</a>
       </div>
     </form>
   </div>
