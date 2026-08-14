@@ -204,6 +204,61 @@ def test_locked_helper():
     assert db.is_locked(today_d, now=datetime(2026, 8, 14, 23, 30)) is True
 
 
+def test_admin_can_fix_one_cell(tmp_db, monkeypatch):
+    client = _client_auth(tmp_db, monkeypatch, username="admin", pin="1234")
+    today_d = date.today()
+    with db.get_db() as conn:
+        sid = _store_id(conn)
+    client.post(
+        "/today",
+        data={"store_id": str(sid), "date": today_d.isoformat(), "m_phone_sales": "4", "m_ai_contract": "2"},
+        follow_redirects=True,
+    )
+    resp = client.post(
+        "/report/cell",
+        data={
+            "store_id": str(sid),
+            "date": today_d.isoformat(),
+            "metric_code": "phone_sales",
+            "value": "9",
+            "view": "month",
+        },
+        follow_redirects=True,
+    )
+    assert "已校准" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        vals = db.day_values(conn, sid, today_d)
+        assert vals["phone_sales"] == 9
+        assert vals["ai_contract"] == 2
+        edits = list(conn.execute("SELECT note FROM report_edits"))
+        assert any(row["note"] == "校准单元格" for row in edits)
+
+
+def test_filler_cannot_fix_cell(tmp_db, monkeypatch):
+    client = _client_auth(tmp_db, monkeypatch)
+    today_d = date.today()
+    with db.get_db() as conn:
+        sid = _store_id(conn)
+    client.post(
+        "/today",
+        data={"store_id": str(sid), "date": today_d.isoformat(), "m_phone_sales": "4"},
+        follow_redirects=True,
+    )
+    resp = client.post(
+        "/report/cell",
+        data={
+            "store_id": str(sid),
+            "date": today_d.isoformat(),
+            "metric_code": "phone_sales",
+            "value": "99",
+        },
+        follow_redirects=True,
+    )
+    assert "需要管理员权限" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        assert db.day_values(conn, sid, today_d)["phone_sales"] == 4
+
+
 def test_now_is_beijing_time():
     from datetime import datetime as dt, timezone
 

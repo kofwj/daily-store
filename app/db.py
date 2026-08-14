@@ -709,6 +709,53 @@ def save_daily(
             )
 
 
+def set_day_value(
+    conn: sqlite3.Connection,
+    *,
+    store_id: int,
+    biz_date: date,
+    metric_code: str,
+    value: int,
+    user_id: int,
+) -> None:
+    """只改某一天某一个指标，不动其它格子。"""
+    codes = {row["code"] for row in list_metrics(conn)}
+    if metric_code not in codes:
+        raise ValueError("没有这个指标")
+    value = max(0, int(value or 0))
+    day = biz_date.isoformat()
+    before = {metric_code: int(day_values(conn, store_id, biz_date).get(metric_code, 0) or 0)}
+    if before[metric_code] == value:
+        return
+    report = get_report(conn, store_id, biz_date)
+    if report is None:
+        conn.execute(
+            """
+            INSERT INTO daily_reports(biz_date, store_id, submitted_by, submitted_at, compact, note)
+            VALUES (?, ?, ?, ?, 0, ?)
+            """,
+            (day, store_id, user_id, _now(), "管理员校准单元格"),
+        )
+    conn.execute(
+        """
+        INSERT INTO daily_facts(biz_date, store_id, metric_code, day_value)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(biz_date, store_id, metric_code) DO UPDATE SET
+            day_value=excluded.day_value
+        """,
+        (day, store_id, metric_code, value),
+    )
+    record_edit(
+        conn,
+        biz_date=biz_date,
+        store_id=store_id,
+        user_id=user_id,
+        before=before,
+        after={metric_code: value},
+        note="校准单元格",
+    )
+
+
 def facts_in_range(
     conn: sqlite3.Connection, store_id: int, start: date, end: date
 ) -> List[sqlite3.Row]:

@@ -565,6 +565,50 @@ def create_app() -> Flask:
             url_for("report", store_id=sid, view="month", start=biz_date.replace(day=1).isoformat())
         )
 
+    @app.route("/report/cell", methods=["POST"])
+    @admin_required
+    def report_cell():
+        """管理员只改某一个指标格子，其它数字不动。"""
+        store_id = request.form.get("store_id") or ""
+        day = request.form.get("date") or ""
+        code = (request.form.get("metric_code") or "").strip()
+        raw = request.form.get("value") or "0"
+        view = request.form.get("view") or "month"
+        start = request.form.get("start") or ""
+        end = request.form.get("end") or ""
+        try:
+            sid = int(store_id)
+            biz_date = date.fromisoformat(day)
+            value = max(0, int(raw))
+        except (ValueError, TypeError):
+            flash("格子参数不对", "error")
+            return redirect(url_for("report"))
+        if not code:
+            flash("没有指定指标", "error")
+            return redirect(url_for("report", store_id=sid))
+        with db.get_db() as conn:
+            if not db.user_can_access_store(conn, g.user, sid):
+                return Response("forbidden", status=403)
+            try:
+                db.set_day_value(
+                    conn,
+                    store_id=sid,
+                    biz_date=biz_date,
+                    metric_code=code,
+                    value=value,
+                    user_id=g.user["id"],
+                )
+            except ValueError as exc:
+                flash(str(exc), "error")
+            else:
+                flash(f"已校准 {biz_date.isoformat()} 的该指标为 {value}", "ok")
+        kwargs = {"store_id": sid, "view": view}
+        if start:
+            kwargs["start"] = start
+        if end and view != "day":
+            kwargs["end"] = end
+        return redirect(url_for("report", **kwargs))
+
     @app.route("/board")
     @login_required
     def board():

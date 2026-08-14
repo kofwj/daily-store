@@ -95,7 +95,23 @@
       {% for row in grp.rows %}
       <tr class="{{ 'row-kpi' if row.code in ['bisuan','bisuan_high','ai_contract'] or row.code.startswith('coin_cut_new') else '' }}">
         <td class="left">{{ row.name }}{% if row.code in ['bisuan','bisuan_high','ai_contract'] or row.code.startswith('coin_cut_new') %} <span class="kpi-dot" title="考核指标">★</span>{% endif %}</td>
-        {% for v in row.days %}<td class="{{ 'day-val' if v else 'day-zero' }}">{{ v if v else '·' }}</td>{% endfor %}
+        {% for v in row.days %}
+        <td class="{{ 'day-val' if v else 'day-zero' }}">
+          {% if g.user['role'] == 'admin' %}
+          <form method="post" action="{{ url_for('report_cell') }}" class="cell-edit" onsubmit="return confirm('把 {{ dates[loop.index0] }} 的「{{ row.name }}」改成这个数？只改这一格。')">
+            <input type="hidden" name="store_id" value="{{ store.id }}">
+            <input type="hidden" name="date" value="{{ dates[loop.index0] }}">
+            <input type="hidden" name="metric_code" value="{{ row.code }}">
+            <input type="hidden" name="view" value="{{ view }}">
+            <input type="hidden" name="start" value="{{ start.isoformat() }}">
+            <input type="hidden" name="end" value="{{ end.isoformat() }}">
+            <input type="number" min="0" step="1" name="value" value="{{ v }}" title="点格子改数，回车保存">
+          </form>
+          {% else %}
+          {{ v if v else '·' }}
+          {% endif %}
+        </td>
+        {% endfor %}
         <td><b>{{ row.total }}</b></td>
         <td class="muted">{{ row.avg or '—' }}</td>
         <td>{{ row.target or '—' }}</td>
@@ -110,7 +126,10 @@
       {% endfor %}
     </tbody>
   </table>
-  <p class="muted" style="margin-top:8px">「·」表示当日为 0；未提交的日期表头没有删除按钮。日均 = 区间合计 ÷ 已提交天数。</p>
+  <p class="muted" style="margin-top:8px">
+    {% if g.user['role'] == 'admin' %}管理员点某个格子改数，回车只保存这一格，其它数字不动，会记进审计。{% else %}「·」表示当日为 0。{% endif %}
+    日均 = 区间合计 ÷ 已提交天数。
+  </p>
 </div>
 
 {# ===== 多店对比（管理员） ===== #}
