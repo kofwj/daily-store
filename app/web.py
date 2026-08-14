@@ -669,14 +669,15 @@ def create_app() -> Flask:
                 for k in r["kpis"]:
                     max_day[k["code"]] = max(max_day[k["code"]], k["day"])
                     max_month[k["code"]] = max(max_month[k["code"]], k["month"])
-            # 排序：今日视图按今日三 KPI 之和降序，本月视图按本月累计降序
-            rows.sort(
-                key=lambda r: (
-                    -(r["day_sum"] if view == "today" else r["month_sum"]),
-                    r["store"]["name"],
-                )
-            )
-            for rank, r in enumerate(rows, 1):
+            if view == "today":
+                ranked = [r for r in rows if r["submitted_today"]]
+                missing = [r for r in rows if not r["submitted_today"]]
+                ranked.sort(key=lambda r: (-r["day_sum"], store_label(r["store"])))
+            else:
+                ranked = list(rows)
+                missing = [r for r in rows if not r["reported_this_month"]]
+                ranked.sort(key=lambda r: (-r["month_sum"], store_label(r["store"])))
+            for rank, r in enumerate(ranked, 1):
                 r["rank"] = rank
                 for k in r["kpis"]:
                     k["top_day"] = k["day"] > 0 and k["day"] == max_day[k["code"]]
@@ -712,6 +713,8 @@ def create_app() -> Flask:
                 biz_date=biz_date,
                 view=view,
                 rows=rows,
+                ranked=ranked,
+                missing=missing,
                 grand=grand,
                 coverage_today=round(done_today / n * 100) if n else 0,
                 coverage_month=round(done_month / n * 100) if n else 0,

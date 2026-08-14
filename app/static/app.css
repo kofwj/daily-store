@@ -602,20 +602,75 @@ table.compare-grid tr:hover td { background: #f8fafc; }
   .report-kpis .kpi:nth-child(2) { grid-column: span 2; }
 }
 
-/* ===== 看板排行榜 ===== */
-.board-kpis { margin: 0 0 14px; }
+/* ===== 看板 ===== */
+.board-page { display: grid; gap: 14px; }
+.board-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+.board-head h1 { margin-bottom: 4px; }
+.board-head p { margin: 0; }
+.board-filters { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; }
+.board-date { min-width: 160px; }
+.board-date span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 500; }
+.seg {
+  display: inline-flex;
+  padding: 3px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.seg a {
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.seg a.active { background: var(--ink); color: #fff; }
+.board-kpis { margin: 0; }
 .board-kpis .kpi { background: #fff; }
+.board-missing { margin: 0; }
+.board-missing-head, .board-rank-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.board-missing-head h2, .board-rank-head h2 { margin: 0; }
+.board-missing-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.miss-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid #fedf89;
+}
+.miss-chip:hover { background: #ffefc7; color: #93370d; }
+.board-rank { margin: 0; overflow: hidden; }
 table.board-table { font-size: 13px; }
 table.board-table th,
 table.board-table td { text-align: left; vertical-align: middle; }
-table.board-table th .sub { margin-top: 2px; font-size: 11px; font-weight: 500; color: var(--muted); }
-.rank-col { width: 44px; text-align: center !important; font-variant-numeric: tabular-nums; }
-.rank-top { font-size: 16px; }
+.rank-col { width: 36px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .store-cell .store-name { font-weight: 650; }
-.store-cell .store-desc { font-size: 12px; margin-top: 2px; }
-table.board-table tr.wait td { background: #fffaf5; color: #9a3412; }
+.store-links { display: flex; gap: 8px; margin-top: 3px; }
+.store-links a { font-size: 12px; color: var(--muted); }
+.store-links a:hover { color: var(--ink); }
 .kpi-cell .kpi-val { font-weight: 700; font-variant-numeric: tabular-nums; }
-.kpi-cell .kpi-val.top { color: #1e3a8a; }
+.kpi-cell.best .kpi-val { color: #1e3a8a; }
 .kpi-cell.lag .kpi-val { color: var(--err); }
-.crown { margin-left: 4px; font-size: 12px; }
+.forecast-cell .status { margin-bottom: 2px; }
 .tiny { font-size: 11px; margin-top: 2px; }
+.board-note { margin: 10px 0 0; }
+
+@media (max-width: 800px) {
+  .board-head { flex-direction: column; align-items: stretch; }
+  .board-filters { justify-content: space-between; }
+}
