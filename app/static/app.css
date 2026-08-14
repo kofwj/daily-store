@@ -378,12 +378,15 @@ table.bulletin tr.total td.name { text-align: center; letter-spacing: 0; }
 table.bulletin td.total-num { font-variant-numeric: tabular-nums; font-weight: 800; color: #1e3a8a; font-size: 14px; }
 table.bulletin tr.total td.flag-yes { background: #bbf7d0; color: #14532d; }
 table.bulletin tr.total td.flag-no { background: #e5e7eb; color: #374151; }
-table.bulletin tr.wait td { background: #f9fafb; color: #374151; }
-table.bulletin tr.wait td.name { color: #111827; }
+table.bulletin tr.wait td { background: #fff7ed; color: #7c2d12; }
+table.bulletin tr.wait td.name { color: #9a3412; }
+table.bulletin tr.wait td.scale { background: #fff7ed !important; color: #9a3412 !important; }
+table.bulletin tr.wait td.flag-yes,
+table.bulletin tr.wait td.flag-no { background: #ffedd5; }
 .miss-tag {
-  display: inline-block; margin-left: 6px; padding: 2px 7px;
-  font-size: 12px; font-weight: 800; letter-spacing: 0;
-  color: #92400e; background: #fde68a; border-radius: 4px;
+  display: inline-block; margin-left: 5px; padding: 0 4px;
+  font-size: 10px; font-weight: 600; letter-spacing: 0; line-height: 16px;
+  color: #b45309; background: #fef3c7; border-radius: 3px; vertical-align: middle;
 }
 
 .profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }

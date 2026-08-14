@@ -104,6 +104,14 @@ def apply_scales(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     max_month = max([0] + [max(int(r["month_ai"]), int(r["month_bisuan"])) for r in rows])
     max_day = max([0] + [max(int(r["day_ai"]), int(r["day_bisuan"])) for r in rows])
     for row in rows:
+        if not row.get("submitted"):
+            # 未交行不套热力，避免和已交的浅色格子撞在一起
+            wait = ""
+            row["month_ai_color"] = wait
+            row["month_bisuan_color"] = wait
+            row["day_ai_color"] = wait
+            row["day_bisuan_color"] = wait
+            continue
         row["month_ai_color"] = scale_color(row["month_ai"], max_month, "month")
         row["month_bisuan_color"] = scale_color(row["month_bisuan"], max_month, "month")
         row["day_ai_color"] = scale_color(row["day_ai"], max_day, "day")

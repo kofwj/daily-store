@@ -93,6 +93,29 @@ def test_scale_color_higher_is_different():
     assert rows[0]["month_bisuan_color"].startswith("#")
 
 
+def test_unsubmitted_row_skips_heatmap():
+    submitted = build_row(
+        {
+            "id": 1, "code": "a", "name": "A", "region_group": "通泰", "city": "南通市",
+            "mobile_code": "1", "area_manager": "", "store_manager": "",
+            "follow_ai": 0, "follow_bisuan": 0,
+        },
+        day_ai=0, month_ai=1, day_bisuan=0, month_bisuan=0, submitted=True,
+    )
+    waiting = build_row(
+        {
+            "id": 2, "code": "b", "name": "B", "region_group": "通泰", "city": "南通市",
+            "mobile_code": "2", "area_manager": "", "store_manager": "",
+            "follow_ai": 0, "follow_bisuan": 0,
+        },
+        day_ai=0, month_ai=4, day_bisuan=0, month_bisuan=1, submitted=False,
+    )
+    apply_scales([submitted, waiting])
+    assert submitted["month_ai_color"].startswith("#")
+    assert waiting["month_ai_color"] == ""
+    assert waiting["day_bisuan_color"] == ""
+
+
 def test_totals_row_sums_and_break_zero_count():
     a = build_row(
         {
