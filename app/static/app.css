@@ -385,16 +385,13 @@ table.bulletin tr.total td.name { text-align: center; letter-spacing: 1px; }
 table.bulletin td.total-num { font-variant-numeric: tabular-nums; font-weight: 800; color: #1d4ed8; font-size: 13px; }
 table.bulletin tr.total td.flag-yes { background: #bbf7d0; color: #047857; }
 table.bulletin tr.total td.flag-no { background: #e2e8f0; color: #475569; }
-/* 未提交：整行浅灰弱化 + 门店名左侧细红条，克制提示 */
+/* 未提交：整行浅灰弱化 + 门店名后琥珀色「未交」标签（提示不刺眼） */
 table.bulletin tr.wait td { background: #fafafa; color: #64748b; }
-table.bulletin tr.wait td.name {
-  color: #475569;
-  box-shadow: inset 3px 0 0 #f87171;
-}
+table.bulletin tr.wait td.name { color: #475569; }
 .miss-tag {
   display: inline-block; margin-left: 6px; padding: 2px 7px;
   font-size: 11px; font-weight: 700; letter-spacing: .5px;
-  color: #b91c1c; background: #fee2e2; border-radius: 4px;
+  color: #b45309; background: #fef3c7; border-radius: 4px;
 }
 
 .profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
