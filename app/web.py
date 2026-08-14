@@ -904,7 +904,7 @@ def create_app() -> Flask:
                         short_name = (request.form.get("short_name") or "").strip()
                         if not name or not short_name:
                             raise ValueError("店名和简称都要填")
-                        db.create_store(
+                        new_store_id = db.create_store(
                             conn,
                             name,
                             mobile_code=request.form.get("mobile_code") or "",
@@ -916,6 +916,7 @@ def create_app() -> Flask:
                             city=request.form.get("city") or "南通市",
                         )
                         flash("门店已加", "ok")
+                        return redirect(url_for("settings", tab="stores", store_id=new_store_id))
                     elif action == "edit_store":
                         sid = int(request.form.get("store_id") or 0)
                         if not db.user_can_access_store(conn, g.user, sid):
@@ -927,8 +928,11 @@ def create_app() -> Flask:
                             area_manager=request.form.get("area_manager") or "",
                             store_manager=request.form.get("store_manager") or "",
                             advisor_name=request.form.get("advisor_name") or "",
+                            region_group=request.form.get("region_group") or "",
+                            city=request.form.get("city") or "",
                         )
                         flash("门店档案已改", "ok")
+                        return redirect(url_for("settings", tab="stores", store_id=sid))
                     elif action == "save_profiles":
                         for store in db.list_all_stores(conn):
                             sid = store["id"]
@@ -1031,6 +1035,14 @@ def create_app() -> Flask:
                     city_order.append(city)
                 grouped_cities[city].append(s)
             store_groups = [{"city": city, "stores": grouped_cities[city]} for city in city_order]
+            current_store = None
+            raw_sid = (request.args.get("store_id") or request.form.get("store_id") or "").strip()
+            if raw_sid != "new" and stores:
+                try:
+                    sid = int(raw_sid) if raw_sid else 0
+                except ValueError:
+                    sid = 0
+                current_store = store_by_id.get(sid) or stores[0]
             people = []
             for u in users:
                 sids = user_map.get(u["id"]) or []
@@ -1051,6 +1063,7 @@ def create_app() -> Flask:
                 people=people,
                 stores=stores,
                 store_groups=store_groups,
+                current_store=current_store,
                 kpis=kpis,
                 user_map=user_map,
                 store_label=store_label,
