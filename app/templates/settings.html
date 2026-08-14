@@ -30,63 +30,95 @@
     {% endif %}
 
     {% if tab == 'stores' and g.user['role'] == 'admin' %}
-    <div class="card">
-      <h1>门店档案</h1>
-      <p class="muted">通报表档案。运营商顾问写姓名：有名字走「AI+芝麻≥10」方案，空着走双破 0。</p>
-      <form method="post">
+    <div class="stores-page">
+      <div class="card stores-head">
+        <div class="stores-head-copy">
+          <h1>门店档案</h1>
+          <p class="muted">按店改档案。顾问写姓名走「AI+芝麻≥10」，空着走双破 0。改完点底部保存。</p>
+        </div>
+        <div class="stores-head-meta">
+          <span class="chip">{{ stores|length }} 家店</span>
+          <span class="chip">{{ store_groups|length }} 个地市</span>
+        </div>
+      </div>
+
+      <form method="post" class="stores-form">
         <input type="hidden" name="action" value="save_profiles">
         <input type="hidden" name="tab" value="stores">
-        <div class="table-wrap">
-          <table class="data settings-table">
-            <thead>
-              <tr>
-                <th>门店</th>
-                <th>大区</th>
-                <th>地市</th>
-                <th>移动编码</th>
-                <th>区域经理</th>
-                <th>店长</th>
-                <th>运营商顾问</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for s in stores %}
-              <tr>
-                <td class="left">
-                  <div>{{ store_label(s) }}</div>
-                  <div class="muted">{{ s.name }}</div>
-                </td>
-                <td><input name="region_group_{{ s.id }}" value="{{ s.region_group }}"></td>
-                <td><input name="city_{{ s.id }}" value="{{ s.city }}"></td>
-                <td><input name="mobile_code_{{ s.id }}" value="{{ s.mobile_code }}"></td>
-                <td><input name="area_manager_{{ s.id }}" value="{{ s.area_manager }}"></td>
-                <td><input name="store_manager_{{ s.id }}" value="{{ s.store_manager }}"></td>
-                <td><input name="advisor_name_{{ s.id }}" value="{{ s.advisor_name }}" placeholder="无顾问留空"></td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
+        {% for group in store_groups %}
+        <section class="store-city">
+          <div class="store-city-head">
+            <h2>{{ group.city }}</h2>
+            <span class="muted">{{ group.stores|length }} 家</span>
+          </div>
+          <div class="store-grid">
+            {% for s in group.stores %}
+            <article class="store-file">
+              <header class="store-file-head">
+                <div>
+                  <div class="store-file-name">{{ store_label(s) }}</div>
+                  <div class="muted store-file-full">{{ s.name }}</div>
+                </div>
+                {% if s.advisor_name %}
+                <span class="status done">有顾问</span>
+                {% else %}
+                <span class="status wait">双破 0</span>
+                {% endif %}
+              </header>
+              <div class="store-file-grid">
+                <p>
+                  <label>大区</label>
+                  <input name="region_group_{{ s.id }}" value="{{ s.region_group }}" autocomplete="off">
+                </p>
+                <p>
+                  <label>地市</label>
+                  <input name="city_{{ s.id }}" value="{{ s.city }}" autocomplete="off">
+                </p>
+                <p class="span-2">
+                  <label>移动编码</label>
+                  <input name="mobile_code_{{ s.id }}" value="{{ s.mobile_code }}" inputmode="numeric" autocomplete="off">
+                </p>
+                <p>
+                  <label>区域经理</label>
+                  <input name="area_manager_{{ s.id }}" value="{{ s.area_manager }}" autocomplete="off">
+                </p>
+                <p>
+                  <label>店长</label>
+                  <input name="store_manager_{{ s.id }}" value="{{ s.store_manager }}" autocomplete="off">
+                </p>
+                <p class="span-2">
+                  <label>运营商顾问</label>
+                  <input name="advisor_name_{{ s.id }}" value="{{ s.advisor_name }}" placeholder="无顾问留空" autocomplete="off">
+                </p>
+              </div>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+        {% endfor %}
+        <div class="toolbar stores-save">
+          <button type="submit">保存档案</button>
+          <span class="muted">一次保存全部门店</span>
         </div>
-        <div class="toolbar"><button type="submit">保存档案</button></div>
       </form>
-    </div>
 
-    <details class="card extra">
-      <summary>添加门店</summary>
-      <form method="post" class="narrow" style="margin-top:14px">
-        <input type="hidden" name="action" value="add_store">
-        <input type="hidden" name="tab" value="stores">
-        <p><label>店名</label><input name="store_name" required placeholder="TZ泰州兴化吾悦vivo体验店"></p>
-        <p><label>简称</label><input name="short_name" required placeholder="如 兴化吾悦"></p>
-        <p><label>大区</label><input name="region_group" value="通泰" required></p>
-        <p><label>地市</label><input name="city" required placeholder="南通市 / 泰州市"></p>
-        <p><label>移动编码</label><input name="mobile_code" placeholder="20001744"></p>
-        <p><label>区域经理</label><input name="area_manager"></p>
-        <p><label>店长</label><input name="store_manager"></p>
-        <p><label>运营商顾问</label><input name="advisor_name" placeholder="无顾问留空"></p>
-        <button type="submit">添加</button>
-      </form>
-    </details>
+      <details class="card extra add-store-card">
+        <summary>添加门店</summary>
+        <form method="post" class="add-store">
+          <input type="hidden" name="action" value="add_store">
+          <input type="hidden" name="tab" value="stores">
+          <p class="span-2"><label>店名</label><input name="store_name" required placeholder="TZ泰州兴化吾悦vivo体验店"></p>
+          <p><label>简称</label><input name="short_name" required placeholder="如 兴化吾悦"></p>
+          <p><label>地市</label><input name="city" required placeholder="南通市 / 泰州市"></p>
+          <p><label>大区</label><input name="region_group" value="通泰" required></p>
+          <p><label>移动编码</label><input name="mobile_code" placeholder="20001744" inputmode="numeric"></p>
+          <p><label>区域经理</label><input name="area_manager"></p>
+          <p><label>店长</label><input name="store_manager"></p>
+          <p class="span-2"><label>运营商顾问</label><input name="advisor_name" placeholder="无顾问留空"></p>
+          <p class="add-store-action"><button type="submit">添加</button></p>
+        </form>
+      </details>
+    </div>
     {% endif %}
 
     {% if tab == 'people' and g.user['role'] == 'admin' %}

@@ -1022,6 +1022,15 @@ def create_app() -> Flask:
                 ]
             user_map = {u["id"]: db.user_store_ids(conn, u["id"]) for u in users}
             store_by_id = {s["id"]: s for s in stores}
+            grouped_cities = {}
+            city_order = []
+            for s in stores:
+                city = (s["city"] or "").strip() or "未分地市"
+                if city not in grouped_cities:
+                    grouped_cities[city] = []
+                    city_order.append(city)
+                grouped_cities[city].append(s)
+            store_groups = [{"city": city, "stores": grouped_cities[city]} for city in city_order]
             people = []
             for u in users:
                 sids = user_map.get(u["id"]) or []
@@ -1041,6 +1050,7 @@ def create_app() -> Flask:
                 users=users,
                 people=people,
                 stores=stores,
+                store_groups=store_groups,
                 kpis=kpis,
                 user_map=user_map,
                 store_label=store_label,
