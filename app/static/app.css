@@ -331,67 +331,59 @@ table.data th:first-child, table.data td:first-child { text-align: left; }
 .status.wait { background: var(--warn-bg); color: var(--warn); }
 
 .bulletin-wrap { overflow: auto; padding: 8px; }
-.bulletin-shot { display: inline-block; min-width: 100%; background: #fff; padding: 14px 12px 16px; box-shadow: 0 1px 2px rgba(15, 23, 42, .05); }
+.bulletin-shot { display: inline-block; min-width: 100%; background: #fff; padding: 16px 14px 18px; }
 .bulletin-shot-title {
-  font-size: 17px; font-weight: 750; letter-spacing: 2px;
-  margin: 0 0 2px; text-align: center; color: #0f172a;
+  font-size: 18px; font-weight: 800; letter-spacing: 1px;
+  margin: 0 0 4px; text-align: center; color: #111827;
 }
 .bulletin-shot-date {
-  font-size: 12px; color: #64748b; margin: 0 0 12px; text-align: center;
-  letter-spacing: 1px;
+  font-size: 13px; color: #334155; margin: 0 0 14px; text-align: center;
 }
 .shot-preview { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
-/* 表格骨架：细边框 + 行高留白，数字区可读优先 */
-table.bulletin { border-collapse: collapse; min-width: 980px; font-size: 13px; }
+table.bulletin { border-collapse: collapse; min-width: 980px; font-size: 14px; color: #111827; }
 table.bulletin th, table.bulletin td {
-  border: 1px solid #e2e8f0;
-  padding: 8px 9px;
+  border: 1px solid #d1d5db;
+  padding: 8px 10px;
   text-align: center;
   white-space: nowrap;
 }
-table.bulletin td.name { text-align: left; font-weight: 650; color: #0f172a; padding-left: 10px; }
-/* 两行表头：浅分区 + 第二行细字，不用深色大色块 */
+table.bulletin td.name { text-align: left; font-weight: 700; color: #111827; padding-left: 10px; }
 table.bulletin thead th {
-  background: #f8fafc; color: #334155;
-  font-weight: 700; font-size: 13px;
+  background: #f3f4f6; color: #111827;
+  font-weight: 800; font-size: 13px;
 }
-table.bulletin th.g-profile { background: #f8fafc; color: #475569; letter-spacing: .5px; }
-table.bulletin th.g-follow { background: #f1f5f9; color: #475569; }
-table.bulletin th.g-month { background: #eff6ff; color: #1d4ed8; font-weight: 750; }
-table.bulletin th.g-day { background: #eef2ff; color: #3730a3; font-weight: 750; }
+table.bulletin th.g-profile { background: #f3f4f6; color: #111827; }
+table.bulletin th.g-follow { background: #e5e7eb; color: #111827; }
+table.bulletin th.g-month { background: #dbeafe; color: #1e3a8a; }
+table.bulletin th.g-day { background: #e0e7ff; color: #312e81; }
 table.bulletin thead tr:nth-child(2) th {
-  font-weight: 650; font-size: 12px; color: #475569;
+  font-weight: 700; font-size: 13px; color: #1f2937;
   padding: 6px 8px;
 }
-table.bulletin thead tr:nth-child(2) th.g-profile { background: #fbfdff; }
-table.bulletin thead tr:nth-child(2) th.g-follow { background: #f8fafc; }
-table.bulletin thead tr:nth-child(2) th.g-month { background: #f0f7ff; color: #2563eb; }
-table.bulletin thead tr:nth-child(2) th.g-day { background: #f3f4ff; color: #4f46e5; }
-/* 跟进：绿=是（达成），灰=否；符号化，不靠纯色块 */
-table.bulletin td.flag-yes { color: #15803d; font-weight: 800; background: #dcfce7; }
-table.bulletin td.flag-no { color: #64748b; font-weight: 700; background: #f1f5f9; }
-/* 数字：等宽对齐 */
+table.bulletin thead tr:nth-child(2) th.g-profile { background: #f9fafb; }
+table.bulletin thead tr:nth-child(2) th.g-follow { background: #f3f4f6; }
+table.bulletin thead tr:nth-child(2) th.g-month { background: #eff6ff; color: #1e3a8a; }
+table.bulletin thead tr:nth-child(2) th.g-day { background: #eef2ff; color: #312e81; }
+table.bulletin td.flag-yes { color: #14532d; font-weight: 800; background: #dcfce7; font-size: 15px; }
+table.bulletin td.flag-no { color: #b91c1c; font-weight: 800; background: #fee2e2; font-size: 15px; }
 table.bulletin td.scale {
-  color: #0f172a; font-variant-numeric: tabular-nums; font-weight: 700; font-size: 13px;
+  color: #111827 !important; font-variant-numeric: tabular-nums; font-weight: 800; font-size: 14px;
 }
-/* 合计行：浅灰底 + 顶部深线分隔，不深色压 */
-table.bulletin tfoot td { font-weight: 800; font-size: 13px; }
+table.bulletin tfoot td { font-weight: 800; font-size: 14px; }
 table.bulletin tr.total td {
-  background: #f1f5f9; color: #0f172a;
-  border-top: 2px solid #94a3b8; font-size: 13px;
-  border-bottom: none;
+  background: #e5e7eb; color: #111827;
+  border-top: 2px solid #6b7280; font-size: 14px;
 }
-table.bulletin tr.total td.name { text-align: center; letter-spacing: 1px; }
-table.bulletin td.total-num { font-variant-numeric: tabular-nums; font-weight: 800; color: #1d4ed8; font-size: 13px; }
-table.bulletin tr.total td.flag-yes { background: #bbf7d0; color: #047857; }
-table.bulletin tr.total td.flag-no { background: #e2e8f0; color: #475569; }
-/* 未提交：整行浅灰弱化 + 门店名后琥珀色「未交」标签（提示不刺眼） */
-table.bulletin tr.wait td { background: #fafafa; color: #64748b; }
-table.bulletin tr.wait td.name { color: #475569; }
+table.bulletin tr.total td.name { text-align: center; letter-spacing: 0; }
+table.bulletin td.total-num { font-variant-numeric: tabular-nums; font-weight: 800; color: #1e3a8a; font-size: 14px; }
+table.bulletin tr.total td.flag-yes { background: #bbf7d0; color: #14532d; }
+table.bulletin tr.total td.flag-no { background: #e5e7eb; color: #374151; }
+table.bulletin tr.wait td { background: #f9fafb; color: #374151; }
+table.bulletin tr.wait td.name { color: #111827; }
 .miss-tag {
   display: inline-block; margin-left: 6px; padding: 2px 7px;
-  font-size: 11px; font-weight: 700; letter-spacing: .5px;
-  color: #b45309; background: #fef3c7; border-radius: 4px;
+  font-size: 12px; font-weight: 800; letter-spacing: 0;
+  color: #92400e; background: #fde68a; border-radius: 4px;
 }
 
 .profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
@@ -505,6 +497,16 @@ table.report-grid th { background: #f8fafc; color: #475569; font-weight: 650; pa
 table.report-grid td { padding: 5px 6px; }
 table.report-grid td.day-zero { color: #cbd5e1; }
 table.report-grid td.day-val { font-variant-numeric: tabular-nums; }
+.cell-edit { margin: 0; }
+.cell-edit input[type="number"] {
+  width: 52px; height: 28px; padding: 0 4px; text-align: center;
+  border: 1px solid transparent; background: transparent;
+  font-variant-numeric: tabular-nums; font-weight: 650;
+}
+.cell-edit input[type="number"]:hover,
+.cell-edit input[type="number"]:focus {
+  border-color: #93c5fd; background: #eff6ff; outline: none;
+}
 table.report-grid tr.group-row td {
   background: #eef2ff; color: #4338ca; font-weight: 700; font-size: 12px;
   padding: 5px 8px; letter-spacing: .5px;

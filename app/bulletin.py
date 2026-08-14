@@ -19,16 +19,15 @@ def _hex(rgb: tuple) -> str:
 
 
 def scale_color(value: int, max_value: int, kind: str) -> str:
-    """热力色阶：低→高 低饱和蓝→中蓝→深蓝；0 是近无色（白/极浅灰）。
+    """热力色阶：只用浅底，保证格子里永远是深色字。
 
-    参考现代数据表格热力设计：只用一个色相，用饱和度/明度表达强度，
-    不用红绿黄，避免像红绿灯；微信小图扫一眼看高下。
+    高值上限压在浅蓝，不再走到深蓝/藏青——深底叠深字才是看不清的根因。
     """
     t = 0.0 if max_value <= 0 else max(0.0, min(1.0, float(value) / max_value))
     if kind == "month":
-        low, mid, high = (239, 246, 255), (147, 197, 253), (37, 99, 235)
+        low, mid, high = (248, 250, 252), (219, 234, 254), (147, 197, 253)
     else:
-        low, mid, high = (248, 250, 252), (191, 219, 254), (96, 165, 250)
+        low, mid, high = (255, 255, 255), (239, 246, 255), (191, 219, 254)
     if t < 0.5:
         p = t * 2
         rgb = (_lerp(low[0], mid[0], p), _lerp(low[1], mid[1], p), _lerp(low[2], mid[2], p))
