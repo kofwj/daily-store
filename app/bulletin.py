@@ -38,7 +38,7 @@ def scale_color(value: int, max_value: int, kind: str) -> str:
 
 
 def fmt_count(value: Any) -> str:
-    """整数原样；小数留一位，贴近原表的 1.0 / 10.0。"""
+    """整数原样；小数留一位，贴近原表的 1.0 / 10.0。0 也显示（通报表不留空白）。"""
     if value is None or value == "":
         return ""
     try:
@@ -46,7 +46,7 @@ def fmt_count(value: Any) -> str:
     except (TypeError, ValueError):
         return ""
     if num == 0:
-        return ""
+        return "0"
     if abs(num - round(num)) < 1e-9:
         return str(int(round(num)))
     return f"{num:.1f}"

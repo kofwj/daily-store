@@ -8,32 +8,126 @@
       <label>日期</label>
       <input type="date" name="date" value="{{ biz_date.isoformat() }}" onchange="this.form.submit()">
     </div>
-  </form>
-  <p class="muted">{% if is_admin %}看各店今天交了没有、重点业务日/累，以及本月预计考核。{% else %}只看自己门店今天交了没有、重点业务日/累，以及本月预计考核。{% endif %}</p>
-</div>
-<div class="grid-2">
-  {% for card in cards %}
-  <div class="store-card {{ 'done' if card.submitted else 'wait' }}">
-    <h2>{{ card.store.name }}</h2>
-    {% if card.submitted %}
-    <p><span class="status done">已交</span> <span class="muted">{{ card.submitter_name }} · {{ card.submitted_at }}</span></p>
-    {% else %}
-    <p><span class="status wait">还没交</span></p>
-    {% endif %}
-    <ul>
-      {% for h in card.highlights %}
-      <li>{{ h.name }}：日{{ h.day }} / 累{{ h.cum }}</li>
-      {% endfor %}
-    </ul>
-    <div class="forecast {{ 'ok' if card.forecast.passed else 'bad' }}">
-      <div class="muted">预计考核 · {{ card.forecast.scheme }}</div>
-      <div><span class="status {{ 'done' if card.forecast.passed else 'wait' }}">{{ card.forecast.label }}</span> {{ card.forecast.money_text }}</div>
-      <div class="muted">AI {{ card.forecast.ai }} · 芝麻 {{ card.forecast.sesame }}{% if card.forecast.has_advisor %} · 合计 {{ card.forecast.total }} / 10{% endif %}{% if card.forecast.advisor_name %} · 顾问 {{ card.forecast.advisor_name }}{% endif %}</div>
+    <div class="field">
+      <label>视角</label>
+      <select name="view" onchange="this.form.submit()">
+        <option value="today" {% if view=='today' %}selected{% endif %}>今日</option>
+        <option value="month" {% if view=='month' %}selected{% endif %}>本月</option>
+      </select>
     </div>
-    <a href="{{ url_for('today', store_id=card.store.id, date=biz_date.isoformat()) }}">去填报</a>
-    ·
-    <a href="{{ url_for('report', store_id=card.store.id) }}">看报表</a>
+  </form>
+  {% if view == 'today' %}
+  <p class="muted">各店今天做得好坏，按今日三 KPI 合计排名；未交店垫底标灰。</p>
+  {% else %}
+  <p class="muted">本月累计进度，按三 KPI 累计合计排名；落后标红。</p>
+  {% endif %}
+</div>
+
+{# ===== 总览条 ===== #}
+<div class="kpi-row board-kpis">
+  <div class="kpi">
+    <div class="muted">{{ '今日已交' if view=='today' else '本月交过' }}</div>
+    <div class="kpi-num">{{ (done_today if view=='today' else done_month) }}/{{ n }}</div>
+    <div class="muted">覆盖率 {{ (coverage_today if view=='today' else coverage_month) }}%</div>
+  </div>
+  {% for g in grand %}
+  <div class="kpi {{ 'kpi-ok' if g.progress is not none and g.progress >= 100 else '' }}">
+    <div class="muted">{{ g.name }}</div>
+    <div class="kpi-num">{{ g.day if view=='today' else g.month }}</div>
+    {% if view == 'month' and g.progress is not none %}
+    <div class="muted">{{ '%.0f'|format(g.progress) }}% / 全区目标 {{ g.target }}</div>
+    <div class="progress thin"><span style="width: {{ [g.progress, 100]|min }}%"></span></div>
+    {% elif view == 'month' %}
+    <div class="muted">未设全区目标</div>
+    {% else %}
+    <div class="muted">今日全区合计</div>
+    {% endif %}
   </div>
   {% endfor %}
+</div>
+
+{# ===== 排行榜 ===== #}
+<div class="card" style="overflow:auto">
+  <table class="data board-table">
+    <thead>
+      <tr>
+        <th class="rank-col">#</th>
+        <th class="left">门店</th>
+        <th>状态</th>
+        {% for g in grand %}
+        <th>
+          {{ g.name }}
+          {% if view == 'month' and g.target %}
+          <div class="sub">{{ '%.0f'|format(g.day / g.target * 100) if g.day else 0 }}% / 全区 {{ g.target }}</div>
+          {% endif %}
+        </th>
+        {% endfor %}
+        <th>预计考核</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      {% if view == 'today' and not r.submitted_today %}<tr class="wait">
+      {% elif view == 'month' and not r.reported_this_month %}<tr class="wait">
+      {% else %}<tr>
+      {% endif %}
+        <td class="rank-col">
+          <span class="{{ 'rank-top' if r.rank <= 3 else '' }}">
+            {% if r.rank == 1 %}🥇{% elif r.rank == 2 %}🥈{% elif r.rank == 3 %}🥉{% else %}{{ r.rank }}{% endif %}
+          </span>
+        </td>
+        <td class="left store-cell">
+          <div class="store-name">{{ r.store.short_name or r.store.name }}</div>
+          <div class="muted store-desc">{{ r.store.name }}</div>
+        </td>
+        <td>
+          {% if view == 'today' %}
+            {% if r.submitted_today %}
+            <span class="status done">已交</span>
+            {% else %}
+            <span class="status wait">未交</span>
+            {% endif %}
+          {% else %}
+            {% if r.reported_this_month %}
+            <span class="status done">已交</span>
+            {% else %}
+            <span class="status wait">未交</span>
+            {% endif %}
+          {% endif %}
+        </td>
+        {% for k in r.kpis %}
+        <td class="kpi-cell {{ 'lag' if view=='month' and k.target and k.month < k.target else '' }}">
+          <div class="kpi-val {{ 'top' if (k.top_day if view=='today' else k.top_month) else '' }}">
+            {{ k.day if view=='today' else k.month }}
+            {% if view=='today' and k.top_day %}<span class="crown">👑</span>{% endif %}
+            {% if view=='month' and k.top_month %}<span class="crown">👑</span>{% endif %}
+          </div>
+          {% if view == 'month' and k.target %}
+          <div class="progress thin"><span style="width: {{ [k.progress or 0, 100]|min }}%"></span></div>
+          {% if k.progress is not none %}<div class="muted tiny">{{ '%.0f'|format(k.progress) }}% / {{ k.target }}</div>{% endif %}
+          {% endif %}
+        </td>
+        {% endfor %}
+        <td>
+          <span class="status {{ 'done' if r.forecast.passed else 'wait' }}">{{ r.forecast.label }}</span>
+          <div class="muted tiny">{{ r.forecast.money_text }}</div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted" style="margin-top:8px">
+    {% if view == 'today' %}👑 = 该指标今日最高。{% else %}👑 = 该指标本月累计最高；红色 = 未达月目标；进度 / 目标为该店单店目标。{% endif %}
+    点「去填报 / 看报表」进入详情。
+  </p>
+</div>
+
+<div class="card">
+  <div class="toolbar">
+    {% for r in rows %}
+    <a class="btn ghost" href="{{ url_for('today', store_id=r.store.id, date=biz_date.isoformat()) }}">{{ (r.store.short_name or r.store.name) }}</a>
+    {% endfor %}
+  </div>
+  <p class="muted">以上按钮直达对应门店「今日填报」。</p>
 </div>
 {% endblock %}

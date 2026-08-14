@@ -39,7 +39,7 @@
   <div class="kpi">
     <div class="muted">区间</div>
     <div class="kpi-num">{{ start.strftime('%m/%d') }}~{{ end.strftime('%m/%d') }}</div>
-    <div class="muted">{{ view }} · 已交 {{ submitted_dates|length }}/{{ working_days }} 个工作日</div>
+    <div class="muted">{{ view }} · 已交 {{ submitted_dates|length }}/{{ total_days }} 天</div>
   </div>
   <div class="kpi">
     <div class="muted">覆盖率</div>
@@ -47,12 +47,10 @@
     <div class="progress thin"><span style="width: {{ [coverage, 100]|min }}%"></span></div>
   </div>
   {% for k in kpi_cards %}
-  <div class="kpi {{ 'kpi-ok' if k.progress is not none and k.progress >= 100 else '' }}">
+  <div class="kpi">
     <div class="muted">{{ k.name }}</div>
-    <div class="kpi-num">{{ k.total }}{% if k.target %} / {{ k.target }}{% endif %}</div>
-    <div class="muted">
-      {% if k.progress is not none %}{{ '%.0f'|format(k.progress) }}% {% if k.left and k.left > 0 %}· 差 {{ k.left }}{% endif %}{% else %}未设目标{% endif %}
-    </div>
+    <div class="kpi-num">{{ k.total }}</div>
+    <div class="muted">区间合计</div>
   </div>
   {% endfor %}
 </div>
@@ -66,8 +64,6 @@
         {% for d in dates %}<th>{{ d[5:] }}</th>{% endfor %}
         <th>合计</th>
         <th>日均</th>
-        <th>月目标</th>
-        <th>进度</th>
       </tr>
       {% if g.user['role'] == 'admin' %}
       <tr>
@@ -83,14 +79,14 @@
           {% endif %}
         </th>
         {% endfor %}
-        <th></th><th></th><th></th><th></th>
+        <th></th><th></th>
       </tr>
       {% endif %}
     </thead>
     <tbody>
       {% for grp in grouped %}
       {% if grp.code != 'basic' %}
-      <tr class="group-row"><td colspan="{{ 4 + dates|length + 1 }}">{{ grp.header }}</td></tr>
+      <tr class="group-row"><td colspan="{{ 3 + dates|length }}">{{ grp.header }}</td></tr>
       {% endif %}
       {% for row in grp.rows %}
       <tr class="{{ 'row-kpi' if row.code in ['bisuan','bisuan_high','ai_contract'] or row.code.startswith('coin_cut_new') else '' }}">
@@ -114,13 +110,6 @@
         {% endfor %}
         <td><b>{{ row.total }}</b></td>
         <td class="muted">{{ row.avg or '—' }}</td>
-        <td>{{ row.target or '—' }}</td>
-        <td>
-          {% if row.progress is not none %}
-          {{ '%.0f'|format(row.progress) }}%
-          <div class="progress thin"><span style="width: {{ [row.progress, 100]|min }}%"></span></div>
-          {% else %}—{% endif %}
-        </td>
       </tr>
       {% endfor %}
       {% endfor %}
@@ -148,7 +137,7 @@
       {% for sc in store_compare %}
       <tr>
         <td class="left">{{ sc.store.short_name or sc.store.name }}</td>
-        <td>{{ sc.submitted }}/{{ working_days }}</td>
+        <td>{{ sc.submitted }}/{{ total_days }}</td>
         {% for k in kpi_cards %}
         <td><b>{{ sc['k_' + k.code] }}</b></td>
         <td class="muted">{{ '%.0f'|format(sc['p_' + k.code]) if sc['p_' + k.code] is not none else '—' }}</td>

@@ -622,3 +622,21 @@ table.compare-grid tr:hover td { background: #f8fafc; }
   .report-kpis { grid-template-columns: 1fr 1fr; }
   .report-kpis .kpi:nth-child(2) { grid-column: span 2; }
 }
+
+/* ===== 看板排行榜 ===== */
+.board-kpis { margin: 0 0 14px; }
+.board-kpis .kpi { background: #fff; }
+table.board-table { font-size: 13px; }
+table.board-table th,
+table.board-table td { text-align: left; vertical-align: middle; }
+table.board-table th .sub { margin-top: 2px; font-size: 11px; font-weight: 500; color: var(--muted); }
+.rank-col { width: 44px; text-align: center !important; font-variant-numeric: tabular-nums; }
+.rank-top { font-size: 16px; }
+.store-cell .store-name { font-weight: 650; }
+.store-cell .store-desc { font-size: 12px; margin-top: 2px; }
+table.board-table tr.wait td { background: #fffaf5; color: #9a3412; }
+.kpi-cell .kpi-val { font-weight: 700; font-variant-numeric: tabular-nums; }
+.kpi-cell .kpi-val.top { color: #1e3a8a; }
+.kpi-cell.lag .kpi-val { color: var(--err); }
+.crown { margin-left: 4px; font-size: 12px; }
+.tiny { font-size: 11px; margin-top: 2px; }
