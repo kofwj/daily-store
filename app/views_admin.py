@@ -30,6 +30,9 @@ from .metrics_seed import KPI_TARGETS, rollup_pair
 def _bulletin_rows(conn, stores, biz_date: date):
     rows = []
     for store in stores:
+        if not (store["mobile_code"] or "").strip():
+            # 没配移动编码的店不进通报表
+            continue
         pairs = values_for_broadcast(conn, store["id"], biz_date)
         day_ai, month_ai = pairs.get("ai_contract", (0, 0))
         day_bisuan = bulletin.bisuan_total(

@@ -292,3 +292,32 @@ def test_board_shows_deals_and_exports_xlsx(tmp_db):
     header = [cell.value for cell in wb.active[1]]
     assert header[:3] == ["排名", "门店", "地市"]
     assert "成交" in header and "已成交" in header
+
+
+def test_bulletin_skips_stores_without_mobile_code(app_client):
+    """没有移动编码的店不出现在通报表里。"""
+    from app import db as _db
+
+    app_client.post("/login", data={"username": "admin", "pin": "1234"})
+    with _db.get_db() as conn:
+        # 加两家店：一个没编码，一个有编码
+        _db.create_store(
+            conn,
+            "TZ测试没编码店",
+            mobile_code="",
+            short_name="没编码店",
+            area_manager="测试",
+        )
+        _db.create_store(
+            conn,
+            "TZ测试有编码店",
+            mobile_code="20999999",
+            short_name="有编码店",
+            area_manager="测试",
+        )
+    page = app_client.get("/bulletin").get_data(as_text=True).replace("\ufeff", "")
+    # 有编码的店保留（南通通报表默认视图，两店都默认南通）
+    assert "测试有编码店" in page
+    # 没有编码的店不出现
+    assert "测试没编码店" not in page
+    assert "没编码店" not in page
