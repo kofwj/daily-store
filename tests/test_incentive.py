@@ -91,6 +91,8 @@ def test_incentive_xlsx_exports_draft(tmp_db):
     assert ws["S2"].value == "考核奖惩"
     # 第一家店：实际酬金公式统一为 开票+房补-垫资
     assert ws["I5"].value == "=F5+G5-H5"
+    # 导出门店用官方全称，不用短名
+    assert ws["B5"].value == "TZ南通市海门金花vivo体验店"
     # 黄色手填格
     assert ws["F5"].fill.fgColor.rgb[-6:] == "FFF2CC"
     # 口径页
@@ -118,4 +120,4 @@ def test_unreported_store_is_not_penalized(tmp_db):
         assert judged["store_penalty"] == 0
     page = c.get("/incentive").get_data(as_text=True)
     assert "本月未交" in page
-    assert "兴化吾悦" in page
+    assert "TZ泰州兴化吾悦vivo体验店" in page

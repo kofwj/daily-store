@@ -96,7 +96,7 @@
         {% if loop.first %}
         <td rowspan="{{ grp.stores|length }}">{{ grp.manager }}</td>
         {% endif %}
-        <td class="left">{{ r.store.short_name or r.store.name }}{% if not r.reported %} <span class="miss-tag">未交</span>{% endif %}</td>
+        <td class="left">{{ r.store.name }}{% if not r.reported %} <span class="miss-tag">未交</span>{% endif %}</td>
         <td>{{ r.grade }}</td>
         <td>{{ r.commission_target }}</td>
         <td>{{ r.ai_target }}</td>
