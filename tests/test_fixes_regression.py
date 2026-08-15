@@ -45,8 +45,8 @@ def test_add_store_uses_city_and_hides_internal_code(app_client):
         data={
             "action": "add_store",
             "tab": "stores",
-            "store_name": "TZ泰州兴化吾悦vivo体验店",
-            "short_name": "兴化吾悦",
+            "store_name": "TZ测试新店vivo体验店",
+            "short_name": "测试新店",
             "region_group": "通泰",
             "city": "泰州市",
             "mobile_code": "20999999",
@@ -55,16 +55,16 @@ def test_add_store_uses_city_and_hides_internal_code(app_client):
     )
     assert resp.status_code == 200
     with db.get_db() as conn:
-        row = conn.execute("SELECT * FROM stores WHERE short_name='兴化吾悦'").fetchone()
+        row = conn.execute("SELECT * FROM stores WHERE short_name='测试新店'").fetchone()
         assert row is not None
         assert row["city"] == "泰州市"
         assert row["region_group"] == "通泰"
         assert row["code"].startswith("s")
     bulletin = app_client.get("/bulletin").get_data(as_text=True)
-    assert "兴化吾悦" not in bulletin
+    assert "测试新店" not in bulletin
     assert "南通vivo" in bulletin or "南通vivo零售运营中心" in bulletin
     tz = app_client.get("/bulletin?city=泰州市").get_data(as_text=True)
-    assert "兴化吾悦" in tz
+    assert "测试新店" in tz
     assert "海门金花" not in tz
     assert "泰州vivo" in tz
 

@@ -24,6 +24,8 @@ def test_catalog_has_eleven_official_stores(tmp_db):
         assert [item["login"] for item in accounts] == [
             "jinhua", "qidong", "jinsha", "tzwanda", "haian", "hawanda",
             "rgning", "dayou", "gzwanda", "kaifaqu", "changq",
+            "yongwang", "yuanrong", "jjwy", "jjyx", "txgl", "jylt",
+            "hlbl", "txwy", "hlwd", "tzwx", "xhwy", "jyss",
         ]
         assert all(len(item["login"]) <= 8 for item in accounts)
         fillers = list(conn.execute("SELECT username, display_name, role FROM users WHERE role='filler' ORDER BY id"))
@@ -102,7 +104,7 @@ def test_legacy_ninghai_name_is_renamed_not_duplicated(tmp_path, monkeypatch):
     db.init_db()
     with db.get_db() as conn:
         rows = list(conn.execute("SELECT code, name FROM stores ORDER BY sort_order"))
-        assert len(rows) == 11
+        assert len(rows) == len(STORES)
         ninghai = conn.execute("SELECT * FROM stores WHERE code='rg-ninghai'").fetchone()
         assert ninghai["id"] == 1
         assert ninghai["name"] == "TZ南通市如皋市如城镇宁海路体验店"

@@ -945,3 +945,8 @@ table.board-table td { text-align: left; vertical-align: middle; }
 .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; line-height: 1.4; white-space: nowrap; }
 .tag-daily { background: var(--tint, #eef3fb); color: var(--link, #2563eb); }
 .tag-deal { background: #eafaf1; color: var(--ok, #16a34a); }
+
+/* 结算底稿预览 */
+.pos { color: var(--ok, #16a34a); font-weight: 700; }
+.neg { color: var(--err, #dc2626); font-weight: 700; }
+table.board-table td.fill { background: #fff3cd; color: #7c5e10; }

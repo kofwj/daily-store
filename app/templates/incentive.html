@@ -65,4 +65,53 @@
     </tbody>
   </table>
 </div>
+
+<div class="card" style="overflow:auto">
+  <div class="board-rank-head">
+    <h2>结算底稿预览</h2>
+    <a class="btn ghost" href="{{ url_for('incentive_xlsx', month=month.strftime('%Y-%m')) }}">导出 Excel</a>
+  </div>
+  <p class="muted">系统已填：AI、新用户直降、考核奖惩。黄色留空开票/房补/垫资/搭载率，下月初在 Excel 里填。<em>仅算当月已交门店；新增目录店如当月无日报，AI/直降/奖惩为 0。</em></p>
+  <table class="data board-table">
+    <thead>
+      <tr>
+        <th class="left">区域经理</th>
+        <th class="left">门店</th>
+        <th>类别</th>
+        <th>酬金目标</th>
+        <th>AI目标</th>
+        <th>新用户直降</th>
+        <th>AI</th>
+        <th>考核奖惩</th>
+        <th>开票</th>
+        <th>房补</th>
+        <th>垫资</th>
+        <th>搭载率</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for grp in settle_groups %}
+      {% set outer = loop %}
+      {% for r in grp.stores %}
+      <tr>
+        {% if loop.first %}
+        <td rowspan="{{ grp.stores|length }}">{{ grp.manager }}</td>
+        {% endif %}
+        <td class="left">{{ r.store.name }}</td>
+        <td>{{ r.grade }}</td>
+        <td>{{ r.commission_target }}</td>
+        <td>{{ r.ai_target }}</td>
+        <td>{{ r.new_cut }}</td>
+        <td>{{ r.ai }}</td>
+        <td class="{{ 'pos' if r.net >= 0 else 'neg' }}">{{ r.net }}</td>
+        <td class="fill"></td>
+        <td class="fill"></td>
+        <td class="fill"></td>
+        <td class="fill"></td>
+      </tr>
+      {% endfor %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endblock %}

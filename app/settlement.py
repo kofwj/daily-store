@@ -126,6 +126,19 @@ def build_settlement_rows(conn, stores: Iterable[Any], as_of: date) -> List[Dict
     return out
 
 
+def group_rows(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """按区域经理把结算行分组，保持原顺序。"""
+    groups: List[Dict[str, Any]] = []
+    index: Dict[str, int] = {}
+    for row in rows:
+        manager = (row["store"]["area_manager"] or "").strip() or "未分经理"
+        if manager not in index:
+            index[manager] = len(groups)
+            groups.append({"manager": manager, "stores": []})
+        groups[index[manager]]["stores"].append(row)
+    return groups
+
+
 def build_settlement_xlsx(conn, stores: Sequence[Any], as_of: date) -> bytes:
     rows = build_settlement_rows(conn, stores, as_of)
     by_id = {r["store"]["id"]: r for r in rows}

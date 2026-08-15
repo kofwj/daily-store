@@ -294,12 +294,17 @@ def register_admin(app) -> None:
                 totals["advisor_penalty"] += judged["advisor_penalty"]
                 totals["net"] += judged["net"]
                 totals["passed"] += 1 if judged["passed"] else 0
+            # 结算底稿预览数据（按区域经理分组）
+            settle_rows = settlement.build_settlement_rows(conn, stores, as_of)
+            settle_groups = settlement.group_rows(settle_rows)
             return render_template(
                 "incentive.html",
                 month=month,
                 as_of=as_of,
                 rows=rows,
                 totals=totals,
+                settle_rows=settle_rows,
+                settle_groups=settle_groups,
             )
 
     @app.route("/incentive.xlsx")
