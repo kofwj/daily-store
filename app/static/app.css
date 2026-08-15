@@ -830,7 +830,8 @@ table.board-table { font-size: 13px; }
 table.board-table th,
 table.board-table td { text-align: left; vertical-align: middle; }
 .rank-col { width: 36px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.store-cell .store-name { font-weight: 650; }
+.store-cell .store-name { font-weight: 650; color: inherit; text-decoration: none; }
+.store-cell a.store-name:hover { color: var(--link, #2563eb); text-decoration: underline; }
 .store-links { display: flex; gap: 8px; margin-top: 3px; }
 .store-links a { font-size: 12px; color: var(--muted); }
 .store-links a:hover { color: var(--ink); }

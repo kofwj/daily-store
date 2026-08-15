@@ -275,12 +275,19 @@ def xlsx_bytes(
     return buf.getvalue()
 
 
+def ascii_filename(name: str, fallback: str = "export.xlsx") -> str:
+    """下载文件名只留 ASCII，避免部分浏览器把中文文件名拆乱。"""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", name or "").strip("._")
+    return cleaned or fallback
+
+
 def xlsx_response(data: bytes, filename: str):
     """带下载头的 xlsx 响应。"""
     from flask import Response
 
+    safe = ascii_filename(filename)
     return Response(
         data,
         mimetype=XLSX_MIME,
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
+        headers={"Content-Disposition": f"attachment; filename={safe}"},
     )

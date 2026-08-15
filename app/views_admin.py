@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List
 
@@ -54,6 +55,141 @@ def _bulletin_rows(conn, stores, biz_date: date):
     return bulletin.apply_scales(rows)
 
 
+def _board_payload(conn, biz_date: date, view: str, city: str = ""):
+    """看板页面和导出共用的取数。"""
+    stores = accessible_stores(conn)
+    cities = []
+    for s in stores:
+        city_name = (s["city"] or "").strip() or "未分地市"
+        if city_name not in cities:
+            cities.append(city_name)
+    if city and city not in cities:
+        city = ""
+    if city:
+        stores = [s for s in stores if ((s["city"] or "").strip() or "未分地市") == city]
+    kpi_targets = db.list_kpi_targets(conn)
+    month_start, _month_end = db.month_bounds(biz_date)
+    rules = incentive_rules(conn)
+    store_ids = [s["id"] for s in stores]
+    month_begin = biz_date.replace(day=1)
+    deal_today_map = db.deal_counts(conn, store_ids, biz_date, biz_date)
+    deal_month_map = db.deal_counts(conn, store_ids, month_begin, biz_date)
+    rows = []
+    for store in stores:
+        sid = store["id"]
+        pairs = values_for_broadcast(conn, sid, biz_date)
+        kpis = []
+        day_sum = 0
+        for code, name, _note in KPI_TARGETS:
+            if code == "ai_contract":
+                day, cum = pairs.get("ai_contract", (0, 0))
+            else:
+                day, cum = rollup_pair(pairs, code)
+            target = kpi_targets.get(code, 0)
+            day_sum += int(day)
+            kpis.append(
+                {
+                    "code": code,
+                    "name": name,
+                    "day": int(day),
+                    "month": int(cum),
+                    "target": target,
+                    "progress": (int(cum) / target * 100) if target else None,
+                }
+            )
+        rep = db.get_report(conn, sid, biz_date)
+        reported_this_month = (
+            conn.execute(
+                "SELECT 1 FROM daily_reports WHERE store_id=? AND biz_date>=? AND biz_date<=? LIMIT 1",
+                (sid, month_start, biz_date.isoformat()),
+            ).fetchone()
+            is not None
+        )
+        deal_today = deal_today_map.get(sid, {"total": 0, "closed": 0})
+        deal_month = deal_month_map.get(sid, {"total": 0, "closed": 0})
+        rows.append(
+            {
+                "store": store,
+                "submitted_today": rep is not None,
+                "submitter_name": rep["submitter_name"] if rep else None,
+                "submitted_at": rep["submitted_at"] if rep else None,
+                "reported_this_month": reported_this_month,
+                "forecast": store_forecast(conn, store, biz_date, rules),
+                "kpis": kpis,
+                "day_sum": day_sum,
+                "month_sum": sum(k["month"] for k in kpis),
+                "deal_today": deal_today,
+                "deal_month": deal_month,
+            }
+        )
+    max_day = {k: 0 for k, _n, _x in KPI_TARGETS}
+    max_month = {k: 0 for k, _n, _x in KPI_TARGETS}
+    for r in rows:
+        for k in r["kpis"]:
+            max_day[k["code"]] = max(max_day[k["code"]], k["day"])
+            max_month[k["code"]] = max(max_month[k["code"]], k["month"])
+    if view == "today":
+        ranked = [r for r in rows if r["submitted_today"]]
+        missing = [r for r in rows if not r["submitted_today"]]
+        ranked.sort(key=lambda r: (-r["day_sum"], store_label(r["store"])))
+    else:
+        ranked = list(rows)
+        missing = [r for r in rows if not r["reported_this_month"]]
+        ranked.sort(key=lambda r: (-r["month_sum"], store_label(r["store"])))
+    for rank, r in enumerate(ranked, 1):
+        r["rank"] = rank
+        for k in r["kpis"]:
+            k["top_day"] = k["day"] > 0 and k["day"] == max_day[k["code"]]
+            k["top_month"] = k["month"] > 0 and k["month"] == max_month[k["code"]]
+    n = len(rows)
+    sum_day = {k: 0 for k, _n, _x in KPI_TARGETS}
+    sum_month = {k: 0 for k, _n, _x in KPI_TARGETS}
+    done_today = sum(1 for r in rows if r["submitted_today"])
+    done_month = sum(1 for r in rows if r["reported_this_month"])
+    for r in rows:
+        for k in r["kpis"]:
+            sum_day[k["code"]] += k["day"]
+            sum_month[k["code"]] += k["month"]
+    grand = [
+        {
+            "code": code,
+            "name": name,
+            "note": note,
+            "day": sum_day[code],
+            "month": sum_month[code],
+            "target": kpi_targets.get(code, 0) * n,
+            "progress": (
+                sum_month[code] / (kpi_targets.get(code, 0) * n) * 100
+            )
+            if kpi_targets.get(code, 0) and n
+            else None,
+        }
+        for code, name, note in KPI_TARGETS
+    ]
+    deal_grand = {
+        "day_total": sum(int(r["deal_today"]["total"]) for r in rows),
+        "day_closed": sum(int(r["deal_today"]["closed"]) for r in rows),
+        "month_total": sum(int(r["deal_month"]["total"]) for r in rows),
+        "month_closed": sum(int(r["deal_month"]["closed"]) for r in rows),
+    }
+    return {
+        "biz_date": biz_date,
+        "view": view,
+        "rows": rows,
+        "ranked": ranked,
+        "missing": missing,
+        "grand": grand,
+        "deal_grand": deal_grand,
+        "coverage_today": round(done_today / n * 100) if n else 0,
+        "coverage_month": round(done_month / n * 100) if n else 0,
+        "done_today": done_today,
+        "done_month": done_month,
+        "n": n,
+        "cities": cities,
+        "city": city,
+    }
+
+
 def register_admin(app) -> None:
     @app.route("/board")
     @admin_required
@@ -62,128 +198,45 @@ def register_admin(app) -> None:
         view = request.args.get("view") or "today"
         if view not in ("today", "month"):
             view = "today"
+        city = (request.args.get("city") or "").strip()
         with db.get_db() as conn:
-            stores = accessible_stores(conn)
-            cities = []
-            for s in stores:
-                city_name = (s["city"] or "").strip() or "未分地市"
-                if city_name not in cities:
-                    cities.append(city_name)
-            city = (request.args.get("city") or "").strip()
-            if city and city not in cities:
-                city = ""
-            if city:
-                stores = [s for s in stores if ((s["city"] or "").strip() or "未分地市") == city]
-            kpi_targets = db.list_kpi_targets(conn)
-            month_start, _month_end = db.month_bounds(biz_date)
-            rules = incentive_rules(conn)
-            rows = []
-            for store in stores:
-                sid = store["id"]
-                pairs = values_for_broadcast(conn, sid, biz_date)
-                kpis = []
-                day_sum = 0
-                for code, name, _note in KPI_TARGETS:
-                    if code == "ai_contract":
-                        day, cum = pairs.get("ai_contract", (0, 0))
-                    else:
-                        day, cum = rollup_pair(pairs, code)
-                    target = kpi_targets.get(code, 0)
-                    day_sum += int(day)
-                    kpis.append(
-                        {
-                            "code": code,
-                            "name": name,
-                            "day": int(day),
-                            "month": int(cum),
-                            "target": target,
-                            "progress": (int(cum) / target * 100) if target else None,
-                        }
-                    )
-                rep = db.get_report(conn, sid, biz_date)
-                reported_this_month = (
-                    conn.execute(
-                        "SELECT 1 FROM daily_reports WHERE store_id=? AND biz_date>=? AND biz_date<=? LIMIT 1",
-                        (sid, month_start, biz_date.isoformat()),
-                    ).fetchone()
-                    is not None
-                )
-                rows.append(
-                    {
-                        "store": store,
-                        "submitted_today": rep is not None,
-                        "submitter_name": rep["submitter_name"] if rep else None,
-                        "submitted_at": rep["submitted_at"] if rep else None,
-                        "reported_this_month": reported_this_month,
-                        "forecast": store_forecast(conn, store, biz_date, rules),
-                        "kpis": kpis,
-                        "day_sum": day_sum,
-                        "month_sum": sum(k["month"] for k in kpis),
-                    }
-                )
-            # 每列最高值（今天/本月）用来标榜首
-            max_day = {k: 0 for k, _n, _x in KPI_TARGETS}
-            max_month = {k: 0 for k, _n, _x in KPI_TARGETS}
-            for r in rows:
-                for k in r["kpis"]:
-                    max_day[k["code"]] = max(max_day[k["code"]], k["day"])
-                    max_month[k["code"]] = max(max_month[k["code"]], k["month"])
-            if view == "today":
-                ranked = [r for r in rows if r["submitted_today"]]
-                missing = [r for r in rows if not r["submitted_today"]]
-                ranked.sort(key=lambda r: (-r["day_sum"], store_label(r["store"])))
-            else:
-                ranked = list(rows)
-                missing = [r for r in rows if not r["reported_this_month"]]
-                ranked.sort(key=lambda r: (-r["month_sum"], store_label(r["store"])))
-            for rank, r in enumerate(ranked, 1):
-                r["rank"] = rank
-                for k in r["kpis"]:
-                    k["top_day"] = k["day"] > 0 and k["day"] == max_day[k["code"]]
-                    k["top_month"] = k["month"] > 0 and k["month"] == max_month[k["code"]]
-            # 本区合计 + 覆盖率
-            n = len(rows)
-            sum_day = {k: 0 for k, _n, _x in KPI_TARGETS}
-            sum_month = {k: 0 for k, _n, _x in KPI_TARGETS}
-            done_today = sum(1 for r in rows if r["submitted_today"])
-            done_month = sum(1 for r in rows if r["reported_this_month"])
-            for r in rows:
-                for k in r["kpis"]:
-                    sum_day[k["code"]] += k["day"]
-                    sum_month[k["code"]] += k["month"]
-            grand = [
-                {
-                    "code": code,
-                    "name": name,
-                    "note": note,
-                    "day": sum_day[code],
-                    "month": sum_month[code],
-                    "target": kpi_targets.get(code, 0) * n,
-                    "progress": (
-                        sum_month[code] / (kpi_targets.get(code, 0) * n) * 100
-                    )
-                    if kpi_targets.get(code, 0) and n
-                    else None,
-                }
-                for code, name, note in KPI_TARGETS
-            ]
-            return render_template(
-                "board.html",
-                biz_date=biz_date,
-                view=view,
-                rows=rows,
-                ranked=ranked,
-                missing=missing,
-                grand=grand,
-                coverage_today=round(done_today / n * 100) if n else 0,
-                coverage_month=round(done_month / n * 100) if n else 0,
-                done_today=done_today,
-                done_month=done_month,
-                n=n,
-                is_admin=g.user["role"] == "admin",
-                cities=cities,
-                city=city,
+            payload = _board_payload(conn, biz_date, view, city)
+            payload["is_admin"] = g.user["role"] == "admin"
+            return render_template("board.html", **payload)
+
+    @app.route("/board.xlsx")
+    @admin_required
+    def board_xlsx():
+        """导出当前看板视图(今日/本月 + 地市)为 Excel。"""
+        biz_date = parse_date(request.args.get("date"))
+        view = request.args.get("view") or "today"
+        if view not in ("today", "month"):
+            view = "today"
+        city = (request.args.get("city") or "").strip()
+        with db.get_db() as conn:
+            payload = _board_payload(conn, biz_date, view, city)
+        header = ["排名", "门店", "地市"]
+        header += [g["name"] for g in payload["grand"]]
+        header += ["成交", "已成交", "考核", "奖罚"]
+        data_rows = []
+        for r in payload["ranked"]:
+            deal = r["deal_today"] if view == "today" else r["deal_month"]
+            data_rows.append(
+                [
+                    r["rank"],
+                    r["store"]["short_name"] or r["store"]["name"],
+                    r["store"]["city"] or "",
+                    *[k["day"] if view == "today" else k["month"] for k in r["kpis"]],
+                    deal["total"],
+                    deal["closed"],
+                    r["forecast"]["label"],
+                    r["forecast"]["money_text"],
+                ]
             )
+        tag = "today" if view == "today" else "month"
+        city_tag = re.sub(r"[^A-Za-z0-9]+", "", city) or "all"
+        filename = f"board_{tag}_{biz_date.isoformat()}_{city_tag}.xlsx"
+        return xlsx_response(xlsx_bytes(header, data_rows, sheet="多店看板"), filename)
 
     @app.route("/bulletin")
     @admin_required

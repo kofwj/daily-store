@@ -34,6 +34,7 @@
         <a class="{{ 'active' if view=='today' else '' }}" href="{{ url_for('board', date=biz_date.isoformat(), view='today', city=city) }}">今日</a>
         <a class="{{ 'active' if view=='month' else '' }}" href="{{ url_for('board', date=biz_date.isoformat(), view='month', city=city) }}">本月</a>
       </div>
+      <a class="btn ghost" href="{{ url_for('board_xlsx', date=biz_date.isoformat(), view=view, city=city) }}">导出 Excel</a>
     </form>
   </div>
 
@@ -57,6 +58,11 @@
       {% endif %}
     </div>
     {% endfor %}
+    <div class="kpi">
+      <div class="muted">成交播报</div>
+      <div class="kpi-num">{{ deal_grand.day_closed if view=='today' else deal_grand.month_closed }}/{{ deal_grand.day_total if view=='today' else deal_grand.month_total }}</div>
+      <div class="muted">已成交 / 全部</div>
+    </div>
   </div>
 
   {% if missing %}
@@ -88,6 +94,7 @@
             {% for g in grand %}
             <th>{{ g.name }}</th>
             {% endfor %}
+            <th>成交</th>
             <th>考核</th>
           </tr>
         </thead>
@@ -96,7 +103,7 @@
           <tr>
             <td class="rank-col">{{ r.rank }}</td>
             <td class="left store-cell">
-              <span class="store-name">{{ r.store.name }}</span>
+              <a class="store-name" href="{{ url_for('report', store_id=r.store.id, start=(biz_date.replace(day=1)).isoformat(), end=biz_date.isoformat()) }}">{{ r.store.short_name or r.store.name }}</a>
             </td>
             {% for k in r.kpis %}
             <td class="kpi-cell {{ 'lag' if view=='month' and k.target and k.month < k.target else '' }} {{ 'best' if (k.top_day if view=='today' else k.top_month) else '' }}">
@@ -107,6 +114,11 @@
               {% endif %}
             </td>
             {% endfor %}
+            {% set deal = r.deal_today if view=='today' else r.deal_month %}
+            <td class="kpi-cell">
+              <div class="kpi-val">{{ deal.closed }}/{{ deal.total }}</div>
+              <div class="muted tiny">已成交/全部</div>
+            </td>
             <td class="forecast-cell">
               <span class="status {{ 'done' if r.forecast.passed else 'wait' }}">{{ r.forecast.label }}</span>
               <div class="muted tiny">{{ r.forecast.money_text }}</div>
@@ -118,9 +130,9 @@
     </div>
     <p class="muted board-note">
       {% if view == 'today' %}
-      按今日三项合计排名。加粗蓝字是该指标今日最高。
+      按今日三项合计排名。加粗蓝字是该指标今日最高。成交是今日已成交/全部。点店名进该店报表。
       {% else %}
-      按本月三项累计排名。红字未达单店月目标；加粗蓝字是该指标本月最高。
+      按本月三项累计排名。红字未达单店月目标；加粗蓝字是该指标本月最高。成交是本月已成交/全部。点店名进该店报表。
       {% endif %}
     </p>
     {% else %}

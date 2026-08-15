@@ -246,3 +246,49 @@ def test_4_net_includes_advisor_penalty():
     row = judge(True, 2, 3)
     assert row["net"] == -150
     assert judge(False, 0, 0)["net"] == -100
+
+
+def test_board_shows_deals_and_exports_xlsx(tmp_db):
+    """看板含成交列, 点店名进报表, 当前视图可导出 Excel。"""
+    from io import BytesIO
+
+    import openpyxl
+
+    from app.web import create_app
+
+    app = create_app()
+    app.config["TESTING"] = True
+    c = app.test_client()
+    c.post("/login", data={"username": "admin", "pin": "1234"})
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        db.save_daily(
+            conn,
+            store_id=sid,
+            biz_date=date.today(),
+            values={"ai_contract": 1, "bisuan": 2},
+            user_id=uid,
+        )
+        db.record_deal_post(
+            conn,
+            store_id=sid,
+            user_id=uid,
+            closed=True,
+            model="S60",
+            phone="15500001111",
+            spend="99",
+        )
+    page = c.get("/board").get_data(as_text=True)
+    assert "成交播报" in page
+    assert "已成交 / 全部" in page
+    assert "海门金花" in page
+    assert "/report?" in page
+    r = c.get("/board.xlsx?view=today")
+    assert r.status_code == 200
+    assert r.mimetype == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert "filename=board_today_" in r.headers.get("Content-Disposition", "")
+    wb = openpyxl.load_workbook(BytesIO(r.get_data()))
+    header = [cell.value for cell in wb.active[1]]
+    assert header[:3] == ["排名", "门店", "地市"]
+    assert "成交" in header and "已成交" in header
