@@ -854,25 +854,53 @@ table.board-table td { text-align: left; vertical-align: middle; }
 .deal-page #dealShot { margin: 0; }
 .deal-page #dealText { min-height: 180px; }
 .deal-log { margin: 0; }
+.deal-log-list { display: grid; gap: 8px; }
+.deal-log-item {
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fafafa;
+}
+.deal-log-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.deal-log-top strong { min-width: 0; overflow-wrap: anywhere; }
+.deal-page .table-wrap { max-width: 100%; }
 @media (max-width: 800px) {
-  body.deal-page .wrap { padding-bottom: calc(76px + var(--safe-bottom)); }
+  html, body.deal-page { overflow-x: hidden; }
+  body.deal-page .wrap {
+    padding-left: 10px;
+    padding-right: 10px;
+    padding-bottom: calc(76px + var(--safe-bottom));
+    overflow-x: hidden;
+  }
+  .deal-page, .deal-main, .deal-form, .deal-log, .deal-page #dealShot { min-width: 0; max-width: 100%; }
   .deal-page { gap: 8px; }
   .deal-head { flex-wrap: wrap; align-items: center; gap: 8px; }
   .deal-title { flex: 1; min-width: 0; }
   .deal-title h1 { font-size: 16px; margin: 0; }
-  .deal-title p { font-size: 12px; }
+  .deal-title p { font-size: 12px; overflow-wrap: anywhere; }
   .deal-kpis { width: 100%; }
-  .deal-kpi { flex: 1; padding: 6px 8px; font-size: 12px; }
-  .deal-main { grid-template-columns: 1fr; gap: 8px; }
+  .deal-kpi { flex: 1; min-width: 0; padding: 6px 8px; font-size: 12px; }
+  .deal-kpi span { display: block; margin: 2px 0 0; }
+  .deal-page .page-filters { width: 100%; }
+  .deal-page .filter { min-width: 0; flex: 1; }
+  .deal-main { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .deal-form { padding: 10px 10px 8px; }
-  .deal-grid { gap: 8px; }
+  .deal-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
   .deal-grid label { margin-bottom: 4px; }
-  .deal-grid input, .deal-grid textarea { padding: 8px 10px; }
-  .deal-flags { gap: 6px 10px; }
-  .deal-flags .check { font-size: 12px; }
+  .deal-grid input, .deal-grid textarea { padding: 8px 10px; max-width: 100%; }
+  .deal-flags { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px 8px; }
+  .deal-flags .check { font-size: 12px; white-space: normal; }
   .deal-grid textarea { min-height: 64px; }
   .deal-page #dealShot.empty { display: none; }
   .deal-page #dealShot { padding: 10px; }
   .deal-page #dealText { min-height: 88px; }
+  .deal-page .copy-btn { min-width: 0; width: 100%; }
   .deal-log { padding: 10px; }
 }
