@@ -38,8 +38,8 @@
 <div class="card deal-records">
   {% if is_admin %}
   <div class="records-toolbar">
-    <span class="muted">近 {{ days }} 天 · 全部门店</span>
-    <a class="btn ghost" href="{{ url_for('deal_export', days=days) }}">导出 CSV</a>
+    <span class="muted">近 {{ days }} 天 · 上面列表按当前门店显示，导出含全部门店</span>
+    <a class="btn ghost" href="{{ url_for('deal_export', days=days) }}">导出全部门店 CSV</a>
   </div>
   {% endif %}
   {% if rows %}
