@@ -6,7 +6,7 @@ import csv
 import io
 import json
 from datetime import date, datetime, timedelta
-from typing import Any, List
+from typing import Any, Dict, List
 
 from flask import Response, g, render_template, request
 
@@ -15,6 +15,7 @@ from .helpers import (
     accessible_stores,
     admin_required,
     build_diff,
+    incentive_rules,
     pagination,
     parse_date,
     store_forecast,
@@ -71,6 +72,7 @@ def register_admin(app) -> None:
                 stores = [s for s in stores if ((s["city"] or "").strip() or "未分地市") == city]
             kpi_targets = db.list_kpi_targets(conn)
             month_start, _month_end = db.month_bounds(biz_date)
+            rules = incentive_rules(conn)
             rows = []
             for store in stores:
                 sid = store["id"]
@@ -109,7 +111,7 @@ def register_admin(app) -> None:
                         "submitter_name": rep["submitter_name"] if rep else None,
                         "submitted_at": rep["submitted_at"] if rep else None,
                         "reported_this_month": reported_this_month,
-                        "forecast": store_forecast(conn, store, biz_date),
+                        "forecast": store_forecast(conn, store, biz_date, rules),
                         "kpis": kpis,
                         "day_sum": day_sum,
                         "month_sum": sum(k["month"] for k in kpis),
@@ -226,8 +228,9 @@ def register_admin(app) -> None:
                 "net": 0,
                 "passed": 0,
             }
+            rules = incentive_rules(conn)
             for store in stores:
-                judged = store_forecast(conn, store, as_of)
+                judged = store_forecast(conn, store, as_of, rules)
                 rows.append(judged)
                 totals["store_reward"] += judged["store_reward"]
                 totals["store_penalty"] += judged["store_penalty"]
@@ -283,13 +286,15 @@ def register_admin(app) -> None:
                 )
             ]
             all_stores = db.list_all_stores(conn)
+        from .metrics_seed import metric_name_map
+        names: Dict[str, str] = metric_name_map()
         for r in rows:
             try:
                 before = json.loads(r["before_json"] or "{}")
                 after = json.loads(r["after_json"] or "{}")
             except ValueError:
                 before, after = {}, {}
-            r["diff"] = build_diff(before, after)
+            r["diff"] = build_diff(before, after, names)
             r["store_name"] = r["store_name"] or "?"
         return render_template(
             "edits.html",

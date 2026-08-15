@@ -143,12 +143,15 @@ def broadcast_compact_sections(conn) -> List[str]:
     return sections
 
 
-def store_forecast(conn, store, as_of: date) -> Dict[str, Any]:
+def store_forecast(conn, store, as_of: date, rules: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
     month_vals = db.month_cum_through(conn, store["id"], as_of)
     ai = int(month_vals.get("ai_contract", 0) or 0)
     new_cut = rollup_amount(month_vals, "coin_cut")
     advisor_name = (store["advisor_name"] if "advisor_name" in store.keys() else "") or ""
-    judged = incentive.judge(bool(advisor_name.strip()), ai, new_cut, incentive_rules(conn))
+    # rules 默认每次现查；批量循环时调用方应提前算一次传入，避免每店重复查设置
+    if rules is None:
+        rules = incentive_rules(conn)
+    judged = incentive.judge(bool(advisor_name.strip()), ai, new_cut, rules)
     judged.update(
         {
             "store_id": store["id"],
@@ -161,11 +164,11 @@ def store_forecast(conn, store, as_of: date) -> Dict[str, Any]:
     return judged
 
 
-def build_diff(before: Dict[str, int], after: Dict[str, int]) -> str:
+def build_diff(before: Dict[str, int], after: Dict[str, int], names=None) -> str:
     """把 before/after 值差异拼成可读文本，如「手机销量 1→7」"""
-    from .metrics_seed import metric_name_map
-
-    names = metric_name_map()
+    if names is None:
+        from .metrics_seed import metric_name_map
+        names = metric_name_map()
     parts = []
     keys = sorted(set(before) | set(after))
     for k in keys:
