@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any, Dict, List, Mapping, Sequence
+from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 
 def yn(flag: Any) -> str:
@@ -340,8 +340,15 @@ def csv_rows(rows: Sequence[Mapping[str, Any]], biz_date: date) -> List[List[str
     return out
 
 
-def summary(rows: Sequence[Mapping[str, Any]], biz_date: date, title_city: str = "") -> str:
-    """通报表的一句话复盘：日期标题 + 今日销量 / 累计销量 / 本月标杆。"""
+def summary(
+    rows: Sequence[Mapping[str, Any]],
+    biz_date: date,
+    title_city: str = "",
+    *,
+    day_deal: Tuple[int, int] = (0, 0),
+    month_deal: Tuple[int, int] = (0, 0),
+) -> str:
+    """通报表的一句话复盘：日期标题 + 今日销量 / 累计销量 / 成交播报 / 本月标杆。"""
     if not rows:
         return f"{biz_date.isoformat()} 暂无门店通报数据。"
     total = totals_row(rows)
@@ -355,6 +362,8 @@ def summary(rows: Sequence[Mapping[str, Any]], biz_date: date, title_city: str =
         int(total["day_bisuan"] or 0),
         int(total.get("day_coin") or 0),
     )
+    day_count, day_closed = int(day_deal[0] or 0), int(day_deal[1] or 0)
+    month_count, month_closed = int(month_deal[0] or 0), int(month_deal[1] or 0)
     ranked = sorted(
         rows,
         key=lambda r: (
@@ -373,6 +382,7 @@ def summary(rows: Sequence[Mapping[str, Any]], biz_date: date, title_city: str =
         head,
         f"今日销量：AI手机合约 {day_ai}，笔算业务 {day_bisuan}，金币直降 {day_coin}",
         f"累计销量：AI手机合约 {month_ai}，笔算业务 {month_bisuan}，金币直降 {month_coin}",
+        f"成交播报：今日 {day_count} 笔（成交 {day_closed}）；本月 {month_count} 笔（成交 {month_closed}）",
         f"本月标杆：{top_name}（AI {top['month_ai']}，笔算 {top['month_bisuan']}，直降 {top.get('month_coin') or 0}）",
     ]
     return "\n".join(lines)

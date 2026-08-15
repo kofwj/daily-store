@@ -256,7 +256,17 @@ def register_admin(app) -> None:
             rows = _bulletin_rows(conn, stores, biz_date)
             copy_text = bulletin.tsv(rows, biz_date)
             title_city = city.replace("市", "") if city else ""
-            review = bulletin.summary(rows, biz_date, title_city) if rows else ""
+            sid_list = [r["store_id"] for r in rows] if rows else []
+            month_start = biz_date.replace(day=1)
+            day_deal = db.deal_counts(conn, sid_list, biz_date, biz_date)
+            month_deal = db.deal_counts(conn, sid_list, month_start, biz_date)
+            day_deal_sum = (sum(d["total"] for d in day_deal.values()), sum(d["closed"] for d in day_deal.values()))
+            month_deal_sum = (sum(d["total"] for d in month_deal.values()), sum(d["closed"] for d in month_deal.values()))
+            review = (
+                bulletin.summary(rows, biz_date, title_city, day_deal=day_deal_sum, month_deal=month_deal_sum)
+                if rows
+                else ""
+            )
             return render_template(
                 "bulletin.html",
                 biz_date=biz_date,

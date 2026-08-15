@@ -235,12 +235,13 @@ def test_summary_review_text():
             "day_coin": 0,
         },
     ]
-    text = summary(rows, date(2026, 8, 13), "南通")
+    text = summary(rows, date(2026, 8, 13), "南通", day_deal=(7, 5), month_deal=(60, 42))
     lines = text.split("\n")
     assert lines[0] == "2026-08-13 南通vivo零售运营中心"
     assert lines[1] == "今日销量：AI手机合约 5，笔算业务 5，金币直降 1"  # 2+3 / 4+1 / 1+0
     assert lines[2] == "累计销量：AI手机合约 17，笔算业务 14，金币直降 8"  # 5+12 / 8+6 / 3+5
-    assert lines[3] == "本月标杆：启东人民（AI 12，笔算 6，直降 5）"  # 12+6+5=23 最高，用简称
+    assert lines[3] == "成交播报：今日 7 笔（成交 5）；本月 60 笔（成交 42）"
+    assert lines[4] == "本月标杆：启东人民（AI 12，笔算 6，直降 5）"  # 12+6+5=23 最高，用简称
     assert summary([], date(2026, 8, 13)) == "2026-08-13 暂无门店通报数据。"
 
 
