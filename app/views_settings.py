@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import json
 
-from flask import flash, g, redirect, render_template, request, url_for
+from flask import Response, flash, g, redirect, render_template, request, url_for
 
-from . import db, incentive
-from .helpers import incentive_rules, login_required, store_label
+from . import backup, db, incentive
+from .helpers import admin_required, ascii_filename, incentive_rules, login_required, store_label
 from .metrics_seed import KPI_TARGETS
 
 
 def _settings_tab() -> str:
     tab = request.values.get("tab") or "account"
-    allowed = {"account", "stores", "people", "targets", "permissions", "broadcast", "rules"}
+    allowed = {"account", "stores", "people", "targets", "permissions", "broadcast", "rules", "backup"}
     if tab not in allowed:
         return "account"
     if g.user["role"] != "admin" and tab != "account":
@@ -37,6 +37,21 @@ def _change_own_pin() -> None:
 
 
 def register_settings(app) -> None:
+    @app.route("/settings/backup/<name>")
+    @admin_required
+    def settings_backup_download(name):
+        from pathlib import Path
+
+        safe = Path(name).name
+        dest = backup.backup_dir() / safe
+        if not dest.is_file() or not safe.startswith(backup.BACKUP_PREFIX):
+            return Response("not found", status=404)
+        return Response(
+            dest.read_bytes(),
+            mimetype="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename={ascii_filename(safe)}"},
+        )
+
     @app.route("/settings", methods=["GET", "POST"])
     @login_required
     def settings():
@@ -168,6 +183,23 @@ def register_settings(app) -> None:
                         db.set_setting(conn, "broadcast_compact", compact)
                         db.set_setting(conn, "broadcast_compact_family", family)
                         flash("播报设置已保存", "ok")
+                    elif action == "make_backup":
+                        path = backup.snapshot("manual")
+                        flash(f"已备份 {path.name}", "ok")
+                        return redirect(url_for("settings", tab="backup"))
+                    elif action == "restore_named":
+                        name = (request.form.get("backup_name") or "").strip()
+                        safety = backup.restore_named(name)
+                        flash(f"已用 {name} 恢复。恢复前现场另存为 {safety.name}", "ok")
+                        return redirect(url_for("settings", tab="backup"))
+                    elif action == "restore_upload":
+                        uploaded = request.files.get("backup_file")
+                        if uploaded is None or not uploaded.filename:
+                            raise ValueError("请先选择备份文件")
+                        data = uploaded.read()
+                        safety = backup.restore_bytes(data)
+                        flash(f"已用上传文件恢复。恢复前现场另存为 {safety.name}", "ok")
+                        return redirect(url_for("settings", tab="backup"))
                     elif action == "save_rules":
                         defaults = incentive.DEFAULTS
                         rules = {}
@@ -241,4 +273,5 @@ def register_settings(app) -> None:
                 broadcast_compact=db.get_setting(conn, "broadcast_compact", "1") == "1",
                 broadcast_compact_family=db.get_setting(conn, "broadcast_compact_family", "0") == "1",
                 incentive_rules=incentive_rules(conn),
+                backups=backup.list_backups() if g.user["role"] == "admin" else [],
             )

@@ -948,6 +948,36 @@ table.board-table td { text-align: left; vertical-align: middle; }
 .tag-daily { background: var(--tint, #eef3fb); color: var(--link, #2563eb); }
 .tag-deal { background: #eafaf1; color: var(--ok, #16a34a); }
 
+/* 垫资填报：电脑端一行表单 */
+body.advance-page-body .wrap { max-width: 1280px; }
+.advance-page { display: grid; gap: 16px; }
+.advance-form { margin: 0; }
+.advance-form-grid {
+  display: grid;
+  grid-template-columns: 150px 170px repeat(3, minmax(120px, 1fr));
+  gap: 12px 12px;
+  align-items: start;
+}
+.advance-form-grid p { margin: 0; }
+.advance-form-grid .span-note { grid-column: 1 / 5; }
+.advance-form-grid .span-actions {
+  grid-column: 5 / 6;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}
+.advance-form-grid .span-actions button,
+.advance-form-grid .span-actions .btn { height: 40px; }
+.field-hint { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.advance-page .deal-records { margin: 0; }
+@media (max-width: 960px) {
+  .advance-form-grid { grid-template-columns: 1fr 1fr; }
+  .advance-form-grid .span-note,
+  .advance-form-grid .span-actions { grid-column: 1 / -1; }
+  .advance-form-grid .span-actions { justify-content: flex-start; }
+}
+
 /* 结算底稿预览 */
 .pos { color: var(--ok, #16a34a); font-weight: 700; }
 .neg { color: var(--err, #dc2626); font-weight: 700; }

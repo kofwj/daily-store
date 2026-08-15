@@ -45,6 +45,7 @@ def create_app() -> Flask:
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_SECURE"] = secure
     app.config["PREFERRED_URL_SCHEME"] = "https" if secure else "http"
+    app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     if secret == SECRET_FALLBACK and secure:
         raise RuntimeError("生产环境必须设置 STORE_DAILY_SECRET，不要用默认值")

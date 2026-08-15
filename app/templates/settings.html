@@ -12,6 +12,7 @@
     <a href="{{ url_for('settings', tab='permissions') }}" class="{{ 'active' if tab=='permissions' else '' }}">权限</a>
     <a href="{{ url_for('settings', tab='broadcast') }}" class="{{ 'active' if tab=='broadcast' else '' }}">播报</a>
     <a href="{{ url_for('settings', tab='rules') }}" class="{{ 'active' if tab=='rules' else '' }}">考核规则</a>
+    <a href="{{ url_for('settings', tab='backup') }}" class="{{ 'active' if tab=='backup' else '' }}">备份恢复</a>
     {% endif %}
   </aside>
 
@@ -321,6 +322,56 @@
         </div>
         <div class="toolbar"><button type="submit">保存考核规则</button></div>
       </form>
+    </div>
+    {% endif %}
+
+    {% if tab == 'backup' and g.user['role'] == 'admin' %}
+    <div class="card">
+      <h1>备份恢复</h1>
+      <p class="muted">备份是当前整库的副本，含日报、成交、垫资、账号。恢复会覆盖现库；恢复前会自动再留一份现场。</p>
+      <div class="toolbar" style="margin-bottom:14px">
+        <form method="post">
+          <input type="hidden" name="action" value="make_backup">
+          <input type="hidden" name="tab" value="backup">
+          <button type="submit">立即备份</button>
+        </form>
+      </div>
+      <form method="post" enctype="multipart/form-data" class="narrow" onsubmit="return confirm('用上传的备份覆盖当前库？恢复前会先自动备份现场。')">
+        <input type="hidden" name="action" value="restore_upload">
+        <input type="hidden" name="tab" value="backup">
+        <p><label>上传备份文件（.db）</label><input type="file" name="backup_file" accept=".db,application/octet-stream" required></p>
+        <button class="ghost" type="submit">上传并恢复</button>
+      </form>
+    </div>
+    <div class="card">
+      <h2>本机已有备份</h2>
+      {% if backups %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th class="left">文件</th><th>时间</th><th>大小</th><th></th></tr></thead>
+          <tbody>
+            {% for b in backups %}
+            <tr>
+              <td class="left">{{ b.name }}</td>
+              <td>{{ b.mtime }}</td>
+              <td>{{ '%.1f'|format(b.size / 1024) }} KB</td>
+              <td class="right">
+                <a class="btn ghost" href="{{ url_for('settings_backup_download', name=b.name) }}">下载</a>
+                <form method="post" onsubmit="return confirm('用这份备份覆盖当前库？恢复前会先自动备份现场。')">
+                  <input type="hidden" name="action" value="restore_named">
+                  <input type="hidden" name="tab" value="backup">
+                  <input type="hidden" name="backup_name" value="{{ b.name }}">
+                  <button class="ghost" type="submit">恢复</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="muted">还没有备份。先点「立即备份」，或上传以前的 .db。</p>
+      {% endif %}
     </div>
     {% endif %}
   </div>

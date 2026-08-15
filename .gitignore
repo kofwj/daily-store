@@ -6,5 +6,6 @@ __pycache__/
 data/*.db
 data/*.db-*
 data/*.db-journal
+data/backups/
 .DS_Store
 .env

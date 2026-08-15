@@ -130,6 +130,31 @@ def test_admin_can_save_without_phone_and_fills_settlement(tmp_db):
     assert book["海门金花"]["G3"].value == "芝麻服务费"
 
 
+def test_filler_can_save_negative_amount(client):
+    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+    page = client.post(
+        "/advance",
+        data={
+            "store_id": str(sid),
+            "biz_date": db.today_local().isoformat(),
+            "phone": "13900004444",
+            "broadband": "-100",
+            "note": "退网络电视",
+        },
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "垫资已保存" in page
+    assert "可填负数" in page
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT broadband FROM advance_posts WHERE store_id=? AND phone='13900004444'",
+            (sid,),
+        ).fetchone()
+        assert float(row["broadband"]) == -100
+
+
 def test_filler_cannot_open_pay_page(client):
     client.post("/login", data={"username": "jinhua", "pin": "123456"})
     r = client.get("/advance/pay", follow_redirects=True)
