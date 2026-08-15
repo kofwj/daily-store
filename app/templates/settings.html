@@ -1,42 +1,93 @@
 {% extends "base.html" %}
 {% block title %}设置{% endblock %}
+{% block body_class %}settings-body{% endblock %}
 {% block body %}
-<div class="page-head"><h1>设置</h1></div>
+<div class="page-head settings-head">
+  <div class="page-title">
+    <h1>设置</h1>
+    <p class="muted">{% if g.user['role'] == 'admin' %}账号、组织、业务规则和备份{% else %}改自己的登录口令{% endif %}</p>
+  </div>
+</div>
 <div class="settings">
   <aside class="settings-nav">
-    <a href="{{ url_for('settings', tab='account') }}" class="{{ 'active' if tab=='account' else '' }}">账号</a>
+    <div class="settings-nav-group">
+      <span class="settings-nav-label">个人</span>
+      <a href="{{ url_for('settings', tab='account') }}" class="{{ 'active' if tab=='account' else '' }}">账号</a>
+    </div>
     {% if g.user['role'] == 'admin' %}
-    <a href="{{ url_for('settings', tab='stores') }}" class="{{ 'active' if tab=='stores' else '' }}">门店</a>
-    <a href="{{ url_for('settings', tab='people') }}" class="{{ 'active' if tab=='people' else '' }}">人员</a>
-    <a href="{{ url_for('settings', tab='targets') }}" class="{{ 'active' if tab=='targets' else '' }}">月目标</a>
-    <a href="{{ url_for('settings', tab='permissions') }}" class="{{ 'active' if tab=='permissions' else '' }}">权限</a>
-    <a href="{{ url_for('settings', tab='broadcast') }}" class="{{ 'active' if tab=='broadcast' else '' }}">播报</a>
-    <a href="{{ url_for('settings', tab='rules') }}" class="{{ 'active' if tab=='rules' else '' }}">考核规则</a>
-    <a href="{{ url_for('settings', tab='backup') }}" class="{{ 'active' if tab=='backup' else '' }}">备份恢复</a>
+    <div class="settings-nav-group">
+      <span class="settings-nav-label">组织</span>
+      <a href="{{ url_for('settings', tab='stores') }}" class="{{ 'active' if tab=='stores' else '' }}">门店</a>
+      <a href="{{ url_for('settings', tab='people') }}" class="{{ 'active' if tab=='people' else '' }}">人员</a>
+    </div>
+    <div class="settings-nav-group">
+      <span class="settings-nav-label">业务</span>
+      <a href="{{ url_for('settings', tab='targets') }}" class="{{ 'active' if tab=='targets' else '' }}">月目标</a>
+      <a href="{{ url_for('settings', tab='rules') }}" class="{{ 'active' if tab=='rules' else '' }}">考核规则</a>
+      <a href="{{ url_for('settings', tab='broadcast') }}" class="{{ 'active' if tab=='broadcast' else '' }}">播报</a>
+      <a href="{{ url_for('settings', tab='permissions') }}" class="{{ 'active' if tab=='permissions' else '' }}">权限</a>
+    </div>
+    <div class="settings-nav-group">
+      <span class="settings-nav-label">系统</span>
+      <a href="{{ url_for('settings', tab='backup') }}" class="{{ 'active' if tab=='backup' else '' }}">备份恢复</a>
+    </div>
     {% endif %}
   </aside>
 
   <div class="settings-main">
     {% if tab == 'account' %}
-    <div class="card">
+    <div class="settings-page-head">
       <h1>账号</h1>
-      <p class="muted">{{ g.user.display_name }} · {{ g.user.username }}{% if g.user.role == 'admin' %} · 管理员{% endif %}</p>
-      <form method="post" class="narrow">
+      <p class="muted">登录身份和口令。口令只保存在本机，改完下次用新口令登。</p>
+    </div>
+    <div class="card settings-card">
+      <div class="settings-card-head">
+        <h2>身份</h2>
+      </div>
+      <dl class="settings-meta">
+        <div>
+          <dt>显示名</dt>
+          <dd>{{ g.user.display_name }}</dd>
+        </div>
+        <div>
+          <dt>账号</dt>
+          <dd><code>{{ g.user.username }}</code></dd>
+        </div>
+        <div>
+          <dt>角色</dt>
+          <dd>
+            {% if g.user.role == 'admin' %}管理员
+            {% elif g.user.role == 'readonly' %}只读
+            {% else %}填报员{% endif %}
+          </dd>
+        </div>
+      </dl>
+    </div>
+    <div class="card settings-card">
+      <div class="settings-card-head">
+        <h2>改口令</h2>
+        <p class="muted">填报员至少 6 位，管理员至少 4 位。</p>
+      </div>
+      <form method="post" class="settings-form">
         <input type="hidden" name="action" value="change_pin">
         <input type="hidden" name="tab" value="account">
-        <p><label>当前口令</label><input name="old_pin" type="password" inputmode="numeric" required></p>
-        <p><label>新口令（{% if g.user.role == 'filler' %}6 位{% else %}至少 4 位{% endif %}）</label><input name="new_pin" type="password" inputmode="numeric" minlength="{{ 6 if g.user.role == 'filler' else 4 }}" required></p>
-        <p><label>再输一遍</label><input name="new_pin2" type="password" inputmode="numeric" minlength="{{ 6 if g.user.role == 'filler' else 4 }}" required></p>
-        <button type="submit">保存口令</button>
+        <p><label>当前口令</label><input name="old_pin" type="password" inputmode="numeric" required autocomplete="current-password"></p>
+        <p><label>新口令（{% if g.user.role == 'filler' %}6 位{% else %}至少 4 位{% endif %}）</label><input name="new_pin" type="password" inputmode="numeric" minlength="{{ 6 if g.user.role == 'filler' else 4 }}" required autocomplete="new-password"></p>
+        <p><label>再输一遍</label><input name="new_pin2" type="password" inputmode="numeric" minlength="{{ 6 if g.user.role == 'filler' else 4 }}" required autocomplete="new-password"></p>
+        <div class="toolbar"><button type="submit">保存口令</button></div>
       </form>
     </div>
     {% endif %}
 
     {% if tab == 'stores' and g.user['role'] == 'admin' %}
+    <div class="settings-page-head">
+      <h1>门店</h1>
+      <p class="muted">左边选店，右边改这一家。顾问写姓名走「AI+新用户直降≥10」，空着走双破 0。</p>
+    </div>
     <div class="stores-desk">
       <aside class="store-list card">
         <div class="store-list-head">
-          <h1>门店</h1>
+          <h2>目录</h2>
           <span class="muted">{{ stores|length }} 家</span>
         </div>
         <a class="store-list-item add {{ 'active' if not current_store else '' }}" href="{{ url_for('settings', tab='stores', store_id='new') }}">添加门店</a>
@@ -55,7 +106,7 @@
         {% if current_store %}
         <div class="store-editor-head">
           <div>
-            <h1>{{ store_label(current_store) }}</h1>
+            <h2>{{ store_label(current_store) }}</h2>
             <p class="muted">{{ current_store.name }}</p>
           </div>
           {% if current_store.advisor_name %}
@@ -64,11 +115,11 @@
           <span class="status wait">无顾问 · 双破 0</span>
           {% endif %}
         </div>
-        <p class="muted store-editor-hint">顾问写姓名走「AI+新用户直降≥10」，空着走双破 0。只改这一家。</p>
         <form method="post" class="store-editor-form">
           <input type="hidden" name="action" value="edit_store">
           <input type="hidden" name="tab" value="stores">
           <input type="hidden" name="store_id" value="{{ current_store.id }}">
+          <h3 class="settings-section">归属</h3>
           <div class="store-editor-grid">
             <p>
               <label>大区</label>
@@ -82,6 +133,9 @@
               <label>移动编码</label>
               <input name="mobile_code" value="{{ current_store.mobile_code }}" inputmode="numeric" autocomplete="off">
             </p>
+          </div>
+          <h3 class="settings-section">人员</h3>
+          <div class="store-editor-grid">
             <p>
               <label>区域经理</label>
               <input name="area_manager" value="{{ current_store.area_manager }}" autocomplete="off">
@@ -90,6 +144,13 @@
               <label>店长</label>
               <input name="store_manager" value="{{ current_store.store_manager }}" autocomplete="off">
             </p>
+            <p class="span-2">
+              <label>运营商顾问</label>
+              <input name="advisor_name" value="{{ current_store.advisor_name }}" placeholder="无顾问留空" autocomplete="off">
+            </p>
+          </div>
+          <h3 class="settings-section">考核口径</h3>
+          <div class="store-editor-grid">
             <p>
               <label>门店类别</label>
               <select name="store_grade">
@@ -101,15 +162,11 @@
               <label>AI 目标</label>
               <input name="ai_target" type="number" min="0" value="{{ current_store.ai_target or 10 }}" inputmode="numeric">
             </p>
-            <p class="span-2">
-              <label>运营商顾问</label>
-              <input name="advisor_name" value="{{ current_store.advisor_name }}" placeholder="无顾问留空" autocomplete="off">
-            </p>
           </div>
           <div class="toolbar"><button type="submit">保存这家店</button></div>
         </form>
         {% else %}
-        <h1>添加门店</h1>
+        <h2>添加门店</h2>
         <p class="muted">新店加进来后会出现在左边名单。</p>
         <form method="post" class="store-editor-form">
           <input type="hidden" name="action" value="add_store">
@@ -143,9 +200,15 @@
     {% endif %}
 
     {% if tab == 'people' and g.user['role'] == 'admin' %}
-    <div class="card">
+    <div class="settings-page-head">
       <h1>人员</h1>
-      <p class="muted">一家店一个填报员。忘了口令就在这一行重置，默认 123456。</p>
+      <p class="muted">一家店一个填报员。店长看本店、区域经理看本区域；忘了口令就在这一行重置，默认 123456。</p>
+    </div>
+    <div class="card settings-card">
+      <div class="settings-card-head">
+        <h2>账号名单</h2>
+        <span class="muted">{{ people|length }} 人</span>
+      </div>
       <div class="table-wrap">
         <table class="data settings-table people-table">
           <thead>
@@ -153,7 +216,7 @@
               <th>姓名</th>
               <th>账号</th>
               <th>角色</th>
-              <th>门店</th>
+              <th>范围</th>
               <th>重置口令</th>
               <th></th>
             </tr>
@@ -165,9 +228,9 @@
               <td class="left">{{ u.display_name }}</td>
               <td class="left"><code>{{ u.username }}</code></td>
               <td>
-                {% if u.role == 'admin' %}管理员
-                {% elif u.role == 'readonly' %}{{ '区域经理' if (u.scope or '') else '店长(只读)' }}
-                {% else %}填报员{% endif %}{% if not u.active %} · 已停用{% endif %}
+                {% if u.role == 'admin' %}<span class="role-chip admin">管理员</span>
+                {% elif u.role == 'readonly' %}<span class="role-chip view">{{ '区域经理' if (u.scope or '') else '店长(只读)' }}</span>
+                {% else %}<span class="role-chip fill">填报员</span>{% endif %}{% if not u.active %} · 已停用{% endif %}
               </td>
               <td class="left">
                 {% if u.role == 'admin' %}
@@ -223,9 +286,11 @@
       </div>
     </div>
 
-    <div class="card">
-      <h2>添加人员</h2>
-      <p class="muted">填报员绑一家店可填报；店长绑一家店、区域经理绑区域姓名，只读可看本店/本区域报表、通报、垫资。</p>
+    <div class="card settings-card">
+      <div class="settings-card-head">
+        <h2>添加人员</h2>
+        <p class="muted">填报员绑一家店可填报；店长绑一家店、区域经理绑区域姓名，只读可看本店/本区域报表、通报、垫资。</p>
+      </div>
       <form method="post" class="add-user" id="addUserForm">
         <input type="hidden" name="action" value="add_user">
         <input type="hidden" name="tab" value="people">
@@ -251,7 +316,7 @@
             </select>
           </p>
         </div>
-        <div id="addAreaField" style="display:none">
+        <div id="addAreaField" hidden>
           <p>
             <label>区域经理姓名</label>
             <input name="scope" placeholder="如 黄雍青、赵家才" autocomplete="off">
@@ -271,12 +336,12 @@
         var v = role.value;
         var isArea = role.options[role.selectedIndex] && role.options[role.selectedIndex].classList.contains('ro-area');
         if (v === 'readonly' && isArea) {
-          storeField.style.display = 'none';
-          areaField.style.display = '';
+          storeField.hidden = true;
+          areaField.hidden = false;
           bind.value = 'area';
         } else {
-          storeField.style.display = '';
-          areaField.style.display = 'none';
+          storeField.hidden = false;
+          areaField.hidden = true;
           bind.value = '';
         }
       }
@@ -286,10 +351,16 @@
     {% endif %}
 
     {% if tab == 'targets' and g.user['role'] == 'admin' %}
-    <div class="card">
+    <div class="settings-page-head">
       <h1>月目标</h1>
-      <p class="muted">月目标三项：比算新增、Ai手机合约、金币直降。奖罚看 AI + 新用户直降。比算新增 = 比算新增 + 比算新增[高]；新用户直降 = 充值 + 芝麻免充 + 储蓄卡冻结 + 全品类。0 表示不考核。</p>
-      <form method="post" class="narrow">
+      <p class="muted">三项月目标：比算新增、Ai手机合约、金币直降。奖罚看 AI + 新用户直降。0 表示不考核。</p>
+    </div>
+    <div class="card settings-card">
+      <div class="settings-card-head">
+        <h2>本月数字</h2>
+        <p class="muted">比算新增 = 比算新增 + 比算新增[高]；新用户直降 = 充值 + 芝麻免充 + 储蓄卡冻结 + 全品类。</p>
+      </div>
+      <form method="post" class="settings-form">
         <input type="hidden" name="action" value="set_targets">
         <input type="hidden" name="tab" value="targets">
         {% for k in kpis %}
@@ -304,55 +375,63 @@
     {% endif %}
 
     {% if tab == 'permissions' and g.user['role'] == 'admin' %}
-    <div class="card">
+    <div class="settings-page-head">
       <h1>权限设置</h1>
-      <p class="muted">控制店员能改哪些日期的数据。默认店员只能改<b>当天</b>；开启后可在<b>本月内</b>补录或修正（跨月仍需管理员）。锁定时间（23:00）后当天不可改，本月补录不受锁定影响。</p>
-      <form method="post" class="narrow">
-        <input type="hidden" name="action" value="save_permissions">
-        <input type="hidden" name="tab" value="permissions">
-        <p>
-          <label class="check">
-            <input type="checkbox" name="filler_edit_month" value="1" {% if filler_edit_month %}checked{% endif %}>
-            允许店员修改本月数据（补录/修正）
-          </label>
-        </p>
-        <div class="toolbar"><button type="submit">保存权限设置</button></div>
-      </form>
+      <p class="muted">控制店员能改哪些日期的数据。锁定时间（23:00）后当天不可改，本月补录不受锁定影响。</p>
     </div>
+    <form method="post" class="card settings-card">
+      <input type="hidden" name="action" value="save_permissions">
+      <input type="hidden" name="tab" value="permissions">
+      <label class="settings-switch">
+        <span>
+          <strong>允许店员修改本月数据（补录/修正）</strong>
+          <span class="muted">默认只能改当天；开启后可在本月内补录。跨月仍需管理员。</span>
+        </span>
+        <input type="checkbox" name="filler_edit_month" value="1" {% if filler_edit_month %}checked{% endif %}>
+      </label>
+      <div class="toolbar"><button type="submit">保存权限设置</button></div>
+    </form>
     {% endif %}
 
     {% if tab == 'broadcast' and g.user['role'] == 'admin' %}
-    <div class="card">
+    <div class="settings-page-head">
       <h1>播报设置</h1>
       <p class="muted">控制「保存并生成播报」贴进微信群的内容。全部门店共用，填报员不用再勾选。</p>
-      <form method="post" class="narrow">
-        <input type="hidden" name="action" value="save_broadcast">
-        <input type="hidden" name="tab" value="broadcast">
-        <p>
-          <label class="check">
-            <input type="checkbox" name="broadcast_compact" value="1" {% if broadcast_compact %}checked{% endif %}>
-            数字化里日=0 且累=0 的行不进群消息
-          </label>
-        </p>
-        <p>
-          <label class="check">
-            <input type="checkbox" name="broadcast_compact_family" value="1" {% if broadcast_compact_family %}checked{% endif %}>
-            家庭类里日=0 且累=0 的行不进群消息
-          </label>
-        </p>
-        <div class="toolbar"><button type="submit">保存播报设置</button></div>
-      </form>
     </div>
+    <form method="post" class="card settings-card">
+      <input type="hidden" name="action" value="save_broadcast">
+      <input type="hidden" name="tab" value="broadcast">
+      <label class="settings-switch">
+        <span>
+          <strong>数字化精简</strong>
+          <span class="muted">数字化里日=0 且累=0 的行不进群消息</span>
+        </span>
+        <input type="checkbox" name="broadcast_compact" value="1" {% if broadcast_compact %}checked{% endif %}>
+      </label>
+      <label class="settings-switch">
+        <span>
+          <strong>家庭类精简</strong>
+          <span class="muted">家庭类里日=0 且累=0 的行不进群消息</span>
+        </span>
+        <input type="checkbox" name="broadcast_compact_family" value="1" {% if broadcast_compact_family %}checked{% endif %}>
+      </label>
+      <div class="toolbar"><button type="submit">保存播报设置</button></div>
+    </form>
     {% endif %}
 
     {% if tab == 'rules' and g.user['role'] == 'admin' %}
-    <div class="card">
+    <div class="settings-page-head">
       <h1>考核规则</h1>
       <p class="muted">季度改阈值和奖罚金额，保存后立即生效。考核项不变，只改数字。</p>
-      <form method="post" class="rules-form">
-        <input type="hidden" name="action" value="save_rules">
-        <input type="hidden" name="tab" value="rules">
-        <h2>有运营商顾问</h2>
+    </div>
+    <form method="post" class="rules-form">
+      <input type="hidden" name="action" value="save_rules">
+      <input type="hidden" name="tab" value="rules">
+      <div class="card settings-card">
+        <div class="settings-card-head">
+          <h2>有运营商顾问</h2>
+          <p class="muted">走 AI + 新用户直降总量方案。</p>
+        </div>
         <div class="rules-grid">
           <p><label>达标总量 AI+新用户直降 ≥</label><input type="number" min="0" name="r_total_threshold" value="{{ incentive_rules['total_threshold'] }}"></p>
           <p><label>AI≥ 高效线</label><input type="number" min="0" name="r_ai_best" value="{{ incentive_rules['ai_best'] }}"></p>
@@ -367,23 +446,32 @@
           <p><label>AI挂0罚门店</label><input type="number" min="0" name="r_penal_store_zero" value="{{ incentive_rules['penal_store_zero'] }}"></p>
           <p><label>AI挂0罚顾问</label><input type="number" min="0" name="r_penal_advisor_zero" value="{{ incentive_rules['penal_advisor_zero'] }}"></p>
         </div>
-        <h2>无运营商顾问</h2>
+      </div>
+      <div class="card settings-card">
+        <div class="settings-card-head">
+          <h2>无运营商顾问</h2>
+          <p class="muted">走双破 0 方案。</p>
+        </div>
         <div class="rules-grid">
           <p><label>双破0奖门店</label><input type="number" min="0" name="r_reward_no_advisor" value="{{ incentive_rules['reward_no_advisor'] }}"></p>
           <p><label>单项破0罚门店</label><input type="number" min="0" name="r_penal_store_one" value="{{ incentive_rules['penal_store_one'] }}"></p>
           <p><label>双未破0罚门店</label><input type="number" min="0" name="r_penal_store_none" value="{{ incentive_rules['penal_store_none'] }}"></p>
         </div>
-        <div class="toolbar"><button type="submit">保存考核规则</button></div>
-      </form>
-    </div>
+      </div>
+      <div class="toolbar"><button type="submit">保存考核规则</button></div>
+    </form>
     {% endif %}
 
     {% if tab == 'backup' and g.user['role'] == 'admin' %}
+    <div class="settings-page-head">
+      <h1>备份恢复</h1>
+      <p class="muted">整库副本，含日报、成交、垫资、账号。恢复会覆盖现库，恢复前会自动再留一份现场。最多留 20 份。</p>
+    </div>
     <div class="backup-page">
       <div class="card backup-hero">
         <div>
-          <h1>备份恢复</h1>
-          <p class="muted">整库副本，含日报、成交、垫资、账号。恢复会覆盖现库，恢复前会自动再留一份现场。最多留 20 份。</p>
+          <h2>立即备份</h2>
+          <p class="muted">在当前库上拍一份快照，可下载或稍后恢复。</p>
         </div>
         <form method="post">
           <input type="hidden" name="action" value="make_backup">

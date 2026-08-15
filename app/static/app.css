@@ -429,16 +429,86 @@ table.bulletin tr.wait td.flag-no { background: #ffedd5; }
 .store-profile { border-top: 1px solid var(--line); padding: 14px 0; }
 .store-profile .name { font-weight: 600; margin-bottom: 8px; }
 
-.settings { display: grid; grid-template-columns: 160px 1fr; gap: 18px; align-items: start; }
-.settings-nav { position: sticky; top: 72px; display: grid; gap: 4px; }
+.settings { display: grid; grid-template-columns: 196px minmax(0, 1fr); gap: 22px; align-items: start; }
+.settings-head { margin-bottom: 18px; }
+.settings-nav {
+  position: sticky; top: 72px;
+  display: grid; gap: 16px;
+  padding: 12px 10px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.settings-nav-group { display: grid; gap: 2px; }
+.settings-nav-label {
+  padding: 2px 10px 6px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
 .settings-nav a {
-  padding: 8px 10px;
+  padding: 7px 10px;
   border-radius: 8px;
   color: var(--muted);
   font-size: 13px;
+  border: 1px solid transparent;
 }
-.settings-nav a:hover, .settings-nav a.active { background: #fff; color: var(--ink); border: 1px solid var(--line); }
-.settings-nav a.active { font-weight: 600; }
+.settings-nav a:hover { background: var(--accent-soft); color: var(--ink); }
+.settings-nav a.active {
+  background: var(--ink);
+  color: #fff;
+  font-weight: 600;
+}
+.settings-page-head { margin: 0 0 14px; }
+.settings-page-head h1 { margin: 0 0 4px; font-size: 20px; }
+.settings-page-head p { margin: 0; max-width: 46em; }
+.settings-card { margin-bottom: 14px; }
+.settings-card-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.settings-card-head h2 { margin: 0; }
+.settings-card-head p { margin: 0; }
+.settings-section {
+  margin: 18px 0 10px; padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 12px; font-weight: 650; color: var(--muted);
+  letter-spacing: 0.06em;
+}
+.settings-form { max-width: 420px; display: grid; gap: 12px; }
+.settings-form p { margin: 0; }
+.settings-meta {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px; margin: 0;
+}
+.settings-meta dt { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.settings-meta dd { margin: 0; font-weight: 600; }
+.settings-meta code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px; background: #f3f4f6; padding: 2px 6px; border-radius: 6px;
+}
+.settings-switch {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.settings-switch:last-of-type { border-bottom: 0; }
+.settings-switch span { display: grid; gap: 4px; min-width: 0; }
+.settings-switch strong { font-size: 14px; font-weight: 600; }
+.settings-switch input[type="checkbox"] {
+  width: 18px; height: 18px; margin-top: 2px; flex: 0 0 auto;
+}
+.role-chip {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; line-height: 18px;
+}
+.role-chip.admin { background: #111827; color: #fff; }
+.role-chip.fill { background: #eff8ff; color: #175cd3; }
+.role-chip.view { background: #ecfdf3; color: #067647; }
 .settings-main .narrow { max-width: 360px; }
 .rules-form { max-width: 620px; }
 .rules-form h2 { margin-top: 18px; }
@@ -530,7 +600,7 @@ details.extra summary { cursor: pointer; font-weight: 600; }
 .store-editor-head h1 { margin-bottom: 4px; }
 .store-editor-head p { margin: 0; }
 .store-editor-hint { margin: 10px 0 16px; }
-.store-editor-form { max-width: 520px; }
+.store-editor-form { max-width: 640px; }
 .store-editor-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -597,7 +667,17 @@ details.extra summary { cursor: pointer; font-weight: 600; }
 
 @media (max-width: 800px) {
   .settings { grid-template-columns: 1fr; }
-  .settings-nav { position: static; grid-auto-flow: column; overflow: auto; }
+  .settings-nav {
+    position: static;
+    display: flex;
+    gap: 14px;
+    overflow: auto;
+    padding: 10px;
+  }
+  .settings-nav-group { min-width: max-content; }
+  .settings-nav-label { padding: 0 8px 4px; }
+  .settings-nav a { white-space: nowrap; }
+  .settings-meta { grid-template-columns: 1fr; }
   .add-user { grid-template-columns: 1fr 1fr; }
   .add-user-action { grid-column: 1 / -1; }
   .stores-desk { grid-template-columns: 1fr; }
