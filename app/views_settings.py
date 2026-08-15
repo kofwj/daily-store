@@ -13,12 +13,21 @@ from .metrics_seed import KPI_TARGETS
 
 def _settings_tab() -> str:
     tab = request.values.get("tab") or "account"
-    allowed = {"account", "stores", "people", "targets", "permissions", "broadcast", "rules", "backup"}
+    if tab == "people":
+        tab = "stores"
+    allowed = {"account", "stores", "targets", "permissions", "broadcast", "rules", "backup"}
     if tab not in allowed:
         return "account"
     if g.user["role"] != "admin" and tab != "account":
         return "account"
     return tab
+
+
+def _org_redirect(store_id=None):
+    sid = store_id or request.form.get("back_store_id") or request.form.get("store_id")
+    if sid and str(sid).strip() and str(sid) != "new":
+        return redirect(url_for("settings", tab="stores", store_id=sid))
+    return redirect(url_for("settings", tab="stores"))
 
 
 def _change_own_pin() -> None:
@@ -151,6 +160,7 @@ def register_settings(app) -> None:
                             scope=scope,
                         )
                         flash("人员已加", "ok")
+                        return _org_redirect(store_ids[0] if store_ids else None)
                     elif action == "reset_pin":
                         uid = int(request.form.get("user_id") or 0)
                         pin = request.form.get("pin") or ""
@@ -160,6 +170,8 @@ def register_settings(app) -> None:
                             raise ValueError(f"口令至少 {min_len} 位")
                         db.update_user_pin(conn, uid, pin)
                         flash("口令已改", "ok")
+                        if (request.form.get("tab") or "") == "stores":
+                            return _org_redirect()
                     elif action == "set_stores":
                         uid = int(request.form.get("user_id") or 0)
                         target = conn.execute("SELECT role, scope FROM users WHERE id=?", (uid,)).fetchone()
@@ -179,6 +191,8 @@ def register_settings(app) -> None:
                             if target["role"] == "readonly":
                                 db.set_user_scope(conn, uid, "")
                         flash("门店权限已改", "ok")
+                        if (request.form.get("tab") or "") == "stores":
+                            return _org_redirect()
                     elif action == "toggle_user":
                         uid = int(request.form.get("user_id") or 0)
                         active = request.form.get("active") == "1"
@@ -186,6 +200,8 @@ def register_settings(app) -> None:
                             raise ValueError("不能停用自己")
                         db.set_user_active(conn, uid, active)
                         flash("人员状态已改", "ok")
+                        if (request.form.get("tab") or "") == "stores":
+                            return _org_redirect()
                     elif action == "set_targets":
                         for code, _name, _note in KPI_TARGETS:
                             raw = request.form.get(f"t_{code}", "0")
@@ -267,29 +283,45 @@ def register_settings(app) -> None:
                     sid = 0
                 current_store = store_by_id.get(sid) or stores[0]
             people = []
+            people_by_store = {s["id"]: [] for s in stores}
+            area_by_store = {s["id"]: [] for s in stores}
+            area_people = []
+            unassigned_people = []
             for u in users:
+                if u["role"] == "admin":
+                    continue
                 sids = user_map.get(u["id"]) or []
                 assigned = [store_by_id[sid] for sid in sids if sid in store_by_id]
                 labels = [store_label(s) for s in assigned]
+                item = {
+                    "user": u,
+                    "store_ids": sids,
+                    "store_id": sids[0] if sids else 0,
+                    "store_label": "、".join(labels) if labels else "未分配",
+                }
+                people.append(item)
                 if u["role"] == "readonly" and (u["scope"] or "").strip():
-                    store_view = "区域经理：" + (u["scope"] or "").strip()
-                elif u["role"] == "admin":
-                    store_view = "全部门店"
-                else:
-                    store_view = "、".join(labels) if labels else "未分配"
-                people.append(
-                    {
-                        "user": u,
-                        "store_ids": sids,
-                        "store_id": sids[0] if sids else 0,
-                        "store_label": store_view,
-                    }
-                )
+                    item["store_label"] = "区域：" + (u["scope"] or "").strip()
+                    area_people.append(item)
+                    for s in stores:
+                        if (s["area_manager"] or "").strip() == (u["scope"] or "").strip():
+                            area_by_store[s["id"]].append(item)
+                    continue
+                if not sids:
+                    unassigned_people.append(item)
+                    continue
+                for sid in sids:
+                    if sid in people_by_store:
+                        people_by_store[sid].append(item)
             return render_template(
                 "settings.html",
                 tab=tab,
                 users=users,
                 people=people,
+                people_by_store=people_by_store,
+                area_by_store=area_by_store,
+                area_people=area_people,
+                unassigned_people=unassigned_people,
                 stores=stores,
                 store_groups=store_groups,
                 current_store=current_store,
