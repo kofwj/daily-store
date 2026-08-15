@@ -62,7 +62,7 @@
           <span class="status wait">无顾问 · 双破 0</span>
           {% endif %}
         </div>
-        <p class="muted store-editor-hint">顾问写姓名走「AI+芝麻≥10」，空着走双破 0。只改这一家。</p>
+        <p class="muted store-editor-hint">顾问写姓名走「AI+新用户直降≥10」，空着走双破 0。只改这一家。</p>
         <form method="post" class="store-editor-form">
           <input type="hidden" name="action" value="edit_store">
           <input type="hidden" name="tab" value="stores">
@@ -211,7 +211,7 @@
     {% if tab == 'targets' and g.user['role'] == 'admin' %}
     <div class="card">
       <h1>月目标</h1>
-      <p class="muted">只考核三项：比算新增、Ai手机合约、金币直降。比算新增 = 比算新增 + 比算新增[高]；金币直降只计新用户：充值 + 芝麻免充 + 储蓄卡冻结 + 全品类。0 表示不考核。</p>
+      <p class="muted">月目标三项：比算新增、Ai手机合约、金币直降。奖罚看 AI + 新用户直降。比算新增 = 比算新增 + 比算新增[高]；新用户直降 = 充值 + 芝麻免充 + 储蓄卡冻结 + 全品类。0 表示不考核。</p>
       <form method="post" class="narrow">
         <input type="hidden" name="action" value="set_targets">
         <input type="hidden" name="tab" value="targets">
@@ -277,13 +277,13 @@
         <input type="hidden" name="tab" value="rules">
         <h2>有运营商顾问</h2>
         <div class="rules-grid">
-          <p><label>达标总量 AI+芝麻 ≥</label><input type="number" min="0" name="r_total_threshold" value="{{ incentive_rules['total_threshold'] }}"></p>
+          <p><label>达标总量 AI+新用户直降 ≥</label><input type="number" min="0" name="r_total_threshold" value="{{ incentive_rules['total_threshold'] }}"></p>
           <p><label>AI≥ 高效线</label><input type="number" min="0" name="r_ai_best" value="{{ incentive_rules['ai_best'] }}"></p>
           <p><label>AI≥ 破0线</label><input type="number" min="0" name="r_ai_pass" value="{{ incentive_rules['ai_pass'] }}"></p>
           <p class="span-2"><label>AI≥ 顾问免责线（未达标时）</label><input type="number" min="0" name="r_ai_5" value="{{ incentive_rules['ai_5'] }}"></p>
           <p><label>高效完成奖门店</label><input type="number" min="0" name="r_reward_best" value="{{ incentive_rules['reward_best'] }}"></p>
           <p><label>总量达标奖门店</label><input type="number" min="0" name="r_reward_pass" value="{{ incentive_rules['reward_pass'] }}"></p>
-          <p><label>总量靠芝麻罚顾问</label><input type="number" min="0" name="r_reward_sesame_penalty" value="{{ incentive_rules['reward_sesame_penalty'] }}"></p>
+          <p><label>总量靠直降罚顾问</label><input type="number" min="0" name="r_reward_sesame_penalty" value="{{ incentive_rules['reward_sesame_penalty'] }}"></p>
           <p><label>顾问免责罚门店</label><input type="number" min="0" name="r_penal_store_ai5" value="{{ incentive_rules['penal_store_ai5'] }}"></p>
           <p><label>整体欠佳罚门店</label><input type="number" min="0" name="r_penal_store_mid" value="{{ incentive_rules['penal_store_mid'] }}"></p>
           <p><label>整体欠佳罚顾问</label><input type="number" min="0" name="r_penal_advisor_mid" value="{{ incentive_rules['penal_advisor_mid'] }}"></p>

@@ -1,8 +1,8 @@
 """运营商顾问 / 无顾问门店的月度奖罚。
 
 口径：
-- AI手机 = Ai手机合约
-- 芝麻直降 = 新用户直降·芝麻免充
+- AI = Ai手机合约
+- 新用户直降 = 充值 + 芝麻免充 + 储蓄卡冻结 + 全品类
 
 奖罚阈值 / 金额可从配置读（app.meta['incentive_rules']），季度可改；
 不配时用下方 DEFAULTS。
@@ -16,13 +16,13 @@ from typing import Any, Dict
 
 
 DEFAULTS: Dict[str, int] = {
-    # 有顾问：AI + 芝麻 ≥ 总量阈值才可能达标
+    # 有顾问：AI + 新用户直降 ≥ 总量阈值才可能达标
     "total_threshold": 10,   # 总量达标线
     "ai_best": 3,            # AI ≥ 此值 → 高效完成
     "ai_pass": 1,            # AI ≥ 此值 → 已破 0
     "reward_best": 500,      # 高效完成奖门店
     "reward_pass": 200,      # 总量达标奖门店
-    "reward_sesame_penalty": 100,  # 总量靠芝麻 → 罚顾问
+    "reward_sesame_penalty": 100,  # 总量靠直降、AI 未破 0 → 罚顾问
     # 有顾问未达标：
     "ai_5": 5,              # AI ≥ 此值 → 顾问免责，罚门店
     "penal_store_ai5": 200,  # 店长带队拖后腿罚门店
@@ -31,7 +31,7 @@ DEFAULTS: Dict[str, int] = {
     "penal_store_zero": 200, # AI 挂 0 罚门店
     "penal_advisor_zero": 100,  # AI 挂 0 罚顾问
     # 无顾问：
-    "reward_no_advisor": 200,    # AI、芝麻均破 0 → 奖门店
+    "reward_no_advisor": 200,    # AI、新用户直降均破 0 → 奖门店
     "penal_store_one": 50,     # 单项破 0 → 罚门店
     "penal_store_none": 100,   # 双未破 0 → 罚门店
 }
@@ -53,11 +53,11 @@ def rules_from(raw: str = "") -> Dict[str, int]:
     return rules
 
 
-def judge_with_advisor(ai: int, sesame: int, r: Dict[str, int] | None = None) -> Dict[str, Any]:
+def judge_with_advisor(ai: int, new_cut: int, r: Dict[str, int] | None = None) -> Dict[str, Any]:
     r = r or DEFAULTS
     ai = int(ai or 0)
-    sesame = int(sesame or 0)
-    total = ai + sesame
+    new_cut = int(new_cut or 0)
+    total = ai + new_cut
     if total >= r["total_threshold"]:
         if ai >= r["ai_best"]:
             return _result(
@@ -70,7 +70,7 @@ def judge_with_advisor(ai: int, sesame: int, r: Dict[str, int] | None = None) ->
                 store_reward=r["reward_pass"],
             )
         return _result(
-            True, "总量靠芝麻", "总量达标但 AI 未破 0，顾问主业失职",
+            True, "总量靠直降", "总量达标但 AI 未破 0，顾问主业失职",
             advisor_penalty=r["reward_sesame_penalty"],
         )
     if ai >= r["ai_5"]:
@@ -92,32 +92,33 @@ def judge_with_advisor(ai: int, sesame: int, r: Dict[str, int] | None = None) ->
     )
 
 
-def judge_without_advisor(ai: int, sesame: int, r: Dict[str, int] | None = None) -> Dict[str, Any]:
+def judge_without_advisor(ai: int, new_cut: int, r: Dict[str, int] | None = None) -> Dict[str, Any]:
     r = r or DEFAULTS
     ai = int(ai or 0)
-    sesame = int(sesame or 0)
+    new_cut = int(new_cut or 0)
     ai_ok = ai >= r["ai_pass"]
-    sesame_ok = sesame >= r["ai_pass"]
-    if ai_ok and sesame_ok:
-        return _result(True, "双破 0", "AI、芝麻均已破 0", store_reward=r["reward_no_advisor"])
-    if ai_ok or sesame_ok:
+    cut_ok = new_cut >= r["ai_pass"]
+    if ai_ok and cut_ok:
+        return _result(True, "双破 0", "AI、新用户直降均已破 0", store_reward=r["reward_no_advisor"])
+    if ai_ok or cut_ok:
         return _result(False, "单项未破 0", "只有一项破 0", store_penalty=r["penal_store_one"])
-    return _result(False, "双未破 0", "AI、芝麻都是 0", store_penalty=r["penal_store_none"])
+    return _result(False, "双未破 0", "AI、新用户直降都是 0", store_penalty=r["penal_store_none"])
 
 
-def judge(has_advisor: bool, ai: int, sesame: int, rules: Dict[str, int] = None) -> Dict[str, Any]:
+def judge(has_advisor: bool, ai: int, new_cut: int, rules: Dict[str, int] = None) -> Dict[str, Any]:
     r = rules or DEFAULTS
     if has_advisor:
-        row = judge_with_advisor(ai, sesame, r)
+        row = judge_with_advisor(ai, new_cut, r)
         row["scheme"] = "有运营商顾问"
-        row["goal"] = f"AI + 芝麻 ≥ {r['total_threshold']}"
+        row["goal"] = f"AI + 新用户直降 ≥ {r['total_threshold']}"
     else:
-        row = judge_without_advisor(ai, sesame, r)
+        row = judge_without_advisor(ai, new_cut, r)
         row["scheme"] = "无运营商顾问"
-        row["goal"] = "AI、芝麻均破 0"
+        row["goal"] = "AI、新用户直降均破 0"
     row["ai"] = int(ai or 0)
-    row["sesame"] = int(sesame or 0)
-    row["total"] = int(ai or 0) + int(sesame or 0)
+    row["new_cut"] = int(new_cut or 0)
+    row["sesame"] = int(new_cut or 0)
+    row["total"] = int(ai or 0) + int(new_cut or 0)
     row["has_advisor"] = bool(has_advisor)
     row["net"] = row["store_reward"] - row["store_penalty"] - row["advisor_penalty"]
     return row

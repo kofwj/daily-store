@@ -25,7 +25,7 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import broadcast, bulletin, db, incentive
-from .metrics_seed import KPI_TARGETS, SECTIONS, rollup_pair
+from .metrics_seed import KPI_TARGETS, SECTIONS, rollup_amount, rollup_pair
 
 SECRET_FALLBACK = "store-daily-dev-change-me"
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -140,9 +140,9 @@ def create_app() -> Flask:
     def store_forecast(conn, store, as_of: date) -> Dict[str, Any]:
         month_vals = db.month_cum_through(conn, store["id"], as_of)
         ai = int(month_vals.get("ai_contract", 0) or 0)
-        sesame = int(month_vals.get("coin_cut_new_sesame", 0) or 0)
+        new_cut = rollup_amount(month_vals, "coin_cut")
         advisor_name = (store["advisor_name"] if "advisor_name" in store.keys() else "") or ""
-        judged = incentive.judge(bool(advisor_name.strip()), ai, sesame, incentive_rules(conn))
+        judged = incentive.judge(bool(advisor_name.strip()), ai, new_cut, incentive_rules(conn))
         judged.update(
             {
                 "store_id": store["id"],

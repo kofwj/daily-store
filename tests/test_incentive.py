@@ -1,4 +1,5 @@
 from app.incentive import DEFAULTS, judge, judge_with_advisor, judge_without_advisor, money_text
+from app.metrics_seed import rollup_amount
 
 
 def test_with_advisor_table():
@@ -31,6 +32,24 @@ def test_custom_rules_change_threshold():
     rules["reward_best"] = 800
     assert judge(True, 3, 7, rules)["passed"] is False
     assert judge(True, 5, 7, rules)["store_reward"] == 800
+
+
+def test_new_user_cut_includes_full_category():
+    month_vals = {
+        "coin_cut_new_recharge": 0,
+        "coin_cut_new_sesame": 0,
+        "coin_cut_new_savings": 0,
+        "coin_cut_new_full": 1,
+        "coin_cut_old": 4,
+        "coin_cut_xtc": 2,
+    }
+    new_cut = rollup_amount(month_vals, "coin_cut")
+    assert new_cut == 1
+    row = judge(False, 1, new_cut)
+    assert row["new_cut"] == 1
+    assert row["passed"] is True
+    assert row["goal"] == "AI、新用户直降均破 0"
+    assert judge(True, 0, 10)["label"] == "总量靠直降"
 
 
 def test_money_text():

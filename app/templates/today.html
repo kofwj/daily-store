@@ -38,7 +38,7 @@
     <div class="kpi forecast-kpi {{ 'ok' if forecast.passed else 'bad' }}">
       <div class="muted">预计考核 · {{ forecast.scheme }}</div>
       <div class="kpi-num">{{ forecast.money_text }}</div>
-      <div class="muted">{{ forecast.label }} · AI {{ forecast.ai }} · 芝麻 {{ forecast.sesame }}{% if forecast.has_advisor %} · 合计 {{ forecast.total }}/10{% endif %}</div>
+      <div class="muted">{{ forecast.label }} · AI {{ forecast.ai }} · 新用户直降 {{ forecast.new_cut }}{% if forecast.has_advisor %} · 合计 {{ forecast.total }}/10{% endif %}</div>
     </div>
     {% endif %}
   </div>

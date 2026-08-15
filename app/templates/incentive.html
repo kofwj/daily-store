@@ -10,8 +10,8 @@
     </label>
   </form>
   <p class="muted">
-    截至 {{ as_of }}。有顾问店看「AI + 芝麻 ≥ 10」；无顾问店看两项都破 0。
-    芝麻 = 新用户直降·芝麻免充。顾问姓名在「设置 → 门店」填写，留空即无顾问。
+    截至 {{ as_of }}。考核的是 AI + 新用户直降。有顾问店看合计是否达标；无顾问店看两项都破 0。
+    新用户直降 = 充值 + 芝麻免充 + 储蓄卡冻结 + 全品类。顾问姓名在「设置 → 门店」填写，留空即无顾问。
   </p>
   <div class="kpi-row">
     <div class="kpi"><div class="muted">达标门店</div><div class="kpi-num">{{ totals.passed }} / {{ rows|length }}</div></div>
@@ -28,7 +28,7 @@
         <th>门店</th>
         <th>方案</th>
         <th>AI</th>
-        <th>芝麻</th>
+        <th>新用户直降</th>
         <th>合计</th>
         <th>结果</th>
         <th>奖门店</th>
@@ -48,7 +48,7 @@
           <div class="muted">{% if row.advisor_name %}顾问 {{ row.advisor_name }}{% else %}无顾问{% endif %}</div>
         </td>
         <td>{{ row.ai }}</td>
-        <td>{{ row.sesame }}</td>
+        <td>{{ row.new_cut }}</td>
         <td>{{ row.total }}</td>
         <td>
           <span class="status {{ 'done' if row.passed else 'wait' }}">{{ row.label }}</span>
