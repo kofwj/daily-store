@@ -15,7 +15,8 @@ def test_closed_deal_uses_short_layout():
         note="用户因价格问题来回拉扯，推荐芝麻直降1600，剩余额度办了分期免息，旧手机抵325元",
     )
     assert text.startswith("通州金沙 · 成交\n")
-    assert "S60元气版｜15514408478｜消费99" in text
+    assert "S60元气版｜1551440****｜消费99" in text
+    assert "15514408478" not in text
     assert "掌厅已查 · 荐89 · 非中高考" in text
     assert "开口 奚其梅" in text
     assert "🌸" not in text
@@ -35,3 +36,9 @@ def test_unchecked_boxes_stay_off_after_post():
     assert values["hall_query"] == "0"
     assert values["closed"] == "0"
     assert values["student"] == "0"
+    assert values["show_phone"] == "0"
+
+
+def test_show_phone_keeps_full_number():
+    text = render_deal("通州金沙", phone="15514408478", show_phone="1")
+    assert "15514408478" in text

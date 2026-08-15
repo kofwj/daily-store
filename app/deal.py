@@ -9,6 +9,13 @@ def yn(value: str, yes: str, no: str) -> str:
     return yes if str(value or "").strip() in {"1", "是", "yes", "true", "Y"} else no
 
 
+def mask_phone(phone: str, *, hide_tail: bool = True) -> str:
+    raw = (phone or "").strip()
+    if not hide_tail or len(raw) < 4:
+        return raw
+    return raw[:-4] + "****"
+
+
 def render_deal(
     store_name: str,
     *,
@@ -21,10 +28,11 @@ def render_deal(
     student: str = "0",
     opener: str = "",
     note: str = "",
+    show_phone: str = "0",
 ) -> str:
     store = (store_name or "").strip() or "未选门店"
     model = (model or "").strip()
-    phone = (phone or "").strip()
+    phone = mask_phone(phone, hide_tail=yn(show_phone, "1", "0") != "1")
     spend = (spend or "").strip()
     recommend = (recommend or "").strip()
     opener = (opener or "").strip()
@@ -64,6 +72,7 @@ def form_values(raw: Mapping[str, str] | None = None, *, posted: bool = False) -
         "recommend": (raw.get("recommend") or "").strip(),
         "closed": raw.get("closed") or default_on,
         "student": raw.get("student") or "0",
+        "show_phone": raw.get("show_phone") or "0",
         "opener": (raw.get("opener") or "").strip(),
         "note": (raw.get("note") or "").strip(),
     }
