@@ -37,7 +37,7 @@ def _bulletin_rows(conn, stores, biz_date: date):
         month_bisuan = bulletin.bisuan_total(
             {"bisuan": pairs.get("bisuan", (0, 0))[1], "bisuan_high": pairs.get("bisuan_high", (0, 0))[1]}
         )
-        _day_coin, month_coin = rollup_pair(pairs, "coin_cut")
+        day_coin, month_coin = rollup_pair(pairs, "coin_cut")
         report = db.get_report(conn, store["id"], biz_date)
         rows.append(
             bulletin.build_row(
@@ -46,6 +46,7 @@ def _bulletin_rows(conn, stores, biz_date: date):
                 month_ai=month_ai,
                 day_bisuan=day_bisuan,
                 month_bisuan=month_bisuan,
+                day_coin=day_coin,
                 month_coin=month_coin,
                 submitted=report is not None,
             )
