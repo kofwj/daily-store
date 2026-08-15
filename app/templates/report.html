@@ -35,12 +35,14 @@
       {% if view != 'week' %}
       <input type="hidden" name="end" value="{{ end.isoformat() }}">
       {% endif %}
-      <div class="seg">
-        <a class="{{ 'active' if view=='month' else '' }}" href="{{ url_for('report', store_id=store.id, view='month', start=month_start.isoformat()) }}">月报</a>
-        <a class="{{ 'active' if view=='week' else '' }}" href="{{ url_for('report', store_id=store.id, view='week', start=start.isoformat()) }}">周报</a>
-        <a class="{{ 'active' if view=='day' else '' }}" href="{{ url_for('report', store_id=store.id, view='day', start=start.isoformat()) }}">日报</a>
+      <div class="report-view-row">
+        <div class="seg">
+          <a class="{{ 'active' if view=='month' else '' }}" href="{{ url_for('report', store_id=store.id, view='month', start=month_start.isoformat()) }}">月报</a>
+          <a class="{{ 'active' if view=='week' else '' }}" href="{{ url_for('report', store_id=store.id, view='week', start=start.isoformat()) }}">周报</a>
+          <a class="{{ 'active' if view=='day' else '' }}" href="{{ url_for('report', store_id=store.id, view='day', start=start.isoformat()) }}">日报</a>
+        </div>
+        <a class="btn ghost" href="{{ url_for('report_csv', store_id=store.id, start=start.isoformat(), end=end.isoformat()) }}">导出 CSV</a>
       </div>
-      <a class="btn ghost" href="{{ url_for('report_csv', store_id=store.id, start=start.isoformat(), end=end.isoformat()) }}">导出 CSV</a>
     </form>
   </div>
 

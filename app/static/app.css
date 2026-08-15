@@ -638,6 +638,11 @@ table.compare-grid td { padding: 8px; border-bottom: 1px solid #f1f5f9; }
 table.compare-grid tr:hover td { background: #f8fafc; }
 table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
 
+.report-view-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
 .report-table-card { overflow: hidden; }
 .report-table-scroll { overflow: auto; -webkit-overflow-scrolling: touch; }
 
@@ -648,10 +653,17 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
   .report-fullname { font-size: 12px; line-height: 1.4; }
   .report-page .page-filters { gap: 8px; }
   .report-page .filter { min-width: 0; flex: 1 1 calc(50% - 8px); }
-  .report-page .seg { flex: 1 1 100%; justify-content: stretch; }
+  .report-view-row {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    flex: 1 1 100%;
+  }
+  .report-page .seg { flex: 1; justify-content: stretch; }
   .report-page .seg a { flex: 1; justify-content: center; }
-  .report-page .page-filters > .btn { flex: 1 1 100%; }
+  .report-view-row > .btn { flex: 0 0 auto; }
   .report-kpis { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .report-kpis .kpi:first-child { grid-column: 1 / -1; }
   .report-kpis .kpi { padding: 8px 10px; }
   .report-kpis .kpi-num { font-size: 17px; }
   .report-month-grid { grid-template-columns: 1fr; gap: 8px; }
