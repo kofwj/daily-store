@@ -803,3 +803,28 @@ table.board-table td { text-align: left; vertical-align: middle; }
 @media (max-width: 800px) {
   .board-head { flex-direction: column; align-items: stretch; }
 }
+
+/* ===== 成交播报 ===== */
+.deal-page { display: grid; gap: 14px; }
+.deal-head h1 { margin-bottom: 4px; }
+.deal-head p { margin: 0 0 10px; }
+.deal-form { margin: 0; }
+.deal-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.deal-grid p { margin: 0; }
+.deal-grid .span-2 { grid-column: 1 / -1; }
+.deal-grid textarea { min-height: 110px; font-family: inherit; }
+.deal-flags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.deal-flags .check { margin: 0; }
+@media (max-width: 800px) {
+  .deal-grid { grid-template-columns: 1fr; }
+  .deal-grid .span-2 { grid-column: auto; }
+}

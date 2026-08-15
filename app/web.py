@@ -24,7 +24,7 @@ from flask import (
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import broadcast, bulletin, db, incentive
+from . import broadcast, bulletin, db, deal, incentive
 from .metrics_seed import KPI_TARGETS, SECTIONS, rollup_amount, rollup_pair
 
 SECRET_FALLBACK = "store-daily-dev-change-me"
@@ -352,6 +352,31 @@ def create_app() -> Flask:
                 compact=bool(compact_sections),
                 kpi_cards=kpi_cards,
                 forecast=forecast,
+                is_admin=g.user["role"] == "admin",
+            )
+
+    @app.route("/deal", methods=["GET", "POST"])
+    @login_required
+    def deal_page():
+        with db.get_db() as conn:
+            store, stores = pick_store(conn, request.values.get("store_id"))
+            if store is None:
+                return render_template("empty.html")
+            values = deal.form_values(
+                request.form if request.method == "POST" else None,
+                posted=request.method == "POST",
+            )
+            if request.method == "GET" and not values["opener"]:
+                values["opener"] = (g.user["display_name"] or "").strip()
+            text = ""
+            if request.method == "POST":
+                text = deal.render_deal(broadcast_store_name(store), **values)
+            return render_template(
+                "deal.html",
+                store=store,
+                stores=stores,
+                form=values,
+                deal_text=text,
                 is_admin=g.user["role"] == "admin",
             )
 

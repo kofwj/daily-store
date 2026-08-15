@@ -227,6 +227,9 @@ def test_login_and_save_roundtrip(tmp_db):
     csv_resp = client.get("/report.csv")
     assert csv_resp.status_code == 200
     assert "当天手机销量" in csv_resp.data.decode("utf-8-sig")
+    deal_page = client.get("/deal")
+    assert deal_page.status_code == 200
+    assert "成交播报".encode("utf-8") in deal_page.data
     sheet = client.get("/bulletin", follow_redirects=True)
     assert "需要管理员权限".encode("utf-8") in sheet.data
     board = client.get("/board", follow_redirects=True)
