@@ -4,6 +4,7 @@ import openpyxl
 
 from app import db
 from app.deal import form_values, render_deal
+from app.helpers import deal_diff
 
 
 def test_closed_deal_uses_short_layout():
@@ -218,6 +219,13 @@ def test_record_deal_post_logs_create_and_update(tmp_db):
             "SELECT COUNT(*) AS c FROM deal_posts WHERE store_id=?", (sid,)
         ).fetchone()["c"]
         assert cnt == 1
+        # 删除也写审计
+        assert db.delete_deal_post(conn, did, sid, user_id=uid)
+        rows = list(conn.execute("SELECT * FROM deal_edits ORDER BY id"))
+        assert len(rows) == 3
+        assert rows[2]["action"] == "delete"
+        assert json.loads(rows[2]["before_json"])["model"] == "S70"
+        assert json.loads(rows[2]["after_json"]) == {}
 
 
 def test_edits_page_filters_by_kind(tmp_db):
@@ -255,3 +263,14 @@ def test_edits_page_filters_by_kind(tmp_db):
     # 全部默认同时含两种类型（日报造一条）
     page = c.get("/edits").get_data(as_text=True)
     assert "日报" in page and "成交" in page
+
+
+def test_deal_diff_formats_bool_fields():
+    text = deal_diff(
+        {"closed": False, "hall_query": True, "student": False, "model": "S60"},
+        {"closed": True, "hall_query": False, "student": True, "model": "S70"},
+    )
+    assert "已成交 ✗→✓" in text
+    assert "开口 ✓→✗" in text
+    assert "学豆 ✗→✓" in text
+    assert "机型 S60→S70" in text

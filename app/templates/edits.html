@@ -62,7 +62,7 @@
       {% endfor %}
     </tbody>
   </table>
-  {{ pager(page, pages, total, 'edits_page', days=days, store_id=store_id) }}
+  {{ pager(page, pages, total, 'edits_page', days=days, store_id=store_id, kind=kind) }}
   {% else %}
   <p class="muted">近 {{ days }} 天还没有修改记录。</p>
   {% endif %}

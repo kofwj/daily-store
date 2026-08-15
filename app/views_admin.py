@@ -330,9 +330,12 @@ def register_admin(app) -> None:
                 before, after = {}, {}
             if r["kind"] == "deal":
                 if r.get("action") == "create":
-                    r["diff"] = "新增成交：" + deal_diff(before, after)
+                    prefix = "新增成交："
+                elif r.get("action") == "delete":
+                    prefix = "删除成交："
                 else:
-                    r["diff"] = "覆盖：" + deal_diff(before, after)
+                    prefix = "覆盖："
+                r["diff"] = prefix + deal_diff(before, after)
             else:
                 r["diff"] = build_diff(before, after, names)
             r["store_name"] = r["store_name"] or "?"

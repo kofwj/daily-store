@@ -285,12 +285,35 @@ def get_deal_post(conn: sqlite3.Connection, deal_id: int, store_id: int) -> Opti
         (deal_id, store_id),
     ).fetchone()
 
-def delete_deal_post(conn: sqlite3.Connection, deal_id: int, store_id: int) -> bool:
-    cur = conn.execute(
+def delete_deal_post(
+    conn: sqlite3.Connection,
+    deal_id: int,
+    store_id: int,
+    user_id: Optional[int] = None,
+) -> bool:
+    row = conn.execute(
+        "SELECT * FROM deal_posts WHERE id=? AND store_id=?",
+        (deal_id, store_id),
+    ).fetchone()
+    if row is None:
+        return False
+    conn.execute(
         "DELETE FROM deal_posts WHERE id=? AND store_id=?",
         (deal_id, store_id),
     )
-    return cur.rowcount > 0
+    biz = date.fromisoformat(str(row["biz_date"])) if row["biz_date"] else today_local()
+    record_deal_edit(
+        conn,
+        store_id=store_id,
+        user_id=int(user_id) if user_id is not None else int(row["user_id"] or 0),
+        deal_id=deal_id,
+        biz_date=biz,
+        action="delete",
+        before=_row_snapshot(row),
+        after={},
+        note="删除成交",
+    )
+    return True
 
 def deal_counts(
     conn: sqlite3.Connection,

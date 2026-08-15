@@ -246,7 +246,7 @@ def register_daily(app) -> None:
         with db.get_db() as conn:
             if not db.user_can_access_store(conn, g.user, sid):
                 return Response("forbidden", status=403)
-            if db.delete_deal_post(conn, did, sid):
+            if db.delete_deal_post(conn, did, sid, user_id=g.user["id"]):
                 flash("已删除该成交播报。", "ok")
             else:
                 flash("这条记录不存在，或已删除。", "error")

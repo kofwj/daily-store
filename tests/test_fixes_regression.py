@@ -230,6 +230,9 @@ def test_edits_page_paginates(tmp_db, monkeypatch):
     assert "上一页" in page1  # 不到最后一页时上一页也应可用
     page2 = app_client.get("/edits?page=2").get_data(as_text=True)
     assert "第 2/2" in page2
+    # 带类型筛选翻页时 kind 不能丢
+    deal_page = app_client.get("/edits?kind=daily").get_data(as_text=True)
+    assert "kind=daily" in deal_page
     last = app_client.get("/edits?page=10").get_data(as_text=True)
     assert "第 2/2" in last  # 越界被夹回最大页
     assert "第 10" not in last
