@@ -41,6 +41,13 @@ def test_unchecked_boxes_stay_off_after_post():
     assert values["show_phone"] == "0"
 
 
+def test_closed_defaults_off():
+    values = form_values()
+    assert values["closed"] == "0"
+    assert values["hall_query"] == "1"
+    assert render_deal("通州金沙").startswith("通州金沙 · 未成交\n")
+
+
 def test_show_phone_keeps_full_number():
     text = render_deal("通州金沙", phone="15514408478", show_phone="1")
     assert "15514408478" in text
