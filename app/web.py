@@ -366,10 +366,21 @@ def create_app() -> Flask:
                 request.form if request.method == "POST" else None,
                 posted=request.method == "POST",
             )
-            if request.method == "GET" and not values["opener"]:
-                values["opener"] = (g.user["display_name"] or "").strip()
             text = ""
             today_d = db.today_local()
+            if request.method == "GET":
+                raw_deal_id = request.args.get("deal_id") or ""
+                try:
+                    edit_id = int(raw_deal_id) if raw_deal_id else None
+                except ValueError:
+                    edit_id = None
+                if edit_id:
+                    row = db.get_deal_post(conn, edit_id, store["id"])
+                    if row:
+                        values = deal.form_from_row(row)
+                        text = row["text"] or ""
+                if not values["opener"]:
+                    values["opener"] = (g.user["display_name"] or "").strip()
             if request.method == "POST":
                 deal_id = request.form.get("deal_id") or values.get("deal_id") or ""
                 text = deal.render_deal(
@@ -404,6 +415,7 @@ def create_app() -> Flask:
             month_counts = db.deal_counts(conn, store_ids, month_start, today_d)
             mine_today = today_counts.get(store["id"], {"total": 0, "closed": 0})
             mine_month = month_counts.get(store["id"], {"total": 0, "closed": 0})
+            recent = db.list_deal_posts(conn, store["id"], month_start, today_d)
             store_stats = []
             if g.user["role"] == "admin":
                 store_stats = [
@@ -423,6 +435,7 @@ def create_app() -> Flask:
                 is_admin=g.user["role"] == "admin",
                 mine_today=mine_today,
                 mine_month=mine_month,
+                recent=recent,
                 store_stats=store_stats,
             )
 

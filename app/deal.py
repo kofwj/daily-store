@@ -77,3 +77,19 @@ def form_values(raw: Mapping[str, str] | None = None, *, posted: bool = False) -
         "note": (raw.get("note") or "").strip(),
         "deal_id": (raw.get("deal_id") or "").strip(),
     }
+
+
+def form_from_row(row) -> dict:
+    return {
+        "model": row["model"] or "",
+        "phone": row["phone"] or "",
+        "spend": row["spend"] or "",
+        "hall_query": "1" if int(row["hall_query"] or 0) else "0",
+        "recommend": row["recommend"] or "",
+        "closed": "1" if int(row["closed"] or 0) else "0",
+        "student": "1" if int(row["student"] or 0) else "0",
+        "show_phone": "0",
+        "opener": row["opener"] or "",
+        "note": row["note"] or "",
+        "deal_id": str(row["id"]),
+    }

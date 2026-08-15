@@ -814,7 +814,26 @@ table.board-table td { text-align: left; vertical-align: middle; }
 }
 .deal-title h1 { margin-bottom: 4px; }
 .deal-title p { margin: 0; }
-.deal-kpis { margin: 0; }
+.deal-kpis {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+}
+.deal-kpi {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 650;
+}
+.deal-kpi span { color: var(--muted); font-weight: 500; margin-left: 6px; }
+.deal-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: 12px;
+  align-items: start;
+}
 .deal-form { margin: 0; }
 .deal-grid {
   display: grid;
@@ -829,17 +848,31 @@ table.board-table td { text-align: left; vertical-align: middle; }
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 14px;
+  grid-column: 1 / -1;
 }
 .deal-flags .check { margin: 0; }
-.deal-page #dealText { min-height: 140px; }
+.deal-page #dealShot { margin: 0; }
+.deal-page #dealText { min-height: 180px; }
+.deal-log { margin: 0; }
 @media (max-width: 800px) {
-  .deal-head { flex-direction: column; align-items: stretch; gap: 8px; }
-  .deal-kpis { grid-template-columns: 1fr 1fr; }
-  .deal-form { padding: 14px 12px 12px; }
-  .deal-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
-  .deal-grid .span-2 { grid-column: 1 / -1; }
-  .deal-flags { gap: 8px 10px; }
-  .deal-flags .check { font-size: 13px; }
-  .deal-grid textarea { min-height: 88px; }
-  .deal-page #dealText { min-height: 120px; }
+  body.deal-page .wrap { padding-bottom: calc(76px + var(--safe-bottom)); }
+  .deal-page { gap: 8px; }
+  .deal-head { flex-wrap: wrap; align-items: center; gap: 8px; }
+  .deal-title { flex: 1; min-width: 0; }
+  .deal-title h1 { font-size: 16px; margin: 0; }
+  .deal-title p { font-size: 12px; }
+  .deal-kpis { width: 100%; }
+  .deal-kpi { flex: 1; padding: 6px 8px; font-size: 12px; }
+  .deal-main { grid-template-columns: 1fr; gap: 8px; }
+  .deal-form { padding: 10px 10px 8px; }
+  .deal-grid { gap: 8px; }
+  .deal-grid label { margin-bottom: 4px; }
+  .deal-grid input, .deal-grid textarea { padding: 8px 10px; }
+  .deal-flags { gap: 6px 10px; }
+  .deal-flags .check { font-size: 12px; }
+  .deal-grid textarea { min-height: 64px; }
+  .deal-page #dealShot.empty { display: none; }
+  .deal-page #dealShot { padding: 10px; }
+  .deal-page #dealText { min-height: 88px; }
+  .deal-log { padding: 10px; }
 }

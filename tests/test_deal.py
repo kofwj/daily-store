@@ -88,3 +88,7 @@ def test_deal_post_counts_by_store(tmp_path, monkeypatch):
         assert rows[0]["phone"] == "15514408478"
         assert rows[0]["note"] == "改过"
         assert "通州金沙" in rows[0]["text"]
+    assert "本店记录" in page
+    assert "S60" in page
+    assert "1551440****" in page
+    assert "15514408478" not in page

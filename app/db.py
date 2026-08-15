@@ -395,6 +395,35 @@ def record_deal_post(
     return int(cur.lastrowid)
 
 
+def list_deal_posts(
+    conn: sqlite3.Connection,
+    store_id: int,
+    start: date,
+    end: date,
+    limit: int = 50,
+) -> List[sqlite3.Row]:
+    return list(
+        conn.execute(
+            """
+            SELECT d.*, u.display_name AS submitter_name
+            FROM deal_posts d
+            LEFT JOIN users u ON u.id = d.user_id
+            WHERE d.store_id=? AND d.biz_date>=? AND d.biz_date<=?
+            ORDER BY d.id DESC
+            LIMIT ?
+            """,
+            (store_id, start.isoformat(), end.isoformat(), limit),
+        )
+    )
+
+
+def get_deal_post(conn: sqlite3.Connection, deal_id: int, store_id: int) -> Optional[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM deal_posts WHERE id=? AND store_id=?",
+        (deal_id, store_id),
+    ).fetchone()
+
+
 def deal_counts(
     conn: sqlite3.Connection,
     store_ids: Iterable[int],
