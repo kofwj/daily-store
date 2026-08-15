@@ -7,6 +7,7 @@ from app.bulletin import (
     csv_rows,
     fmt_count,
     scale_color,
+    summary,
     totals_row,
     tsv,
 )
@@ -198,3 +199,54 @@ def test_bulletin_export_xlsx(client):
     # 旧 CSV 链接现在重定向到 .xlsx
     r2 = client.get(f"/bulletin.csv?date={biz_date}")
     assert r2.status_code in (302, 200)
+
+
+def test_summary_review_text():
+    rows = [
+        {
+            "name": "TZ南通市海门金花vivo体验店",
+            "short_name": "海门金花",
+            "follow_ai": True,
+            "follow_bisuan": True,
+            "month_ai": 5,
+            "month_bisuan": 8,
+            "month_coin": 3,
+            "day_ai": 2,
+            "day_bisuan": 4,
+            "day_coin": 1,
+        },
+        {
+            "name": "TZ南通市启东汇龙镇人民中路专卖店",
+            "short_name": "启东人民",
+            "follow_ai": True,
+            "follow_bisuan": False,
+            "month_ai": 12,
+            "month_bisuan": 6,
+            "month_coin": 5,
+            "day_ai": 3,
+            "day_bisuan": 1,
+            "day_coin": 0,
+        },
+        {
+            "name": "TZ南通市通州区金沙专卖店",
+            "short_name": "通州金沙",
+            "follow_ai": False,
+            "follow_bisuan": False,
+            "month_ai": 0,
+            "month_bisuan": 0,
+            "month_coin": 0,
+            "day_ai": 0,
+            "day_bisuan": 0,
+            "day_coin": 0,
+        },
+    ]
+    text = summary(rows, date(2026, 8, 13))
+    assert "本日13日" in text
+    assert "共3家店" in text
+    assert "【本月累计】AI手机合约 17" in text  # 5+12
+    assert "笔算业务 14" in text  # 8+6
+    assert "金币直降 8" in text  # 3+5
+    assert "【本日】AI手机合约 5" in text  # 2+3
+    assert "本月标杆：启东人民" in text  # 12+6+5=23 最高
+    assert "AI破0 2/3" in text
+    assert summary([], date(2026, 8, 13)) == "2026-08-13 暂无门店通报数据。"

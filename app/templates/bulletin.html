@@ -26,6 +26,19 @@
   </form>
 </div>
 
+{% if review %}
+<div class="card bulletin-review">
+  <div class="bulletin-review-head">
+    <div>
+      <strong>本日 / 本月复盘</strong>
+      <span class="muted">一句话贴群里，或手动编辑后再发</span>
+    </div>
+    <button type="button" class="ghost" onclick="copyReviewText()">复制文案</button>
+  </div>
+  <pre id="reviewText" class="bulletin-review-text">{{ review }}</pre>
+</div>
+{% endif %}
+
 <div class="card bulletin-wrap">
   <div id="bulletinShot" class="bulletin-shot">
     <div class="bulletin-shot-title">{{ bulletin_title }}</div>
@@ -106,6 +119,28 @@ const SHOT_NAME = 'bulletin_{{ biz_date.isoformat() }}.png';
 function setHint(text) {
   const hint = document.getElementById('copyHint');
   if (hint) hint.textContent = text;
+}
+
+function copyReviewText() {
+  const el = document.getElementById('reviewText');
+  if (!el) return;
+  const text = el.innerText || el.textContent || '';
+  if (navigator.clipboard && window.ClipboardItem) {
+    navigator.clipboard.writeText(text).then(() => setHint('复盘文案已复制，去微信粘贴'))
+      .catch(() => fallbackCopy(el));
+  } else {
+    fallbackCopy(el);
+  }
+}
+
+function fallbackCopy(el) {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  try { document.execCommand('copy'); setHint('复盘文案已复制'); }
+  catch (e) { setHint('请手动长按选择复制复盘文字'); }
 }
 
 function showPreview(blob, url) {

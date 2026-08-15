@@ -352,6 +352,21 @@ table.data th:first-child, table.data td:first-child { text-align: left; }
 .status.miss { background: var(--accent-soft); color: var(--muted); }
 
 .bulletin-wrap { overflow: auto; padding: 8px; }
+.bulletin-review {
+  margin: 0 0 14px; padding: 14px 16px;
+  background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
+  border-top: 3px solid var(--accent);
+}
+.bulletin-review-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 10px;
+}
+.bulletin-review-head strong { font-size: 15px; }
+.bulletin-review-head .muted { margin-left: 8px; font-size: 12px; }
+.bulletin-review-text {
+  margin: 0; padding: 0; white-space: pre-wrap; word-break: break-word;
+  font: inherit; line-height: 1.7; color: var(--ink);
+}
 .bulletin-shot { display: inline-block; min-width: 100%; background: #fff; padding: 16px 14px 18px; }
 .bulletin-shot-title {
   font-size: 18px; font-weight: 800; letter-spacing: 1px;
