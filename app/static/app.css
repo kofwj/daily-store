@@ -806,9 +806,15 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
 .deal-records-link .btn { text-decoration: none; }
 .deal-records-head h1 { margin-bottom: 4px; }
 .deal-records-head p { margin: 0; }
-/* 桌面：作为 .deal-records-head 的 flex 子项时，auto-fit grid 会塌缩成单列窄竖条；
-   给个最小宽让它横排两张卡片，避免 140px×191px 的别扭布局。 */
-.deal-records-kpis { margin: 0; min-width: 300px; }
+.deal-records-kpis { margin: 0; }
+.records-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.records-toolbar .btn { text-decoration: none; font-size: 13px; padding: 6px 12px; }
 @media (max-width: 800px) {
   .deal-records-head { flex-direction: column; gap: 12px; }
   .deal-records-kpis { grid-template-columns: 1fr 1fr; width: 100%; }

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from datetime import timedelta
 
 from flask import Response, flash, g, redirect, render_template, request, url_for
@@ -290,3 +292,41 @@ def register_daily(app) -> None:
                 mine_today=mine_today,
                 mine_month=mine_month,
             )
+
+    @app.route("/deal/export")
+    @admin_required
+    def deal_export():
+        """管理员导出全部门店指定区间内的成交记录。"""
+        today_d = db.today_local()
+        try:
+            days_int = max(1, min(int(request.args.get("days", "7")), 90))
+        except ValueError:
+            days_int = 7
+        start = today_d - timedelta(days=days_int - 1)
+        with db.get_db() as conn:
+            rows = db.list_all_deal_posts(conn, start, today_d)
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["日期", "门店", "机型", "号码", "消费", "推荐套餐", "开口/导购", "结果", "备注"])
+        for r in rows:
+            writer.writerow(
+                [
+                    (r["biz_date"] or ""),
+                    r["store_short"] or r["store_name"] or "",
+                    r["model"] or "",
+                    r["phone"] or "",
+                    r["spend"] or "",
+                    r["recommend"] or "",
+                    r["opener"] or r["submitter_name"] or "",
+                    "成交" if r["closed"] else "未成交",
+                    r["note"] or "",
+                ]
+            )
+        data = buf.getvalue().encode("utf-8-sig")
+        filename = f"deal_export_{start.isoformat()}_{today_d.isoformat()}.csv"
+        return Response(
+            data,
+            mimetype="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+

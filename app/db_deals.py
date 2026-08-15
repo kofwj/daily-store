@@ -161,6 +161,27 @@ def list_deal_posts(
         )
     )
 
+
+def list_all_deal_posts(
+    conn: sqlite3.Connection, start: date, end: date
+) -> List[sqlite3.Row]:
+    """全部门店在区间内的成交，按日期+门店排序（管理员导出用）。"""
+    return list(
+        conn.execute(
+            """
+            SELECT d.*, st.name AS store_name, st.short_name AS store_short,
+                   u.display_name AS submitter_name
+            FROM deal_posts d
+            JOIN stores st ON st.id = d.store_id
+            LEFT JOIN users u ON u.id = d.user_id
+            WHERE d.biz_date>=? AND d.biz_date<=?
+            ORDER BY d.biz_date, st.sort_order, st.id, d.id
+            """,
+            (start.isoformat(), end.isoformat()),
+        )
+    )
+
+
 def get_deal_post(conn: sqlite3.Connection, deal_id: int, store_id: int) -> Optional[sqlite3.Row]:
     return conn.execute(
         "SELECT * FROM deal_posts WHERE id=? AND store_id=?",

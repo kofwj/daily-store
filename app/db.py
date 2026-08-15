@@ -19,6 +19,7 @@ from .db_deals import (  # noqa: F401
     deal_counts,
     delete_deal_post,
     get_deal_post,
+    list_all_deal_posts,
     list_deal_posts,
     record_deal_post,
 )

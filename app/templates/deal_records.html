@@ -8,34 +8,40 @@
       <h1>成交记录</h1>
       <p class="muted">每成交一单填一次，点一单可改、再复制。号码默认打码。</p>
     </div>
-    <div class="kpi-row deal-records-kpis">
-      <div class="kpi"><div class="muted">今日</div><div class="kpi-num">{{ mine_today.total }}</div><div class="muted">成交 {{ mine_today.closed }}</div></div>
-      <div class="kpi"><div class="muted">本月</div><div class="kpi-num">{{ mine_month.total }}</div><div class="muted">成交 {{ mine_month.closed }}</div></div>
-    </div>
+    <form method="get" class="page-filters">
+      {% if is_admin and stores|length > 1 %}
+      <label class="filter">
+        <span>门店</span>
+        <select name="store_id" onchange="this.form.submit()">
+          {% for s in stores %}
+          <option value="{{ s.id }}" {% if s.id == store.id %}selected{% endif %}>{{ s.short_name or s.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
+      <label class="filter">
+        <span>近 N 天</span>
+        <select name="days" onchange="this.form.submit()">
+          {% for d in [7, 14, 30, 90] %}
+          <option value="{{ d }}" {% if d == days %}selected{% endif %}>{{ d }} 天</option>
+          {% endfor %}
+        </select>
+      </label>
+    </form>
   </div>
-  <form method="get" class="page-filters">
-    {% if is_admin and stores|length > 1 %}
-    <label class="filter">
-      <span>门店</span>
-      <select name="store_id" onchange="this.form.submit()">
-        {% for s in stores %}
-        <option value="{{ s.id }}" {% if s.id == store.id %}selected{% endif %}>{{ s.short_name or s.name }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    {% endif %}
-    <label class="filter">
-      <span>近 N 天</span>
-      <select name="days" onchange="this.form.submit()">
-        {% for d in [7, 14, 30, 90] %}
-        <option value="{{ d }}" {% if d == days %}selected{% endif %}>{{ d }} 天</option>
-        {% endfor %}
-      </select>
-    </label>
-  </form>
+  <div class="kpi-row deal-records-kpis">
+    <div class="kpi"><div class="muted">今日</div><div class="kpi-num">{{ mine_today.total }}</div><div class="muted">成交 {{ mine_today.closed }}</div></div>
+    <div class="kpi"><div class="muted">本月</div><div class="kpi-num">{{ mine_month.total }}</div><div class="muted">成交 {{ mine_month.closed }}</div></div>
+  </div>
 </div>
 
 <div class="card deal-records">
+  {% if is_admin %}
+  <div class="records-toolbar">
+    <span class="muted">近 {{ days }} 天 · 全部门店</span>
+    <a class="btn ghost" href="{{ url_for('deal_export', days=days) }}">导出 CSV</a>
+  </div>
+  {% endif %}
   {% if rows %}
   <div class="table-wrap">
     <table class="data">

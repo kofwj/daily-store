@@ -112,3 +112,40 @@ def test_deal_post_counts_by_store(client):
     )
     assert blocked.status_code == 200
     assert "需要管理员权限" in blocked.get_data(as_text=True)
+
+
+def test_admin_exports_all_stores_deal_csv(client):
+    client.post("/login", data={"username": "admin", "pin": "1234"})
+    with db.get_db() as conn:
+        sid_a = conn.execute("SELECT id FROM stores ORDER BY id LIMIT 1").fetchone()["id"]
+        sid_b = conn.execute("SELECT id FROM stores ORDER BY id DESC LIMIT 1").fetchone()["id"]
+        uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        db.record_deal_post(
+            conn, store_id=sid_a, user_id=uid, model="S60", phone="13811110000",
+            spend="99", recommend="89", closed=True, note="甲店",
+        )
+        db.record_deal_post(
+            conn, store_id=sid_b, user_id=uid, model="X300", phone="13822220000",
+            spend="199", recommend="139", closed=False, opener="李",
+        )
+    # 非管理员不能导出
+    client.get("/logout")
+    client.post("/login", data={"username": "jinsha", "pin": "123456"})
+    r = client.get("/deal/export")
+    assert r.status_code == 302
+    assert "/today" in r.headers.get("Location", "")
+    # 管理员导出全部门店
+    client.get("/logout")
+    client.post("/login", data={"username": "admin", "pin": "1234"})
+    r = client.get("/deal/export")
+    assert r.status_code == 200
+    assert r.mimetype == "text/csv"
+    assert "attachment" in r.headers.get("Content-Disposition", "")
+    body = r.get_data(as_text=True)
+    assert "日期,门店,机型,号码,消费,推荐套餐,开口/导购,结果,备注" in body.replace("\ufeff", "")
+    assert "S60" in body and "13811110000" in body  # 甲店
+    assert "X300" in body and "13822220000" in body  # 乙店
+    # 只导出设定天数内的（今天必然在内）
+    r7 = client.get("/deal/export?days=7")
+    assert r7.status_code == 200
+    assert "S60" in r7.get_data(as_text=True)
