@@ -73,6 +73,29 @@ def test_compact_hides_zero_digital_rows():
     assert "当天手机销量：日1，累13" in text
 
 
+def test_compact_hides_zero_family_rows():
+    biz = date(2026, 8, 13)
+    values = {
+        "phone_sales": (1, 13),
+        "broadband": (0, 1),
+        "tv": (0, 0),
+        "tv_member": (0, 0),
+        "fttr": (0, 0),
+    }
+    text = render_broadcast(
+        "兴化吾悦vivo 店",
+        biz,
+        values,
+        compact=True,
+        compact_sections=("family",),
+    )
+    assert "宽带：日0，累1" in text
+    assert "电视" not in text
+    assert "电视会员" not in text
+    assert "FTTR" not in text
+    assert "当天手机销量：日1，累13" in text
+
+
 def test_add_day_to_prev_is_month_running_total():
     prev = {"broadband": 7, "tv": 7}
     today = {"broadband": 3, "tv": 3, "phone_sales": 1}

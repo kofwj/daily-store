@@ -638,11 +638,52 @@ table.compare-grid td { padding: 8px; border-bottom: 1px solid #f1f5f9; }
 table.compare-grid tr:hover td { background: #f8fafc; }
 table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
 
+.report-table-card { overflow: hidden; }
+.report-table-scroll { overflow: auto; -webkit-overflow-scrolling: touch; }
+
 @media (max-width: 800px) {
-  .report-head { flex-direction: column; align-items: stretch; }
-  .report-kpis { grid-template-columns: 1fr 1fr; }
-  .report-kpis .kpi:nth-child(2) { grid-column: span 2; }
-  .report-month-grid { grid-template-columns: 1fr; }
+  .report-page { gap: 10px; }
+  .report-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .report-title h1 { margin-bottom: 2px; font-size: 18px; }
+  .report-fullname { font-size: 12px; line-height: 1.4; }
+  .report-page .page-filters { gap: 8px; }
+  .report-page .filter { min-width: 0; flex: 1 1 calc(50% - 8px); }
+  .report-page .seg { flex: 1 1 100%; justify-content: stretch; }
+  .report-page .seg a { flex: 1; justify-content: center; }
+  .report-page .page-filters > .btn { flex: 1 1 100%; }
+  .report-kpis { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .report-kpis .kpi { padding: 8px 10px; }
+  .report-kpis .kpi-num { font-size: 17px; }
+  .report-month-grid { grid-template-columns: 1fr; gap: 8px; }
+  .report-section { padding: 12px; }
+  .report-section h2 { margin-bottom: 8px; }
+  table.report-month th, table.report-month td { padding: 8px 6px; }
+  table.report-month td:nth-child(2),
+  table.report-month td:nth-child(3),
+  table.report-month th:nth-child(2),
+  table.report-month th:nth-child(3) { text-align: right; width: 64px; }
+  .report-table-card { padding: 0 0 10px; margin: 0; }
+  .report-table-card .report-note { margin: 8px 12px 0; }
+  table.report-grid { font-size: 12px; }
+  table.report-grid th,
+  table.report-grid td { padding: 8px 6px; }
+  table.report-grid th:first-child,
+  table.report-grid td.left {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    min-width: 88px;
+    max-width: 108px;
+    background: #fff;
+    box-shadow: 1px 0 0 var(--line);
+  }
+  table.report-grid thead th:first-child { z-index: 3; background: #f8fafc; }
+  table.report-grid tr.group-row td { position: sticky; left: 0; z-index: 2; }
+  table.report-grid tr.row-kpi td.left { background: #f8faff; }
+  table.report-grid .day-head,
+  table.report-grid .day-val,
+  table.report-grid .day-zero { min-width: 36px; text-align: center; }
+  .cell-edit input[type="number"] { width: 40px; height: 32px; font-size: 16px; }
 }
 
 /* ===== 看板 ===== */

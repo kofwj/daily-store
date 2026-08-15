@@ -1,11 +1,14 @@
 {% extends "base.html" %}
 {% block title %}报表 · {{ store.short_name or store.name }}{% endblock %}
+{% block body_class %}report-page-body{% endblock %}
 {% block body %}
 <div class="report-page">
   <div class="report-head">
-    <div>
+    <div class="report-title">
       <h1>{{ store.short_name or store.name }}</h1>
-      <p class="muted">{{ store.name }}</p>
+      {% if store.short_name and store.short_name != store.name %}
+      <p class="muted report-fullname">{{ store.name }}</p>
+      {% endif %}
     </div>
     <form method="get" class="page-filters">
       {% if g.user['role'] == 'admin' and stores|length > 1 %}
@@ -89,14 +92,15 @@
   </div>
   <p class="muted report-note">日均 = 区间合计 ÷ 已提交天数。要改某一天，切到周报或日报。</p>
   {% else %}
-  <div class="card" style="overflow:auto">
+  <div class="card report-table-card">
+    <div class="report-table-scroll">
     <table class="data report-grid">
       <thead>
         <tr>
           <th>指标</th>
-          {% for d in dates %}<th>{{ d[5:] }}</th>{% endfor %}
+          {% for d in dates %}<th class="day-head">{{ d[5:7]|int }}/{{ d[8:]|int }}</th>{% endfor %}
           <th>合计</th>
-          <th>日均</th>
+          <th class="avg-head">日均</th>
         </tr>
         {% if g.user['role'] == 'admin' %}
         <tr>
@@ -142,13 +146,14 @@
           </td>
           {% endfor %}
           <td><b>{{ row.total }}</b></td>
-          <td class="muted">{{ row.avg or '—' }}</td>
+          <td class="muted avg-col">{{ row.avg or '—' }}</td>
         </tr>
         {% endfor %}
         {% endfor %}
       </tbody>
     </table>
-    <p class="muted" style="margin-top:8px">
+    </div>
+    <p class="muted report-note">
       {% if g.user['role'] == 'admin' %}
       管理员点某个格子改数，回车只保存这一格，其它数字不动，会记进审计。日均 = 区间合计 ÷ 已提交天数。
       {% else %}

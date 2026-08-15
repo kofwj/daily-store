@@ -229,6 +229,8 @@ def test_login_and_save_roundtrip(tmp_db):
     assert "当天手机销量" in csv_resp.data.decode("utf-8-sig")
     sheet = client.get("/bulletin", follow_redirects=True)
     assert "需要管理员权限".encode("utf-8") in sheet.data
+    board = client.get("/board", follow_redirects=True)
+    assert "需要管理员权限".encode("utf-8") in board.data
     incentive = client.get("/incentive", follow_redirects=True)
     assert "需要管理员权限".encode("utf-8") in incentive.data
     settings = client.get("/settings")

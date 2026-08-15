@@ -15,9 +15,7 @@
       <a href="{{ url_for('report') }}" class="{{ 'active' if request.endpoint == 'report' else '' }}">报表</a>
       {% if g.user['role'] == 'admin' %}
       <a href="{{ url_for('bulletin_page') }}" class="{{ 'active' if request.endpoint == 'bulletin_page' else '' }}"><span class="full">通报表</span><span class="short">通报</span></a>
-      {% endif %}
-      <a href="{{ url_for('board') }}" class="{{ 'active' if request.endpoint == 'board' else '' }}">{{ '多店看板' if g.user['role'] == 'admin' else '看板' }}</a>
-      {% if g.user['role'] == 'admin' %}
+      <a href="{{ url_for('board') }}" class="{{ 'active' if request.endpoint == 'board' else '' }}">多店看板</a>
       <a href="{{ url_for('incentive_page') }}" class="{{ 'active' if request.endpoint == 'incentive_page' else '' }}"><span class="full">月度考核</span><span class="short">考核</span></a>
       <a href="{{ url_for('edits_page') }}" class="{{ 'active' if request.endpoint == 'edits_page' else '' }}"><span class="full">修改审计</span><span class="short">审计</span></a>
       {% endif %}

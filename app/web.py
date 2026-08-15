@@ -129,6 +129,14 @@ def create_app() -> Flask:
     def incentive_rules(conn) -> Dict[str, int]:
         return incentive.rules_from(db.get_setting(conn, "incentive_rules", ""))
 
+    def broadcast_compact_sections(conn) -> list[str]:
+        sections = []
+        if db.get_setting(conn, "broadcast_compact", "1") == "1":
+            sections.append("digital")
+        if db.get_setting(conn, "broadcast_compact_family", "0") == "1":
+            sections.append("family")
+        return sections
+
     def store_forecast(conn, store, as_of: date) -> Dict[str, Any]:
         month_vals = db.month_cum_through(conn, store["id"], as_of)
         ai = int(month_vals.get("ai_contract", 0) or 0)
@@ -241,7 +249,7 @@ def create_app() -> Flask:
                         values[m["code"]] = max(0, int(raw or 0))
                     except ValueError:
                         values[m["code"]] = 0
-                compact = db.get_setting(conn, "broadcast_compact", "1") == "1"
+                compact_sections = broadcast_compact_sections(conn)
                 note = (request.form.get("note") or "").strip()
                 before = db.day_values(conn, store["id"], biz_date)
                 db.save_daily(
@@ -250,7 +258,7 @@ def create_app() -> Flask:
                     biz_date=biz_date,
                     values=values,
                     user_id=g.user["id"],
-                    compact=compact,
+                    compact=bool(compact_sections),
                     note=note,
                 )
                 if existing:
@@ -279,9 +287,13 @@ def create_app() -> Flask:
             kpi_targets = db.list_kpi_targets(conn)
             filler_month = db.get_setting(conn, "filler_edit_month", "0") == "1"
             report = db.get_report(conn, store["id"], biz_date)
-            compact = db.get_setting(conn, "broadcast_compact", "1") == "1"
+            compact_sections = broadcast_compact_sections(conn)
             text = broadcast.render_broadcast(
-                store_label(store), biz_date, pairs, compact=compact
+                store_label(store),
+                biz_date,
+                pairs,
+                compact=bool(compact_sections),
+                compact_sections=compact_sections,
             )
             grouped = []
             for section in SECTIONS:
@@ -332,7 +344,7 @@ def create_app() -> Flask:
                 grouped=grouped,
                 report=report,
                 broadcast_text=text,
-                compact=compact,
+                compact=bool(compact_sections),
                 kpi_cards=kpi_cards,
                 forecast=forecast,
                 is_admin=g.user["role"] == "admin",
@@ -583,7 +595,7 @@ def create_app() -> Flask:
         return redirect(url_for("report", **kwargs))
 
     @app.route("/board")
-    @login_required
+    @admin_required
     def board():
         biz_date = parse_date(request.args.get("date"))
         view = request.args.get("view") or "today"
@@ -997,7 +1009,9 @@ def create_app() -> Flask:
                         flash("权限设置已保存", "ok")
                     elif action == "save_broadcast":
                         compact = "1" if request.form.get("broadcast_compact") == "1" else "0"
+                        family = "1" if request.form.get("broadcast_compact_family") == "1" else "0"
                         db.set_setting(conn, "broadcast_compact", compact)
+                        db.set_setting(conn, "broadcast_compact_family", family)
                         flash("播报设置已保存", "ok")
                     elif action == "save_rules":
                         defaults = incentive.DEFAULTS
@@ -1070,6 +1084,7 @@ def create_app() -> Flask:
                 store_label=store_label,
                 filler_edit_month=db.get_setting(conn, "filler_edit_month", "0") == "1",
                 broadcast_compact=db.get_setting(conn, "broadcast_compact", "1") == "1",
+                broadcast_compact_family=db.get_setting(conn, "broadcast_compact_family", "0") == "1",
                 incentive_rules=incentive_rules(conn),
             )
     @app.context_processor
