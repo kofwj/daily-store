@@ -1,24 +1,26 @@
 {% extends "base.html" %}
 {% block title %}月度考核{% endblock %}
 {% block body %}
-<div class="card">
-  <h1>月度考核</h1>
+<div class="page-head">
+  <div class="page-title">
+    <h1>月度考核</h1>
+    <p class="muted">
+      截至 {{ as_of }}。考核的是 AI + 新用户直降。有顾问店看合计是否达标；无顾问店看两项都破 0。
+      新用户直降 = 充值 + 芝麻免充 + 储蓄卡冻结 + 全品类。顾问姓名在「设置 → 门店」填写，留空即无顾问。
+    </p>
+  </div>
   <form method="get" class="page-filters">
     <label class="filter">
       <span>月份</span>
       <input type="month" name="month" value="{{ month.strftime('%Y-%m') }}" onchange="this.form.submit()">
     </label>
   </form>
-  <p class="muted">
-    截至 {{ as_of }}。考核的是 AI + 新用户直降。有顾问店看合计是否达标；无顾问店看两项都破 0。
-    新用户直降 = 充值 + 芝麻免充 + 储蓄卡冻结 + 全品类。顾问姓名在「设置 → 门店」填写，留空即无顾问。
-  </p>
-  <div class="kpi-row">
-    <div class="kpi"><div class="muted">达标门店</div><div class="kpi-num">{{ totals.passed }} / {{ rows|length }}</div></div>
-    <div class="kpi"><div class="muted">门店奖励</div><div class="kpi-num">{{ totals.store_reward }}</div></div>
-    <div class="kpi"><div class="muted">门店扣罚</div><div class="kpi-num">{{ totals.store_penalty }}</div></div>
-    <div class="kpi"><div class="muted">顾问扣罚</div><div class="kpi-num">{{ totals.advisor_penalty }}</div></div>
-  </div>
+</div>
+<div class="kpi-row">
+  <div class="kpi"><div class="muted">达标门店</div><div class="kpi-num">{{ totals.passed }} / {{ rows|length }}</div></div>
+  <div class="kpi"><div class="muted">门店奖励</div><div class="kpi-num">{{ totals.store_reward }}</div></div>
+  <div class="kpi"><div class="muted">门店扣罚</div><div class="kpi-num">{{ totals.store_penalty }}</div></div>
+  <div class="kpi"><div class="muted">顾问扣罚</div><div class="kpi-num">{{ totals.advisor_penalty }}</div></div>
 </div>
 
 <div class="card" style="overflow:auto">

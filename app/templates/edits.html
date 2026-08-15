@@ -2,9 +2,11 @@
 {% from "_pager.html" import pager %}
 {% block title %}修改审计{% endblock %}
 {% block body %}
-<div class="card">
-  <h1>修改审计</h1>
-  <p class="muted">谁在什么时候把哪家店哪天的日报改成了什么。锁定后的修改、历史日期覆盖、删除都会记录在这里。</p>
+<div class="page-head">
+  <div class="page-title">
+    <h1>修改审计</h1>
+    <p class="muted">谁在什么时候把哪家店哪天的日报改成了什么。锁定后的修改、历史日期覆盖、删除都会记录在这里。</p>
+  </div>
   <form method="get" class="page-filters">
     <label class="filter">
       <span>近 N 天</span>

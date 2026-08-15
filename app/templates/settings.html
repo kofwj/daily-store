@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}设置{% endblock %}
 {% block body %}
+<div class="page-head"><h1>设置</h1></div>
 <div class="settings">
   <aside class="settings-nav">
     <a href="{{ url_for('settings', tab='account') }}" class="{{ 'active' if tab=='account' else '' }}">账号</a>

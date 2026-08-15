@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 {% block title %}通报表{% endblock %}
 {% block body %}
-<div class="card">
-  <h1>通报表</h1>
+<div class="page-head">
+  <div class="page-title">
+    <h1>通报表</h1>
+    <p class="muted">电脑 Chrome / Edge 点「复制图片」再回微信粘贴。手机或不支持复制时会下载图片，或长按下方预览发给微信。</p>
+  </div>
   <form method="get" class="page-filters">
     <label class="filter">
       <span>日期</span>
@@ -21,7 +24,6 @@
     <a class="btn ghost" href="{{ url_for('bulletin_csv', date=biz_date.isoformat(), city=city) }}">导出 CSV</a>
     <span class="chip" id="copyHint">可贴进微信</span>
   </form>
-  <p class="muted">电脑 Chrome / Edge 点「复制图片」再回微信粘贴。手机或不支持复制时会下载图片，或长按下方预览发给微信。</p>
 </div>
 
 <div class="card bulletin-wrap">

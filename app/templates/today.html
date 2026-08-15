@@ -2,7 +2,7 @@
 {% block title %}今日填报 · {{ store.name }}{% endblock %}
 {% block body_class %}today-page{% endblock %}
 {% block body %}
-<div class="card today-head">
+<div class="page-head today-head">
   <h1>{{ store.name }}</h1>
   <form method="get" class="page-filters">
     {% if is_admin and stores|length > 1 %}
@@ -20,30 +20,30 @@
       <input type="date" name="date" value="{{ biz_date.isoformat() }}" onchange="this.form.submit()">
     </label>
   </form>
-  {% if report %}
-  <p class="muted">已由 {{ report.submitter_name or '未知' }} 于 {{ report.submitted_at }} 提交，可覆盖保存。</p>
-  {% else %}
-  <p class="muted">只填今天的数，累自动算。上面三块是月度考核进度。</p>
-  {% endif %}
-  {% if kpi_cards %}
-  <div class="kpi-row">
-    {% for k in kpi_cards %}
-    <div class="kpi">
-      <div class="muted">{{ k.name }}</div>
-      <div class="kpi-num">{{ k.cum }}{% if k.target %} / {{ k.target }}{% endif %}</div>
-      <div class="muted">今日 {{ k.day }}{% if k.progress is not none %} · {{ '%.0f'|format(k.progress) }}%{% endif %}</div>
-    </div>
-    {% endfor %}
-    {% if forecast %}
-    <div class="kpi forecast-kpi {{ 'ok' if forecast.passed else 'bad' }}">
-      <div class="muted">预计考核 · {{ forecast.scheme }}</div>
-      <div class="kpi-num">{{ forecast.money_text }}</div>
-      <div class="muted">{{ forecast.label }} · AI {{ forecast.ai }} · 新用户直降 {{ forecast.new_cut }}{% if forecast.has_advisor %} · 合计 {{ forecast.total }}/10{% endif %}</div>
-    </div>
-    {% endif %}
+</div>
+{% if report %}
+<p class="muted">已由 {{ report.submitter_name or '未知' }} 于 {{ report.submitted_at }} 提交，可覆盖保存。</p>
+{% else %}
+<p class="muted">只填今天的数，累自动算。下面三块是月度考核进度。</p>
+{% endif %}
+{% if kpi_cards %}
+<div class="kpi-row">
+  {% for k in kpi_cards %}
+  <div class="kpi">
+    <div class="muted">{{ k.name }}</div>
+    <div class="kpi-num">{{ k.cum }}{% if k.target %} / {{ k.target }}{% endif %}</div>
+    <div class="muted">今日 {{ k.day }}{% if k.progress is not none %} · {{ '%.0f'|format(k.progress) }}%{% endif %}</div>
+  </div>
+  {% endfor %}
+  {% if forecast %}
+  <div class="kpi forecast-kpi {{ 'ok' if forecast.passed else 'bad' }}">
+    <div class="muted">预计考核 · {{ forecast.scheme }}</div>
+    <div class="kpi-num">{{ forecast.money_text }}</div>
+    <div class="muted">{{ forecast.label }} · AI {{ forecast.ai }} · 新用户直降 {{ forecast.new_cut }}{% if forecast.has_advisor %} · 合计 {{ forecast.total }}/10{% endif %}</div>
   </div>
   {% endif %}
 </div>
+{% endif %}
 
 {% if report %}
 <div class="card" id="broadcast">

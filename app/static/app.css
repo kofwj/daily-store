@@ -77,8 +77,19 @@ a:hover { color: #374151; }
 }
 
 .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 16px 64px; }
-.page-head { margin-bottom: 16px; }
-.page-head h1 { margin-bottom: 6px; }
+/* 统一页头：无框标题 + 筛选同行右对齐；有 KPI 放标题下方。 */
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.page-head > h1 { margin: 0 0 4px; }
+.page-head .page-title h1 { margin: 0 0 4px; }
+.page-head .page-title p { margin: 0; }
+.page-head .page-filters { margin: 0; }
 .card {
   background: var(--paper);
   border: 1px solid var(--line);
@@ -201,7 +212,11 @@ button.ghost:hover, .btn.ghost:hover { background: var(--accent-soft); }
 .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 14px; }
 .kpi { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fafafa; }
 .kpi-num { font-size: 20px; font-weight: 650; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
-@media (max-width: 800px) { .kpi-row { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 800px) {
+  .kpi-row { grid-template-columns: 1fr 1fr; }
+  .page-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .page-head .page-filters { width: 100%; }
+}
 .check input { width: auto; }
 
 table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -535,7 +550,6 @@ details.extra summary { cursor: pointer; font-weight: 600; }
   .profile-grid { grid-template-columns: 1fr; }
   .wrap { padding: 12px 10px calc(88px + var(--safe-bottom)); }
   h1 { font-size: 18px; }
-  .today-head h1 { font-size: 16px; line-height: 1.35; }
   .today-page textarea { min-height: 140px; }
   .desktop-save { display: none; }
   .sticky-save {
@@ -795,17 +809,8 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
 .pager-btns { display: flex; gap: 8px; }
 .pager .btn.ghost { text-decoration: none; text-align: center; }
 .pager .btn.ghost.disabled { opacity: .45; pointer-events: none; }
-.deal-records-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
 .deal-records-link { display: flex; justify-content: flex-end; }
 .deal-records-link .btn { text-decoration: none; }
-.deal-records-head h1 { margin-bottom: 4px; }
-.deal-records-head p { margin: 0; }
 .deal-records-kpis { margin: 0; }
 .records-toolbar {
   display: flex;
@@ -816,7 +821,6 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
 }
 .records-toolbar .btn { text-decoration: none; font-size: 13px; padding: 6px 12px; }
 @media (max-width: 800px) {
-  .deal-records-head { flex-direction: column; gap: 12px; }
   .deal-records-kpis { grid-template-columns: 1fr 1fr; width: 100%; }
   .deal-records-card .wrap { padding-bottom: calc(76px + var(--safe-bottom)); }
 }
