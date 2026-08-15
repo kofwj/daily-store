@@ -205,6 +205,34 @@ def test_locked_helper():
     assert db.is_locked(today_d, now=datetime(2026, 8, 14, 23, 30)) is True
 
 
+def test_month_switch_does_not_unlock_today(tmp_db, monkeypatch):
+    """开启「本月可改」后，店员也不能改『今天』锁定后的数据——本月可改只放开本月过去日。"""
+    client = _client_auth(tmp_db, monkeypatch, username="admin", pin="1234")
+    resp = client.post(
+        "/settings",
+        data={"action": "save_permissions", "tab": "permissions", "filler_edit_month": "1"},
+        follow_redirects=True,
+    )
+    assert "权限设置已保存" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        assert db.get_setting(conn, "filler_edit_month") == "1"
+    client.post("/logout")
+    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    today_d = date.today()
+    # 锁定今天
+    monkeypatch.setattr(db, "is_locked", lambda biz_date, now=None: biz_date == today_d)
+    with db.get_db() as conn:
+        sid = _store_id(conn)
+    resp = client.post(
+        "/today",
+        data={"store_id": str(sid), "date": today_d.isoformat(), "m_phone_sales": "9"},
+        follow_redirects=True,
+    )
+    assert "已锁定" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        assert db.get_report(conn, sid, today_d) is None
+
+
 def test_admin_can_fix_one_cell(tmp_db, monkeypatch):
     client = _client_auth(tmp_db, monkeypatch, username="admin", pin="1234")
     today_d = date.today()

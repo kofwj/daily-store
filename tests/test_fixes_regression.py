@@ -150,6 +150,41 @@ def test_3_open_redirect_blocked(app_client):
     assert resp.request.path == "/today"
 
 
+def test_report_ignores_inactive_metric_facts(tmp_db, monkeypatch):
+    """即使某天留下了停用指标的 day 值，报表也不能崩，应忽略。"""
+    from datetime import date as _date
+
+    app_client = _admin_client(tmp_db)
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        at = _date.today().isoformat()
+        # 停用一个指标并故意留下它的历史 day 值
+        conn.execute("UPDATE metrics SET active=0 WHERE code='watch_pack'")
+        conn.execute(
+            "INSERT OR REPLACE INTO daily_facts(biz_date, store_id, metric_code, day_value) VALUES (?,?,?,?)",
+            (at, sid, "watch_pack", 3),
+        )
+        # 再留一个当前活跃指标的 day 值
+        conn.execute(
+            "INSERT OR REPLACE INTO daily_facts(biz_date, store_id, metric_code, day_value) VALUES (?,?,?,?)",
+            (at, sid, "phone_sales", 7),
+        )
+    resp = app_client.get("/report")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "手机销量" in body
+
+
+def _admin_client(tmp_db):
+    from app.web import create_app
+
+    app = create_app()
+    app.config["TESTING"] = True
+    c = app.test_client()
+    c.post("/login", data={"username": "admin", "pin": "1234"})
+    return c
+
+
 def test_4_net_includes_advisor_penalty():
     row = judge(True, 0, 10)
     assert row["advisor_penalty"] == 100

@@ -230,13 +230,13 @@ def create_app() -> Flask:
             metrics = db.list_metrics(conn)
             if request.method == "POST":
                 filler_month = db.get_setting(conn, "filler_edit_month", "0") == "1"
+                same_month = biz_date.year == today.year and biz_date.month == today.month
                 if g.user["role"] != "admin":
-                    if biz_date != today and not (
-                        filler_month and biz_date.year == today.year and biz_date.month == today.month
-                    ):
+                    if biz_date != today and not (filler_month and same_month):
                         flash("只能改当天（管理员开启『本月可改』后可补录本月）。历史跨月需找管理员修改。", "error")
                         return redirect(url_for("today", store_id=store["id"]))
-                    if db.is_locked(biz_date) and not (filler_month and biz_date.year == today.year and biz_date.month == today.month):
+                    # 当天锁定始终生效：本月可改只解锁本月的“过去日”，不放开“今天”
+                    if db.is_locked(biz_date):
                         flash(
                             f"当天数据已锁定（{db.LOCK_HOUR:02d}:{db.LOCK_MINUTE:02d} 后不可改），找管理员解锁修改。",
                             "error",
@@ -488,6 +488,9 @@ def create_app() -> Flask:
             grid: Dict[str, Dict[str, int]] = {m["code"]: {} for m in metrics}
             totals: Dict[str, int] = {m["code"]: 0 for m in metrics}
             for row in facts:
+                # 只累计/摆放“当前活跃”指标；历史停用指标的遗留 day 值不参与报表，避免 KeyError
+                if row["metric_code"] not in totals:
+                    continue
                 grid[row["metric_code"]][row["biz_date"]] = int(row["day_value"] or 0)
                 totals[row["metric_code"]] += int(row["day_value"] or 0)
 
@@ -933,6 +936,8 @@ def create_app() -> Flask:
         if store_id and store_id.isdigit():
             where = "AND e.store_id=?"
             params.append(int(store_id))
+        # edited_at 存的是北京时间；用北京时间算窗口边界，避免 SQLite 的 UTC now 差 8 小时
+        cutoff = (datetime.now(db.TZ) - timedelta(days=days_int)).strftime("%Y-%m-%d %H:%M:%S")
         with db.get_db() as conn:
             rows = [
                 dict(r)
@@ -942,12 +947,12 @@ def create_app() -> Flask:
                     FROM report_edits e
                     JOIN stores s ON s.id=e.store_id
                     JOIN users u ON u.id=e.user_id
-                    WHERE e.edited_at >= datetime('now', '-{days_int} days')
+                    WHERE e.edited_at >= ?
                     {where}
                     ORDER BY e.id DESC
                     LIMIT 300
                     """,
-                    params,
+                    [cutoff, *params],
                 )
             ]
             all_stores = db.list_all_stores(conn)
