@@ -164,6 +164,26 @@ CREATE TABLE IF NOT EXISTS kpi_targets (
     code TEXT PRIMARY KEY,
     monthly_target INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS deal_posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    store_id INTEGER NOT NULL REFERENCES stores(id),
+    user_id INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT '',
+    biz_date TEXT NOT NULL,
+    closed INTEGER NOT NULL DEFAULT 1,
+    model TEXT NOT NULL DEFAULT '',
+    phone TEXT NOT NULL DEFAULT '',
+    spend TEXT NOT NULL DEFAULT '',
+    hall_query INTEGER NOT NULL DEFAULT 1,
+    recommend TEXT NOT NULL DEFAULT '',
+    student INTEGER NOT NULL DEFAULT 0,
+    opener TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    text TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_deal_posts_store_date ON deal_posts(store_id, biz_date);
 """
 
 
@@ -171,6 +191,7 @@ def init_db() -> None:
     with get_db() as conn:
         conn.executescript(SCHEMA)
         _ensure_store_columns(conn)
+        _ensure_deal_posts(conn)
         _ensure_app_meta(conn)
         _seed_metrics(conn)
         _seed_kpi_targets(conn)
@@ -202,6 +223,206 @@ def _ensure_store_columns(conn: sqlite3.Connection) -> None:
         except sqlite3.OperationalError as exc:
             if "duplicate column" not in str(exc).lower():
                 raise
+
+
+def _ensure_deal_posts(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS deal_posts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            store_id INTEGER NOT NULL REFERENCES stores(id),
+            user_id INTEGER REFERENCES users(id),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT '',
+            biz_date TEXT NOT NULL,
+            closed INTEGER NOT NULL DEFAULT 1,
+            model TEXT NOT NULL DEFAULT '',
+            phone TEXT NOT NULL DEFAULT '',
+            spend TEXT NOT NULL DEFAULT '',
+            hall_query INTEGER NOT NULL DEFAULT 1,
+            recommend TEXT NOT NULL DEFAULT '',
+            student INTEGER NOT NULL DEFAULT 0,
+            opener TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT '',
+            text TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    extra = {
+        "updated_at": "TEXT NOT NULL DEFAULT ''",
+        "phone": "TEXT NOT NULL DEFAULT ''",
+        "spend": "TEXT NOT NULL DEFAULT ''",
+        "hall_query": "INTEGER NOT NULL DEFAULT 1",
+        "recommend": "TEXT NOT NULL DEFAULT ''",
+        "student": "INTEGER NOT NULL DEFAULT 0",
+        "opener": "TEXT NOT NULL DEFAULT ''",
+        "note": "TEXT NOT NULL DEFAULT ''",
+        "text": "TEXT NOT NULL DEFAULT ''",
+    }
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(deal_posts)")}
+    for name, ddl in extra.items():
+        if name in cols:
+            continue
+        try:
+            conn.execute(f"ALTER TABLE deal_posts ADD COLUMN {name} {ddl}")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column" not in str(exc).lower():
+                raise
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_deal_posts_store_date ON deal_posts(store_id, biz_date)"
+    )
+
+
+def _deal_payload(
+    *,
+    user_id: int,
+    closed: bool,
+    model: str,
+    phone: str,
+    spend: str,
+    hall_query: bool,
+    recommend: str,
+    student: bool,
+    opener: str,
+    note: str,
+    text: str,
+) -> Dict[str, Any]:
+    return {
+        "user_id": user_id,
+        "closed": 1 if closed else 0,
+        "model": (model or "").strip()[:80],
+        "phone": (phone or "").strip()[:20],
+        "spend": (spend or "").strip()[:20],
+        "hall_query": 1 if hall_query else 0,
+        "recommend": (recommend or "").strip()[:80],
+        "student": 1 if student else 0,
+        "opener": (opener or "").strip()[:40],
+        "note": (note or "").strip()[:1000],
+        "text": (text or "").strip()[:2000],
+        "updated_at": _now(),
+    }
+
+
+def record_deal_post(
+    conn: sqlite3.Connection,
+    *,
+    store_id: int,
+    user_id: int,
+    closed: bool,
+    model: str = "",
+    phone: str = "",
+    spend: str = "",
+    hall_query: bool = True,
+    recommend: str = "",
+    student: bool = False,
+    opener: str = "",
+    note: str = "",
+    text: str = "",
+    deal_id: Optional[int] = None,
+    biz_date: Optional[date] = None,
+) -> int:
+    day = biz_date or today_local()
+    payload = _deal_payload(
+        user_id=user_id,
+        closed=closed,
+        model=model,
+        phone=phone,
+        spend=spend,
+        hall_query=hall_query,
+        recommend=recommend,
+        student=student,
+        opener=opener,
+        note=note,
+        text=text,
+    )
+    existing_id = None
+    if deal_id:
+        row = conn.execute(
+            "SELECT id FROM deal_posts WHERE id=? AND store_id=?",
+            (deal_id, store_id),
+        ).fetchone()
+        if row:
+            existing_id = int(row["id"])
+    if existing_id is None and payload["phone"]:
+        row = conn.execute(
+            """
+            SELECT id FROM deal_posts
+            WHERE store_id=? AND biz_date=? AND phone=?
+            ORDER BY id DESC LIMIT 1
+            """,
+            (store_id, day.isoformat(), payload["phone"]),
+        ).fetchone()
+        if row:
+            existing_id = int(row["id"])
+    if existing_id is not None:
+        conn.execute(
+            """
+            UPDATE deal_posts
+            SET user_id=:user_id, updated_at=:updated_at, closed=:closed, model=:model,
+                phone=:phone, spend=:spend, hall_query=:hall_query, recommend=:recommend,
+                student=:student, opener=:opener, note=:note, text=:text
+            WHERE id=:id
+            """,
+            {**payload, "id": existing_id},
+        )
+        return existing_id
+    cur = conn.execute(
+        """
+        INSERT INTO deal_posts(
+            store_id, user_id, created_at, updated_at, biz_date, closed, model,
+            phone, spend, hall_query, recommend, student, opener, note, text
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            store_id,
+            payload["user_id"],
+            payload["updated_at"],
+            payload["updated_at"],
+            day.isoformat(),
+            payload["closed"],
+            payload["model"],
+            payload["phone"],
+            payload["spend"],
+            payload["hall_query"],
+            payload["recommend"],
+            payload["student"],
+            payload["opener"],
+            payload["note"],
+            payload["text"],
+        ),
+    )
+    return int(cur.lastrowid)
+
+
+def deal_counts(
+    conn: sqlite3.Connection,
+    store_ids: Iterable[int],
+    start: date,
+    end: date,
+) -> Dict[int, Dict[str, int]]:
+    ids = [int(sid) for sid in store_ids]
+    out = {sid: {"total": 0, "closed": 0} for sid in ids}
+    if not ids:
+        return out
+    placeholders = ",".join("?" * len(ids))
+    rows = conn.execute(
+        f"""
+        SELECT store_id,
+               COUNT(*) AS total,
+               SUM(CASE WHEN closed=1 THEN 1 ELSE 0 END) AS closed
+        FROM deal_posts
+        WHERE store_id IN ({placeholders}) AND biz_date>=? AND biz_date<=?
+        GROUP BY store_id
+        """,
+        [*ids, start.isoformat(), end.isoformat()],
+    )
+    for row in rows:
+        out[int(row["store_id"])] = {
+            "total": int(row["total"] or 0),
+            "closed": int(row["closed"] or 0),
+        }
+    return out
 
 
 def _ensure_app_meta(conn: sqlite3.Connection) -> None:

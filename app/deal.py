@@ -75,4 +75,5 @@ def form_values(raw: Mapping[str, str] | None = None, *, posted: bool = False) -
         "show_phone": raw.get("show_phone") or "0",
         "opener": (raw.get("opener") or "").strip(),
         "note": (raw.get("note") or "").strip(),
+        "deal_id": (raw.get("deal_id") or "").strip(),
     }

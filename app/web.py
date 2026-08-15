@@ -369,8 +369,51 @@ def create_app() -> Flask:
             if request.method == "GET" and not values["opener"]:
                 values["opener"] = (g.user["display_name"] or "").strip()
             text = ""
+            today_d = db.today_local()
             if request.method == "POST":
-                text = deal.render_deal(broadcast_store_name(store), **values)
+                deal_id = request.form.get("deal_id") or values.get("deal_id") or ""
+                text = deal.render_deal(
+                    broadcast_store_name(store),
+                    **{k: v for k, v in values.items() if k != "deal_id"},
+                )
+                try:
+                    deal_id_int = int(deal_id) if deal_id else None
+                except ValueError:
+                    deal_id_int = None
+                saved_id = db.record_deal_post(
+                    conn,
+                    store_id=store["id"],
+                    user_id=g.user["id"],
+                    closed=deal.yn(values["closed"], "1", "0") == "1",
+                    model=values["model"],
+                    phone=values["phone"],
+                    spend=values["spend"],
+                    hall_query=deal.yn(values["hall_query"], "1", "0") == "1",
+                    recommend=values["recommend"],
+                    student=deal.yn(values["student"], "1", "0") == "1",
+                    opener=values["opener"],
+                    note=values["note"],
+                    text=text,
+                    deal_id=deal_id_int,
+                    biz_date=today_d,
+                )
+                values["deal_id"] = saved_id
+            month_start = today_d.replace(day=1)
+            store_ids = [s["id"] for s in stores]
+            today_counts = db.deal_counts(conn, store_ids, today_d, today_d)
+            month_counts = db.deal_counts(conn, store_ids, month_start, today_d)
+            mine_today = today_counts.get(store["id"], {"total": 0, "closed": 0})
+            mine_month = month_counts.get(store["id"], {"total": 0, "closed": 0})
+            store_stats = []
+            if g.user["role"] == "admin":
+                store_stats = [
+                    {
+                        "store": s,
+                        "today": today_counts.get(s["id"], {"total": 0, "closed": 0}),
+                        "month": month_counts.get(s["id"], {"total": 0, "closed": 0}),
+                    }
+                    for s in stores
+                ]
             return render_template(
                 "deal.html",
                 store=store,
@@ -378,6 +421,9 @@ def create_app() -> Flask:
                 form=values,
                 deal_text=text,
                 is_admin=g.user["role"] == "admin",
+                mine_today=mine_today,
+                mine_month=mine_month,
+                store_stats=store_stats,
             )
 
     @app.route("/report")

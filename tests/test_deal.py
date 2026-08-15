@@ -1,4 +1,6 @@
+from app import db
 from app.deal import form_values, render_deal
+from app.web import create_app
 
 
 def test_closed_deal_uses_short_layout():
@@ -42,3 +44,47 @@ def test_unchecked_boxes_stay_off_after_post():
 def test_show_phone_keeps_full_number():
     text = render_deal("通州金沙", phone="15514408478", show_phone="1")
     assert "15514408478" in text
+
+
+def test_deal_post_counts_by_store(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    path = tmp_path / "t.db"
+    monkeypatch.setenv("STORE_DAILY_DB", str(path))
+    monkeypatch.setenv("STORE_DAILY_DATA", str(tmp_path))
+    monkeypatch.setattr(db, "DB_PATH", Path(path))
+    monkeypatch.setattr(db, "DATA_DIR", Path(tmp_path))
+    monkeypatch.setattr(db, "is_locked", lambda *a, **k: False)
+    db.init_db()
+    app = create_app()
+    app.config["TESTING"] = True
+    client = app.test_client()
+    client.post("/login", data={"username": "admin", "pin": "1234"})
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE short_name='通州金沙'").fetchone()["id"]
+    client.post(
+        "/deal",
+        data={"store_id": str(sid), "model": "S60", "phone": "15514408478", "closed": "1", "note": "首发"},
+    )
+    client.post(
+        "/deal",
+        data={"store_id": str(sid), "model": "S60", "phone": "15514408478", "closed": "1", "note": "改过"},
+    )
+    client.post("/deal", data={"store_id": str(sid), "model": "X300", "phone": "13800001111"})
+    page = client.get(f"/deal?store_id={sid}").get_data(as_text=True)
+    assert "各店次数" in page
+    with db.get_db() as conn:
+        today = db.today_local()
+        counts = db.deal_counts(conn, [sid], today, today)
+        assert counts[sid]["total"] == 2
+        assert counts[sid]["closed"] == 1
+        rows = list(
+            conn.execute(
+                "SELECT model, phone, note, text FROM deal_posts WHERE store_id=? ORDER BY id",
+                (sid,),
+            )
+        )
+        assert len(rows) == 2
+        assert rows[0]["phone"] == "15514408478"
+        assert rows[0]["note"] == "改过"
+        assert "通州金沙" in rows[0]["text"]
