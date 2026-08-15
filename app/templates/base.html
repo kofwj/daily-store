@@ -11,13 +11,17 @@
   <header class="top">
     <div class="brand">门店日报</div>
     <nav class="nav">
+      {% if g.user['role'] != 'readonly' %}
       <a href="{{ url_for('today') }}" class="{{ 'active' if request.endpoint == 'today' else '' }}"><span class="full">今日填报</span><span class="short">填报</span></a>
       <a href="{{ url_for('deal_page') }}" class="{{ 'active' if request.endpoint == 'deal_page' else '' }}"><span class="full">成交播报</span><span class="short">成交</span></a>
       <a href="{{ url_for('deal_records') }}" class="{{ 'active' if request.endpoint == 'deal_records' else '' }}"><span class="full">成交记录</span><span class="short">记录</span></a>
+      {% endif %}
       <a href="{{ url_for('advance_page') }}" class="{{ 'active' if request.endpoint in ('advance_page', 'advance_pay') else '' }}"><span class="full">垫资</span><span class="short">垫资</span></a>
       <a href="{{ url_for('report') }}" class="{{ 'active' if request.endpoint == 'report' else '' }}">报表</a>
-      {% if g.user['role'] == 'admin' %}
+      {% if g.user['role'] in ('admin', 'readonly') %}
       <a href="{{ url_for('bulletin_page') }}" class="{{ 'active' if request.endpoint == 'bulletin_page' else '' }}"><span class="full">通报表</span><span class="short">通报</span></a>
+      {% endif %}
+      {% if g.user['role'] == 'admin' %}
       <a href="{{ url_for('board') }}" class="{{ 'active' if request.endpoint == 'board' else '' }}">多店看板</a>
       <a href="{{ url_for('incentive_page') }}" class="{{ 'active' if request.endpoint == 'incentive_page' else '' }}"><span class="full">月度考核</span><span class="short">考核</span></a>
       <a href="{{ url_for('edits_page') }}" class="{{ 'active' if request.endpoint == 'edits_page' else '' }}"><span class="full">修改审计</span><span class="short">审计</span></a>

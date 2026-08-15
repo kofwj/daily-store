@@ -74,6 +74,32 @@ def admin_required(fn):
     return wrapper
 
 
+def readonly_required(fn):
+    """管理员或只读角色（店长/区域经理）可访问；店员无权。"""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if g.user is None:
+            return redirect(url_for("login", next=request.path))
+        if g.user["role"] not in ("admin", "readonly"):
+            flash("需要管理员或只读权限", "error")
+            return redirect(url_for("today"))
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def viewer_only(fn):
+    """只读角色不能写（填报/成交/垫资提交），访问页面时直接挡住。"""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if g.user is not None and g.user["role"] == "readonly":
+            flash("只读账号不能填写或修改数据", "error")
+            return redirect(url_for("report"))
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
 def store_label(store) -> str:
     if store is None:
         return ""

@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT NOT NULL UNIQUE,
     display_name TEXT NOT NULL,
     pin_hash TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('admin', 'filler')),
+    role TEXT NOT NULL CHECK (role IN ('admin', 'filler', 'readonly')),
+    scope TEXT NOT NULL DEFAULT '',
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
 );
@@ -154,6 +155,7 @@ MIGRATIONS: List[Tuple[int, str, callable]] = [
     # 旧版在每次启动 seed 里搬数据；改为一次性迁移，避免生产重启反复重做
     (1, "retire_legacy_coin_cut", "_retire_legacy_coin_cut"),
     (2, "split_new_user_coin_cut", "_split_new_user_coin_cut"),
+    (3, "expand_user_roles_readonly", "_expand_user_roles_readonly"),
 ]
 
 def _now() -> str:
@@ -200,45 +202,51 @@ def init_db() -> None:
     with get_db() as conn:
         conn.executescript(SCHEMA)
         _ensure_store_columns(conn)
+        _ensure_user_columns(conn)
         _ensure_deal_posts(conn)
         _ensure_deal_edits(conn)
         _ensure_advance_posts(conn)
         _ensure_app_meta(conn)
-        # 种子（建表/加列/回填默认）每次幂等执行即可；真正“动数据”的迁移走 migrate() 只跑一次
+        # 种子（建表/加列/回填默认）每次幂等执行即可；真正“动数据”的迁移走 migrate() 一次
         _seed_metrics(conn)
         _seed_kpi_targets(conn)
         _seed_catalog_stores(conn)
         _seed_defaults(conn)
         _reset_filler_pins_once(conn)
-        migrate(conn)
+    migrate()
 
-def migrate(conn: sqlite3.Connection) -> None:
-    """执行尚未跑过的数据迁移，并记录版本。仅在 init_db 内调用。"""
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS schema_migrations (
-            version INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            applied_at TEXT NOT NULL
-        )
-        """
-    )
-    applied = {int(row["version"]) for row in conn.execute("SELECT version FROM schema_migrations")}
-    fns: Dict[str, callable] = {
-        "_retire_legacy_coin_cut": _retire_legacy_coin_cut,
-        "_split_new_user_coin_cut": _split_new_user_coin_cut,
-    }
-    for version, name, fn_name in sorted(MIGRATIONS):
-        if version in applied:
-            continue
-        fn = fns.get(fn_name)
-        if fn is None:
-            raise RuntimeError(f"迁移 {version} {fn_name} 未注册")
-        fn(conn)
+def migrate() -> None:
+    """执行尚未跑过的数据迁移，并记录版本。独立连接，可在表重建前关外键/开旧式 ALTER。"""
+    with get_db() as conn:
+        # get_db 刚连上还没开写事务，这里改 pragma 即时生效
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.execute("PRAGMA legacy_alter_table=ON")
         conn.execute(
-            "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
-            (version, name, _now()),
+            """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            )
+            """
         )
+        applied = {int(row["version"]) for row in conn.execute("SELECT version FROM schema_migrations")}
+        fns: Dict[str, callable] = {
+            "_retire_legacy_coin_cut": _retire_legacy_coin_cut,
+            "_split_new_user_coin_cut": _split_new_user_coin_cut,
+            "_expand_user_roles_readonly": _expand_user_roles_readonly,
+        }
+        for version, name, fn_name in sorted(MIGRATIONS):
+            if version in applied:
+                continue
+            fn = fns.get(fn_name)
+            if fn is None:
+                raise RuntimeError(f"迁移 {version} {fn_name} 未注册")
+            fn(conn)
+            conn.execute(
+                "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+                (version, name, _now()),
+            )
 
 def _ensure_store_columns(conn: sqlite3.Connection) -> None:
     extra = {
@@ -265,6 +273,16 @@ def _ensure_store_columns(conn: sqlite3.Connection) -> None:
         except sqlite3.OperationalError as exc:
             if "duplicate column" not in str(exc).lower():
                 raise
+
+def _ensure_user_columns(conn: sqlite3.Connection) -> None:
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    if "scope" not in cols:
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN scope TEXT NOT NULL DEFAULT ''")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column" not in str(exc).lower():
+                raise
+
 
 def _ensure_deal_posts(conn: sqlite3.Connection) -> None:
     conn.execute(
@@ -365,6 +383,55 @@ def _ensure_advance_posts(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_advance_posts_paid ON advance_posts(paid, biz_date)"
     )
+
+
+def _expand_user_roles_readonly(conn: sqlite3.Connection) -> None:
+    """给 users 打开 readonly 角色并加 scope 列：重建表最稳，避免旧 CHECK 挡住新角色。
+
+    外键 user_stores.references(users) 按表名解析，重建回退名 users 后依然指向同名表。
+    """
+    _ensure_user_columns(conn)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    exists_scope = "scope" in cols
+    # 检查旧 CHECK 是否已包含 readonly（新库/已迁移库直接跳过重建）
+    sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").fetchone()
+    if sql and "'readonly'" in (sql["sql"] or ""):
+        return
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute("DROP TABLE IF EXISTS users_old")
+    conn.execute("ALTER TABLE users RENAME TO users_old")
+    conn.execute(
+        """
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            pin_hash TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('admin', 'filler', 'readonly')),
+            scope TEXT NOT NULL DEFAULT '',
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    if exists_scope:
+        conn.execute(
+            """
+            INSERT INTO users(id, username, display_name, pin_hash, role, scope, active, created_at)
+            SELECT id, username, display_name, pin_hash, role, scope, active, created_at FROM users_old
+            """
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO users(id, username, display_name, pin_hash, role, scope, active, created_at)
+            SELECT id, username, display_name, pin_hash, role, '', active, created_at FROM users_old
+            """
+        )
+    # 重置 sqlite 自增序列，避免新用户 id 撞旧值
+    conn.execute("DELETE FROM sqlite_sequence WHERE name='users'")
+    conn.execute("DROP TABLE users_old")
+    conn.execute("PRAGMA foreign_keys=ON")
 
 
 def _ensure_app_meta(conn: sqlite3.Connection) -> None:
@@ -713,6 +780,16 @@ def get_user_by_username(conn: sqlite3.Connection, username: str) -> Optional[sq
 def list_user_stores(conn: sqlite3.Connection, user: sqlite3.Row) -> List[sqlite3.Row]:
     if user["role"] == "admin":
         return list(conn.execute("SELECT * FROM stores WHERE active=1 ORDER BY sort_order, id"))
+    if user["role"] == "readonly":
+        scope = (user["scope"] or "").strip() if "scope" in user.keys() else ""
+        if scope:
+            # 区域经理：看同一区域经理名下的店
+            return list(
+                conn.execute(
+                    "SELECT * FROM stores WHERE area_manager=? AND active=1 ORDER BY sort_order, id",
+                    (scope,),
+                )
+            )
     return list(
         conn.execute(
             """
@@ -729,6 +806,14 @@ def user_can_access_store(conn: sqlite3.Connection, user: sqlite3.Row, store_id:
     if user["role"] == "admin":
         row = conn.execute("SELECT id FROM stores WHERE id=? AND active=1", (store_id,)).fetchone()
         return row is not None
+    if user["role"] == "readonly":
+        scope = (user["scope"] or "").strip() if "scope" in user.keys() else ""
+        if scope:
+            row = conn.execute(
+                "SELECT 1 FROM stores WHERE id=? AND area_manager=? AND active=1",
+                (store_id, scope),
+            ).fetchone()
+            return row is not None
     row = conn.execute(
         "SELECT 1 FROM user_stores WHERE user_id=? AND store_id=?",
         (user["id"], store_id),
@@ -892,15 +977,16 @@ def create_user(
     pin: str,
     role: str,
     store_ids: Iterable[int],
+    scope: str = "",
 ) -> int:
-    if role not in ("admin", "filler"):
+    if role not in ("admin", "filler", "readonly"):
         raise ValueError("role")
     conn.execute(
         """
-        INSERT INTO users(username, display_name, pin_hash, role, active, created_at)
-        VALUES (?, ?, ?, ?, 1, ?)
+        INSERT INTO users(username, display_name, pin_hash, role, scope, active, created_at)
+        VALUES (?, ?, ?, ?, ?, 1, ?)
         """,
-        (username.strip(), display_name.strip(), hash_pin(pin), role, _now()),
+        (username.strip(), display_name.strip(), hash_pin(pin), role, scope.strip(), _now()),
     )
     user_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
     for store_id in store_ids:
@@ -909,6 +995,9 @@ def create_user(
             (user_id, int(store_id)),
         )
     return user_id
+
+def set_user_scope(conn: sqlite3.Connection, user_id: int, scope: str) -> None:
+    conn.execute("UPDATE users SET scope=? WHERE id=?", (scope.strip(), user_id))
 
 def update_user_pin(conn: sqlite3.Connection, user_id: int, pin: str) -> None:
     conn.execute("UPDATE users SET pin_hash=? WHERE id=?", (hash_pin(pin), user_id))

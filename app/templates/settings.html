@@ -164,15 +164,29 @@
             <tr class="{{ 'off' if not u.active else '' }}">
               <td class="left">{{ u.display_name }}</td>
               <td class="left"><code>{{ u.username }}</code></td>
-              <td>{{ '管理员' if u.role=='admin' else '填报员' }}{% if not u.active %} · 已停用{% endif %}</td>
+              <td>
+                {% if u.role == 'admin' %}管理员
+                {% elif u.role == 'readonly' %}{{ '区域经理' if (u.scope or '') else '店长(只读)' }}
+                {% else %}填报员{% endif %}{% if not u.active %} · 已停用{% endif %}
+              </td>
               <td class="left">
                 {% if u.role == 'admin' %}
                 <span class="muted">全部门店</span>
+                {% elif u.role == 'readonly' and (u.scope or '') %}
+                <form method="post" class="inline-store">
+                  <input type="hidden" name="action" value="set_stores">
+                  <input type="hidden" name="tab" value="people">
+                  <input type="hidden" name="user_id" value="{{ u.id }}">
+                  <input type="hidden" name="bind" value="area">
+                  <input name="scope" value="{{ u.scope }}" placeholder="区域经理姓名" autocomplete="off" class="area-scope">
+                  <button class="ghost" type="submit">存</button>
+                </form>
                 {% else %}
                 <form method="post" class="inline-store">
                   <input type="hidden" name="action" value="set_stores">
                   <input type="hidden" name="tab" value="people">
                   <input type="hidden" name="user_id" value="{{ u.id }}">
+                  {% if u.role == 'readonly' %}<input type="hidden" name="bind" value="store">{% endif %}
                   <select name="store_ids" onchange="this.form.submit()">
                     <option value="">未分配</option>
                     {% for s in stores %}
@@ -211,25 +225,64 @@
 
     <div class="card">
       <h2>添加人员</h2>
-      <form method="post" class="add-user">
+      <p class="muted">填报员绑一家店可填报；店长绑一家店、区域经理绑区域姓名，只读可看本店/本区域报表、通报、垫资。</p>
+      <form method="post" class="add-user" id="addUserForm">
         <input type="hidden" name="action" value="add_user">
         <input type="hidden" name="tab" value="people">
-        <input type="hidden" name="role" value="filler">
-        <p><label>账号</label><input name="username" required maxlength="8" placeholder="不超过 8 位"></p>
-        <p><label>显示名</label><input name="display_name" required placeholder="如 如皋宁海路"></p>
-        <p><label>口令</label><input name="pin" type="password" inputmode="numeric" required minlength="6" placeholder="6 位"></p>
         <p>
-          <label>门店</label>
-          <select name="store_ids" required>
-            <option value="" disabled selected>选择门店</option>
-            {% for s in stores %}
-            <option value="{{ s.id }}">{{ store_label(s) }}</option>
-            {% endfor %}
+          <label>角色</label>
+          <select name="role" id="addRole">
+            <option value="filler">填报员（可填日报/成交/垫资）</option>
+            <option value="readonly">只读 · 店长（看本店）</option>
+            <option value="readonly" class="ro-area">只读 · 区域经理（看本区域）</option>
           </select>
         </p>
-        <p class="add-user-action"><button type="submit">添加填报员</button></p>
+        <p><label>账号（姓名全拼）</label><input name="username" required placeholder="zhangsan" autocomplete="off"></p>
+        <p><label>显示名</label><input name="display_name" required placeholder="张三" autocomplete="off"></p>
+        <p><label>口令</label><input name="pin" type="password" inputmode="numeric" required minlength="6" placeholder="6 位"></p>
+        <div id="addStoreField">
+          <p>
+            <label>门店</label>
+            <select name="store_ids" required>
+              <option value="" disabled selected>选择门店</option>
+              {% for s in stores %}
+              <option value="{{ s.id }}">{{ store_label(s) }}</option>
+              {% endfor %}
+            </select>
+          </p>
+        </div>
+        <div id="addAreaField" style="display:none">
+          <p>
+            <label>区域经理姓名</label>
+            <input name="scope" placeholder="如 黄雍青、赵家才" autocomplete="off">
+            <input type="hidden" name="bind" value="area">
+          </p>
+        </div>
+        <p class="add-user-action"><button type="submit">添加</button></p>
       </form>
     </div>
+    <script>
+    (function () {
+      var role = document.getElementById('addRole');
+      var storeField = document.getElementById('addStoreField');
+      var areaField = document.getElementById('addAreaField');
+      var bind = areaField.querySelector('[name="bind"]');
+      function sync() {
+        var v = role.value;
+        var isArea = role.options[role.selectedIndex] && role.options[role.selectedIndex].classList.contains('ro-area');
+        if (v === 'readonly' && isArea) {
+          storeField.style.display = 'none';
+          areaField.style.display = '';
+          bind.value = 'area';
+        } else {
+          storeField.style.display = '';
+          areaField.style.display = 'none';
+          bind.value = '';
+        }
+      }
+      if (role) { role.addEventListener('change', sync); sync(); }
+    })();
+    </script>
     {% endif %}
 
     {% if tab == 'targets' and g.user['role'] == 'admin' %}

@@ -11,7 +11,7 @@
       {% endif %}
     </div>
     <form method="get" class="page-filters">
-      {% if g.user['role'] == 'admin' and stores|length > 1 %}
+      {% if stores|length > 1 %}
       <label class="filter">
         <span>门店</span>
         <select name="store_id" onchange="this.form.submit()">

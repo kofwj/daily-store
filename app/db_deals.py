@@ -148,6 +148,10 @@ def record_deal_post(
             (deal_id, store_id),
         ).fetchone()
         if row:
+            from .deal import is_today_deal
+
+            if not is_today_deal(row, day):
+                raise ValueError("past_deal_locked")
             existing_id = int(row["id"])
             existing_row = row
     if existing_id is None and payload["phone"]:
@@ -296,6 +300,10 @@ def delete_deal_post(
         (deal_id, store_id),
     ).fetchone()
     if row is None:
+        return False
+    from .deal import is_today_deal
+
+    if not is_today_deal(row, today_local()):
         return False
     conn.execute(
         "DELETE FROM deal_posts WHERE id=? AND store_id=?",

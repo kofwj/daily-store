@@ -18,6 +18,7 @@ from .helpers import (
     incentive_rules,
     pagination,
     parse_date,
+    readonly_required,
     store_forecast,
     store_label,
     values_for_broadcast,
@@ -238,7 +239,7 @@ def register_admin(app) -> None:
         return xlsx_response(xlsx_bytes(header, data_rows, sheet="多店看板"), filename)
 
     @app.route("/bulletin")
-    @admin_required
+    @readonly_required
     def bulletin_page():
         biz_date = parse_date(request.args.get("date"))
         city = (request.args.get("city") or "").strip()
@@ -434,7 +435,7 @@ def register_admin(app) -> None:
         )
 
     @app.route("/bulletin.xlsx")
-    @admin_required
+    @readonly_required
     def bulletin_xlsx():
         """通报表导出为真实 Excel（.xlsx）。保留旧 /bulletin.csv 作为兼容别名。"""
         biz_date = parse_date(request.args.get("date"))
@@ -453,7 +454,7 @@ def register_admin(app) -> None:
             )
 
     @app.route("/bulletin.csv")
-    @admin_required
+    @readonly_required
     def bulletin_csv():
         """旧 CSV 兼容别名：重定向到新 .xlsx。"""
         from flask import redirect as _redirect

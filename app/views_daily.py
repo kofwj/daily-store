@@ -36,6 +36,9 @@ def register_daily(app) -> None:
             today = db.today_local()
             metrics = db.list_metrics(conn)
             if request.method == "POST":
+                if g.user["role"] == "readonly":
+                    flash("只读账号不能填日报", "error")
+                    return redirect(url_for("report", store_id=store["id"]))
                 filler_month = db.get_setting(conn, "filler_edit_month", "0") == "1"
                 same_month = biz_date.year == today.year and biz_date.month == today.month
                 if g.user["role"] != "admin":
@@ -175,6 +178,7 @@ def register_daily(app) -> None:
             )
             text = ""
             today_d = db.today_local()
+            editable = True
             if request.method == "GET":
                 raw_deal_id = request.args.get("deal_id") or ""
                 try:
@@ -185,19 +189,34 @@ def register_daily(app) -> None:
                     row = db.get_deal_post(conn, edit_id, store["id"])
                     if row:
                         values = deal.form_from_row(row)
-                        text = row["text"] or ""
+                        text = row["text"] or deal.render_deal(
+                            broadcast_store_name(store),
+                            **{k: v for k, v in values.items() if k != "deal_id"},
+                        )
+                        editable = deal.is_today_deal(row, today_d)
                 if not values["opener"]:
                     values["opener"] = (g.user["display_name"] or "").strip()
             if request.method == "POST":
+                if g.user["role"] == "readonly":
+                    flash("只读账号不能填成交播报", "error")
+                    return redirect(url_for("deal_records", store_id=store["id"]))
                 deal_id = request.form.get("deal_id") or values.get("deal_id") or ""
-                text = deal.render_deal(
-                    broadcast_store_name(store),
-                    **{k: v for k, v in values.items() if k != "deal_id"},
-                )
                 try:
                     deal_id_int = int(deal_id) if deal_id else None
                 except ValueError:
                     deal_id_int = None
+                existing = (
+                    db.get_deal_post(conn, deal_id_int, store["id"]) if deal_id_int else None
+                )
+                if existing is not None and not deal.is_today_deal(existing, today_d):
+                    flash("往日成交只能查看，不能改。", "error")
+                    return redirect(
+                        url_for("deal_page", store_id=store["id"], deal_id=deal_id_int)
+                    )
+                text = deal.render_deal(
+                    broadcast_store_name(store),
+                    **{k: v for k, v in values.items() if k != "deal_id"},
+                )
                 saved_id = db.record_deal_post(
                     conn,
                     store_id=store["id"],
@@ -216,6 +235,7 @@ def register_daily(app) -> None:
                     biz_date=today_d,
                 )
                 values["deal_id"] = saved_id
+                editable = True
             month_start = today_d.replace(day=1)
             store_ids = [s["id"] for s in stores]
             today_counts = db.deal_counts(conn, store_ids, today_d, today_d)
@@ -231,6 +251,7 @@ def register_daily(app) -> None:
                 is_admin=g.user["role"] == "admin",
                 mine_today=mine_today,
                 mine_month=mine_month,
+                editable=editable,
             )
 
     @app.route("/deal/delete", methods=["POST"])
@@ -246,7 +267,12 @@ def register_daily(app) -> None:
         with db.get_db() as conn:
             if not db.user_can_access_store(conn, g.user, sid):
                 return Response("forbidden", status=403)
-            if db.delete_deal_post(conn, did, sid, user_id=g.user["id"]):
+            row = db.get_deal_post(conn, did, sid)
+            if row is None:
+                flash("这条记录不存在，或已删除。", "error")
+            elif not deal.is_today_deal(row, db.today_local()):
+                flash("往日成交只能查看，不能删。", "error")
+            elif db.delete_deal_post(conn, did, sid, user_id=g.user["id"]):
                 flash("已删除该成交播报。", "ok")
             else:
                 flash("这条记录不存在，或已删除。", "error")
@@ -289,6 +315,7 @@ def register_daily(app) -> None:
                 total=total,
                 start=start,
                 end=today_d,
+                today=today_d.isoformat(),
                 mine_today=mine_today,
                 mine_month=mine_month,
             )

@@ -7,7 +7,7 @@
     <p class="muted">本月垫资记在本页下方。未兑付的点「改」或「删」就能纠错；管理员兑付后会锁住，填错了让管理员取消兑付再改。</p>
   </div>
   <form method="get" class="page-filters">
-    {% if is_admin and stores|length > 1 %}
+    {% if stores|length > 1 %}
     <label class="filter">
       <span>门店</span>
       <select name="store_id" onchange="this.form.submit()">
@@ -30,6 +30,7 @@
 </div>
 
 <form method="post" class="card advance-form">
+  {% if is_viewer %}{% else %}
   <input type="hidden" name="store_id" value="{{ store.id }}">
   <input type="hidden" name="advance_id" value="{{ form.advance_id }}">
   <div class="deal-grid">
@@ -65,6 +66,7 @@
     {% endif %}
   </div>
 </form>
+{% endif %}
 
 <div class="card deal-records">
   <div class="records-toolbar">
@@ -106,15 +108,17 @@
             {% endif %}
           </td>
           <td class="right">
-            {% if not r.paid %}
+            {% if not r.paid and not is_viewer %}
             <a class="btn ghost" href="{{ url_for('advance_page', store_id=store.id, advance_id=r.id) }}">改</a>
             <form method="post" action="{{ url_for('advance_delete') }}" onsubmit="return confirm('删除这笔垫资？')">
               <input type="hidden" name="store_id" value="{{ store.id }}">
               <input type="hidden" name="advance_id" value="{{ r.id }}">
               <button class="ghost del-day" type="submit">删</button>
             </form>
-            {% else %}
+            {% elif r.paid %}
             <span class="muted">已锁</span>
+            {% else %}
+            <span class="muted">只读</span>
             {% endif %}
           </td>
         </tr>
@@ -146,15 +150,17 @@
       </div>
       {% if r.note %}<p class="muted advance-card-note">{{ r.note }}</p>{% endif %}
       <div class="advance-card-actions">
-        {% if not r.paid %}
+        {% if not r.paid and not is_viewer %}
         <a class="btn ghost" href="{{ url_for('advance_page', store_id=store.id, advance_id=r.id) }}">改</a>
         <form method="post" action="{{ url_for('advance_delete') }}" onsubmit="return confirm('删除这笔垫资？')">
           <input type="hidden" name="store_id" value="{{ store.id }}">
           <input type="hidden" name="advance_id" value="{{ r.id }}">
           <button class="ghost del-day" type="submit">删</button>
         </form>
-        {% else %}
+        {% elif r.paid %}
         <span class="muted">{{ r.paid_at }} 已锁</span>
+        {% else %}
+        <span class="muted">只读</span>
         {% endif %}
       </div>
     </article>

@@ -19,6 +19,7 @@ from .helpers import (
     pagination,
     parse_date,
     pick_store,
+    viewer_only,
     xlsx_response,
 )
 
@@ -53,7 +54,7 @@ def _empty_form(today: date) -> Dict[str, str]:
     }
 
 
-def _render_advance(conn, store, stores, form, is_admin, today_d):
+def _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d):
     month = today_d.replace(day=1)
     month_end = _month_end(month)
     rows = db.list_advances(
@@ -69,6 +70,7 @@ def _render_advance(conn, store, stores, form, is_admin, today_d):
         stores=stores,
         form=form,
         is_admin=is_admin,
+        is_viewer=is_viewer,
         rows=rows,
         month=month,
         totals=totals,
@@ -86,6 +88,7 @@ def register_advance(app) -> None:
                 return render_template("empty.html")
             today_d = db.today_local()
             is_admin = g.user["role"] == "admin"
+            is_viewer = g.user["role"] == "readonly"
             form = _empty_form(today_d)
             if request.method == "GET":
                 raw_id = request.args.get("advance_id") or ""
@@ -98,6 +101,9 @@ def register_advance(app) -> None:
                     if row:
                         form = _form_from_row(row)
             if request.method == "POST":
+                if is_viewer:
+                    flash("只读账号不能填垫资，联系管理员。", "error")
+                    return redirect(url_for("advance_page", store_id=store["id"]))
                 raw_id = request.form.get("advance_id") or ""
                 try:
                     aid = int(raw_id) if raw_id else None
@@ -128,10 +134,10 @@ def register_advance(app) -> None:
                     return redirect(url_for("advance_page", store_id=store["id"]))
                 if not is_admin and not phone:
                     flash("门店填写垫资必须带号码。", "error")
-                    return _render_advance(conn, store, stores, form, is_admin, today_d)
+                    return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
                 if not db.money_ok(broadband, rebate, other):
                     flash("三类金额至少填一项。", "error")
-                    return _render_advance(conn, store, stores, form, is_admin, today_d)
+                    return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
                 try:
                     db.record_advance(
                         conn,
@@ -153,10 +159,10 @@ def register_advance(app) -> None:
                     return redirect(url_for("advance_page", store_id=store["id"]))
                 flash("垫资已保存，可在下方本月记录里核对；填错了点「改」。", "ok")
                 return redirect(url_for("advance_page", store_id=store["id"]))
-            return _render_advance(conn, store, stores, form, is_admin, today_d)
+            return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
 
     @app.route("/advance/delete", methods=["POST"])
-    @login_required
+    @viewer_only
     def advance_delete():
         store_id = request.form.get("store_id") or ""
         advance_id = request.form.get("advance_id") or ""

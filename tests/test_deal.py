@@ -265,6 +265,72 @@ def test_edits_page_filters_by_kind(tmp_db):
     assert "日报" in page and "成交" in page
 
 
+def test_past_deal_is_readonly(client):
+    """当天成交可改可删；往日成交只能看。"""
+    from datetime import timedelta
+
+    client.post("/login", data={"username": "admin", "pin": "1234"})
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE short_name='通州金沙'").fetchone()["id"]
+        uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        today = db.today_local()
+        yesterday = today - timedelta(days=1)
+        past_id = db.record_deal_post(
+            conn,
+            store_id=sid,
+            user_id=uid,
+            closed=True,
+            model="昨日机",
+            phone="13900001111",
+            note="昨天的",
+            biz_date=yesterday,
+        )
+        today_id = db.record_deal_post(
+            conn,
+            store_id=sid,
+            user_id=uid,
+            closed=True,
+            model="今日机",
+            phone="13900002222",
+            note="今天的",
+            biz_date=today,
+        )
+    past_page = client.get(f"/deal?store_id={sid}&deal_id={past_id}").get_data(as_text=True)
+    assert "往日成交只能查看" in past_page
+    assert "昨日机" in past_page
+    assert 'name="model"' not in past_page
+    assert "生成播报" not in past_page
+    today_page = client.get(f"/deal?store_id={sid}&deal_id={today_id}").get_data(as_text=True)
+    assert "生成播报" in today_page
+    assert "今日机" in today_page
+    blocked = client.post(
+        "/deal",
+        data={
+            "store_id": str(sid),
+            "deal_id": str(past_id),
+            "model": "改不了",
+            "phone": "13900001111",
+            "note": "不该写进去",
+        },
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "往日成交只能查看，不能改" in blocked
+    rec = client.get(f"/deal/records?store_id={sid}&days=7").get_data(as_text=True)
+    assert "只读" in rec
+    gone = client.post(
+        "/deal/delete",
+        data={"store_id": str(sid), "deal_id": str(past_id)},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "往日成交只能查看，不能删" in gone
+    with db.get_db() as conn:
+        still = conn.execute("SELECT model, note FROM deal_posts WHERE id=?", (past_id,)).fetchone()
+        assert still["model"] == "昨日机"
+        assert still["note"] == "昨天的"
+        assert db.delete_deal_post(conn, today_id, sid, user_id=uid)
+        assert db.delete_deal_post(conn, past_id, sid, user_id=uid) is False
+
+
 def test_deal_diff_formats_bool_fields():
     text = deal_diff(
         {"closed": False, "hall_query": True, "student": False, "model": "S60"},

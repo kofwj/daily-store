@@ -5,7 +5,7 @@
 <div class="page-head">
   <div class="page-title">
     <h1>成交记录</h1>
-    <p class="muted">每成交一单填一次，点一单可改、再复制。号码默认打码。</p>
+    <p class="muted">当天的可以点进去改、再复制；往日的只能查看。号码默认打码。</p>
   </div>
   <form method="get" class="page-filters">
     {% if is_admin and stores|length > 1 %}
@@ -69,11 +69,15 @@
           <td><span class="status {{ 'done' if r.closed else 'wait' }}">{{ '成交' if r.closed else '未成交' }}</span></td>
           {% if is_admin %}
           <td class="right">
+            {% if r.biz_date == today %}
             <form method="post" action="{{ url_for('deal_delete') }}" onsubmit="return confirm('删除这条成交播报？此操作不可恢复。')">
               <input type="hidden" name="store_id" value="{{ store.id }}">
               <input type="hidden" name="deal_id" value="{{ r.id }}">
               <button class="ghost del-day" type="submit" title="删除">删</button>
             </form>
+            {% else %}
+            <span class="muted">只读</span>
+            {% endif %}
           </td>
           {% endif %}
         </tr>

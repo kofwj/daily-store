@@ -124,10 +124,21 @@ def register_settings(app) -> None:
                         display = (request.form.get("display_name") or "").strip()
                         pin = request.form.get("pin") or ""
                         role = request.form.get("role") or "filler"
-                        store_ids = [int(x) for x in request.form.getlist("store_ids")]
+                        if role not in ("filler", "readonly"):
+                            raise ValueError("只支持填报员或只读账号")
+                        scope = ""
+                        if role == "readonly" and request.form.get("bind") == "area":
+                            scope = (request.form.get("scope") or "").strip()
+                            if not scope:
+                                raise ValueError("区域经理没填区域经理姓名")
+                            store_ids = []
+                        else:
+                            store_ids = [int(x) for x in request.form.getlist("store_ids")]
+                            if role == "readonly" and not store_ids:
+                                raise ValueError("店长要选一家店")
                         if not username or not display or not pin:
                             raise ValueError("账号、姓名、口令都要填")
-                        min_len = db.FILLER_PIN_MIN if role == "filler" else db.ADMIN_PIN_MIN
+                        min_len = db.FILLER_PIN_MIN
                         if len(pin) < min_len:
                             raise ValueError(f"口令至少 {min_len} 位")
                         db.create_user(
@@ -137,6 +148,7 @@ def register_settings(app) -> None:
                             pin=pin,
                             role=role,
                             store_ids=store_ids,
+                            scope=scope,
                         )
                         flash("人员已加", "ok")
                     elif action == "reset_pin":
@@ -150,13 +162,22 @@ def register_settings(app) -> None:
                         flash("口令已改", "ok")
                     elif action == "set_stores":
                         uid = int(request.form.get("user_id") or 0)
-                        target = conn.execute("SELECT role FROM users WHERE id=?", (uid,)).fetchone()
+                        target = conn.execute("SELECT role, scope FROM users WHERE id=?", (uid,)).fetchone()
                         if target is None:
                             raise ValueError("查无此人")
                         if target["role"] == "admin":
                             raise ValueError("管理员无需分配门店")
-                        store_ids = [int(x) for x in request.form.getlist("store_ids") if str(x).strip().isdigit()]
-                        db.set_user_stores(conn, uid, store_ids)
+                        if target["role"] == "readonly" and request.form.get("bind") == "area":
+                            scope = (request.form.get("scope") or "").strip()
+                            if not scope:
+                                raise ValueError("区域经理没填区域经理姓名")
+                            db.set_user_scope(conn, uid, scope)
+                            db.set_user_stores(conn, uid, [])
+                        else:
+                            store_ids = [int(x) for x in request.form.getlist("store_ids") if str(x).strip().isdigit()]
+                            db.set_user_stores(conn, uid, store_ids)
+                            if target["role"] == "readonly":
+                                db.set_user_scope(conn, uid, "")
                         flash("门店权限已改", "ok")
                     elif action == "toggle_user":
                         uid = int(request.form.get("user_id") or 0)
@@ -250,12 +271,18 @@ def register_settings(app) -> None:
                 sids = user_map.get(u["id"]) or []
                 assigned = [store_by_id[sid] for sid in sids if sid in store_by_id]
                 labels = [store_label(s) for s in assigned]
+                if u["role"] == "readonly" and (u["scope"] or "").strip():
+                    store_view = "区域经理：" + (u["scope"] or "").strip()
+                elif u["role"] == "admin":
+                    store_view = "全部门店"
+                else:
+                    store_view = "、".join(labels) if labels else "未分配"
                 people.append(
                     {
                         "user": u,
                         "store_ids": sids,
                         "store_id": sids[0] if sids else 0,
-                        "store_label": "全部门店" if u["role"] == "admin" else ("、".join(labels) if labels else "未分配"),
+                        "store_label": store_view,
                     }
                 )
             return render_template(

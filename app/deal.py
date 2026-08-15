@@ -2,11 +2,24 @@
 
 from __future__ import annotations
 
-from typing import Mapping
+from datetime import date
+from typing import Any, Mapping
 
 
 def yn(value: str, yes: str, no: str) -> str:
     return yes if str(value or "").strip() in {"1", "是", "yes", "true", "Y"} else no
+
+
+def is_today_deal(row: Any, today: date) -> bool:
+    """只有业务日是当天的成交才能改/删。"""
+    biz = ""
+    if row is None:
+        return False
+    if hasattr(row, "keys") and "biz_date" in row.keys():
+        biz = str(row["biz_date"] or "")
+    elif isinstance(row, Mapping):
+        biz = str(row.get("biz_date") or "")
+    return biz[:10] == today.isoformat()
 
 
 def mask_phone(phone: str, *, hide_tail: bool = True) -> str:

@@ -224,7 +224,7 @@ def test_login_and_save_roundtrip(tmp_db):
     assert deal_page.status_code == 200
     assert "成交播报".encode("utf-8") in deal_page.data
     sheet = client.get("/bulletin", follow_redirects=True)
-    assert "需要管理员权限".encode("utf-8") in sheet.data
+    assert "需要管理员或只读权限".encode("utf-8") in sheet.data
     board = client.get("/board", follow_redirects=True)
     assert "需要管理员权限".encode("utf-8") in board.data
     incentive = client.get("/incentive", follow_redirects=True)

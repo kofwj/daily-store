@@ -30,6 +30,7 @@
   </div>
 
   <div class="deal-main">
+  {% if editable %}
   <form method="post" class="card deal-form">
     <input type="hidden" name="store_id" value="{{ store.id }}">
     <input type="hidden" name="deal_id" value="{{ form.deal_id }}">
@@ -72,6 +73,24 @@
       <button type="submit">生成播报</button>
     </div>
   </form>
+  {% else %}
+  <div class="card deal-form deal-readonly">
+    <p class="muted">往日成交只能查看，不能改。</p>
+    <div class="deal-grid">
+      <p><label>机型</label><span>{{ form.model or '—' }}</span></p>
+      <p><label>号码</label><span>{{ form.phone or '—' }}</span></p>
+      <p><label>消费</label><span>{{ form.spend or '—' }}</span></p>
+      <p><label>推荐套餐</label><span>{{ form.recommend or '—' }}</span></p>
+      <p><label>开口人员</label><span>{{ form.opener or '—' }}</span></p>
+      <div class="deal-flags">
+        <span class="chip">{{ '掌厅已查' if form.hall_query == '1' else '未查掌厅' }}</span>
+        <span class="chip">{{ '已成交' if form.closed == '1' else '未成交' }}</span>
+        <span class="chip">{{ '中高考学生' if form.student == '1' else '非中高考' }}</span>
+      </div>
+      <p class="span-2"><label>情况描述</label><span>{{ form.note or '—' }}</span></p>
+    </div>
+  </div>
+  {% endif %}
 
   <div class="card {{ 'empty' if not deal_text.strip() else '' }}" id="dealShot">
     <h2>复制进微信群</h2>
@@ -82,8 +101,10 @@
       <button type="button" class="copy-btn" onclick="copyDeal()">复制全文</button>
       <span class="chip" id="copyHint">未复制</span>
     </div>
-    {% else %}
+    {% elif editable %}
     <p class="muted">先填左边的单，点「生成播报」。</p>
+    {% else %}
+    <p class="muted">这条往日成交没有保存播报全文。</p>
     {% endif %}
   </div>
   </div>
