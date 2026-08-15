@@ -209,7 +209,8 @@ button.ghost:hover, .btn.ghost:hover { background: var(--accent-soft); }
   font-size: 13px;
   color: var(--ink);
 }
-.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 14px; }
+/* KPI 行作为头部区结尾: 顶部留小间隙, 底部统一 16px 再进正文卡片(与 .page-head 一致) */
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 12px; margin-bottom: 16px; }
 .kpi { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fafafa; }
 .kpi-num { font-size: 20px; font-weight: 650; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
 @media (max-width: 800px) {
@@ -585,7 +586,7 @@ details.extra summary { cursor: pointer; font-weight: 600; }
 .del-day:hover { background: #fee4e2; border-color: var(--err); }
 
 /* ===== 报表页 ===== */
-.report-page { display: grid; gap: 14px; }
+.report-page { display: grid; gap: 16px; }
 .report-head {
   display: flex;
   align-items: flex-end;
@@ -714,7 +715,7 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
 }
 
 /* ===== 看板 ===== */
-.board-page { display: grid; gap: 14px; }
+.board-page { display: grid; gap: 16px; }
 .board-head {
   display: flex;
   align-items: flex-end;
@@ -811,7 +812,7 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
 .pager .btn.ghost.disabled { opacity: .45; pointer-events: none; }
 .deal-records-link { display: flex; justify-content: flex-end; }
 .deal-records-link .btn { text-decoration: none; }
-.deal-records-kpis { margin: 0; }
+/* records 页与今天一样是 block 流: 让 .kpi-row 的 16px 下边距生效 */
 .records-toolbar {
   display: flex;
   align-items: center;
@@ -845,7 +846,8 @@ table.board-table td { text-align: left; vertical-align: middle; }
 }
 
 /* ===== 成交播报 ===== */
-.deal-page { display: grid; gap: 12px; }
+.deal-page { display: grid; gap: 16px; }
+.deal-page .deal-head-kpis { margin: 0; }
 .deal-head {
   display: flex;
   align-items: flex-end;
