@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# 提交前 lint：对这个仓库跑 ruff check。ruff 未装则跳过并提示（不阻塞）。
+# 安装：ln -sf ../../scripts/pre-commit .git/hooks/pre-commit  (见 scripts/install_precommit.sh)
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+if command -v ruff >/dev/null 2>&1; then
+  RUFF=ruff
+elif [ -x "$HOME/Library/Python/3.9/bin/ruff" ]; then
+  RUFF="$HOME/Library/Python/3.9/bin/ruff"
+else
+  echo "⚠️  未找到 ruff（pip install ruff 后生效），本次跳过 lint"
+  exit 0
+fi
+
+echo "→ ruff check"
+"$RUFF" check .

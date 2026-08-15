@@ -155,7 +155,6 @@ def test_report_ignores_inactive_metric_facts(tmp_db, monkeypatch):
 
 
 def _admin_client(tmp_db):
-    from app.web import create_app
 
     app = create_app()
     app.config["TESTING"] = True

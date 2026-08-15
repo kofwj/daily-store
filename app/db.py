@@ -6,14 +6,14 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime
-from zoneinfo import ZoneInfo
 from hashlib import pbkdf2_hmac
 from pathlib import Path
 from secrets import token_hex
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from .metrics_seed import KPI_TARGETS, all_metrics
-from .stores_seed import NINGHAI_CODE, STORES, filler_accounts
+from .stores_seed import STORES, filler_accounts
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("STORE_DAILY_DATA", ROOT / "data"))

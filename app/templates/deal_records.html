@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pager.html" import pager %}
 {% block title %}成交记录 · {{ store.short_name or store.name }}{% endblock %}
 {% block body %}
 <div class="card">
@@ -76,23 +77,7 @@
       </tbody>
     </table>
   </div>
-  {% if pages > 1 %}
-  <div class="pager">
-    <span class="muted">{{ start.isoformat() }} ~ {{ end.isoformat() }} · 共 {{ total }} 条 · 第 {{ page }}/{{ pages }} 页</span>
-    <div class="pager-btns">
-      {% if page > 1 %}
-      <a class="btn ghost" href="{{ url_for('deal_records', store_id=store.id, days=days, page=page-1) }}">上一页</a>
-      {% else %}
-      <span class="btn ghost disabled">上一页</span>
-      {% endif %}
-      {% if page < pages %}
-      <a class="btn ghost" href="{{ url_for('deal_records', store_id=store.id, days=days, page=page+1) }}">下一页</a>
-      {% else %}
-      <span class="btn ghost disabled">下一页</span>
-      {% endif %}
-    </div>
-  </div>
-  {% endif %}
+  {{ pager(page, pages, total, 'deal_records', label=start.isoformat() + ' ~ ' + end.isoformat(), store_id=store.id, days=days) }}
   {% else %}
   <p class="muted">近 {{ days }} 天还没有成交播报。</p>
   {% endif %}

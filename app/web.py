@@ -10,7 +10,7 @@ import re
 import secrets
 from datetime import date, datetime, timedelta
 from functools import wraps
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from flask import (
     Flask,
@@ -477,17 +477,10 @@ def create_app() -> Flask:
             except ValueError:
                 days_int = 7
             start = today_d - timedelta(days=days_int - 1)
-            per_page = 50
-            try:
-                page = max(1, int(request.args.get("page", "1")))
-            except ValueError:
-                page = 1
             total = db.count_deal_posts(conn, store["id"], start, today_d)
-            pages = max(1, -(-total // per_page))
-            if page > pages:
-                page = pages
+            page, pages = _pagination(request.args.get("page"), total)
             rows = db.list_deal_posts(
-                conn, store["id"], start, today_d, limit=per_page, offset=(page - 1) * per_page
+                conn, store["id"], start, today_d, limit=50, offset=(page - 1) * 50
             )
             month_start = today_d.replace(day=1)
             store_ids = [s["id"] for s in stores]
@@ -595,7 +588,7 @@ def create_app() -> Flask:
                 )
 
             # 指标行：按 SECTIONS 分组；KPI 成员标记高亮；普通指标目标读 metrics.monthly_target
-            from .metrics_seed import SECTIONS, section_by_code
+            from .metrics_seed import SECTIONS
 
             rows = []
             for m in metrics:
@@ -991,24 +984,17 @@ def create_app() -> Flask:
             params.append(int(store_id))
         # edited_at 存的是北京时间；用北京时间算窗口边界，避免 SQLite 的 UTC now 差 8 小时
         cutoff = (datetime.now(db.TZ) - timedelta(days=days_int)).strftime("%Y-%m-%d %H:%M:%S")
-        per_page = 50
-        try:
-            page = max(1, int(request.args.get("page", "1")))
-        except ValueError:
-            page = 1
         base_sql = (
             "report_edits e "
-            "JOIN stores s ON s.id=e.store_id "
-            "JOIN users u ON u.id=e.user_id "
+            "LEFT JOIN stores s ON s.id=e.store_id "
+            "LEFT JOIN users u ON u.id=e.user_id "
             f"WHERE e.edited_at >= ? {where}"
         )
         with db.get_db() as conn:
             total = conn.execute(
                 f"SELECT COUNT(*) FROM {base_sql}", [cutoff, *params]
             ).fetchone()[0]
-            pages = max(1, -(-total // per_page))
-            if page > pages:
-                page = pages
+            page, pages = _pagination(request.args.get("page"), total)
             rows = [
                 dict(r)
                 for r in conn.execute(
@@ -1018,7 +1004,7 @@ def create_app() -> Flask:
                     ORDER BY e.id DESC
                     LIMIT ? OFFSET ?
                     """,
-                    [cutoff, *params, per_page, (page - 1) * per_page],
+                    [cutoff, *params, 50, (page - 1) * 50],
                 )
             ]
             all_stores = db.list_all_stores(conn)
@@ -1298,6 +1284,18 @@ def _build_diff(before: Dict[str, int], after: Dict[str, int]) -> str:
         name = names.get(k, k)
         parts.append(f"{name} {b}→{a}")
     return "；".join(parts) or "（无变化）"
+
+
+def _pagination(raw_page: Optional[str], total: int, per_page: int = 50) -> Tuple[int, int]:
+    """把请求里的 page 参数夹到合法范围，返回 (page, pages)。"""
+    try:
+        page = max(1, int(raw_page or "1"))
+    except (TypeError, ValueError):
+        page = 1
+    pages = max(1, -(-total // per_page))
+    if page > pages:
+        page = pages
+    return page, pages
 
 
 app = create_app()

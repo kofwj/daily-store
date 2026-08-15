@@ -1,6 +1,15 @@
 from datetime import date
 
-from app.bulletin import apply_scales, bisuan_total, build_row, csv_rows, fmt_count, scale_color, totals_row, tsv
+from app.bulletin import (
+    apply_scales,
+    bisuan_total,
+    build_row,
+    csv_rows,
+    fmt_count,
+    scale_color,
+    totals_row,
+    tsv,
+)
 
 
 def test_fmt_count_hides_zero():

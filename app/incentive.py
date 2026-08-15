@@ -14,7 +14,6 @@ import copy
 import json
 from typing import Any, Dict
 
-
 DEFAULTS: Dict[str, int] = {
     # 有顾问：AI + 新用户直降 ≥ 总量阈值才可能达标
     "total_threshold": 10,   # 总量达标线

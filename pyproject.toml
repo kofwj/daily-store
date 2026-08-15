@@ -1,0 +1,13 @@
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+exclude = [".git", ".pytest_cache", "data"]
+
+[tool.ruff.lint]
+# 聚焦真实错误：F=未用/未定义/重定义，E/W=风格一致，I=导入排序
+select = ["E", "F", "W", "I"]
+# 行宽不强制（业务长注释/字符串多），不强制 tz 注解
+ignore = ["E501", "DTZ"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "tests"]

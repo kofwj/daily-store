@@ -267,7 +267,8 @@ def test_filler_cannot_fix_cell(tmp_db, monkeypatch):
 
 
 def test_now_is_beijing_time():
-    from datetime import datetime as dt, timezone
+    from datetime import datetime as dt
+    from datetime import timezone
 
     out = db._now()
     utc = dt.now(timezone.utc)

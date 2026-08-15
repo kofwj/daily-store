@@ -1,0 +1,24 @@
+{# 分页宏：页底 上一页/下一页 + 计数。
+用法：
+{% from "_pager.html" import pager %}
+{{ pager(page, pages, total, 'edits_page', days=days, store_id=store_id) }}
+翻页链接会带上 days / store_id（空也带，不影响路由解析）。 #}
+{% macro pager(page, pages, total, endpoint, days='', store_id='', label='') %}
+{% if pages > 1 %}
+<div class="pager">
+  <span class="muted">{% if label %}{{ label }} · {% endif %}共 {{ total }} 条 · 第 {{ page }}/{{ pages }} 页</span>
+  <div class="pager-btns">
+    {% if page > 1 %}
+    <a class="btn ghost" href="{{ url_for(endpoint, days=days, store_id=store_id, page=page-1) }}">上一页</a>
+    {% else %}
+    <span class="btn ghost disabled">上一页</span>
+    {% endif %}
+    {% if page < pages %}
+    <a class="btn ghost" href="{{ url_for(endpoint, days=days, store_id=store_id, page=page+1) }}">下一页</a>
+    {% else %}
+    <span class="btn ghost disabled">下一页</span>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endmacro %}
