@@ -61,8 +61,11 @@ def test_bulletin_row_and_tsv_match_sheet():
     assert "20001744" in text
     assert "冒国云" in text
     headers = csv_rows([row], date(2026, 8, 13))[0]
-    assert headers[8] == "8月AI手机合约"
-    assert headers[10] == "8月13日AI手机合约"
+    assert headers[8] == "8月金币直降"
+    assert headers[9] == "8月AI手机合约"
+    assert headers[11] == "8月13日AI手机合约"
+    assert headers[6] == "AI破0"
+    assert headers[7] == "笔算破0"
 
 
 def test_follow_uses_month_break_zero_for_every_store():
