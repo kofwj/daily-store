@@ -87,8 +87,46 @@
 
   <div class="card deal-log">
     <h2>本店记录</h2>
-    <p class="muted">本月已记 {{ recent|length }} 单。点一条可改、再复制。</p>
+    <p class="muted">本月已记 {{ recent|length }} 单。点一行可改、再复制。</p>
     {% if recent %}
+    <div class="deal-log-table">
+      <table class="data">
+        <thead>
+          <tr>
+            <th class="left">时间</th>
+            <th class="left">机型</th>
+            <th class="left">号码</th>
+            <th>消费</th>
+            <th class="left">荐</th>
+            <th class="left">开口</th>
+            <th>结果</th>
+            {% if is_admin %}<th></th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in recent %}
+          <tr>
+            <td class="left"><a href="{{ url_for('deal_page', store_id=store.id, deal_id=row.id) }}">{{ (row.updated_at or row.created_at)[5:16] }}</a></td>
+            <td class="left"><a href="{{ url_for('deal_page', store_id=store.id, deal_id=row.id) }}">{{ row.model or '—' }}</a></td>
+            <td class="left">{{ row.phone[:-4] + '****' if row.phone|length >= 4 else (row.phone or '—') }}</td>
+            <td>{{ row.spend or '—' }}</td>
+            <td class="left">{{ row.recommend or '—' }}</td>
+            <td class="left">{{ row.opener or row.submitter_name or '—' }}</td>
+            <td><span class="status {{ 'done' if row.closed else 'wait' }}">{{ '成交' if row.closed else '未成交' }}</span></td>
+            {% if is_admin %}
+            <td class="right">
+              <form method="post" action="{{ url_for('deal_delete') }}" onsubmit="return confirm('删除这条成交播报？此操作不可恢复。')">
+                <input type="hidden" name="store_id" value="{{ store.id }}">
+                <input type="hidden" name="deal_id" value="{{ row.id }}">
+                <button class="ghost del-day" type="submit" title="删除">删</button>
+              </form>
+            </td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
     <div class="deal-log-list">
       {% for row in recent %}
       <div class="deal-log-item">
@@ -118,6 +156,30 @@
   <div class="card">
     <h2>各店次数</h2>
     <p class="muted">按单记账。同一号码当天再生成，只更新这一单。</p>
+    <div class="deal-store-table">
+      <table class="data">
+        <thead>
+          <tr>
+            <th class="left">门店</th>
+            <th>今日</th>
+            <th>今日成交</th>
+            <th>本月</th>
+            <th>本月成交</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in store_stats %}
+          <tr>
+            <td class="left">{{ row.store.short_name or row.store.name }}</td>
+            <td>{{ row.today.total }}</td>
+            <td>{{ row.today.closed }}</td>
+            <td>{{ row.month.total }}</td>
+            <td>{{ row.month.closed }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
     <div class="deal-store-stats">
       {% for row in store_stats %}
       <div class="deal-log-item">

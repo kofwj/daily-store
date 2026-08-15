@@ -854,7 +854,10 @@ table.board-table td { text-align: left; vertical-align: middle; }
 .deal-page #dealShot { margin: 0; }
 .deal-page #dealText { min-height: 180px; }
 .deal-log { margin: 0; }
-.deal-log-list { display: grid; gap: 8px; }
+.deal-log-table { display: block; }
+.deal-log-list { display: none; gap: 8px; }
+.deal-store-table { display: block; }
+.deal-store-stats { display: none; }
 .deal-log-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -913,4 +916,6 @@ table.board-table td { text-align: left; vertical-align: middle; }
   .deal-page #dealText { min-height: 88px; }
   .deal-page .copy-btn { min-width: 0; width: 100%; }
   .deal-log { padding: 10px; }
+  .deal-log-table, .deal-store-table { display: none; }
+  .deal-log-list, .deal-store-stats { display: grid; }
 }
