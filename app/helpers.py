@@ -181,6 +181,36 @@ def build_diff(before: Dict[str, int], after: Dict[str, int], names=None) -> str
     return "；".join(parts) or "（无变化）"
 
 
+_DEAL_FIELD_LABELS = {
+    "closed": "已成交",
+    "model": "机型",
+    "phone": "号码",
+    "spend": "消费",
+    "hall_query": "开口",
+    "recommend": "推荐套餐",
+    "student": "学豆",
+    "opener": "导购",
+    "note": "备注",
+    "text": "播报全文",
+}
+
+
+def deal_diff(before: Dict[str, Any], after: Dict[str, Any]) -> str:
+    """把成交播报新增/覆盖的差异拼成可读文本。"""
+    parts = []
+    for key in _DEAL_FIELD_LABELS:
+        label = _DEAL_FIELD_LABELS[key]
+        b = before.get(key)
+        a = after.get(key)
+        # 补一个字段级摘要：新值缺失时显示 source → None
+        if b == a:
+            continue
+        b_txt = "✓" if (key == "closed" and b) else ("✗" if key == "closed" else str(b or ""))
+        a_txt = "✓" if (key == "closed" and a) else ("✗" if key == "closed" else str(a or ""))
+        parts.append(f"{label} {b_txt}→{a_txt}")
+    return "；".join(parts) or "（内容未变）"
+
+
 def pagination(raw_page: Optional[str], total: int, per_page: int = 50) -> Tuple[int, int]:
     """把请求里的 page 参数夹到合法范围，返回 (page, pages)。"""
     try:

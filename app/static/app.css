@@ -939,3 +939,8 @@ table.board-table td { text-align: left; vertical-align: middle; }
   .deal-records-link { justify-content: center; }
   .deal-records-link .btn { width: 100%; }
 }
+
+/* 审计类型标签 */
+.tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; line-height: 1.4; white-space: nowrap; }
+.tag-daily { background: var(--tint, #eef3fb); color: var(--link, #2563eb); }
+.tag-deal { background: #eafaf1; color: var(--ok, #16a34a); }

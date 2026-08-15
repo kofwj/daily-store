@@ -199,6 +199,7 @@ def init_db() -> None:
         conn.executescript(SCHEMA)
         _ensure_store_columns(conn)
         _ensure_deal_posts(conn)
+        _ensure_deal_edits(conn)
         _ensure_app_meta(conn)
         # 种子（建表/加列/回填默认）每次幂等执行即可；真正“动数据”的迁移走 migrate() 只跑一次
         _seed_metrics(conn)
@@ -306,6 +307,30 @@ def _ensure_deal_posts(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_deal_posts_store_date ON deal_posts(store_id, biz_date)"
     )
+
+
+def _ensure_deal_edits(conn: sqlite3.Connection) -> None:
+    """成交播报的修改审计表（新增/覆盖都要记）— 幂等建表。"""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS deal_edits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            store_id INTEGER NOT NULL REFERENCES stores(id),
+            user_id INTEGER REFERENCES users(id),
+            deal_id INTEGER NOT NULL,
+            biz_date TEXT NOT NULL,
+            edited_at TEXT NOT NULL,
+            action TEXT NOT NULL DEFAULT '',
+            before_json TEXT NOT NULL DEFAULT '',
+            after_json TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_deal_edits_store_date ON deal_edits(store_id, biz_date)"
+    )
+
 
 def _ensure_app_meta(conn: sqlite3.Connection) -> None:
     conn.execute(

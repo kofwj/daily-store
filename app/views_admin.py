@@ -15,6 +15,7 @@ from .helpers import (
     accessible_stores,
     admin_required,
     build_diff,
+    deal_diff,
     incentive_rules,
     pagination,
     parse_date,
@@ -248,41 +249,71 @@ def register_admin(app) -> None:
     @app.route("/edits")
     @admin_required
     def edits_page():
-        """审计日志：谁在什么时候把哪家店哪天的日报改成了什么。"""
+        """审计日志：日报 / 成交播报谁在什么时候把哪家店改成了什么。kind=all|daily|deal"""
         store_id = request.args.get("store_id", "")
         days = request.args.get("days", "7")
+        kind = request.args.get("kind", "all")
+        if kind not in ("all", "daily", "deal"):
+            kind = "all"
         try:
             days_int = max(1, min(int(days), 90))
         except ValueError:
             days_int = 7
-        where = ""
-        params: List[Any] = []
-        if store_id and store_id.isdigit():
-            where = "AND e.store_id=?"
-            params.append(int(store_id))
         # edited_at 存的是北京时间；用北京时间算窗口边界，避免 SQLite 的 UTC now 差 8 小时
         cutoff = (datetime.now(db.TZ) - timedelta(days=days_int)).strftime("%Y-%m-%d %H:%M:%S")
-        base_sql = (
-            "report_edits e "
-            "LEFT JOIN stores s ON s.id=e.store_id "
-            "LEFT JOIN users u ON u.id=e.user_id "
-            f"WHERE e.edited_at >= ? {where}"
-        )
+        sid = int(store_id) if store_id.isdigit() else None
+        parts: List[str] = []
+        params: List[Any] = []
+        if kind in ("daily", "all"):
+            w = "rn.edited_at >= ?"
+            ps: List[Any] = [cutoff]
+            if sid:
+                w += " AND rn.store_id=?"
+                ps.append(sid)
+            parts.append(
+                "SELECT 'daily' AS kind, rn.id, rn.biz_date, rn.edited_at, rn.note, "
+                "rn.before_json, rn.after_json, '' AS action, "
+                "s.name AS store_name, u.username AS user_name "
+                "FROM report_edits rn "
+                "LEFT JOIN stores s ON s.id=rn.store_id "
+                "LEFT JOIN users u ON u.id=rn.user_id "
+                f"WHERE {w}"
+            )
+            params += ps
+        if kind in ("deal", "all"):
+            w = "dn.edited_at >= ?"
+            ps = [cutoff]
+            if sid:
+                w += " AND dn.store_id=?"
+                ps.append(sid)
+            parts.append(
+                "SELECT 'deal' AS kind, dn.id, dn.biz_date, dn.edited_at, dn.note, "
+                "dn.before_json, dn.after_json, dn.action, "
+                "s.name AS store_name, u.username AS user_name "
+                "FROM deal_edits dn "
+                "LEFT JOIN stores s ON s.id=dn.store_id "
+                "LEFT JOIN users u ON u.id=dn.user_id "
+                f"WHERE {w}"
+            )
+            params += ps
+        union_sql = " UNION ALL ".join(parts) if parts else \
+            "SELECT 'daily' AS kind, NULL AS id, '' AS biz_date, '' AS edited_at, '' AS note, " \
+            "'{}' AS before_json, '{}' AS after_json, '' AS store_name, '' AS user_name " \
+            "WHERE 0"
         with db.get_db() as conn:
             total = conn.execute(
-                f"SELECT COUNT(*) FROM {base_sql}", [cutoff, *params]
+                f"SELECT COUNT(*) FROM ({union_sql})", params
             ).fetchone()[0]
             page, pages = pagination(request.args.get("page"), total)
             rows = [
                 dict(r)
                 for r in conn.execute(
                     f"""
-                    SELECT e.*, s.name AS store_name, u.username AS user_name
-                    FROM {base_sql}
-                    ORDER BY e.id DESC
+                    SELECT * FROM ({union_sql}) t
+                    ORDER BY t.edited_at DESC, t.id DESC
                     LIMIT ? OFFSET ?
                     """,
-                    [cutoff, *params, 50, (page - 1) * 50],
+                    [*params, 50, (page - 1) * 50],
                 )
             ]
             all_stores = db.list_all_stores(conn)
@@ -294,7 +325,13 @@ def register_admin(app) -> None:
                 after = json.loads(r["after_json"] or "{}")
             except ValueError:
                 before, after = {}, {}
-            r["diff"] = build_diff(before, after, names)
+            if r["kind"] == "deal":
+                if r.get("action") == "create":
+                    r["diff"] = "新增成交：" + deal_diff(before, after)
+                else:
+                    r["diff"] = "覆盖：" + deal_diff(before, after)
+            else:
+                r["diff"] = build_diff(before, after, names)
             r["store_name"] = r["store_name"] or "?"
         return render_template(
             "edits.html",
@@ -305,6 +342,7 @@ def register_admin(app) -> None:
             page=page,
             pages=pages,
             total=total,
+            kind=kind,
         )
 
     @app.route("/bulletin.csv")

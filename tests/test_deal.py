@@ -149,3 +149,97 @@ def test_admin_exports_all_stores_deal_csv(client):
     r7 = client.get("/deal/export?days=7")
     assert r7.status_code == 200
     assert "S60" in r7.get_data(as_text=True)
+
+
+def test_record_deal_post_logs_create_and_update(tmp_db):
+    """新增写一条 create 审计，覆盖(同店+当日+同号码)写一条带 before 的 update。"""
+    import json
+
+    from app import db
+
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        # 新增
+        did = db.record_deal_post(
+            conn,
+            store_id=sid,
+            user_id=uid,
+            closed=True,
+            model="S60",
+            phone="15500000001",
+            spend="99",
+            hall_query=True,
+            recommend="89",
+            opener="张三",
+            note="n1",
+        )
+        rows = list(conn.execute("SELECT * FROM deal_edits WHERE deal_id=?", (did,)))
+        assert len(rows) == 1
+        assert rows[0]["action"] == "create"
+        assert rows[0]["store_id"] == sid
+        assert json.loads(rows[0]["after_json"])["model"] == "S60"
+        # 覆盖：同店+当日+同号码 -> update
+        db.record_deal_post(
+            conn,
+            store_id=sid,
+            user_id=uid,
+            closed=True,
+            model="S70",
+            phone="15500000001",
+            spend="199",
+            hall_query=True,
+            recommend="129",
+            opener="张三",
+            note="n2",
+        )
+        rows = list(conn.execute("SELECT * FROM deal_edits ORDER BY id"))
+        assert len(rows) == 2
+        upd = rows[1]
+        assert upd["action"] == "update"
+        before = json.loads(upd["before_json"])
+        after = json.loads(upd["after_json"])
+        assert before["model"] == "S60" and before["spend"] == "99"
+        assert after["model"] == "S70" and after["spend"] == "199"
+        # 覆盖不会新增 deal_posts 行
+        cnt = conn.execute(
+            "SELECT COUNT(*) AS c FROM deal_posts WHERE store_id=?", (sid,)
+        ).fetchone()["c"]
+        assert cnt == 1
+
+
+def test_edits_page_filters_by_kind(tmp_db):
+    """修改审计里能看到成交播报：按类型筛选 + 全部同时显示。"""
+    from app import db
+    from app.web import create_app
+
+    app = create_app()
+    app.config["TESTING"] = True
+    c = app.test_client()
+    c.post("/login", data={"username": "admin", "pin": "1234"})
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        db.record_deal_post(
+            conn,
+            store_id=sid,
+            user_id=uid,
+            closed=True,
+            model="S60",
+            phone="15500000002",
+            spend="99",
+            hall_query=True,
+            recommend="89",
+            opener="张三",
+            note="n1",
+        )
+    deal_html = c.get("/edits?kind=deal").get_data(as_text=True)
+    assert "成交" in deal_html
+    assert "新增成交" in deal_html
+    assert "S60" in deal_html
+    # 按门店过滤成交
+    scoped = c.get(f"/edits?kind=deal&store_id={sid}").get_data(as_text=True)
+    assert "新增成交" in scoped
+    # 全部默认同时含两种类型（日报造一条）
+    page = c.get("/edits").get_data(as_text=True)
+    assert "日报" in page and "成交" in page

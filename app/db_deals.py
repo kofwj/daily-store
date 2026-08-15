@@ -37,6 +37,77 @@ def _deal_payload(
         "updated_at": _now(),
     }
 
+
+# 审计关心的内容字段（含前/后快照与展示标签）
+_DEAL_SNAPSHOT_FIELDS = (
+    "closed",
+    "model",
+    "phone",
+    "spend",
+    "hall_query",
+    "recommend",
+    "student",
+    "opener",
+    "note",
+    "text",
+)
+
+
+def _row_snapshot(row) -> Dict[str, Any]:
+    """把 deal_posts 一行转成审计内容快照（布尔归一）。"""
+    return {
+        f: bool(row[f]) if f in ("closed", "hall_query", "student") else (row[f] or "")
+        for f in _DEAL_SNAPSHOT_FIELDS
+    }
+
+
+def _payload_snapshot(p: Dict[str, Any]) -> Dict[str, Any]:
+    """把保存后的 payload 转成审计内容快照（与新纪录后的行为一致）。"""
+    out: Dict[str, Any] = {}
+    for f in _DEAL_SNAPSHOT_FIELDS:
+        if f in ("closed", "hall_query", "student"):
+            out[f] = bool(p[f])
+        else:
+            out[f] = p[f]
+    return out
+
+
+def record_deal_edit(
+    conn: sqlite3.Connection,
+    *,
+    store_id: int,
+    user_id: int,
+    deal_id: int,
+    biz_date: date,
+    action: str,
+    before: Dict[str, Any],
+    after: Dict[str, Any],
+    note: str = "",
+) -> None:
+    """往 deal_edits 写一条成交播报的审计日志。action: create / update。"""
+    import json as _json
+
+    conn.execute(
+        """
+        INSERT INTO deal_edits(
+            store_id, user_id, deal_id, biz_date, edited_at, action,
+            before_json, after_json, note
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            store_id,
+            user_id,
+            deal_id,
+            biz_date.isoformat(),
+            _now(),
+            action,
+            _json.dumps(before, ensure_ascii=False, sort_keys=True),
+            _json.dumps(after, ensure_ascii=False, sort_keys=True),
+            note,
+        ),
+    )
+
 def record_deal_post(
     conn: sqlite3.Connection,
     *,
@@ -70,17 +141,19 @@ def record_deal_post(
         text=text,
     )
     existing_id = None
+    existing_row = None
     if deal_id:
         row = conn.execute(
-            "SELECT id FROM deal_posts WHERE id=? AND store_id=?",
+            "SELECT * FROM deal_posts WHERE id=? AND store_id=?",
             (deal_id, store_id),
         ).fetchone()
         if row:
             existing_id = int(row["id"])
+            existing_row = row
     if existing_id is None and payload["phone"]:
         row = conn.execute(
             """
-            SELECT id FROM deal_posts
+            SELECT * FROM deal_posts
             WHERE store_id=? AND biz_date=? AND phone=?
             ORDER BY id DESC LIMIT 1
             """,
@@ -88,7 +161,10 @@ def record_deal_post(
         ).fetchone()
         if row:
             existing_id = int(row["id"])
+            existing_row = row
+    after = _payload_snapshot(payload)
     if existing_id is not None:
+        before = _row_snapshot(existing_row) if existing_row is not None else {}
         conn.execute(
             """
             UPDATE deal_posts
@@ -98,6 +174,16 @@ def record_deal_post(
             WHERE id=:id
             """,
             {**payload, "id": existing_id},
+        )
+        record_deal_edit(
+            conn,
+            store_id=store_id,
+            user_id=user_id,
+            deal_id=existing_id,
+            biz_date=day,
+            action="update",
+            before=before,
+            after=after,
         )
         return existing_id
     cur = conn.execute(
@@ -126,7 +212,18 @@ def record_deal_post(
             payload["text"],
         ),
     )
-    return int(cur.lastrowid)
+    new_id = int(cur.lastrowid)
+    record_deal_edit(
+        conn,
+        store_id=store_id,
+        user_id=user_id,
+        deal_id=new_id,
+        biz_date=day,
+        action="create",
+        before={},
+        after=after,
+    )
+    return new_id
 
 def count_deal_posts(
     conn: sqlite3.Connection, store_id: int, start: date, end: date

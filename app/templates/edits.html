@@ -5,9 +5,17 @@
 <div class="page-head">
   <div class="page-title">
     <h1>修改审计</h1>
-    <p class="muted">谁在什么时候把哪家店哪天的日报改成了什么。锁定后的修改、历史日期覆盖、删除都会记录在这里。</p>
+    <p class="muted">日报与成交播报的修改记录（锁定后覆盖、历史日期覆盖、删除都会记在这里）。</p>
   </div>
   <form method="get" class="page-filters">
+    <label class="filter">
+      <span>类型</span>
+      <select name="kind" onchange="this.form.submit()">
+        <option value="all" {% if kind == 'all' %}selected{% endif %}>全部</option>
+        <option value="daily" {% if kind == 'daily' %}selected{% endif %}>日报</option>
+        <option value="deal" {% if kind == 'deal' %}selected{% endif %}>成交播报</option>
+      </select>
+    </label>
     <label class="filter">
       <span>近 N 天</span>
       <select name="days" onchange="this.form.submit()">
@@ -34,6 +42,7 @@
     <thead>
       <tr>
         <th>时间</th>
+        <th>类型</th>
         <th>门店</th>
         <th>操作人</th>
         <th>日期</th>
@@ -44,6 +53,7 @@
       {% for r in rows %}
       <tr>
         <td>{{ r.edited_at }}</td>
+        <td>{% if r.kind == 'deal' %}<span class="tag tag-deal">成交</span>{% else %}<span class="tag tag-daily">日报</span>{% endif %}</td>
         <td>{{ r.store_name }}</td>
         <td><code>{{ r.user_name }}</code></td>
         <td>{{ r.biz_date }}{% if r.note %} <span class="muted">（{{ r.note }}）</span>{% endif %}</td>
