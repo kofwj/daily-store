@@ -57,6 +57,8 @@ CREATE TABLE IF NOT EXISTS stores (
     has_advisor INTEGER NOT NULL DEFAULT 0,
     advisor_name TEXT NOT NULL DEFAULT '',
     short_name TEXT NOT NULL DEFAULT '',
+    store_grade TEXT NOT NULL DEFAULT '',
+    ai_target INTEGER NOT NULL DEFAULT 0,
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
 );
@@ -250,6 +252,8 @@ def _ensure_store_columns(conn: sqlite3.Connection) -> None:
         "has_advisor": "INTEGER NOT NULL DEFAULT 0",
         "advisor_name": "TEXT NOT NULL DEFAULT ''",
         "short_name": "TEXT NOT NULL DEFAULT ''",
+        "store_grade": "TEXT NOT NULL DEFAULT ''",
+        "ai_target": "INTEGER NOT NULL DEFAULT 0",
     }
     for name, ddl in extra.items():
         cols = {row[1] for row in conn.execute("PRAGMA table_info(stores)")}
@@ -588,10 +592,19 @@ def _seed_catalog_stores(conn: sqlite3.Connection) -> None:
                 """
                 INSERT INTO stores(
                     name, code, sort_order, region_group, city, mobile_code,
-                    area_manager, store_manager, short_name, advisor_name, active, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', 1, ?)
+                    area_manager, store_manager, short_name, advisor_name,
+                    store_grade, ai_target, active, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, 1, ?)
                 """,
-                (name, code, sort, *profile, _now()),
+                (
+                    name,
+                    code,
+                    sort,
+                    *profile,
+                    item.get("store_grade") or "A",
+                    int(item.get("ai_target") or 10),
+                    _now(),
+                ),
             )
         else:
             # 已存在的店：只更新店名与排序，不覆盖管理员改过的档案/状态
@@ -599,6 +612,17 @@ def _seed_catalog_stores(conn: sqlite3.Connection) -> None:
                 "UPDATE stores SET name=?, sort_order=? WHERE id=?",
                 (name, sort, row["id"]),
             )
+            # 新加的类别/AI目标只在空着时回填目录默认，不覆盖已改过的
+            if not (row["store_grade"] if "store_grade" in row.keys() else ""):
+                conn.execute(
+                    "UPDATE stores SET store_grade=? WHERE id=?",
+                    (item.get("store_grade") or "A", row["id"]),
+                )
+            if not int(row["ai_target"] if "ai_target" in row.keys() else 0):
+                conn.execute(
+                    "UPDATE stores SET ai_target=? WHERE id=?",
+                    (int(item.get("ai_target") or 10), row["id"]),
+                )
 
 def _seed_defaults(conn: sqlite3.Connection) -> None:
     all_ids = [row["id"] for row in conn.execute("SELECT id FROM stores WHERE active=1")]
@@ -739,6 +763,8 @@ def create_store(
     follow_bisuan: bool = False,
     advisor_name: str = "",
     short_name: str = "",
+    store_grade: str = "A",
+    ai_target: int = 10,
 ) -> int:
     nxt = conn.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 AS n FROM stores").fetchone()["n"]
     store_code = (code or "").strip() or alloc_store_code(conn)
@@ -746,8 +772,9 @@ def create_store(
         """
         INSERT INTO stores(
             name, code, sort_order, region_group, city, mobile_code,
-            area_manager, store_manager, follow_ai, follow_bisuan, has_advisor, advisor_name, short_name, active, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+            area_manager, store_manager, follow_ai, follow_bisuan, has_advisor, advisor_name, short_name,
+            store_grade, ai_target, active, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
         """,
         (
             name.strip(),
@@ -763,6 +790,8 @@ def create_store(
             1 if advisor_name.strip() else 0,
             advisor_name.strip(),
             (short_name or "").strip(),
+            (store_grade or "A").strip().upper()[:1] or "A",
+            max(0, int(ai_target or 10)),
             _now(),
         ),
     )
@@ -778,18 +807,36 @@ def update_store_profile(
     advisor_name: str = "",
     region_group: Optional[str] = None,
     city: Optional[str] = None,
+    store_grade: Optional[str] = None,
+    ai_target: Optional[int] = None,
 ) -> None:
     name = (advisor_name or "").strip()
-    row = conn.execute("SELECT region_group, city FROM stores WHERE id=?", (store_id,)).fetchone()
+    row = conn.execute(
+        "SELECT region_group, city, store_grade, ai_target FROM stores WHERE id=?",
+        (store_id,),
+    ).fetchone()
     if row is None:
         raise ValueError("没有这家店")
     next_region = (region_group if region_group is not None else row["region_group"] or "").strip() or "通泰"
     next_city = (city if city is not None else row["city"] or "").strip() or "南通市"
+    next_grade = (
+        (store_grade if store_grade is not None else row["store_grade"] or "A")
+        .strip()
+        .upper()[:1]
+        or "A"
+    )
+    if next_grade not in ("A", "B"):
+        next_grade = "A"
+    if ai_target is None:
+        next_ai = int(row["ai_target"] or 10)
+    else:
+        next_ai = max(0, int(ai_target))
     conn.execute(
         """
         UPDATE stores SET
             mobile_code=?, area_manager=?, store_manager=?,
-            advisor_name=?, has_advisor=?, region_group=?, city=?
+            advisor_name=?, has_advisor=?, region_group=?, city=?,
+            store_grade=?, ai_target=?
         WHERE id=?
         """,
         (
@@ -800,6 +847,8 @@ def update_store_profile(
             1 if name else 0,
             next_region,
             next_city,
+            next_grade,
+            next_ai,
             store_id,
         ),
     )

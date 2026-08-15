@@ -67,6 +67,8 @@ def register_settings(app) -> None:
                             short_name=short_name,
                             region_group=request.form.get("region_group") or "通泰",
                             city=request.form.get("city") or "南通市",
+                            store_grade=request.form.get("store_grade") or "A",
+                            ai_target=int(request.form.get("ai_target") or 10),
                         )
                         flash("门店已加", "ok")
                         return redirect(url_for("settings", tab="stores", store_id=new_store_id))
@@ -83,6 +85,8 @@ def register_settings(app) -> None:
                             advisor_name=request.form.get("advisor_name") or "",
                             region_group=request.form.get("region_group") or "",
                             city=request.form.get("city") or "",
+                            store_grade=request.form.get("store_grade") or "A",
+                            ai_target=int(request.form.get("ai_target") or 10),
                         )
                         flash("门店档案已改", "ok")
                         return redirect(url_for("settings", tab="stores", store_id=sid))

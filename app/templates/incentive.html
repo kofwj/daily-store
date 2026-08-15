@@ -14,6 +14,7 @@
       <span>月份</span>
       <input type="month" name="month" value="{{ month.strftime('%Y-%m') }}" onchange="this.form.submit()">
     </label>
+    <a class="btn ghost" href="{{ url_for('incentive_xlsx', month=month.strftime('%Y-%m')) }}">导出结算底稿</a>
   </form>
 </div>
 <div class="kpi-row">

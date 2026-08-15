@@ -9,7 +9,7 @@ from typing import Any, Dict, List
 
 from flask import g, render_template, request
 
-from . import bulletin, db
+from . import bulletin, db, settlement
 from .helpers import (
     accessible_stores,
     admin_required,
@@ -301,6 +301,23 @@ def register_admin(app) -> None:
                 rows=rows,
                 totals=totals,
             )
+
+    @app.route("/incentive.xlsx")
+    @admin_required
+    def incentive_xlsx():
+        """导出当月运营商结算底稿：系统填 AI/直降/奖惩，开票/房补/垫资/搭载率留空。"""
+        today_d = db.today_local()
+        month = parse_date(request.args.get("month"), today_d.replace(day=1)).replace(day=1)
+        if month.month == 12:
+            month_end = date(month.year + 1, 1, 1) - timedelta(days=1)
+        else:
+            month_end = date(month.year, month.month + 1, 1) - timedelta(days=1)
+        as_of = min(month_end, today_d)
+        with db.get_db() as conn:
+            stores = accessible_stores(conn)
+            data = settlement.build_settlement_xlsx(conn, stores, as_of)
+        filename = f"settlement_{month.strftime('%Y_%m')}.xlsx"
+        return xlsx_response(data, filename)
 
     @app.route("/edits")
     @admin_required

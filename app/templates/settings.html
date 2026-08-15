@@ -89,6 +89,17 @@
               <label>店长</label>
               <input name="store_manager" value="{{ current_store.store_manager }}" autocomplete="off">
             </p>
+            <p>
+              <label>门店类别</label>
+              <select name="store_grade">
+                <option value="A" {% if current_store.store_grade == 'A' %}selected{% endif %}>A（酬金目标 4000）</option>
+                <option value="B" {% if current_store.store_grade == 'B' %}selected{% endif %}>B（酬金目标 1000）</option>
+              </select>
+            </p>
+            <p>
+              <label>AI 目标</label>
+              <input name="ai_target" type="number" min="0" value="{{ current_store.ai_target or 10 }}" inputmode="numeric">
+            </p>
             <p class="span-2">
               <label>运营商顾问</label>
               <input name="advisor_name" value="{{ current_store.advisor_name }}" placeholder="无顾问留空" autocomplete="off">
@@ -110,6 +121,17 @@
             <p><label>移动编码</label><input name="mobile_code" placeholder="20001744" inputmode="numeric"></p>
             <p><label>区域经理</label><input name="area_manager"></p>
             <p><label>店长</label><input name="store_manager"></p>
+            <p>
+              <label>门店类别</label>
+              <select name="store_grade">
+                <option value="A" selected>A（酬金目标 4000）</option>
+                <option value="B">B（酬金目标 1000）</option>
+              </select>
+            </p>
+            <p>
+              <label>AI 目标</label>
+              <input name="ai_target" type="number" min="0" value="10" inputmode="numeric">
+            </p>
             <p class="span-2"><label>运营商顾问</label><input name="advisor_name" placeholder="无顾问留空"></p>
           </div>
           <div class="toolbar"><button type="submit">添加</button></div>

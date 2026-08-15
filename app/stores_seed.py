@@ -18,6 +18,8 @@ STORES: List[Dict] = [
         "store_manager": "陈娟娟",
         "follow_ai": True,
         "follow_bisuan": True,
+        "store_grade": "A",
+        "ai_target": 10,
     },
     {
         "code": "qidong-renmin",
@@ -31,6 +33,8 @@ STORES: List[Dict] = [
         "store_manager": "肖亚",
         "follow_ai": True,
         "follow_bisuan": False,
+        "store_grade": "A",
+        "ai_target": 10,
     },
     {
         "code": "tongzhou-jinsha",
@@ -44,6 +48,8 @@ STORES: List[Dict] = [
         "store_manager": "奚其梅",
         "follow_ai": True,
         "follow_bisuan": True,
+        "store_grade": "A",
+        "ai_target": 10,
     },
     {
         "code": "tongzhou-wanda",
@@ -57,6 +63,8 @@ STORES: List[Dict] = [
         "store_manager": "郭英",
         "follow_ai": True,
         "follow_bisuan": True,
+        "store_grade": "A",
+        "ai_target": 10,
     },
     {
         "code": "haian-renmin",
@@ -70,6 +78,8 @@ STORES: List[Dict] = [
         "store_manager": "储成恽",
         "follow_ai": True,
         "follow_bisuan": True,
+        "store_grade": "A",
+        "ai_target": 10,
     },
     {
         "code": "haian-wanda",
@@ -83,6 +93,8 @@ STORES: List[Dict] = [
         "store_manager": "张晓志",
         "follow_ai": True,
         "follow_bisuan": True,
+        "store_grade": "A",
+        "ai_target": 10,
     },
     {
         "code": "rg-ninghai",
@@ -96,6 +108,8 @@ STORES: List[Dict] = [
         "store_manager": "冒国云",
         "follow_ai": False,
         "follow_bisuan": True,
+        "store_grade": "A",
+        "ai_target": 10,
     },
     {
         "code": "nt-dayoujing",
@@ -109,6 +123,8 @@ STORES: List[Dict] = [
         "store_manager": "李丹",
         "follow_ai": False,
         "follow_bisuan": False,
+        "store_grade": "B",
+        "ai_target": 2,
     },
     {
         "code": "gangzha-wanda",
@@ -122,6 +138,8 @@ STORES: List[Dict] = [
         "store_manager": "顾静",
         "follow_ai": True,
         "follow_bisuan": False,
+        "store_grade": "A",
+        "ai_target": 10,
     },
     {
         "code": "nt-kaifaqu",
@@ -135,6 +153,8 @@ STORES: List[Dict] = [
         "store_manager": "周伟01",
         "follow_ai": True,
         "follow_bisuan": False,
+        "store_grade": "B",
+        "ai_target": 10,
     },
     {
         "code": "chongchuan-changqiao",
@@ -148,6 +168,8 @@ STORES: List[Dict] = [
         "store_manager": "马周霞",
         "follow_ai": False,
         "follow_bisuan": False,
+        "store_grade": "B",
+        "ai_target": 2,
     },
 ]
 
@@ -160,6 +182,8 @@ PROFILE_FIELDS = (
     "store_manager",
     "follow_ai",
     "follow_bisuan",
+    "store_grade",
+    "ai_target",
 )
 
 

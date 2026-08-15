@@ -57,3 +57,41 @@ def test_money_text():
     assert money_text(judge(False, 0, 0)) == "罚门店 100"
     assert "罚门店 100" in money_text(judge(True, 2, 3))
     assert "罚顾问 50" in money_text(judge(True, 2, 3))
+
+
+def test_settlement_formulas_follow_confirmed_rules():
+    from app.settlement import bonus_formula, commission_target, focus_score_formula
+
+    assert commission_target("A") == 4000
+    assert commission_target("B") == 1000
+    assert "I5" in bonus_formula("I5", "A") and "4000" in bonus_formula("I5", "A")
+    assert "1000" in bonus_formula("I6", "B") and "1200" in bonus_formula("I6", "B")
+    assert "M5>=10" in focus_score_formula("M5", "A")
+    assert "M6>=4" in focus_score_formula("M6", "B")
+
+
+def test_incentive_xlsx_exports_draft(tmp_db):
+    from io import BytesIO
+
+    import openpyxl
+
+    from app.web import create_app
+
+    app = create_app()
+    app.config["TESTING"] = True
+    c = app.test_client()
+    c.post("/login", data={"username": "admin", "pin": "1234"})
+    r = c.get("/incentive.xlsx")
+    assert r.status_code == 200
+    assert "filename=settlement_" in r.headers.get("Content-Disposition", "")
+    wb = openpyxl.load_workbook(BytesIO(r.get_data()))
+    ws = wb["移动接入"]
+    assert "运营商绩效" in (ws["A1"].value or "")
+    assert ws["E2"].value == "酬金（50%）"
+    assert ws["S2"].value == "考核奖惩"
+    # 第一家店：实际酬金公式统一为 开票+房补-垫资
+    assert ws["I5"].value == "=F5+G5-H5"
+    # 黄色手填格
+    assert ws["F5"].fill.fgColor.rgb[-6:] == "FFF2CC"
+    # 口径页
+    assert "口径" in wb.sheetnames
