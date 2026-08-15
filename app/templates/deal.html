@@ -24,11 +24,6 @@
     {% endif %}
   </div>
 
-  <div class="deal-kpis">
-    <div class="deal-kpi">今日 {{ mine_today.total }}<span>成交 {{ mine_today.closed }}</span></div>
-    <div class="deal-kpi">本月 {{ mine_month.total }}<span>成交 {{ mine_month.closed }}</span></div>
-  </div>
-
   <div class="deal-main">
   <form method="post" class="card deal-form">
     <input type="hidden" name="store_id" value="{{ store.id }}">
