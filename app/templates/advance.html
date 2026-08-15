@@ -1,8 +1,6 @@
 {% extends "base.html" %}
 {% block title %}垫资 · {{ store.short_name or store.name }}{% endblock %}
-{% block body_class %}advance-page-body{% endblock %}
 {% block body %}
-<div class="advance-page">
 <div class="page-head">
   <div class="page-title">
     <h1>垫资</h1>
@@ -34,41 +32,37 @@
 <form method="post" class="card advance-form">
   <input type="hidden" name="store_id" value="{{ store.id }}">
   <input type="hidden" name="advance_id" value="{{ form.advance_id }}">
-  <div class="advance-form-grid">
+  <div class="deal-grid">
     <p>
       <label>日期</label>
       <input type="date" name="biz_date" value="{{ form.biz_date }}">
     </p>
     <p>
       <label>号码</label>
-      <input name="phone" value="{{ form.phone }}" inputmode="numeric" placeholder="11位手机号" autocomplete="off">
+      <input type="text" name="phone" value="{{ form.phone }}" inputmode="numeric" placeholder="11位手机号" autocomplete="off">
     </p>
     <p>
       <label>宽带调测费</label>
-      <input name="broadband" value="{{ form.broadband }}" inputmode="decimal" placeholder="可空 / 退款 -200" autocomplete="off">
-      <span class="field-hint">可空，可填负数</span>
+      <input type="text" name="broadband" value="{{ form.broadband }}" inputmode="decimal" placeholder="可空，退款填负数" autocomplete="off">
     </p>
     <p>
       <label>购机让利</label>
-      <input name="rebate" value="{{ form.rebate }}" inputmode="decimal" placeholder="可空 / 退款 -100" autocomplete="off">
-      <span class="field-hint">可空，可填负数</span>
+      <input type="text" name="rebate" value="{{ form.rebate }}" inputmode="decimal" placeholder="可空，退款填负数" autocomplete="off">
     </p>
     <p>
       <label>其他业务</label>
-      <input name="other" value="{{ form.other }}" inputmode="decimal" placeholder="可空 / 退款 -40" autocomplete="off">
-      <span class="field-hint">可空，可填负数</span>
+      <input type="text" name="other" value="{{ form.other }}" inputmode="decimal" placeholder="可空，退款填负数" autocomplete="off">
     </p>
-    <p class="span-note">
+    <p>
       <label>备注（项目 + 串码）</label>
-      <input name="note" value="{{ form.note }}" placeholder="如 宽带电视 / 购机让利+会员+串码 / 退网络电视" autocomplete="off">
+      <input type="text" name="note" value="{{ form.note }}" placeholder="宽带电视 / 串码 / 退网络电视" autocomplete="off">
     </p>
-    <p class="span-actions">
-      <label>&nbsp;</label>
-      <button type="submit">{{ '保存修改' if form.advance_id else '记一笔垫资' }}</button>
-      {% if form.advance_id %}
-      <a class="btn ghost" href="{{ url_for('advance_page', store_id=store.id) }}">取消编辑</a>
-      {% endif %}
-    </p>
+  </div>
+  <div class="toolbar">
+    <button type="submit">{{ '保存修改' if form.advance_id else '记一笔垫资' }}</button>
+    {% if form.advance_id %}
+    <a class="btn ghost" href="{{ url_for('advance_page', store_id=store.id) }}">取消编辑</a>
+    {% endif %}
   </div>
 </form>
 
@@ -169,6 +163,5 @@
   {% else %}
   <p class="muted">本月还没有垫资。</p>
   {% endif %}
-</div>
 </div>
 {% endblock %}

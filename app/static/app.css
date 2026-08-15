@@ -111,8 +111,10 @@ h2 { font-size: 15px; }
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
 label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 500; }
 input, select, textarea, button { font: inherit; color: var(--ink); }
-input[type="text"], input[type="password"], input[type="number"], input[type="date"], select, textarea {
+input:not([type]), input[type="text"], input[type="password"], input[type="number"], input[type="date"], input[type="month"], select, textarea {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   padding: 9px 11px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
@@ -217,6 +219,7 @@ button.ghost:hover, .btn.ghost:hover { background: var(--accent-soft); }
   .kpi-row { grid-template-columns: 1fr 1fr; }
   .page-head { flex-direction: column; align-items: stretch; gap: 10px; }
   .page-head .page-filters { width: 100%; }
+  .filter { min-width: 0; flex: 1 1 100%; }
 }
 .check input { width: auto; }
 
@@ -996,45 +999,12 @@ table.board-table td { text-align: left; vertical-align: middle; }
 .tag-daily { background: var(--tint, #eef3fb); color: var(--link, #2563eb); }
 .tag-deal { background: #eafaf1; color: var(--ok, #16a34a); }
 
-/* 垫资填报：电脑端一行表单 */
-body.advance-page-body .wrap { max-width: 1280px; }
-.advance-page { display: grid; gap: 16px; }
-.advance-form { margin: 0; }
-.advance-form-grid {
-  display: grid;
-  grid-template-columns: 150px 170px repeat(3, minmax(120px, 1fr));
-  gap: 12px 12px;
-  align-items: start;
-}
-.advance-form-grid p { margin: 0; }
-.advance-form-grid .span-note { grid-column: 1 / 5; }
-.advance-form-grid .span-actions {
-  grid-column: 5 / 6;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: flex-end;
-}
-.advance-form-grid .span-actions button,
-.advance-form-grid .span-actions .btn { height: 40px; }
-.field-hint { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.4; }
-.advance-page .deal-records { margin: 0; }
+/* 垫资：跟成交记录同一套页头/KPI/卡片；手机用卡片不用宽表 */
+.advance-form .deal-grid p { min-width: 0; }
+.advance-form .deal-grid input { min-width: 0; max-width: 100%; }
 .advance-cards { display: none; }
-@media (max-width: 960px) {
-  html, body.advance-page-body { overflow-x: hidden; }
-  body.advance-page-body .wrap {
-    padding-left: 12px;
-    padding-right: 12px;
-    overflow-x: hidden;
-  }
-  .advance-page, .advance-form, .advance-form-grid, .advance-form-grid p { min-width: 0; max-width: 100%; }
-  .advance-form-grid { grid-template-columns: 1fr 1fr; }
-  .advance-form-grid .span-note,
-  .advance-form-grid .span-actions { grid-column: 1 / -1; }
-  .advance-form-grid .span-actions { justify-content: stretch; }
-  .advance-form-grid .span-actions button,
-  .advance-form-grid .span-actions .btn { width: 100%; }
-  .advance-form-grid input { max-width: 100%; }
+@media (max-width: 800px) {
+  .advance-form .deal-grid { grid-template-columns: minmax(0, 1fr); }
   .advance-desk { display: none; }
   .advance-cards { display: grid; gap: 10px; }
   .advance-card {
@@ -1042,6 +1012,7 @@ body.advance-page-body .wrap { max-width: 1280px; }
     border-radius: 12px;
     padding: 12px;
     background: #fafafa;
+    min-width: 0;
   }
   .advance-card-top {
     display: flex;
@@ -1053,7 +1024,7 @@ body.advance-page-body .wrap { max-width: 1280px; }
   .advance-card-sum .kpi-num { font-size: 18px; }
   .advance-card-money {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
     gap: 6px;
     margin-top: 10px;
     font-size: 12px;

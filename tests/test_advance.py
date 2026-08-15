@@ -146,7 +146,7 @@ def test_filler_can_save_negative_amount(client):
         follow_redirects=True,
     ).get_data(as_text=True)
     assert "垫资已保存" in page
-    assert "可填负数" in page
+    assert "退款填负数" in page
     with db.get_db() as conn:
         row = conn.execute(
             "SELECT broadband FROM advance_posts WHERE store_id=? AND phone='13900004444'",
