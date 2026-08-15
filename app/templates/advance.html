@@ -4,7 +4,7 @@
 <div class="page-head">
   <div class="page-title">
     <h1>垫资</h1>
-    <p class="muted">门店按笔填写本月垫资，必须带号码。已兑付的不能改、不能删。</p>
+    <p class="muted">本月垫资记在本页下方。未兑付的点「改」或「删」就能纠错；管理员兑付后会锁住，填错了让管理员取消兑付再改。</p>
   </div>
   <form method="get" class="page-filters">
     {% if is_admin and stores|length > 1 %}
@@ -68,6 +68,7 @@
 
 <div class="card deal-records">
   <div class="records-toolbar">
+    <strong>本月记录</strong>
     <span class="muted">{{ month.year }}年{{ month.month }}月 · {{ rows|length }} 笔{% if totals.unpaid %} · 未兑 {{ totals.unpaid }}{% endif %}</span>
   </div>
   {% if rows %}

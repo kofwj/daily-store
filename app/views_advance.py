@@ -133,7 +133,7 @@ def register_advance(app) -> None:
                     flash("三类金额至少填一项。", "error")
                     return _render_advance(conn, store, stores, form, is_admin, today_d)
                 try:
-                    saved = db.record_advance(
+                    db.record_advance(
                         conn,
                         store_id=store["id"],
                         user_id=g.user["id"],
@@ -151,8 +151,8 @@ def register_advance(app) -> None:
                     else:
                         flash("这条垫资不存在。", "error")
                     return redirect(url_for("advance_page", store_id=store["id"]))
-                flash("垫资已保存。", "ok")
-                return redirect(url_for("advance_page", store_id=store["id"], advance_id=saved))
+                flash("垫资已保存，可在下方本月记录里核对；填错了点「改」。", "ok")
+                return redirect(url_for("advance_page", store_id=store["id"]))
             return _render_advance(conn, store, stores, form, is_admin, today_d)
 
     @app.route("/advance/delete", methods=["POST"])
@@ -189,29 +189,35 @@ def register_advance(app) -> None:
         month_end = min(_month_end(month), today_d) if month.year == today_d.year and month.month == today_d.month else _month_end(month)
         store_id = request.args.get("store_id", "")
         paid_raw = request.args.get("paid", "0")
+        scope = request.args.get("scope", "today")
+        if scope not in ("today", "month"):
+            scope = "today"
         paid = None
         if paid_raw == "0":
             paid = 0
         elif paid_raw == "1":
             paid = 1
+        start = today_d if scope == "today" else month
+        end = today_d if scope == "today" else month_end
         with db.get_db() as conn:
             stores = accessible_stores(conn)
             sid = int(store_id) if store_id.isdigit() else None
             if sid and not any(s["id"] == sid for s in stores):
                 sid = None
-            total = db.count_advances(conn, store_id=sid, start=month, end=month_end, paid=paid)
+            inbox = db.advance_today_inbox(conn, today_d)
+            total = db.count_advances(conn, store_id=sid, start=start, end=end, paid=paid)
             page, pages = pagination(request.args.get("page"), total)
             rows = db.list_advances(
                 conn,
                 store_id=sid,
-                start=month,
-                end=month_end,
+                start=start,
+                end=end,
                 paid=paid,
                 limit=50,
                 offset=(page - 1) * 50,
             )
             sums = {"broadband": 0.0, "rebate": 0.0, "other": 0.0, "total": 0.0, "unpaid": 0}
-            all_rows = db.list_all_advances(conn, month, month_end)
+            all_rows = db.list_all_advances(conn, start, end)
             for r in all_rows:
                 if sid and int(r["store_id"]) != sid:
                     continue
@@ -226,8 +232,11 @@ def register_advance(app) -> None:
                 stores=stores,
                 rows=rows,
                 month=month,
+                today=today_d,
                 store_id=str(sid or ""),
                 paid=paid_raw,
+                scope=scope,
+                inbox=inbox,
                 page=page,
                 pages=pages,
                 total=total,
@@ -242,6 +251,7 @@ def register_advance(app) -> None:
         month = request.form.get("month") or ""
         store_id = request.form.get("store_id") or ""
         paid = request.form.get("paid") or "0"
+        scope = request.form.get("scope") or "today"
         with db.get_db() as conn:
             n = db.set_advance_paid(
                 conn,
@@ -250,10 +260,10 @@ def register_advance(app) -> None:
                 user_id=g.user["id"],
             )
         if action == "unpay":
-            flash(f"已取消兑付 {n} 笔。" if n else "没有可取消的记录。", "ok" if n else "error")
+            flash(f"已取消兑付 {n} 笔。门店现在可以改这条。" if n else "没有可取消的记录。", "ok" if n else "error")
         else:
             flash(f"已兑付 {n} 笔。" if n else "没有可兑付的记录。", "ok" if n else "error")
-        return redirect(url_for("advance_pay", month=month, store_id=store_id, paid=paid))
+        return redirect(url_for("advance_pay", month=month, store_id=store_id, paid=paid, scope=scope))
 
     @app.route("/advance.xlsx")
     @admin_required

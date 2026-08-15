@@ -134,3 +134,31 @@ def test_filler_cannot_open_pay_page(client):
     client.post("/login", data={"username": "jinhua", "pin": "123456"})
     r = client.get("/advance/pay", follow_redirects=True)
     assert "需要管理员权限" in r.get_data(as_text=True)
+
+
+def test_store_sees_month_list_and_admin_sees_today_inbox(client):
+    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+    today = db.today_local().isoformat()
+    client.post(
+        "/advance",
+        data={
+            "store_id": str(sid),
+            "biz_date": today,
+            "phone": "13900003333",
+            "rebate": "100",
+            "note": "购机让利",
+        },
+        follow_redirects=True,
+    )
+    page = client.get("/advance").get_data(as_text=True)
+    assert "本月记录" in page
+    assert "13900003333" in page
+    assert "改" in page and "删" in page
+    client.get("/logout")
+    client.post("/login", data={"username": "admin", "pin": "1234"})
+    inbox = client.get("/advance/pay?scope=today&paid=0").get_data(as_text=True)
+    assert "今天待兑" in inbox
+    assert "海门金花" in inbox
+    assert "1笔" in inbox

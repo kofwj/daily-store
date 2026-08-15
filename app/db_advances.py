@@ -223,6 +223,27 @@ def list_all_advances(
     )
 
 
+def advance_today_inbox(conn: sqlite3.Connection, day: date) -> List[sqlite3.Row]:
+    """当天未兑付：按店汇总，管理员用来看谁交了要兑。"""
+    return list(
+        conn.execute(
+            """
+            SELECT a.store_id,
+                   st.short_name AS store_short,
+                   st.name AS store_name,
+                   COUNT(*) AS n,
+                   ROUND(SUM(a.broadband + a.rebate + a.other), 2) AS total
+            FROM advance_posts a
+            JOIN stores st ON st.id = a.store_id
+            WHERE a.biz_date=? AND a.paid=0
+            GROUP BY a.store_id
+            ORDER BY st.sort_order, st.id
+            """,
+            (day.isoformat(),),
+        )
+    )
+
+
 def advance_month_totals(
     conn: sqlite3.Connection, store_ids: Iterable[int], as_of: date
 ) -> Dict[int, Dict[str, float]]:

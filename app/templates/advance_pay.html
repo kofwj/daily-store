@@ -5,13 +5,18 @@
 <div class="page-head">
   <div class="page-title">
     <h1>垫资兑付</h1>
-    <p class="muted">管理员勾选后兑付。已兑付的门店不能再改、不能再删。结算底稿的垫资列按本月合计回填。</p>
+    <p class="muted">先看今天谁交了待兑。门店填错且已兑付时，取消兑付后店里就能改。</p>
   </div>
   <form method="get" class="page-filters">
+    <div class="seg">
+      <a class="{{ 'active' if scope=='today' else '' }}" href="{{ url_for('advance_pay', month=month.strftime('%Y-%m'), store_id=store_id, paid=paid, scope='today') }}">今天</a>
+      <a class="{{ 'active' if scope=='month' else '' }}" href="{{ url_for('advance_pay', month=month.strftime('%Y-%m'), store_id=store_id, paid=paid, scope='month') }}">本月</a>
+    </div>
     <label class="filter">
       <span>月份</span>
       <input type="month" name="month" value="{{ month.strftime('%Y-%m') }}" onchange="this.form.submit()">
     </label>
+    <input type="hidden" name="scope" value="{{ scope }}">
     <label class="filter">
       <span>门店</span>
       <select name="store_id" onchange="this.form.submit()">
@@ -32,6 +37,23 @@
     <a class="btn ghost" href="{{ url_for('advance_xlsx', month=month.strftime('%Y-%m')) }}">导出垫资表</a>
   </form>
 </div>
+{% if inbox %}
+<div class="card board-missing">
+  <div class="board-missing-head">
+    <h2>今天待兑</h2>
+    <span class="muted">{{ today.isoformat() }} · {{ inbox|length }} 家店</span>
+  </div>
+  <div class="board-missing-list">
+    {% for s in inbox %}
+    <a class="miss-chip" href="{{ url_for('advance_pay', month=month.strftime('%Y-%m'), store_id=s.store_id, paid='0', scope='today') }}">{{ s.store_short or s.store_name }} · {{ s.n }}笔 {{ '%.0f'|format(s.total) }}</a>
+    {% endfor %}
+  </div>
+</div>
+{% elif scope == 'today' %}
+<div class="card board-missing">
+  <div class="board-missing-head"><h2>今天待兑</h2><span class="muted">{{ today.isoformat() }} 还没有未兑付的垫资</span></div>
+</div>
+{% endif %}
 <div class="kpi-row">
   <div class="kpi"><div class="muted">本月合计</div><div class="kpi-num">{{ '%.2f'|format(sums.total) }}</div></div>
   <div class="kpi"><div class="muted">宽带调测</div><div class="kpi-num">{{ '%.2f'|format(sums.broadband) }}</div></div>
@@ -45,6 +67,7 @@
     <input type="hidden" name="month" value="{{ month.strftime('%Y-%m') }}">
     <input type="hidden" name="store_id" value="{{ store_id }}">
     <input type="hidden" name="paid" value="{{ paid }}">
+    <input type="hidden" name="scope" value="{{ scope }}">
     <div class="records-toolbar">
       <span class="muted">本页 {{ rows|length }} 笔</span>
       <div>
@@ -98,7 +121,7 @@
       </table>
     </div>
   </form>
-  {{ pager(page, pages, total, 'advance_pay', month=month.strftime('%Y-%m'), store_id=store_id, paid=paid) }}
+  {{ pager(page, pages, total, 'advance_pay', month=month.strftime('%Y-%m'), store_id=store_id, paid=paid, scope=scope) }}
   {% else %}
   <p class="muted">这个筛选下没有垫资。</p>
   {% endif %}

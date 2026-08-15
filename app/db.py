@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from .db_advances import (  # noqa: F401
     advance_month_totals,
+    advance_today_inbox,
     count_advances,
     delete_advance,
     get_advance,
