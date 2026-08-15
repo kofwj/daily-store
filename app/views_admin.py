@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import csv
-import io
 import json
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List
 
-from flask import Response, g, render_template, request
+from flask import g, render_template, request
 
 from . import bulletin, db
 from .helpers import (
@@ -22,6 +20,8 @@ from .helpers import (
     store_forecast,
     store_label,
     values_for_broadcast,
+    xlsx_bytes,
+    xlsx_response,
 )
 from .metrics_seed import KPI_TARGETS, rollup_pair
 
@@ -345,9 +345,10 @@ def register_admin(app) -> None:
             kind=kind,
         )
 
-    @app.route("/bulletin.csv")
+    @app.route("/bulletin.xlsx")
     @admin_required
-    def bulletin_csv():
+    def bulletin_xlsx():
+        """通报表导出为真实 Excel（.xlsx）。保留旧 /bulletin.csv 作为兼容别名。"""
         biz_date = parse_date(request.args.get("date"))
         city = (request.args.get("city") or "").strip()
         with db.get_db() as conn:
@@ -355,13 +356,25 @@ def register_admin(app) -> None:
             if city:
                 stores = [s for s in stores if (s["city"] or "南通市") == city]
             rows = _bulletin_rows(conn, stores, biz_date)
-            buf = io.StringIO()
-            writer = csv.writer(buf)
-            writer.writerows(bulletin.csv_rows(rows, biz_date))
-            data = buf.getvalue().encode("utf-8-sig")
-            filename = f"bulletin_{biz_date.isoformat()}.csv"
-            return Response(
-                data,
-                mimetype="text/csv; charset=utf-8",
-                headers={"Content-Disposition": f"attachment; filename={filename}"},
+            lines = bulletin.csv_rows(rows, biz_date)
+            header, data_rows = lines[0], lines[1:]
+            filename = f"bulletin_{biz_date.isoformat()}.xlsx"
+            return xlsx_response(
+                xlsx_bytes(header, data_rows, sheet="通报表"),
+                filename,
             )
+
+    @app.route("/bulletin.csv")
+    @admin_required
+    def bulletin_csv():
+        """旧 CSV 兼容别名：重定向到新 .xlsx。"""
+        from flask import redirect as _redirect
+        from flask import url_for as _url_for
+
+        return _redirect(
+            _url_for(
+                "bulletin_xlsx",
+                date=parse_date(request.args.get("date")).isoformat(),
+                city=(request.args.get("city") or "").strip(),
+            )
+        )

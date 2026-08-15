@@ -1,4 +1,7 @@
 from datetime import date
+from io import BytesIO
+
+import openpyxl
 
 from app import db, db_core
 from app.broadcast import render_broadcast
@@ -210,9 +213,14 @@ def test_login_and_save_roundtrip(tmp_db):
     )
     assert saved.status_code == 200
     assert "已保存".encode("utf-8") in saved.data
-    csv_resp = client.get("/report.csv")
-    assert csv_resp.status_code == 200
-    assert "当天手机销量" in csv_resp.data.decode("utf-8-sig")
+    xlsx_resp = client.get("/report.xlsx")
+    assert xlsx_resp.status_code == 200
+    assert xlsx_resp.mimetype == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    workbook = openpyxl.load_workbook(BytesIO(xlsx_resp.data))
+    flat = [str(v) for row in workbook.active.iter_rows(values_only=True) for v in row if v is not None]
+    assert "当天手机销量" in flat
+    # 旧 /report.csv 重定向到 .xlsx
+    assert client.get("/report.csv").status_code == 302
     deal_page = client.get("/deal")
     assert deal_page.status_code == 200
     assert "成交播报".encode("utf-8") in deal_page.data

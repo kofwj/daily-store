@@ -152,3 +152,43 @@ def test_totals_row_sums_and_break_zero_count():
     assert total["day_bisuan"] == 4
     text = tsv([a, b], date(2026, 8, 14))
     assert "合计（2 店）" in text
+
+
+def test_bulletin_export_xlsx(client):
+    """管理员通报表导出为 .xlsx，旧 /bulletin.csv 重定向到新地址。"""
+    import io
+
+    import openpyxl
+
+    client.post("/login", data={"username": "admin", "pin": "1234"})
+    biz_date = date.today().isoformat()
+    # 先提交两店日报，让通报表有数据
+    from app import db
+
+    with db.get_db() as conn:
+        stores = list(conn.execute("SELECT id, code FROM stores LIMIT 2"))
+    for st in stores:
+        client.post(
+            "/today",
+            data={
+                "store_id": str(st["id"]),
+                "date": biz_date,
+                "m_phone_sales": "2",
+                "m_ai_contract": "1",
+                "m_cloud_disk": "0",
+            },
+            follow_redirects=True,
+        )
+    r = client.get(f"/bulletin.xlsx?date={biz_date}")
+    assert r.status_code == 200
+    assert r.mimetype == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert r.headers.get("Content-Disposition", "").endswith(".xlsx")
+    wb = openpyxl.load_workbook(io.BytesIO(r.get_data()))
+    ws = wb.active
+    assert ws.title == "通报表"
+    header = [c.value for c in ws[1]]
+    assert header[1] == "地市" and header[3] == "移动编码"
+    assert "区域经理" in header
+    # 旧 CSV 链接现在重定向到 .xlsx
+    r2 = client.get(f"/bulletin.csv?date={biz_date}")
+    assert r2.status_code in (302, 200)

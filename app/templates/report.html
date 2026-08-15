@@ -41,7 +41,7 @@
           <a class="{{ 'active' if view=='week' else '' }}" href="{{ url_for('report', store_id=store.id, view='week', start=start.isoformat()) }}">周报</a>
           <a class="{{ 'active' if view=='day' else '' }}" href="{{ url_for('report', store_id=store.id, view='day', start=start.isoformat()) }}">日报</a>
         </div>
-        <a class="btn ghost" href="{{ url_for('report_csv', store_id=store.id, start=start.isoformat(), end=end.isoformat()) }}">导出 CSV</a>
+        <a class="btn ghost" href="{{ url_for('report_xlsx', store_id=store.id, start=start.isoformat(), end=end.isoformat()) }}">导出 Excel</a>
       </div>
     </form>
   </div>

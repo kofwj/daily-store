@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import csv
-import io
 from datetime import timedelta
 
 from flask import Response, flash, g, redirect, render_template, request, url_for
@@ -19,6 +17,8 @@ from .helpers import (
     pick_store,
     store_forecast,
     values_for_broadcast,
+    xlsx_bytes,
+    xlsx_response,
 )
 from .metrics_seed import KPI_TARGETS, SECTIONS, rollup_pair
 
@@ -305,28 +305,24 @@ def register_daily(app) -> None:
         start = today_d - timedelta(days=days_int - 1)
         with db.get_db() as conn:
             rows = db.list_all_deal_posts(conn, start, today_d)
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-        writer.writerow(["日期", "门店", "机型", "号码", "消费", "推荐套餐", "开口/导购", "结果", "备注"])
-        for r in rows:
-            writer.writerow(
-                [
-                    (r["biz_date"] or ""),
-                    r["store_short"] or r["store_name"] or "",
-                    r["model"] or "",
-                    r["phone"] or "",
-                    r["spend"] or "",
-                    r["recommend"] or "",
-                    r["opener"] or r["submitter_name"] or "",
-                    "成交" if r["closed"] else "未成交",
-                    r["note"] or "",
-                ]
-            )
-        data = buf.getvalue().encode("utf-8-sig")
-        filename = f"deal_export_{start.isoformat()}_{today_d.isoformat()}.csv"
-        return Response(
-            data,
-            mimetype="text/csv; charset=utf-8",
-            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        header = ["日期", "门店", "机型", "号码", "消费", "推荐套餐", "开口/导购", "结果", "备注"]
+        data_rows = [
+            [
+                (r["biz_date"] or ""),
+                r["store_short"] or r["store_name"] or "",
+                r["model"] or "",
+                r["phone"] or "",
+                r["spend"] or "",
+                r["recommend"] or "",
+                r["opener"] or r["submitter_name"] or "",
+                "成交" if r["closed"] else "未成交",
+                r["note"] or "",
+            ]
+            for r in rows
+        ]
+        filename = f"deal_export_{start.isoformat()}_{today_d.isoformat()}.xlsx"
+        return xlsx_response(
+            xlsx_bytes(header, data_rows, sheet="成交播报"),
+            filename,
         )
 

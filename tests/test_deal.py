@@ -1,3 +1,7 @@
+import io
+
+import openpyxl
+
 from app import db
 from app.deal import form_values, render_deal
 
@@ -139,16 +143,24 @@ def test_admin_exports_all_stores_deal_csv(client):
     client.post("/login", data={"username": "admin", "pin": "1234"})
     r = client.get("/deal/export")
     assert r.status_code == 200
-    assert r.mimetype == "text/csv"
+    assert r.mimetype == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     assert "attachment" in r.headers.get("Content-Disposition", "")
-    body = r.get_data(as_text=True)
-    assert "日期,门店,机型,号码,消费,推荐套餐,开口/导购,结果,备注" in body.replace("\ufeff", "")
-    assert "S60" in body and "13811110000" in body  # 甲店
-    assert "X300" in body and "13822220000" in body  # 乙店
+    assert r.headers.get("Content-Disposition", "").endswith(".xlsx")
+    wb = openpyxl.load_workbook(io.BytesIO(r.get_data()))
+    ws = wb.active
+    assert ws.title == "成交播报"
+    header = [c.value for c in ws[1]]
+    assert header == ["日期", "门店", "机型", "号码", "消费", "推荐套餐", "开口/导购", "结果", "备注"]
+    cells = list(ws.iter_rows(min_row=2, values_only=True))
+    flat = [str(v) for row in cells for v in row if v is not None]
+    assert "S60" in flat and "13811110000" in flat  # 甲店
+    assert "X300" in flat and "13822220000" in flat  # 乙店
     # 只导出设定天数内的（今天必然在内）
     r7 = client.get("/deal/export?days=7")
     assert r7.status_code == 200
-    assert "S60" in r7.get_data(as_text=True)
+    wb7 = openpyxl.load_workbook(io.BytesIO(r7.get_data()))
+    flat7 = [str(v) for row in wb7.active.iter_rows(values_only=True) for v in row if v is not None]
+    assert "S60" in flat7
 
 
 def test_record_deal_post_logs_create_and_update(tmp_db):

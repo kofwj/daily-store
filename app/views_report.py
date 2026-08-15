@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import csv
-import io
 from datetime import date, timedelta
 from typing import Dict
 
@@ -15,6 +13,8 @@ from .helpers import (
     login_required,
     parse_date,
     pick_store,
+    xlsx_bytes,
+    xlsx_response,
 )
 from .metrics_seed import KPI_TARGETS, SECTIONS, rollup_amount
 
@@ -151,9 +151,10 @@ def register_report(app) -> None:
                 month_start=start.replace(day=1),
             )
 
-    @app.route("/report.csv")
+    @app.route("/report.xlsx")
     @login_required
-    def report_csv():
+    def report_xlsx():
+        """报表导出为真实 Excel（.xlsx）。"""
         with db.get_db() as conn:
             store, _stores = pick_store(conn, request.args.get("store_id"))
             if store is None:
@@ -161,20 +162,29 @@ def register_report(app) -> None:
             start = parse_date(request.args.get("start"), db.today_local().replace(day=1))
             end = parse_date(request.args.get("end"), db.today_local())
             facts = db.facts_in_range(conn, store["id"], start, end)
-            buf = io.StringIO()
-            writer = csv.writer(buf)
-            writer.writerow(["日期", "门店", "分类", "指标", "日值"])
-            for row in facts:
-                writer.writerow(
-                    [row["biz_date"], store["name"], row["section"], row["name"], row["day_value"]]
-                )
-            data = buf.getvalue().encode("utf-8-sig")
-            filename = f"{store['code']}_{start.isoformat()}_{end.isoformat()}.csv"
-            return Response(
-                data,
-                mimetype="text/csv; charset=utf-8",
-                headers={"Content-Disposition": f"attachment; filename={filename}"},
+            header = ["日期", "门店", "分类", "指标", "日值"]
+            data_rows = [
+                [row["biz_date"], store["name"], row["section"], row["name"], row["day_value"]]
+                for row in facts
+            ]
+            filename = f"{store['code']}_{start.isoformat()}_{end.isoformat()}.xlsx"
+            return xlsx_response(
+                xlsx_bytes(header, data_rows, sheet="报表"),
+                filename,
             )
+
+    @app.route("/report.csv")
+    @login_required
+    def report_csv():
+        """旧 CSV 兼容别名：重定向到新 .xlsx。"""
+        return redirect(
+            url_for(
+                "report_xlsx",
+                store_id=request.args.get("store_id"),
+                start=request.args.get("start"),
+                end=request.args.get("end"),
+            )
+        )
 
     @app.route("/report/delete", methods=["POST"])
     @admin_required

@@ -21,7 +21,7 @@
     </label>
     <button type="button" onclick="copyBulletinImage()">复制图片</button>
     <button type="button" class="ghost" onclick="downloadBulletinImage()">下载图片</button>
-    <a class="btn ghost" href="{{ url_for('bulletin_csv', date=biz_date.isoformat(), city=city) }}">导出 CSV</a>
+    <a class="btn ghost" href="{{ url_for('bulletin_xlsx', date=biz_date.isoformat(), city=city) }}">导出 Excel</a>
     <span class="chip" id="copyHint">可贴进微信</span>
   </form>
 </div>

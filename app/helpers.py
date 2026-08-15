@@ -9,8 +9,10 @@ from __future__ import annotations
 import re
 from datetime import date
 from functools import wraps
-from typing import Any, Dict, List, Optional, Tuple
+from io import BytesIO
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import openpyxl
 from flask import current_app, flash, g, redirect, request, session, url_for
 
 from . import broadcast, db, incentive
@@ -221,3 +223,58 @@ def pagination(raw_page: Optional[str], total: int, per_page: int = 50) -> Tuple
     if page > pages:
         page = pages
     return page, pages
+
+
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def xlsx_bytes(
+    header: Sequence[str],
+    rows: Sequence[Sequence[Any]],
+    *,
+    sheet: str = "Sheet1",
+    autofilter: bool = True,
+) -> bytes:
+    """把表头+数据行导出为真实 .xlsx 字节流。表头加粗+底色+冻结，列宽自适应。"""
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = (sheet or "Sheet1")[:31]  # Excel sheet 名最长 31 字符
+    ws.append(list(header))
+    fill = PatternFill("solid", fgColor="D9E2F3")
+    for col in range(1, len(header) + 1):
+        cell = ws.cell(row=1, column=col)
+        cell.font = Font(bold=True, color="1F2937")
+        cell.fill = fill
+        cell.alignment = Alignment(vertical="center")
+    if rows:
+        for r in rows:
+            ws.append(list(r))
+    ws.freeze_panes = "A2"
+    if autofilter:
+        ws.auto_filter.ref = ws.dimensions
+    # 列宽自适应（中文按宽字符估算，封顶 60）
+    for col in range(1, max(1, ws.max_column) + 1):
+        width = 0.0
+        for row in ws.iter_rows(min_col=col, max_col=col):
+            for cell in row:
+                v = cell.value
+                w = 0 if v is None else sum(2 if ord(ch) > 127 else 1 for ch in str(v))
+                width = max(width, w)
+        ws.column_dimensions[get_column_letter(col)].width = min(max(width + 2, 10), 60)
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def xlsx_response(data: bytes, filename: str):
+    """带下载头的 xlsx 响应。"""
+    from flask import Response
+
+    return Response(
+        data,
+        mimetype=XLSX_MIME,
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
