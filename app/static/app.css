@@ -895,8 +895,8 @@ table.board-table td { text-align: left; vertical-align: middle; }
 .deal-log-top strong { min-width: 0; overflow-wrap: anywhere; }
 .deal-page .table-wrap { max-width: 100%; }
 @media (max-width: 800px) {
-  html, body.deal-page { overflow-x: hidden; }
-  body.deal-page .wrap {
+  html, body.deal-page-body { overflow-x: hidden; }
+  body.deal-page-body .wrap {
     padding-left: 10px;
     padding-right: 10px;
     padding-bottom: calc(76px + var(--safe-bottom));
