@@ -95,3 +95,27 @@ def test_incentive_xlsx_exports_draft(tmp_db):
     assert ws["F5"].fill.fgColor.rgb[-6:] == "FFF2CC"
     # 口径页
     assert "口径" in wb.sheetnames
+
+
+def test_unreported_store_is_not_penalized(tmp_db):
+    """本月没交过日报的店不参与考核，奖惩记 0。"""
+    from datetime import date
+
+    from app import db as _db
+    from app.helpers import store_forecast
+    from app.web import create_app
+
+    app = create_app()
+    app.config["TESTING"] = True
+    c = app.test_client()
+    c.post("/login", data={"username": "admin", "pin": "1234"})
+    with _db.get_db() as conn:
+        store = conn.execute("SELECT * FROM stores WHERE code='xinghua-wuyue'").fetchone()
+        judged = store_forecast(conn, store, date.today())
+        assert judged["reported"] is False
+        assert judged["label"] == "本月未交"
+        assert judged["net"] == 0
+        assert judged["store_penalty"] == 0
+    page = c.get("/incentive").get_data(as_text=True)
+    assert "本月未交" in page
+    assert "兴化吾悦" in page

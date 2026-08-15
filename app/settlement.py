@@ -105,10 +105,16 @@ def _group_stores(stores: Sequence[Any]) -> List[Dict[str, Any]]:
 
 
 def build_settlement_rows(conn, stores: Iterable[Any], as_of: date) -> List[Dict[str, Any]]:
+    from . import db
+
+    stores = list(stores)
     rules = incentive_rules(conn)
+    reported_ids = db.stores_reported_in_month(conn, [s["id"] for s in stores], as_of)
     out = []
     for store in stores:
-        judged = store_forecast(conn, store, as_of, rules)
+        judged = store_forecast(
+            conn, store, as_of, rules, reported=store["id"] in reported_ids
+        )
         grade = grade_of(store)
         out.append(
             {
@@ -121,6 +127,7 @@ def build_settlement_rows(conn, stores: Iterable[Any], as_of: date) -> List[Dict
                 "net": judged["net"],
                 "label": judged["label"],
                 "money_text": judged["money_text"],
+                "reported": judged.get("reported", True),
             }
         )
     return out

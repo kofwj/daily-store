@@ -120,7 +120,7 @@
               <div class="muted tiny">已成交/全部</div>
             </td>
             <td class="forecast-cell">
-              <span class="status {{ 'done' if r.forecast.passed else 'wait' }}">{{ r.forecast.label }}</span>
+              <span class="status {{ 'done' if r.forecast.passed else ('miss' if not r.forecast.reported else 'wait') }}">{{ r.forecast.label }}</span>
               <div class="muted tiny">{{ r.forecast.money_text }}</div>
             </td>
           </tr>

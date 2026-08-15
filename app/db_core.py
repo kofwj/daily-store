@@ -570,7 +570,7 @@ def _profile_values(item: dict) -> tuple:
     )
 
 def _seed_catalog_stores(conn: sqlite3.Connection) -> None:
-    """按官方店名补齐 11 家店。已有日报的宁海路店只改名，不换 code。
+    """按官方店名补齐目录店。已有日报的宁海路店只改名，不换 code。
 
     新店首次出现时写全目录档案；已存在的店只补名/排序，
     不覆盖管理员在设置里改过的档案字段（区域经理、店长、顾问、停用状态等）。

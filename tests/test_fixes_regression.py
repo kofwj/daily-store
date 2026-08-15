@@ -321,3 +321,8 @@ def test_bulletin_skips_stores_without_mobile_code(app_client):
     # 没有编码的店不出现
     assert "测试没编码店" not in page
     assert "没编码店" not in page
+    # 没编码的泰州新店不该把「泰州市」带进下拉
+    assert 'value="泰州市"' not in page
+    empty = app_client.get("/bulletin?city=泰州市").get_data(as_text=True).replace("\ufeff", "")
+    assert "测试有编码店" in empty  # 非法地市回退到南通
+    assert "兴化吾悦" not in empty

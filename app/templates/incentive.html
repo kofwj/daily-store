@@ -18,7 +18,7 @@
   </form>
 </div>
 <div class="kpi-row">
-  <div class="kpi"><div class="muted">达标门店</div><div class="kpi-num">{{ totals.passed }} / {{ rows|length }}</div></div>
+  <div class="kpi"><div class="muted">达标门店</div><div class="kpi-num">{{ totals.passed }} / {{ totals.reported }}</div><div class="muted">已交 {{ totals.reported }} / {{ rows|length }}</div></div>
   <div class="kpi"><div class="muted">门店奖励</div><div class="kpi-num">{{ totals.store_reward }}</div></div>
   <div class="kpi"><div class="muted">门店扣罚</div><div class="kpi-num">{{ totals.store_penalty }}</div></div>
   <div class="kpi"><div class="muted">顾问扣罚</div><div class="kpi-num">{{ totals.advisor_penalty }}</div></div>
@@ -54,7 +54,7 @@
         <td>{{ row.new_cut }}</td>
         <td>{{ row.total }}</td>
         <td>
-          <span class="status {{ 'done' if row.passed else 'wait' }}">{{ row.label }}</span>
+          <span class="status {{ 'done' if row.passed else ('miss' if not row.reported else 'wait') }}">{{ row.label }}</span>
           <div class="muted">{{ row.reason }}</div>
         </td>
         <td>{% if row.store_reward %}{{ row.store_reward }}{% else %}—{% endif %}</td>
@@ -71,7 +71,7 @@
     <h2>结算底稿预览</h2>
     <a class="btn ghost" href="{{ url_for('incentive_xlsx', month=month.strftime('%Y-%m')) }}">导出 Excel</a>
   </div>
-  <p class="muted">系统已填：AI、新用户直降、考核奖惩。黄色留空开票/房补/垫资/搭载率，下月初在 Excel 里填。<em>仅算当月已交门店；新增目录店如当月无日报，AI/直降/奖惩为 0。</em></p>
+  <p class="muted">系统已填：AI、新用户直降、考核奖惩。黄色留空开票/房补/垫资/搭载率，下月初在 Excel 里填。本月还没交过日报的店不参与考核，奖惩记 0。</p>
   <table class="data board-table">
     <thead>
       <tr>
@@ -91,19 +91,18 @@
     </thead>
     <tbody>
       {% for grp in settle_groups %}
-      {% set outer = loop %}
       {% for r in grp.stores %}
       <tr>
         {% if loop.first %}
         <td rowspan="{{ grp.stores|length }}">{{ grp.manager }}</td>
         {% endif %}
-        <td class="left">{{ r.store.name }}</td>
+        <td class="left">{{ r.store.short_name or r.store.name }}{% if not r.reported %} <span class="miss-tag">未交</span>{% endif %}</td>
         <td>{{ r.grade }}</td>
         <td>{{ r.commission_target }}</td>
         <td>{{ r.ai_target }}</td>
         <td>{{ r.new_cut }}</td>
         <td>{{ r.ai }}</td>
-        <td class="{{ 'pos' if r.net >= 0 else 'neg' }}">{{ r.net }}</td>
+        <td class="{{ 'pos' if r.reported and r.net > 0 else ('neg' if r.reported and r.net < 0 else '') }}">{% if r.reported %}{{ r.net }}{% else %}—{% endif %}</td>
         <td class="fill"></td>
         <td class="fill"></td>
         <td class="fill"></td>

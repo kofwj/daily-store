@@ -145,7 +145,14 @@ def broadcast_compact_sections(conn) -> List[str]:
     return sections
 
 
-def store_forecast(conn, store, as_of: date, rules: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
+def store_forecast(
+    conn,
+    store,
+    as_of: date,
+    rules: Optional[Dict[str, int]] = None,
+    *,
+    reported: Optional[bool] = None,
+) -> Dict[str, Any]:
     month_vals = db.month_cum_through(conn, store["id"], as_of)
     ai = int(month_vals.get("ai_contract", 0) or 0)
     new_cut = rollup_amount(month_vals, "coin_cut")
@@ -153,14 +160,42 @@ def store_forecast(conn, store, as_of: date, rules: Optional[Dict[str, int]] = N
     # rules 默认每次现查；批量循环时调用方应提前算一次传入，避免每店重复查设置
     if rules is None:
         rules = incentive_rules(conn)
-    judged = incentive.judge(bool(advisor_name.strip()), ai, new_cut, rules)
+    if reported is None:
+        start, end = db.month_bounds(as_of)
+        reported = (
+            conn.execute(
+                "SELECT 1 FROM daily_reports WHERE store_id=? AND biz_date>=? AND biz_date<=? LIMIT 1",
+                (store["id"], start, end),
+            ).fetchone()
+            is not None
+        )
+    if not reported:
+        judged = {
+            "passed": False,
+            "label": "本月未交",
+            "reason": "本月还没交过日报，不参与考核",
+            "store_reward": 0,
+            "store_penalty": 0,
+            "advisor_penalty": 0,
+            "scheme": "有运营商顾问" if advisor_name.strip() else "无运营商顾问",
+            "goal": "先交日报再考核",
+            "ai": ai,
+            "new_cut": new_cut,
+            "sesame": new_cut,
+            "total": ai + new_cut,
+            "has_advisor": bool(advisor_name.strip()),
+            "net": 0,
+        }
+    else:
+        judged = incentive.judge(bool(advisor_name.strip()), ai, new_cut, rules)
     judged.update(
         {
             "store_id": store["id"],
             "name": store["name"],
             "store_manager": store["store_manager"] or "",
             "advisor_name": advisor_name.strip(),
-            "money_text": incentive.money_text(judged),
+            "money_text": incentive.money_text(judged) if reported else "—",
+            "reported": bool(reported),
         }
     )
     return judged

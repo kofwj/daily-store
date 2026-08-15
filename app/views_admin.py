@@ -71,10 +71,10 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
     if city:
         stores = [s for s in stores if ((s["city"] or "").strip() or "未分地市") == city]
     kpi_targets = db.list_kpi_targets(conn)
-    month_start, _month_end = db.month_bounds(biz_date)
     rules = incentive_rules(conn)
     store_ids = [s["id"] for s in stores]
     month_begin = biz_date.replace(day=1)
+    reported_ids = db.stores_reported_in_month(conn, store_ids, biz_date)
     deal_today_map = db.deal_counts(conn, store_ids, biz_date, biz_date)
     deal_month_map = db.deal_counts(conn, store_ids, month_begin, biz_date)
     rows = []
@@ -101,13 +101,7 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
                 }
             )
         rep = db.get_report(conn, sid, biz_date)
-        reported_this_month = (
-            conn.execute(
-                "SELECT 1 FROM daily_reports WHERE store_id=? AND biz_date>=? AND biz_date<=? LIMIT 1",
-                (sid, month_start, biz_date.isoformat()),
-            ).fetchone()
-            is not None
-        )
+        reported_this_month = sid in reported_ids
         deal_today = deal_today_map.get(sid, {"total": 0, "closed": 0})
         deal_month = deal_month_map.get(sid, {"total": 0, "closed": 0})
         rows.append(
@@ -117,7 +111,9 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
                 "submitter_name": rep["submitter_name"] if rep else None,
                 "submitted_at": rep["submitted_at"] if rep else None,
                 "reported_this_month": reported_this_month,
-                "forecast": store_forecast(conn, store, biz_date, rules),
+                "forecast": store_forecast(
+                    conn, store, biz_date, rules, reported=reported_this_month
+                ),
                 "kpis": kpis,
                 "day_sum": day_sum,
                 "month_sum": sum(k["month"] for k in kpis),
@@ -248,7 +244,11 @@ def register_admin(app) -> None:
         city = (request.args.get("city") or "").strip()
         with db.get_db() as conn:
             stores = accessible_stores(conn)
+            # 通报表只看有移动编码的店；地市下拉也按这个口径，避免空店把泰州带出来
+            stores = [s for s in stores if (s["mobile_code"] or "").strip()]
             cities = sorted({(s["city"] or "南通市") for s in stores})
+            if city and city not in cities:
+                city = ""
             if not city:
                 city = "南通市" if "南通市" in cities else (cities[0] if cities else "")
             stores = [s for s in stores if (s["city"] or "南通市") == city] if city else stores
@@ -287,16 +287,21 @@ def register_admin(app) -> None:
                 "advisor_penalty": 0,
                 "net": 0,
                 "passed": 0,
+                "reported": 0,
             }
             rules = incentive_rules(conn)
+            reported_ids = db.stores_reported_in_month(conn, [s["id"] for s in stores], as_of)
             for store in stores:
-                judged = store_forecast(conn, store, as_of, rules)
+                judged = store_forecast(
+                    conn, store, as_of, rules, reported=store["id"] in reported_ids
+                )
                 rows.append(judged)
                 totals["store_reward"] += judged["store_reward"]
                 totals["store_penalty"] += judged["store_penalty"]
                 totals["advisor_penalty"] += judged["advisor_penalty"]
                 totals["net"] += judged["net"]
                 totals["passed"] += 1 if judged["passed"] else 0
+                totals["reported"] += 1 if judged.get("reported") else 0
             # 结算底稿预览数据（按区域经理分组）
             settle_rows = settlement.build_settlement_rows(conn, stores, as_of)
             settle_groups = settlement.group_rows(settle_rows)
@@ -306,7 +311,6 @@ def register_admin(app) -> None:
                 as_of=as_of,
                 rows=rows,
                 totals=totals,
-                settle_rows=settle_rows,
                 settle_groups=settle_groups,
             )
 

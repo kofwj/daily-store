@@ -211,3 +211,24 @@ def dashboard_today(conn: sqlite3.Connection, store_ids: Iterable[int], biz_date
         )
     return out
 
+
+def stores_reported_in_month(
+    conn: sqlite3.Connection, store_ids: Iterable[int], as_of: date
+) -> set:
+    """本月 1 号到 as_of 交过日报的店 id。空列表返回空集。"""
+    ids = [int(sid) for sid in store_ids]
+    if not ids:
+        return set()
+    start, end = month_bounds(as_of)
+    placeholders = ",".join("?" * len(ids))
+    return {
+        int(row["store_id"])
+        for row in conn.execute(
+            f"""
+            SELECT DISTINCT store_id FROM daily_reports
+            WHERE biz_date>=? AND biz_date<=? AND store_id IN ({placeholders})
+            """,
+            [start, end, *ids],
+        )
+    }
+

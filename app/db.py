@@ -31,4 +31,5 @@ from .db_query import (  # noqa: F401
     prev_month_cum,
     save_daily,
     set_day_value,
+    stores_reported_in_month,
 )

@@ -346,6 +346,7 @@ table.data th:first-child, table.data td:first-child { text-align: left; }
 }
 .status.done { background: var(--ok-bg); color: var(--ok); }
 .status.wait { background: var(--warn-bg); color: var(--warn); }
+.status.miss { background: var(--accent-soft); color: var(--muted); }
 
 .bulletin-wrap { overflow: auto; padding: 8px; }
 .bulletin-shot { display: inline-block; min-width: 100%; background: #fff; padding: 16px 14px 18px; }
