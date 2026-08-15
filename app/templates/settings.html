@@ -85,21 +85,28 @@
       <p class="muted">左边选店，右边改这一家。顾问写姓名走「AI+新用户直降≥10」，空着走双破 0。</p>
     </div>
     <div class="stores-desk">
-      <aside class="store-list card">
+      <aside class="store-list card" id="storeList">
         <div class="store-list-head">
           <h2>目录</h2>
           <span class="muted">{{ stores|length }} 家</span>
         </div>
+        <label class="store-search">
+          <span class="sr-only">搜索门店</span>
+          <input type="search" id="storeFilter" placeholder="搜简称、店长、地市" autocomplete="off">
+        </label>
         <a class="store-list-item add {{ 'active' if not current_store else '' }}" href="{{ url_for('settings', tab='stores', store_id='new') }}">添加门店</a>
         {% for group in store_groups %}
-        <div class="store-list-city">{{ group.city }}</div>
-        {% for s in group.stores %}
-        <a class="store-list-item {{ 'active' if current_store and s.id == current_store.id else '' }}" href="{{ url_for('settings', tab='stores', store_id=s.id) }}">
-          <span class="store-list-name">{{ store_label(s) }}</span>
-          <span class="muted store-list-people">{{ s.store_manager or '未设店长' }}</span>
-        </a>
+        <div class="store-group" data-city="{{ group.city }}">
+          <div class="store-list-city">{{ group.city }}</div>
+          {% for s in group.stores %}
+          <a class="store-list-item {{ 'active' if current_store and s.id == current_store.id else '' }}" href="{{ url_for('settings', tab='stores', store_id=s.id) }}" data-text="{{ store_label(s) }} {{ s.name }} {{ s.store_manager }} {{ s.area_manager }} {{ s.city }}">
+            <span class="store-list-name">{{ store_label(s) }}</span>
+            <span class="muted store-list-people">{{ s.store_manager or '未设店长' }}{% if s.store_grade %} · {{ s.store_grade }}类{% endif %}</span>
+          </a>
+          {% endfor %}
+        </div>
         {% endfor %}
-        {% endfor %}
+        <p class="muted store-empty" id="storeEmpty" hidden>没有匹配的门店</p>
       </aside>
 
       <div class="store-editor card">
@@ -114,6 +121,11 @@
           {% else %}
           <span class="status wait">无顾问 · 双破 0</span>
           {% endif %}
+        </div>
+        <div class="store-editor-meta">
+          <span>{{ current_store.city or '未分地市' }}</span>
+          <span>{{ current_store.store_grade or 'A' }}类</span>
+          <span>{{ current_store.mobile_code or '无移动编码' }}</span>
         </div>
         <form method="post" class="store-editor-form">
           <input type="hidden" name="action" value="edit_store">
@@ -166,19 +178,31 @@
           <div class="toolbar"><button type="submit">保存这家店</button></div>
         </form>
         {% else %}
-        <h2>添加门店</h2>
-        <p class="muted">新店加进来后会出现在左边名单。</p>
+        <div class="store-editor-head">
+          <div>
+            <h2>添加门店</h2>
+            <p class="muted">新店加进来后会出现在左边名单。</p>
+          </div>
+        </div>
         <form method="post" class="store-editor-form">
           <input type="hidden" name="action" value="add_store">
           <input type="hidden" name="tab" value="stores">
+          <h3 class="settings-section">基础</h3>
           <div class="store-editor-grid">
             <p class="span-2"><label>店名</label><input name="store_name" required placeholder="TZ泰州兴化吾悦vivo体验店"></p>
             <p><label>简称</label><input name="short_name" required placeholder="如 兴化吾悦"></p>
             <p><label>地市</label><input name="city" required placeholder="南通市 / 泰州市"></p>
             <p><label>大区</label><input name="region_group" value="通泰" required></p>
             <p><label>移动编码</label><input name="mobile_code" placeholder="20001744" inputmode="numeric"></p>
+          </div>
+          <h3 class="settings-section">人员</h3>
+          <div class="store-editor-grid">
             <p><label>区域经理</label><input name="area_manager"></p>
             <p><label>店长</label><input name="store_manager"></p>
+            <p class="span-2"><label>运营商顾问</label><input name="advisor_name" placeholder="无顾问留空"></p>
+          </div>
+          <h3 class="settings-section">考核口径</h3>
+          <div class="store-editor-grid">
             <p>
               <label>门店类别</label>
               <select name="store_grade">
@@ -190,13 +214,32 @@
               <label>AI 目标</label>
               <input name="ai_target" type="number" min="0" value="10" inputmode="numeric">
             </p>
-            <p class="span-2"><label>运营商顾问</label><input name="advisor_name" placeholder="无顾问留空"></p>
           </div>
           <div class="toolbar"><button type="submit">添加</button></div>
         </form>
         {% endif %}
       </div>
     </div>
+    <script>
+    (function () {
+      var input = document.getElementById('storeFilter');
+      var empty = document.getElementById('storeEmpty');
+      if (!input) return;
+      input.addEventListener('input', function () {
+        var q = (input.value || '').trim().toLowerCase();
+        document.querySelectorAll('.store-group').forEach(function (group) {
+          var shown = 0;
+          group.querySelectorAll('.store-list-item').forEach(function (item) {
+            var hit = !q || (item.getAttribute('data-text') || '').toLowerCase().indexOf(q) !== -1;
+            item.hidden = !hit;
+            if (hit) shown += 1;
+          });
+          group.hidden = shown === 0;
+        });
+        if (empty) empty.hidden = !!document.querySelector('.store-group:not([hidden])');
+      });
+    })();
+    </script>
     {% endif %}
 
     {% if tab == 'people' and g.user['role'] == 'admin' %}
@@ -205,17 +248,26 @@
       <p class="muted">一家店一个填报员。店长看本店、区域经理看本区域；忘了口令就在这一行重置，默认 123456。</p>
     </div>
     <div class="card settings-card">
-      <div class="settings-card-head">
-        <h2>账号名单</h2>
-        <span class="muted">{{ people|length }} 人</span>
+      <div class="settings-card-head people-toolbar">
+        <div>
+          <h2>账号名单</h2>
+          <span class="muted">{{ people|length }} 人</span>
+        </div>
+        <label class="people-filter">
+          <span class="sr-only">筛选角色</span>
+          <select id="peopleRoleFilter">
+            <option value="">全部角色</option>
+            <option value="admin">管理员</option>
+            <option value="filler">填报员</option>
+            <option value="readonly">只读</option>
+          </select>
+        </label>
       </div>
       <div class="table-wrap">
         <table class="data settings-table people-table">
           <thead>
             <tr>
-              <th>姓名</th>
-              <th>账号</th>
-              <th>角色</th>
+              <th>身份</th>
               <th>范围</th>
               <th>重置口令</th>
               <th></th>
@@ -224,13 +276,14 @@
           <tbody>
             {% for p in people %}
             {% set u = p.user %}
-            <tr class="{{ 'off' if not u.active else '' }}">
-              <td class="left">{{ u.display_name }}</td>
-              <td class="left"><code>{{ u.username }}</code></td>
-              <td>
-                {% if u.role == 'admin' %}<span class="role-chip admin">管理员</span>
-                {% elif u.role == 'readonly' %}<span class="role-chip view">{{ '区域经理' if (u.scope or '') else '店长(只读)' }}</span>
-                {% else %}<span class="role-chip fill">填报员</span>{% endif %}{% if not u.active %} · 已停用{% endif %}
+            <tr class="{{ 'off' if not u.active else '' }}" data-role="{{ u.role }}">
+              <td class="left people-identity">
+                <strong>{{ u.display_name }}</strong>
+                <span class="people-sub"><code>{{ u.username }}</code>
+                  {% if u.role == 'admin' %}<span class="role-chip admin">管理员</span>
+                  {% elif u.role == 'readonly' %}<span class="role-chip view">{{ '区域经理' if (u.scope or '') else '店长(只读)' }}</span>
+                  {% else %}<span class="role-chip fill">填报员</span>{% endif %}{% if not u.active %} · 已停用{% endif %}
+                </span>
               </td>
               <td class="left">
                 {% if u.role == 'admin' %}
@@ -294,36 +347,42 @@
       <form method="post" class="add-user" id="addUserForm">
         <input type="hidden" name="action" value="add_user">
         <input type="hidden" name="tab" value="people">
-        <p>
-          <label>角色</label>
-          <select name="role" id="addRole">
-            <option value="filler">填报员（可填日报/成交/垫资）</option>
-            <option value="readonly">只读 · 店长（看本店）</option>
-            <option value="readonly" class="ro-area">只读 · 区域经理（看本区域）</option>
-          </select>
-        </p>
-        <p><label>账号（姓名全拼）</label><input name="username" required placeholder="zhangsan" autocomplete="off"></p>
-        <p><label>显示名</label><input name="display_name" required placeholder="张三" autocomplete="off"></p>
-        <p><label>口令</label><input name="pin" type="password" inputmode="numeric" required minlength="6" placeholder="6 位"></p>
-        <div id="addStoreField">
+        <h3 class="settings-section">账号</h3>
+        <div class="add-user-grid">
           <p>
-            <label>门店</label>
-            <select name="store_ids" required>
-              <option value="" disabled selected>选择门店</option>
-              {% for s in stores %}
-              <option value="{{ s.id }}">{{ store_label(s) }}</option>
-              {% endfor %}
+            <label>角色</label>
+            <select name="role" id="addRole">
+              <option value="filler">填报员（可填日报/成交/垫资）</option>
+              <option value="readonly">只读 · 店长（看本店）</option>
+              <option value="readonly" class="ro-area">只读 · 区域经理（看本区域）</option>
             </select>
           </p>
+          <p><label>账号（姓名全拼）</label><input name="username" required placeholder="zhangsan" autocomplete="off"></p>
+          <p><label>显示名</label><input name="display_name" required placeholder="张三" autocomplete="off"></p>
+          <p><label>口令</label><input name="pin" type="password" inputmode="numeric" required minlength="6" placeholder="6 位"></p>
         </div>
-        <div id="addAreaField" hidden>
-          <p>
-            <label>区域经理姓名</label>
-            <input name="scope" placeholder="如 黄雍青、赵家才" autocomplete="off">
-            <input type="hidden" name="bind" value="area">
-          </p>
+        <h3 class="settings-section">范围</h3>
+        <div class="add-user-grid">
+          <div id="addStoreField">
+            <p>
+              <label>门店</label>
+              <select name="store_ids" required>
+                <option value="" disabled selected>选择门店</option>
+                {% for s in stores %}
+                <option value="{{ s.id }}">{{ store_label(s) }}</option>
+                {% endfor %}
+              </select>
+            </p>
+          </div>
+          <div id="addAreaField" hidden>
+            <p>
+              <label>区域经理姓名</label>
+              <input name="scope" placeholder="如 黄雍青、赵家才" autocomplete="off">
+              <input type="hidden" name="bind" value="area">
+            </p>
+          </div>
         </div>
-        <p class="add-user-action"><button type="submit">添加</button></p>
+        <div class="toolbar"><button type="submit">添加</button></div>
       </form>
     </div>
     <script>
@@ -346,6 +405,15 @@
         }
       }
       if (role) { role.addEventListener('change', sync); sync(); }
+      var filter = document.getElementById('peopleRoleFilter');
+      if (filter) {
+        filter.addEventListener('change', function () {
+          var q = filter.value;
+          document.querySelectorAll('.people-table tbody tr').forEach(function (row) {
+            row.hidden = !!(q && row.getAttribute('data-role') !== q);
+          });
+        });
+      }
     })();
     </script>
     {% endif %}
