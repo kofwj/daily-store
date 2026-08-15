@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from app import db
+from app import db, db_core
 from app.web import create_app
 
 
@@ -17,8 +17,10 @@ def tmp_db(tmp_path, monkeypatch):
     path = tmp_path / "t.db"
     monkeypatch.setenv("STORE_DAILY_DB", str(path))
     monkeypatch.setenv("STORE_DAILY_DATA", str(tmp_path))
-    monkeypatch.setattr(db, "DB_PATH", Path(path))
-    monkeypatch.setattr(db, "DATA_DIR", Path(tmp_path))
+    # DB_PATH/DATA_DIR 真正被读的地方是 db_core.connect()（模块级全局），
+    # 而 db 只是 re-export 副本——必须 patch 属主模块，否则测试会写进真 dev 库。
+    monkeypatch.setattr(db_core, "DB_PATH", Path(path))
+    monkeypatch.setattr(db_core, "DATA_DIR", Path(tmp_path))
     monkeypatch.setattr(db, "is_locked", lambda *a, **k: False)
     db.init_db()
     return path

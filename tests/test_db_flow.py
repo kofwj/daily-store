@@ -1,6 +1,6 @@
 from datetime import date
 
-from app import db
+from app import db, db_core
 from app.broadcast import render_broadcast
 from app.stores_seed import NINGHAI_CODE, STORES, filler_accounts
 from app.web import create_app
@@ -30,8 +30,9 @@ def test_catalog_has_eleven_official_stores(tmp_db):
 
 def test_legacy_ninghai_name_is_renamed_not_duplicated(tmp_path, monkeypatch):
     path = tmp_path / "legacy.db"
-    monkeypatch.setattr(db, "DB_PATH", path)
-    monkeypatch.setattr(db, "DATA_DIR", tmp_path)
+    # 真正读路径的是 db_core.connect()（模块级全局），必须 patch 属主；db 只是 re-export。
+    monkeypatch.setattr(db_core, "DB_PATH", path)
+    monkeypatch.setattr(db_core, "DATA_DIR", tmp_path)
     conn = db.connect()
     conn.executescript(
         """
