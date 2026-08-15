@@ -5,12 +5,10 @@
 <div class="deal-page">
   <div class="deal-head">
     <div class="deal-title">
-      <h1>成交播报</h1>
-      <p class="muted">{{ store.short_name or store.name }}</p>
-    </div>
-    <div class="deal-kpis">
-      <div class="deal-kpi">今日 {{ mine_today.total }}<span>成交 {{ mine_today.closed }}</span></div>
-      <div class="deal-kpi">本月 {{ mine_month.total }}<span>成交 {{ mine_month.closed }}</span></div>
+      <h1>{{ store.short_name or store.name }}</h1>
+      {% if store.short_name and store.short_name != store.name %}
+      <p class="muted deal-fullname">{{ store.name }}</p>
+      {% endif %}
     </div>
     {% if is_admin and stores|length > 1 %}
     <form method="get" class="page-filters">
@@ -24,6 +22,11 @@
       </label>
     </form>
     {% endif %}
+  </div>
+
+  <div class="deal-kpis">
+    <div class="deal-kpi">今日 {{ mine_today.total }}<span>成交 {{ mine_today.closed }}</span></div>
+    <div class="deal-kpi">本月 {{ mine_month.total }}<span>成交 {{ mine_month.closed }}</span></div>
   </div>
 
   <div class="deal-main">
