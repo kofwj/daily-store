@@ -255,8 +255,8 @@ def register_admin(app) -> None:
             stores = [s for s in stores if (s["city"] or "南通市") == city] if city else stores
             rows = _bulletin_rows(conn, stores, biz_date)
             copy_text = bulletin.tsv(rows, biz_date)
-            review = bulletin.summary(rows, biz_date) if rows else ""
             title_city = city.replace("市", "") if city else ""
+            review = bulletin.summary(rows, biz_date, title_city) if rows else ""
             return render_template(
                 "bulletin.html",
                 biz_date=biz_date,

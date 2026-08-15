@@ -1,5 +1,6 @@
 from datetime import date
 
+from app import db
 from app.bulletin import (
     apply_scales,
     bisuan_total,
@@ -206,8 +207,6 @@ def test_summary_review_text():
         {
             "name": "TZ南通市海门金花vivo体验店",
             "short_name": "海门金花",
-            "follow_ai": True,
-            "follow_bisuan": True,
             "month_ai": 5,
             "month_bisuan": 8,
             "month_coin": 3,
@@ -218,8 +217,6 @@ def test_summary_review_text():
         {
             "name": "TZ南通市启东汇龙镇人民中路专卖店",
             "short_name": "启东人民",
-            "follow_ai": True,
-            "follow_bisuan": False,
             "month_ai": 12,
             "month_bisuan": 6,
             "month_coin": 5,
@@ -230,8 +227,6 @@ def test_summary_review_text():
         {
             "name": "TZ南通市通州区金沙专卖店",
             "short_name": "通州金沙",
-            "follow_ai": False,
-            "follow_bisuan": False,
             "month_ai": 0,
             "month_bisuan": 0,
             "month_coin": 0,
@@ -240,13 +235,27 @@ def test_summary_review_text():
             "day_coin": 0,
         },
     ]
-    text = summary(rows, date(2026, 8, 13))
-    assert "本日13日" in text
-    assert "共3家店" in text
-    assert "【本月累计】AI手机合约 17" in text  # 5+12
-    assert "笔算业务 14" in text  # 8+6
-    assert "金币直降 8" in text  # 3+5
-    assert "【本日】AI手机合约 5" in text  # 2+3
-    assert "本月标杆：启东人民" in text  # 12+6+5=23 最高
-    assert "AI破0 2/3" in text
+    text = summary(rows, date(2026, 8, 13), "南通")
+    lines = text.split("\n")
+    assert lines[0] == "2026-08-13 南通vivo零售运营中心"
+    assert lines[1] == "今日销量：AI手机合约 5，笔算业务 5，金币直降 1"  # 2+3 / 4+1 / 1+0
+    assert lines[2] == "累计销量：AI手机合约 17，笔算业务 14，金币直降 8"  # 5+12 / 8+6 / 3+5
+    assert lines[3] == "本月标杆：启东人民（AI 12，笔算 6，直降 5）"  # 12+6+5=23 最高，用简称
     assert summary([], date(2026, 8, 13)) == "2026-08-13 暂无门店通报数据。"
+
+
+def test_build_row_short_name_from_row(tmp_db):
+    # sqlite3.Row 不支持 .get，_store_short 要用下标取简称，避免标杆退全称
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM stores WHERE code='haimen-jinhua'"
+        ).fetchone()
+    out = build_row(
+        row,
+        day_ai=0,
+        month_ai=0,
+        day_bisuan=0,
+        month_bisuan=0,
+        submitted=False,
+    )
+    assert out["short_name"] == "海门金花"

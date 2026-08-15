@@ -56,6 +56,14 @@ def bisuan_total(values: Mapping[str, int]) -> int:
     return int(values.get("bisuan", 0) or 0) + int(values.get("bisuan_high", 0) or 0)
 
 
+def _store_short(store: Mapping[str, Any]) -> str:
+    """安全取门店简称：兼容普通 dict 和 sqlite3.Row。"""
+    try:
+        return (store["short_name"] or "").strip()
+    except (KeyError, TypeError, IndexError):
+        return ""
+
+
 def build_row(
     store: Mapping[str, Any],
     *,
@@ -75,7 +83,7 @@ def build_row(
         "region_group": store["region_group"] or "通泰",
         "city": store["city"] or "南通市",
         "name": store["name"],
-        "short_name": (store.get("short_name") if hasattr(store, "get") else "") or "",
+        "short_name": _store_short(store),
         "mobile_code": store["mobile_code"] or "",
         "area_manager": store["area_manager"] or "",
         "store_manager": store["store_manager"] or "",
@@ -332,12 +340,11 @@ def csv_rows(rows: Sequence[Mapping[str, Any]], biz_date: date) -> List[List[str
     return out
 
 
-def summary(rows: Sequence[Mapping[str, Any]], biz_date: date) -> str:
-    """通报表的一句话复盘：本月累计合计 + 破0情况 + 本月标杆店 + 今日合计。"""
+def summary(rows: Sequence[Mapping[str, Any]], biz_date: date, title_city: str = "") -> str:
+    """通报表的一句话复盘：日期标题 + 今日销量 / 累计销量 / 本月标杆。"""
     if not rows:
         return f"{biz_date.isoformat()} 暂无门店通报数据。"
     total = totals_row(rows)
-    n = len(rows)
     month_ai, month_bisuan, month_coin = (
         int(total["month_ai"] or 0),
         int(total["month_bisuan"] or 0),
@@ -359,11 +366,13 @@ def summary(rows: Sequence[Mapping[str, Any]], biz_date: date) -> str:
     )
     top = ranked[0]
     top_name = top.get("short_name") or top["name"]
+    head = biz_date.isoformat()
+    if title_city:
+        head = f"{head} {title_city}vivo零售运营中心"
     lines = [
-        f"本日{biz_date.day}日 · 共{n}家店 · 通报表复盘",
-        f"【本月累计】AI手机合约 {month_ai}，笔算业务 {month_bisuan}，金币直降 {month_coin}；"
-        f"AI破0 {total['follow_ai_text']}，笔算破0 {total['follow_bisuan_text']}。",
-        f"本月标杆：{top_name}（AI {top['month_ai']} / 笔算 {top['month_bisuan']} / 直降 {top.get('month_coin') or 0}）",
-        f"【本日】AI手机合约 {day_ai}，笔算业务 {day_bisuan}，金币直降 {day_coin}。",
+        head,
+        f"今日销量：AI手机合约 {day_ai}，笔算业务 {day_bisuan}，金币直降 {day_coin}",
+        f"累计销量：AI手机合约 {month_ai}，笔算业务 {month_bisuan}，金币直降 {month_coin}",
+        f"本月标杆：{top_name}（AI {top['month_ai']}，笔算 {top['month_bisuan']}，直降 {top.get('month_coin') or 0}）",
     ]
     return "\n".join(lines)
