@@ -22,6 +22,7 @@ from flask import Flask, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import db
+from .errors import register_errors
 from .helpers import csrf_protect, load_user
 from .views_admin import register_admin
 from .views_auth import register_auth
@@ -67,6 +68,7 @@ def create_app() -> Flask:
     register_report(app)
     register_admin(app)
     register_settings(app)
+    register_errors(app)
     return app
 
 
