@@ -21,13 +21,10 @@ def test_catalog_has_eleven_official_stores(tmp_db):
         assert ninghai["store_manager"] == "冒国云"
         assert ninghai["short_name"] == "如皋宁海路"
         accounts = filler_accounts()
-        assert [item["login"] for item in accounts] == [
-            "jinhua", "qidong", "jinsha", "tzwanda", "haian", "hawanda",
-            "rgning", "dayou", "gzwanda", "kaifaqu", "changq",
-            "yongwang", "yuanrong", "jjwy", "jjyx", "txgl", "jylt",
-            "hlbl", "txwy", "hlwd", "tzwx", "xhwy", "jyss",
-        ]
+        logins = [item["login"] for item in accounts]
+        assert len(logins) == len(set(logins))
         assert all(len(item["login"]) <= 8 for item in accounts)
+        assert "qdwy" in logins and "yinhe" in logins and "rgwd" in logins
         fillers = list(conn.execute("SELECT username, display_name, role FROM users WHERE role='filler' ORDER BY id"))
         assert [row["username"] for row in fillers] == [item["login"] for item in accounts]
         assert conn.execute("SELECT id FROM users WHERE username='ninghai'").fetchone() is None

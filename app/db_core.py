@@ -202,6 +202,7 @@ def init_db() -> None:
         _ensure_store_columns(conn)
         _ensure_deal_posts(conn)
         _ensure_deal_edits(conn)
+        _ensure_advance_posts(conn)
         _ensure_app_meta(conn)
         # 种子（建表/加列/回填默认）每次幂等执行即可；真正“动数据”的迁移走 migrate() 只跑一次
         _seed_metrics(conn)
@@ -333,6 +334,36 @@ def _ensure_deal_edits(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_deal_edits_store_date ON deal_edits(store_id, biz_date)"
+    )
+
+
+def _ensure_advance_posts(conn: sqlite3.Connection) -> None:
+    """门店垫资流水：一笔一行，管理员兑付。"""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS advance_posts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            store_id INTEGER NOT NULL REFERENCES stores(id),
+            user_id INTEGER REFERENCES users(id),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT '',
+            biz_date TEXT NOT NULL,
+            phone TEXT NOT NULL DEFAULT '',
+            broadband REAL NOT NULL DEFAULT 0,
+            rebate REAL NOT NULL DEFAULT 0,
+            other REAL NOT NULL DEFAULT 0,
+            note TEXT NOT NULL DEFAULT '',
+            paid INTEGER NOT NULL DEFAULT 0,
+            paid_at TEXT NOT NULL DEFAULT '',
+            paid_by INTEGER REFERENCES users(id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_advance_posts_store_date ON advance_posts(store_id, biz_date)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_advance_posts_paid ON advance_posts(paid, biz_date)"
     )
 
 

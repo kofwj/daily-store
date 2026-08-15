@@ -822,6 +822,7 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
   margin-bottom: 10px;
 }
 .records-toolbar .btn { text-decoration: none; font-size: 13px; padding: 6px 12px; }
+td.right form { display: inline; }
 @media (max-width: 800px) {
   .deal-records-kpis { grid-template-columns: 1fr 1fr; width: 100%; }
   .deal-records-card .wrap { padding-bottom: calc(76px + var(--safe-bottom)); }

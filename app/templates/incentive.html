@@ -71,7 +71,7 @@
     <h2>结算底稿预览</h2>
     <a class="btn ghost" href="{{ url_for('incentive_xlsx', month=month.strftime('%Y-%m')) }}">导出 Excel</a>
   </div>
-  <p class="muted">系统已填：AI、新用户直降、考核奖惩。黄色留空开票/房补/垫资/搭载率，下月初在 Excel 里填。本月还没交过日报的店不参与考核，奖惩记 0。</p>
+  <p class="muted">系统已填：AI、新用户直降、考核奖惩、垫资（来自垫资台账本月合计）。黄色留空开票/房补/搭载率。本月还没交过日报的店不参与考核，奖惩记 0。</p>
   <table class="data board-table">
     <thead>
       <tr>
@@ -105,7 +105,7 @@
         <td class="{{ 'pos' if r.reported and r.net > 0 else ('neg' if r.reported and r.net < 0 else '') }}">{% if r.reported %}{{ r.net }}{% else %}—{% endif %}</td>
         <td class="fill"></td>
         <td class="fill"></td>
-        <td class="fill"></td>
+        <td class="fill">{% if r.advance %}{{ '%.2f'|format(r.advance) }}{% endif %}</td>
         <td class="fill"></td>
       </tr>
       {% endfor %}

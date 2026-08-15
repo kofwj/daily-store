@@ -25,6 +25,7 @@ from . import db
 from .errors import register_errors
 from .helpers import csrf_protect, load_user
 from .views_admin import register_admin
+from .views_advance import register_advance
 from .views_auth import register_auth
 from .views_daily import register_daily
 from .views_report import register_report
@@ -65,6 +66,7 @@ def create_app() -> Flask:
 
     register_auth(app)
     register_daily(app)
+    register_advance(app)
     register_report(app)
     register_admin(app)
     register_settings(app)
