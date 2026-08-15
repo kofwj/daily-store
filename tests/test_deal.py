@@ -92,3 +92,27 @@ def test_deal_post_counts_by_store(tmp_path, monkeypatch):
     assert "S60" in page
     assert "1551440****" in page
     assert "15514408478" not in page
+    assert "删除" in page
+    with db.get_db() as conn:
+        deal_id = conn.execute(
+            "SELECT id FROM deal_posts WHERE store_id=? AND phone='13800001111'",
+            (sid,),
+        ).fetchone()["id"]
+    gone = client.post(
+        "/deal/delete",
+        data={"store_id": str(sid), "deal_id": str(deal_id)},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "已删除该成交播报" in gone
+    with db.get_db() as conn:
+        left = conn.execute("SELECT COUNT(*) AS n FROM deal_posts WHERE store_id=?", (sid,)).fetchone()["n"]
+        assert left == 1
+    client.get("/logout")
+    client.post("/login", data={"username": "jinsha", "pin": "123456"})
+    blocked = client.post(
+        "/deal/delete",
+        data={"store_id": str(sid), "deal_id": "1"},
+        follow_redirects=True,
+    )
+    assert blocked.status_code == 200
+    assert "需要管理员权限" in blocked.get_data(as_text=True)

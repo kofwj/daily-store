@@ -424,6 +424,14 @@ def get_deal_post(conn: sqlite3.Connection, deal_id: int, store_id: int) -> Opti
     ).fetchone()
 
 
+def delete_deal_post(conn: sqlite3.Connection, deal_id: int, store_id: int) -> bool:
+    cur = conn.execute(
+        "DELETE FROM deal_posts WHERE id=? AND store_id=?",
+        (deal_id, store_id),
+    )
+    return cur.rowcount > 0
+
+
 def deal_counts(
     conn: sqlite3.Connection,
     store_ids: Iterable[int],

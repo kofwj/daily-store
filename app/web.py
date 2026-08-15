@@ -439,6 +439,25 @@ def create_app() -> Flask:
                 store_stats=store_stats,
             )
 
+    @app.route("/deal/delete", methods=["POST"])
+    @admin_required
+    def deal_delete():
+        store_id = request.form.get("store_id") or ""
+        deal_id = request.form.get("deal_id") or ""
+        try:
+            sid = int(store_id)
+            did = int(deal_id)
+        except (TypeError, ValueError):
+            return Response("bad request", status=400)
+        with db.get_db() as conn:
+            if not db.user_can_access_store(conn, g.user, sid):
+                return Response("forbidden", status=403)
+            if db.delete_deal_post(conn, did, sid):
+                flash("已删除该成交播报。", "ok")
+            else:
+                flash("这条记录不存在，或已删除。", "error")
+        return redirect(url_for("deal_page", store_id=sid))
+
     @app.route("/report")
     @login_required
     def report():

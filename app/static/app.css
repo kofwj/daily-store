@@ -856,11 +856,21 @@ table.board-table td { text-align: left; vertical-align: middle; }
 .deal-log { margin: 0; }
 .deal-log-list { display: grid; gap: 8px; }
 .deal-log-item {
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: #fafafa;
+}
+.deal-log-item > a { min-width: 0; }
+.deal-del { margin: 0; }
+.deal-del button {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 .deal-log-top {
   display: flex;
