@@ -1,0 +1,264 @@
+"""报表、CSV 导出、删除单日日报、校准单个格子。"""
+
+from __future__ import annotations
+
+import csv
+import io
+from datetime import date, timedelta
+from typing import Dict
+
+from flask import Response, flash, g, redirect, render_template, request, url_for
+
+from . import db
+from .helpers import (
+    admin_required,
+    login_required,
+    parse_date,
+    pick_store,
+)
+from .metrics_seed import KPI_TARGETS, SECTIONS, rollup_amount
+
+
+def register_report(app) -> None:
+    @app.route("/report")
+    @login_required
+    def report():
+        with db.get_db() as conn:
+            store, stores = pick_store(conn, request.args.get("store_id"))
+            if store is None:
+                return render_template("empty.html")
+            today_d = db.today_local()
+            view = request.args.get("view") or "month"
+            if view == "week":
+                start = parse_date(request.args.get("start"), today_d - timedelta(days=today_d.weekday()))
+                end = parse_date(request.args.get("end"), start + timedelta(days=6))
+            elif view == "day":
+                start = parse_date(request.args.get("start"), today_d)
+                end = start
+            else:
+                view = "month"
+                start = parse_date(request.args.get("start"), today_d.replace(day=1))
+                if start.month == 12:
+                    end = date(start.year + 1, 1, 1) - timedelta(days=1)
+                else:
+                    end = date(start.year, start.month + 1, 1) - timedelta(days=1)
+                end = min(end, today_d)
+
+            facts = db.facts_in_range(conn, store["id"], start, end)
+            metrics = db.list_metrics(conn)
+            dates = sorted({row["biz_date"] for row in facts})
+            grid: Dict[str, Dict[str, int]] = {m["code"]: {} for m in metrics}
+            totals: Dict[str, int] = {m["code"]: 0 for m in metrics}
+            for row in facts:
+                # 只累计/摆放“当前活跃”指标；历史停用指标的遗留 day 值不参与报表，避免 KeyError
+                if row["metric_code"] not in totals:
+                    continue
+                grid[row["metric_code"]][row["biz_date"]] = int(row["day_value"] or 0)
+                totals[row["metric_code"]] += int(row["day_value"] or 0)
+
+            # 提交状态 + 区间总天数（工作日口径：周一~周五）
+            submitted = {
+                row["biz_date"]
+                for row in conn.execute(
+                    """
+                    SELECT biz_date FROM daily_reports
+                    WHERE store_id=? AND biz_date>=? AND biz_date<=?
+                    """,
+                    (store["id"], start.isoformat(), end.isoformat()),
+                )
+            }
+            submitted_dates = sorted(submitted & set(dates))
+            all_days = [
+                (start + timedelta(days=i)).isoformat()
+                for i in range((end - start).days + 1)
+            ]
+            # 区间总天数：日报每天都要填，不区分工作日
+            total_days = all_days
+            coverage = (
+                round(len(submitted_dates) / len(total_days) * 100)
+                if total_days
+                else 0
+            )
+
+            # 三个考核 KPI：从 kpi_targets 读目标（与月度考核页一致），区间累计
+            kpi_targets = db.list_kpi_targets(conn)
+            kpi_cards = []
+            for code, name, note in KPI_TARGETS:
+                if code == "ai_contract":
+                    total = totals.get("ai_contract", 0)
+                else:
+                    total = rollup_amount(totals, code)
+                target = kpi_targets.get(code, 0)
+                kpi_cards.append(
+                    {
+                        "code": code,
+                        "name": name,
+                        "note": note,
+                        "total": total,
+                        "target": target,
+                        "progress": (total / target * 100) if target else None,
+                        "left": max(0, target - total) if target else None,
+                    }
+                )
+
+            # 指标行：按 SECTIONS 分组；KPI 成员标记高亮；普通指标目标读 metrics.monthly_target
+            rows = []
+            for m in metrics:
+                total = totals[m["code"]]
+                month_target = int(m["monthly_target"] or 0)
+                rows.append(
+                    {
+                        "code": m["code"],
+                        "name": m["name"],
+                        "section": m["section"],
+                        "target": month_target,
+                        "total": total,
+                        "progress": (total / month_target * 100) if month_target else None,
+                        "days": [grid[m["code"]].get(d, 0) for d in dates],
+                        "avg": round(total / max(1, len(submitted_dates)), 1) if submitted_dates else 0,
+                    }
+                )
+
+            # 分组视图：SECTIONS 顺序 + 每组的 KPI/普通行
+            grouped = []
+            for section in SECTIONS:
+                sec_rows = [r for r in rows if r["section"] == section["code"]]
+                if not sec_rows:
+                    continue
+                grouped.append(
+                    {
+                        "code": section["code"],
+                        "header": section["header"] or section["code"],
+                        "rows": sec_rows,
+                    }
+                )
+
+            return render_template(
+                "report.html",
+                store=store,
+                stores=stores,
+                view=view,
+                start=start,
+                end=end,
+                dates=dates,
+                rows=rows,
+                grouped=grouped,
+                submitted=submitted,
+                submitted_dates=submitted_dates,
+                coverage=coverage,
+                total_days=len(total_days),
+                kpi_cards=kpi_cards,
+                month_start=start.replace(day=1),
+            )
+
+    @app.route("/report.csv")
+    @login_required
+    def report_csv():
+        with db.get_db() as conn:
+            store, _stores = pick_store(conn, request.args.get("store_id"))
+            if store is None:
+                return Response("no store", status=400)
+            start = parse_date(request.args.get("start"), db.today_local().replace(day=1))
+            end = parse_date(request.args.get("end"), db.today_local())
+            facts = db.facts_in_range(conn, store["id"], start, end)
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            writer.writerow(["日期", "门店", "分类", "指标", "日值"])
+            for row in facts:
+                writer.writerow(
+                    [row["biz_date"], store["name"], row["section"], row["name"], row["day_value"]]
+                )
+            data = buf.getvalue().encode("utf-8-sig")
+            filename = f"{store['code']}_{start.isoformat()}_{end.isoformat()}.csv"
+            return Response(
+                data,
+                mimetype="text/csv; charset=utf-8",
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
+            )
+
+    @app.route("/report/delete", methods=["POST"])
+    @admin_required
+    def report_delete():
+        """删除某店某一天的日报（连事实一起删）。锁定时间内管理员可删。"""
+        store_id = request.form.get("store_id") or request.args.get("store_id")
+        day = request.form.get("date") or request.args.get("date")
+        try:
+            sid = int(store_id or 0)
+            biz_date = date.fromisoformat(day) if day else None
+        except (ValueError, TypeError):
+            biz_date = None
+        if sid <= 0 or biz_date is None:
+            return Response("bad request", status=400)
+        with db.get_db() as conn:
+            if not db.user_can_access_store(conn, g.user, sid):
+                return Response("forbidden", status=403)
+            report = db.get_report(conn, sid, biz_date)
+            if report is None:
+                flash("该日没有日报，无需删除。", "error")
+            else:
+                before = db.day_values(conn, sid, biz_date)
+                db.record_edit(
+                    conn,
+                    biz_date=biz_date,
+                    store_id=sid,
+                    user_id=g.user["id"],
+                    before=before,
+                    after={},
+                    note="删除日报",
+                )
+                conn.execute(
+                    "DELETE FROM daily_facts WHERE store_id=? AND biz_date=?",
+                    (sid, biz_date.isoformat()),
+                )
+                conn.execute(
+                    "DELETE FROM daily_reports WHERE store_id=? AND biz_date=?",
+                    (sid, biz_date.isoformat()),
+                )
+                flash("已删除该日日报（已记录审计）。", "ok")
+        return redirect(
+            url_for("report", store_id=sid, view="month", start=biz_date.replace(day=1).isoformat())
+        )
+
+    @app.route("/report/cell", methods=["POST"])
+    @admin_required
+    def report_cell():
+        """管理员只改某一个指标格子，其它数字不动。"""
+        store_id = request.form.get("store_id") or ""
+        day = request.form.get("date") or ""
+        code = (request.form.get("metric_code") or "").strip()
+        raw = request.form.get("value") or "0"
+        view = request.form.get("view") or "month"
+        start = request.form.get("start") or ""
+        end = request.form.get("end") or ""
+        try:
+            sid = int(store_id)
+            biz_date = date.fromisoformat(day)
+            value = max(0, int(raw))
+        except (ValueError, TypeError):
+            flash("格子参数不对", "error")
+            return redirect(url_for("report"))
+        if not code:
+            flash("没有指定指标", "error")
+            return redirect(url_for("report", store_id=sid))
+        with db.get_db() as conn:
+            if not db.user_can_access_store(conn, g.user, sid):
+                return Response("forbidden", status=403)
+            try:
+                db.set_day_value(
+                    conn,
+                    store_id=sid,
+                    biz_date=biz_date,
+                    metric_code=code,
+                    value=value,
+                    user_id=g.user["id"],
+                )
+            except ValueError as exc:
+                flash(str(exc), "error")
+            else:
+                flash(f"已校准 {biz_date.isoformat()} 的该指标为 {value}", "ok")
+        kwargs = {"store_id": sid, "view": view}
+        if start:
+            kwargs["start"] = start
+        if end and view != "day":
+            kwargs["end"] = end
+        return redirect(url_for("report", **kwargs))
