@@ -25,7 +25,7 @@ SECTIONS: List[Dict] = [
         "metrics": [
             ("bisuan", "比算新增", "纯新或低消迎回，有效插卡，ARPU>0"),
             ("bisuan_high", "比算新增[高]", "上面这类里，折后主套105以上"),
-            ("ai_contract", "Ai手机合约", "店内考核项；结算文件没有单独科目"),
+            ("ai_contract", "Ai手机合约", ""),
         ],
     },
     {
