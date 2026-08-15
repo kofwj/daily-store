@@ -45,17 +45,17 @@
     </p>
     <p>
       <label>宽带调测费</label>
-      <input name="broadband" value="{{ form.broadband }}" inputmode="decimal" placeholder="可空，退款填 -200" autocomplete="off">
+      <input name="broadband" value="{{ form.broadband }}" inputmode="decimal" placeholder="可空 / 退款 -200" autocomplete="off">
       <span class="field-hint">可空，可填负数</span>
     </p>
     <p>
       <label>购机让利</label>
-      <input name="rebate" value="{{ form.rebate }}" inputmode="decimal" placeholder="可空，退款填 -100" autocomplete="off">
+      <input name="rebate" value="{{ form.rebate }}" inputmode="decimal" placeholder="可空 / 退款 -100" autocomplete="off">
       <span class="field-hint">可空，可填负数</span>
     </p>
     <p>
       <label>其他业务</label>
-      <input name="other" value="{{ form.other }}" inputmode="decimal" placeholder="可空，退款填 -39.99" autocomplete="off">
+      <input name="other" value="{{ form.other }}" inputmode="decimal" placeholder="可空 / 退款 -40" autocomplete="off">
       <span class="field-hint">可空，可填负数</span>
     </p>
     <p class="span-note">
@@ -78,7 +78,7 @@
     <span class="muted">{{ month.year }}年{{ month.month }}月 · {{ rows|length }} 笔{% if totals.unpaid %} · 未兑 {{ totals.unpaid }}{% endif %}</span>
   </div>
   {% if rows %}
-  <div class="table-wrap">
+  <div class="table-wrap advance-desk">
     <table class="data">
       <thead>
         <tr>
@@ -127,6 +127,44 @@
         {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="advance-cards">
+    {% for r in rows %}
+    <article class="advance-card">
+      <div class="advance-card-top">
+        <div>
+          <strong>{{ r.biz_date }}</strong>
+          <div class="muted">{{ r.phone or '无号码' }}</div>
+        </div>
+        <div class="advance-card-sum">
+          <div class="kpi-num">{{ '%.2f'|format(r.total) }}</div>
+          {% if r.paid %}
+          <span class="status done">已兑</span>
+          {% else %}
+          <span class="status wait">未兑</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="advance-card-money">
+        <span>宽带 {{ '%.2f'|format(r.broadband) if r.broadband else '—' }}</span>
+        <span>让利 {{ '%.2f'|format(r.rebate) if r.rebate else '—' }}</span>
+        <span>其他 {{ '%.2f'|format(r.other) if r.other else '—' }}</span>
+      </div>
+      {% if r.note %}<p class="muted advance-card-note">{{ r.note }}</p>{% endif %}
+      <div class="advance-card-actions">
+        {% if not r.paid %}
+        <a class="btn ghost" href="{{ url_for('advance_page', store_id=store.id, advance_id=r.id) }}">改</a>
+        <form method="post" action="{{ url_for('advance_delete') }}" onsubmit="return confirm('删除这笔垫资？')">
+          <input type="hidden" name="store_id" value="{{ store.id }}">
+          <input type="hidden" name="advance_id" value="{{ r.id }}">
+          <button class="ghost del-day" type="submit">删</button>
+        </form>
+        {% else %}
+        <span class="muted">{{ r.paid_at }} 已锁</span>
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
   </div>
   {% else %}
   <p class="muted">本月还没有垫资。</p>

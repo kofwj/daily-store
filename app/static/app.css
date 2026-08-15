@@ -528,6 +528,54 @@ details.extra summary { cursor: pointer; font-weight: 600; }
 }
 .rules-grid p { margin: 0; }
 .rules-grid .span-2 { grid-column: 1 / -1; }
+.backup-page { display: grid; gap: 14px; }
+.backup-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 0;
+}
+.backup-hero h1 { margin-bottom: 6px; }
+.backup-hero p { margin: 0; max-width: 46em; }
+.backup-hero form { margin: 0; }
+.backup-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.backup-upload, .backup-list { margin: 0; }
+.backup-upload h2, .backup-list h2 { margin-bottom: 6px; }
+.backup-list-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.backup-items { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.backup-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fafafa;
+}
+.backup-item-main { display: grid; gap: 2px; min-width: 0; }
+.backup-item-main .muted { overflow-wrap: anywhere; }
+.backup-item-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.backup-item-actions form { margin: 0; }
+.backup-item-actions .btn,
+.backup-item-actions button { height: 34px; padding: 0 12px; }
+@media (max-width: 800px) {
+  .backup-hero { flex-direction: column; }
+  .backup-grid { grid-template-columns: 1fr; }
+  .backup-item { flex-direction: column; align-items: stretch; }
+}
 
 @media (max-width: 800px) {
   .settings { grid-template-columns: 1fr; }
@@ -971,11 +1019,54 @@ body.advance-page-body .wrap { max-width: 1280px; }
 .advance-form-grid .span-actions .btn { height: 40px; }
 .field-hint { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.4; }
 .advance-page .deal-records { margin: 0; }
+.advance-cards { display: none; }
 @media (max-width: 960px) {
+  html, body.advance-page-body { overflow-x: hidden; }
+  body.advance-page-body .wrap {
+    padding-left: 12px;
+    padding-right: 12px;
+    overflow-x: hidden;
+  }
+  .advance-page, .advance-form, .advance-form-grid, .advance-form-grid p { min-width: 0; max-width: 100%; }
   .advance-form-grid { grid-template-columns: 1fr 1fr; }
   .advance-form-grid .span-note,
   .advance-form-grid .span-actions { grid-column: 1 / -1; }
-  .advance-form-grid .span-actions { justify-content: flex-start; }
+  .advance-form-grid .span-actions { justify-content: stretch; }
+  .advance-form-grid .span-actions button,
+  .advance-form-grid .span-actions .btn { width: 100%; }
+  .advance-form-grid input { max-width: 100%; }
+  .advance-desk { display: none; }
+  .advance-cards { display: grid; gap: 10px; }
+  .advance-card {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px;
+    background: #fafafa;
+  }
+  .advance-card-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .advance-card-sum { text-align: right; }
+  .advance-card-sum .kpi-num { font-size: 18px; }
+  .advance-card-money {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 6px;
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .advance-card-note { margin: 8px 0 0; overflow-wrap: anywhere; }
+  .advance-card-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    align-items: center;
+  }
+  .advance-card-actions form { margin: 0; }
 }
 
 /* 结算底稿预览 */
