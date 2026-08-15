@@ -1,31 +1,10 @@
 """修复回归测试：1) set_stores 保存门店权限 2) 种子不覆盖管理员改动 3) 开放重定向 4) net 含顾问罚。"""
 
-from pathlib import Path
-
-import pytest
+from datetime import date
 
 from app import db
 from app.incentive import judge
 from app.web import create_app
-
-
-@pytest.fixture()
-def tmp_db(tmp_path, monkeypatch):
-    path = tmp_path / "t.db"
-    monkeypatch.setenv("STORE_DAILY_DB", str(path))
-    monkeypatch.setenv("STORE_DAILY_DATA", str(tmp_path))
-    monkeypatch.setattr(db, "DB_PATH", Path(path))
-    monkeypatch.setattr(db, "DATA_DIR", Path(tmp_path))
-    monkeypatch.setattr(db, "is_locked", lambda *a, **k: False)
-    db.init_db()
-    return path
-
-
-@pytest.fixture()
-def app_client(tmp_db):
-    app = create_app()
-    app.config["TESTING"] = True
-    return app.test_client()
 
 
 def test_broadcast_compact_is_admin_setting(app_client):
@@ -183,6 +162,79 @@ def _admin_client(tmp_db):
     c = app.test_client()
     c.post("/login", data={"username": "admin", "pin": "1234"})
     return c
+
+
+def test_csrf_blocks_unsigned_post(tmp_db, monkeypatch):
+    """正式（非 TESTING）下，写操作必须带 CSRF token。"""
+    from app.web import create_app as _create_app
+
+    app = _create_app()
+    app.config["TESTING"] = False
+    client = app.test_client()
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        today = date.today().isoformat()
+    # 1) 登录（带 pre-login token）
+    with client.session_transaction() as sess:
+        sess["_csrf_token"] = "prelogin"
+    client.post("/login", data={"username": "admin", "pin": "1234", "_csrf_token": "prelogin"})
+    # 2) 登录后获取新 token
+    client.get("/today")
+    with client.session_transaction() as sess:
+        token = sess.get("_csrf_token")
+    assert token and token != "prelogin"
+    # 3) 不带 token 的 POST 被拒
+    bad = client.post(
+        "/today",
+        data={"store_id": str(sid), "date": today, "m_phone_sales": "3"},
+        follow_redirects=True,
+    )
+    assert "校验失败" in bad.get_data(as_text=True)
+    with db.get_db() as conn:
+        assert db.get_report(conn, sid, date.today()) is None
+    # 4) 带 token 的 POST 成功
+    ok = client.post(
+        "/today",
+        data={
+            "store_id": str(sid), "date": today, "m_phone_sales": "3", "_csrf_token": token,
+        },
+        follow_redirects=True,
+    )
+    assert "已保存" in ok.get_data(as_text=True)
+    assert "校验失败" not in ok.get_data(as_text=True)
+
+
+def test_edits_page_paginates(tmp_db, monkeypatch):
+    """修改审计超过一页时分页，过滤参数保持。"""
+    from datetime import date as _date
+
+    app_client = _admin_client(tmp_db)
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        day = _date.today().isoformat()
+        # 造 55 条审计记录
+        for i in range(55):
+            db.record_edit(
+                conn,
+                biz_date=_date.today(),
+                store_id=sid,
+                user_id=uid,
+                before={"phone_sales": i},
+                after={"phone_sales": i + 1},
+                note="压测",
+            )
+            _ = day
+    page1 = app_client.get("/edits").get_data(as_text=True)
+    assert "共 55 条" in page1
+    assert "下一页" in page1
+    assert "上一页" in page1  # 不到最后一页时上一页也应可用
+    page2 = app_client.get("/edits?page=2").get_data(as_text=True)
+    assert "第 2/2" in page2
+    last = app_client.get("/edits?page=10").get_data(as_text=True)
+    assert "第 2/2" in last  # 越界被夹回最大页
+    assert "第 10" not in last
+    assert "disabled" in last  # 最后一页的下一页禁用
 
 
 def test_4_net_includes_advisor_penalty():

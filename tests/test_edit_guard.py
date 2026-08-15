@@ -1,31 +1,9 @@
 """纠错功能回归测试：店员只改当天 / 锁定时间 / 审计记录 / 删除日报。"""
 
 from datetime import date, datetime
-from pathlib import Path
-
-import pytest
 
 from app import db
 from app.web import create_app
-
-
-@pytest.fixture()
-def tmp_db(tmp_path, monkeypatch):
-    path = tmp_path / "t.db"
-    monkeypatch.setenv("STORE_DAILY_DB", str(path))
-    monkeypatch.setenv("STORE_DAILY_DATA", str(tmp_path))
-    monkeypatch.setattr(db, "DB_PATH", Path(path))
-    monkeypatch.setattr(db, "DATA_DIR", Path(tmp_path))
-    monkeypatch.setattr(db, "is_locked", lambda *a, **k: False)
-    db.init_db()
-    return path
-
-
-@pytest.fixture()
-def client(tmp_db):
-    app = create_app()
-    app.config["TESTING"] = True
-    return app.test_client()
 
 
 def _login(client, username, pin):
@@ -37,7 +15,7 @@ def _store_id(conn, code="haimen-jinhua"):
 
 
 def test_filler_cannot_save_past_date(tmp_db, monkeypatch):
-    client = _client_auth(tmp_db, monkeypatch)
+    client = _client_auth()
     today_d = date.today()
     past = today_d - __import__("datetime").timedelta(days=2)
     with db.get_db() as conn:
@@ -54,7 +32,7 @@ def test_filler_cannot_save_past_date(tmp_db, monkeypatch):
 
 
 def test_filler_month_switch_off_blocks_this_month_past(tmp_db, monkeypatch):
-    client = _client_auth(tmp_db, monkeypatch)
+    client = _client_auth()
     with db.get_db() as conn:
         sid = _store_id(conn)
     # 本月 1 号（非当天），开关默认关 → 拒绝
@@ -70,7 +48,7 @@ def test_filler_month_switch_off_blocks_this_month_past(tmp_db, monkeypatch):
 
 
 def test_filler_month_switch_on_allows_this_month(tmp_db, monkeypatch):
-    client = _client_auth(tmp_db, monkeypatch, username="admin", pin="1234")
+    client = _client_auth(username="admin", pin="1234")
     # 管理员开开关
     resp = client.post(
         "/settings",
@@ -97,7 +75,7 @@ def test_filler_month_switch_on_allows_this_month(tmp_db, monkeypatch):
 
 
 def test_admin_can_save_past_date(tmp_db, monkeypatch):
-    client = _client_auth(tmp_db, monkeypatch, username="admin", pin="1234")
+    client = _client_auth(username="admin", pin="1234")
     today_d = date.today()
     past = today_d - __import__("datetime").timedelta(days=1)
     with db.get_db() as conn:
@@ -113,7 +91,7 @@ def test_admin_can_save_past_date(tmp_db, monkeypatch):
 
 
 def test_locked_today_blocked_but_admin_ok(tmp_db, monkeypatch):
-    client = _client_auth(tmp_db, monkeypatch)
+    client = _client_auth()
     today_d = date.today()
     # 模拟锁定时间后的 now
     monkeypatch.setattr(
@@ -132,7 +110,7 @@ def test_locked_today_blocked_but_admin_ok(tmp_db, monkeypatch):
 
 
 def test_admin_override_lock(tmp_db, monkeypatch):
-    client = _client_auth(tmp_db, monkeypatch, username="admin", pin="1234")
+    client = _client_auth(username="admin", pin="1234")
     today_d = date.today()
     monkeypatch.setattr(db, "is_locked", lambda biz_date, now=None: biz_date == today_d)
     with db.get_db() as conn:
@@ -148,7 +126,7 @@ def test_admin_override_lock(tmp_db, monkeypatch):
 
 
 def test_overwrite_records_audit(tmp_db, monkeypatch):
-    client = _client_auth(tmp_db, monkeypatch)
+    client = _client_auth()
     today_d = date.today()
     with db.get_db() as conn:
         sid = _store_id(conn)
@@ -172,7 +150,7 @@ def test_overwrite_records_audit(tmp_db, monkeypatch):
 
 
 def test_delete_report_records_audit(tmp_db, monkeypatch):
-    client = _client_auth(tmp_db, monkeypatch, username="admin", pin="1234")
+    client = _client_auth(username="admin", pin="1234")
     today_d = date.today()
     with db.get_db() as conn:
         sid = _store_id(conn)
@@ -207,7 +185,7 @@ def test_locked_helper():
 
 def test_month_switch_does_not_unlock_today(tmp_db, monkeypatch):
     """开启「本月可改」后，店员也不能改『今天』锁定后的数据——本月可改只放开本月过去日。"""
-    client = _client_auth(tmp_db, monkeypatch, username="admin", pin="1234")
+    client = _client_auth(username="admin", pin="1234")
     resp = client.post(
         "/settings",
         data={"action": "save_permissions", "tab": "permissions", "filler_edit_month": "1"},
@@ -234,7 +212,7 @@ def test_month_switch_does_not_unlock_today(tmp_db, monkeypatch):
 
 
 def test_admin_can_fix_one_cell(tmp_db, monkeypatch):
-    client = _client_auth(tmp_db, monkeypatch, username="admin", pin="1234")
+    client = _client_auth(username="admin", pin="1234")
     today_d = date.today()
     with db.get_db() as conn:
         sid = _store_id(conn)
@@ -264,7 +242,7 @@ def test_admin_can_fix_one_cell(tmp_db, monkeypatch):
 
 
 def test_filler_cannot_fix_cell(tmp_db, monkeypatch):
-    client = _client_auth(tmp_db, monkeypatch)
+    client = _client_auth()
     today_d = date.today()
     with db.get_db() as conn:
         sid = _store_id(conn)
@@ -301,7 +279,7 @@ def test_now_is_beijing_time():
     assert abs((db.today_local() - utc.date()).days) <= 1
 
 
-def _client_auth(tmp_db, monkeypatch, username="jinhua", pin="123456"):
+def _client_auth(username="jinhua", pin="123456"):
     app = create_app()
     app.config["TESTING"] = True
     client = app.test_client()

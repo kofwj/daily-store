@@ -1,6 +1,5 @@
 from app import db
 from app.deal import form_values, render_deal
-from app.web import create_app
 
 
 def test_closed_deal_uses_short_layout():
@@ -53,19 +52,7 @@ def test_show_phone_keeps_full_number():
     assert "15514408478" in text
 
 
-def test_deal_post_counts_by_store(tmp_path, monkeypatch):
-    from pathlib import Path
-
-    path = tmp_path / "t.db"
-    monkeypatch.setenv("STORE_DAILY_DB", str(path))
-    monkeypatch.setenv("STORE_DAILY_DATA", str(tmp_path))
-    monkeypatch.setattr(db, "DB_PATH", Path(path))
-    monkeypatch.setattr(db, "DATA_DIR", Path(tmp_path))
-    monkeypatch.setattr(db, "is_locked", lambda *a, **k: False)
-    db.init_db()
-    app = create_app()
-    app.config["TESTING"] = True
-    client = app.test_client()
+def test_deal_post_counts_by_store(client):
     client.post("/login", data={"username": "admin", "pin": "1234"})
     with db.get_db() as conn:
         sid = conn.execute("SELECT id FROM stores WHERE short_name='通州金沙'").fetchone()["id"]
@@ -79,7 +66,7 @@ def test_deal_post_counts_by_store(tmp_path, monkeypatch):
     )
     client.post("/deal", data={"store_id": str(sid), "model": "X300", "phone": "13800001111"})
     page = client.get(f"/deal?store_id={sid}").get_data(as_text=True)
-    assert "各店次数" in page
+    assert "各店次数" not in page  # 记录已迁到独立页
     with db.get_db() as conn:
         today = db.today_local()
         counts = db.deal_counts(conn, [sid], today, today)
@@ -95,11 +82,13 @@ def test_deal_post_counts_by_store(tmp_path, monkeypatch):
         assert rows[0]["phone"] == "15514408478"
         assert rows[0]["note"] == "改过"
         assert "通州金沙" in rows[0]["text"]
-    assert "本店记录" in page
-    assert "S60" in page
-    assert "1551440****" in page
-    assert "15514408478" not in page
-    assert "删除" in page
+    assert "查看成交记录" in page  # 填报页不再内嵌记录表，只留跳转入口
+    rec = client.get(f"/deal/records?store_id={sid}").get_data(as_text=True)
+    assert "成交记录" in rec
+    assert "S60" in rec
+    assert "1551440****" in rec
+    assert "15514408478" not in rec
+    assert "删除" in rec
     with db.get_db() as conn:
         deal_id = conn.execute(
             "SELECT id FROM deal_posts WHERE store_id=? AND phone='13800001111'",

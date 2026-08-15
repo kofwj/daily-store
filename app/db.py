@@ -193,11 +193,51 @@ def init_db() -> None:
         _ensure_store_columns(conn)
         _ensure_deal_posts(conn)
         _ensure_app_meta(conn)
+        # 种子（建表/加列/回填默认）每次幂等执行即可；真正“动数据”的迁移走 migrate() 只跑一次
         _seed_metrics(conn)
         _seed_kpi_targets(conn)
         _seed_catalog_stores(conn)
         _seed_defaults(conn)
         _reset_filler_pins_once(conn)
+        migrate(conn)
+
+
+# 版本化迁移：每个迁移只在这个库上执行一次，已记录的版本不再重跑。
+# 以后新增“历史数据搬运/回填/拆分”类逻辑，加进这个列表（版本号递增），不要在 init_db 里改数据。
+MIGRATIONS: List[Tuple[int, str, callable]] = [
+    # 旧版在每次启动 seed 里搬数据；改为一次性迁移，避免生产重启反复重做
+    (1, "retire_legacy_coin_cut", "_retire_legacy_coin_cut"),
+    (2, "split_new_user_coin_cut", "_split_new_user_coin_cut"),
+]
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    """执行尚未跑过的数据迁移，并记录版本。仅在 init_db 内调用。"""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at TEXT NOT NULL
+        )
+        """
+    )
+    applied = {int(row["version"]) for row in conn.execute("SELECT version FROM schema_migrations")}
+    fns: Dict[str, callable] = {
+        "_retire_legacy_coin_cut": _retire_legacy_coin_cut,
+        "_split_new_user_coin_cut": _split_new_user_coin_cut,
+    }
+    for version, name, fn_name in sorted(MIGRATIONS):
+        if version in applied:
+            continue
+        fn = fns.get(fn_name)
+        if fn is None:
+            raise RuntimeError(f"迁移 {version} {fn_name} 未注册")
+        fn(conn)
+        conn.execute(
+            "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+            (version, name, _now()),
+        )
 
 
 def _ensure_store_columns(conn: sqlite3.Connection) -> None:
@@ -395,12 +435,25 @@ def record_deal_post(
     return int(cur.lastrowid)
 
 
+def count_deal_posts(
+    conn: sqlite3.Connection, store_id: int, start: date, end: date
+) -> int:
+    return int(
+        conn.execute(
+            "SELECT COUNT(*) FROM deal_posts WHERE store_id=? AND biz_date>=? AND biz_date<=?",
+            (store_id, start.isoformat(), end.isoformat()),
+        ).fetchone()[0]
+        or 0
+    )
+
+
 def list_deal_posts(
     conn: sqlite3.Connection,
     store_id: int,
     start: date,
     end: date,
     limit: int = 50,
+    offset: int = 0,
 ) -> List[sqlite3.Row]:
     return list(
         conn.execute(
@@ -410,9 +463,9 @@ def list_deal_posts(
             LEFT JOIN users u ON u.id = d.user_id
             WHERE d.store_id=? AND d.biz_date>=? AND d.biz_date<=?
             ORDER BY d.id DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
-            (store_id, start.isoformat(), end.isoformat(), limit),
+            (store_id, start.isoformat(), end.isoformat(), limit, offset),
         )
     )
 
@@ -572,8 +625,6 @@ def _seed_metrics(conn: sqlite3.Connection) -> None:
                 """,
                 (code, name, section, sort, 1 if code in highlight else 0),
             )
-    _retire_legacy_coin_cut(conn)
-    _split_new_user_coin_cut(conn)
 
 
 def _retire_legacy_coin_cut(conn: sqlite3.Connection) -> None:

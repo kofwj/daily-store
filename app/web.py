@@ -7,6 +7,7 @@ import io
 import json
 import os
 import re
+import secrets
 from datetime import date, datetime, timedelta
 from functools import wraps
 from typing import Any, Dict, List, Optional
@@ -56,6 +57,23 @@ def create_app() -> Flask:
         with db.get_db() as conn:
             row = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (uid,)).fetchone()
             g.user = row
+
+    @app.before_request
+    def csrf_protect():
+        """非安全方法必须有合法 CSRF token（session 里随机一次、表单/头带回来）。
+
+        测试环境（TESTING）关闭，方便测试直接 POST；正式只有带 token 的写操作能过。
+        """
+        if app.config.get("TESTING"):
+            return None
+        if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+            return None
+        token = session.get("_csrf_token")
+        given = request.form.get("_csrf_token") or request.headers.get("X-CSRF-Token", "")
+        if not token or not given or not secrets.compare_digest(token, given):
+            flash("页面停留太久，操作校验失败，请刷新后重试。", "error")
+            return redirect(request.referrer or url_for("today"))
+        return None
 
     def login_required(fn):
         @wraps(fn)
@@ -415,17 +433,6 @@ def create_app() -> Flask:
             month_counts = db.deal_counts(conn, store_ids, month_start, today_d)
             mine_today = today_counts.get(store["id"], {"total": 0, "closed": 0})
             mine_month = month_counts.get(store["id"], {"total": 0, "closed": 0})
-            recent = db.list_deal_posts(conn, store["id"], month_start, today_d)
-            store_stats = []
-            if g.user["role"] == "admin":
-                store_stats = [
-                    {
-                        "store": s,
-                        "today": today_counts.get(s["id"], {"total": 0, "closed": 0}),
-                        "month": month_counts.get(s["id"], {"total": 0, "closed": 0}),
-                    }
-                    for s in stores
-                ]
             return render_template(
                 "deal.html",
                 store=store,
@@ -435,8 +442,6 @@ def create_app() -> Flask:
                 is_admin=g.user["role"] == "admin",
                 mine_today=mine_today,
                 mine_month=mine_month,
-                recent=recent,
-                store_stats=store_stats,
             )
 
     @app.route("/deal/delete", methods=["POST"])
@@ -456,7 +461,55 @@ def create_app() -> Flask:
                 flash("已删除该成交播报。", "ok")
             else:
                 flash("这条记录不存在，或已删除。", "error")
-        return redirect(url_for("deal_page", store_id=sid))
+        return redirect(url_for("deal_records", store_id=sid))
+
+    @app.route("/deal/records")
+    @login_required
+    def deal_records():
+        """成交播报记录页：按门店 + 近 N 天，分页。"""
+        with db.get_db() as conn:
+            store, stores = pick_store(conn, request.args.get("store_id"))
+            if store is None:
+                return render_template("empty.html")
+            today_d = db.today_local()
+            try:
+                days_int = max(1, min(int(request.args.get("days", "7")), 90))
+            except ValueError:
+                days_int = 7
+            start = today_d - timedelta(days=days_int - 1)
+            per_page = 50
+            try:
+                page = max(1, int(request.args.get("page", "1")))
+            except ValueError:
+                page = 1
+            total = db.count_deal_posts(conn, store["id"], start, today_d)
+            pages = max(1, -(-total // per_page))
+            if page > pages:
+                page = pages
+            rows = db.list_deal_posts(
+                conn, store["id"], start, today_d, limit=per_page, offset=(page - 1) * per_page
+            )
+            month_start = today_d.replace(day=1)
+            store_ids = [s["id"] for s in stores]
+            today_counts = db.deal_counts(conn, store_ids, today_d, today_d)
+            month_counts = db.deal_counts(conn, store_ids, month_start, today_d)
+            mine_today = today_counts.get(store["id"], {"total": 0, "closed": 0})
+            mine_month = month_counts.get(store["id"], {"total": 0, "closed": 0})
+            return render_template(
+                "deal_records.html",
+                store=store,
+                stores=stores,
+                is_admin=g.user["role"] == "admin",
+                rows=rows,
+                days=days_int,
+                page=page,
+                pages=pages,
+                total=total,
+                start=start,
+                end=today_d,
+                mine_today=mine_today,
+                mine_month=mine_month,
+            )
 
     @app.route("/report")
     @login_required
@@ -938,21 +991,34 @@ def create_app() -> Flask:
             params.append(int(store_id))
         # edited_at 存的是北京时间；用北京时间算窗口边界，避免 SQLite 的 UTC now 差 8 小时
         cutoff = (datetime.now(db.TZ) - timedelta(days=days_int)).strftime("%Y-%m-%d %H:%M:%S")
+        per_page = 50
+        try:
+            page = max(1, int(request.args.get("page", "1")))
+        except ValueError:
+            page = 1
+        base_sql = (
+            "report_edits e "
+            "JOIN stores s ON s.id=e.store_id "
+            "JOIN users u ON u.id=e.user_id "
+            f"WHERE e.edited_at >= ? {where}"
+        )
         with db.get_db() as conn:
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM {base_sql}", [cutoff, *params]
+            ).fetchone()[0]
+            pages = max(1, -(-total // per_page))
+            if page > pages:
+                page = pages
             rows = [
                 dict(r)
                 for r in conn.execute(
                     f"""
                     SELECT e.*, s.name AS store_name, u.username AS user_name
-                    FROM report_edits e
-                    JOIN stores s ON s.id=e.store_id
-                    JOIN users u ON u.id=e.user_id
-                    WHERE e.edited_at >= ?
-                    {where}
+                    FROM {base_sql}
                     ORDER BY e.id DESC
-                    LIMIT 300
+                    LIMIT ? OFFSET ?
                     """,
-                    [cutoff, *params],
+                    [cutoff, *params, per_page, (page - 1) * per_page],
                 )
             ]
             all_stores = db.list_all_stores(conn)
@@ -971,6 +1037,9 @@ def create_app() -> Flask:
             days=days_int,
             store_id=store_id,
             stores=all_stores,
+            page=page,
+            pages=pages,
+            total=total,
         )
 
     @app.route("/bulletin.csv")
@@ -1202,7 +1271,14 @@ def create_app() -> Flask:
             )
     @app.context_processor
     def inject_now():
-        return {"today_iso": db.today_local().isoformat(), "now": datetime.now(db.TZ)}
+        # 首次访问就为会话生成 CSRF token，供表单使用
+        if "_csrf_token" not in session:
+            session["_csrf_token"] = secrets.token_hex(16)
+        return {
+            "today_iso": db.today_local().isoformat(),
+            "now": datetime.now(db.TZ),
+            "csrf_token": session.get("_csrf_token", ""),
+        }
 
     return app
 

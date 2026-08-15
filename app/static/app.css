@@ -784,6 +784,34 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
   border: 1px solid #fedf89;
 }
 .miss-chip:hover { background: #ffefc7; color: #93370d; }
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.pager-btns { display: flex; gap: 8px; }
+.pager .btn.ghost { text-decoration: none; text-align: center; }
+.pager .btn.ghost.disabled { opacity: .45; pointer-events: none; }
+.deal-records-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.deal-records-link { display: flex; justify-content: flex-end; }
+.deal-records-link .btn { text-decoration: none; }
+.deal-records-head h1 { margin-bottom: 4px; }
+.deal-records-head p { margin: 0; }
+.deal-records-kpis { margin: 0; }
+@media (max-width: 800px) {
+  .deal-records-head { flex-direction: column; gap: 12px; }
+  .deal-records-kpis { grid-template-columns: 1fr 1fr; width: 100%; }
+  .deal-records-card .wrap { padding-bottom: calc(76px + var(--safe-bottom)); }
+}
 .board-rank { margin: 0; overflow: hidden; }
 table.board-table { font-size: 13px; }
 table.board-table th,
@@ -854,10 +882,6 @@ table.board-table td { text-align: left; vertical-align: middle; }
 .deal-page #dealShot { margin: 0; }
 .deal-page #dealText { min-height: 180px; }
 .deal-log { margin: 0; }
-.deal-log-table { display: block; }
-.deal-log-list { display: none; gap: 8px; }
-.deal-store-table { display: block; }
-.deal-store-stats { display: none; }
 .deal-log-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -915,7 +939,6 @@ table.board-table td { text-align: left; vertical-align: middle; }
   .deal-page #dealShot { padding: 10px; }
   .deal-page #dealText { min-height: 88px; }
   .deal-page .copy-btn { min-width: 0; width: 100%; }
-  .deal-log { padding: 10px; }
-  .deal-log-table, .deal-store-table { display: none; }
-  .deal-log-list, .deal-store-stats { display: grid; }
+  .deal-records-link { justify-content: center; }
+  .deal-records-link .btn { width: 100%; }
 }

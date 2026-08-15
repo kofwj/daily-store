@@ -13,6 +13,7 @@
     <nav class="nav">
       <a href="{{ url_for('today') }}" class="{{ 'active' if request.endpoint == 'today' else '' }}"><span class="full">今日填报</span><span class="short">填报</span></a>
       <a href="{{ url_for('deal_page') }}" class="{{ 'active' if request.endpoint == 'deal_page' else '' }}"><span class="full">成交播报</span><span class="short">成交</span></a>
+      <a href="{{ url_for('deal_records') }}" class="{{ 'active' if request.endpoint == 'deal_records' else '' }}"><span class="full">成交记录</span><span class="short">记录</span></a>
       <a href="{{ url_for('report') }}" class="{{ 'active' if request.endpoint == 'report' else '' }}">报表</a>
       {% if g.user['role'] == 'admin' %}
       <a href="{{ url_for('bulletin_page') }}" class="{{ 'active' if request.endpoint == 'bulletin_page' else '' }}"><span class="full">通报表</span><span class="short">通报</span></a>
@@ -38,5 +39,18 @@
     {% endwith %}
     {% block body %}{% endblock %}
   </main>
+  <script>
+  // 给所有 POST 表单自动带上 CSRF 令牌，登录/填报/设置/删除都不用逐个加隐藏字段
+  document.addEventListener('submit', function (e) {
+    var f = e.target;
+    if (f && f.method && f.method.toLowerCase() === 'post' &&
+        !f.querySelector('[name="_csrf_token"]')) {
+      var i = document.createElement('input');
+      i.type = 'hidden'; i.name = '_csrf_token';
+      i.value = {{ csrf_token|tojson }};
+      f.appendChild(i);
+    }
+  }, true);
+  </script>
 </body>
 </html>

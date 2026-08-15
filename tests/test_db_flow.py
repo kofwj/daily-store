@@ -1,26 +1,10 @@
 import os
 from datetime import date
-from pathlib import Path
-
-import pytest
 
 from app import db
 from app.broadcast import render_broadcast
 from app.stores_seed import NINGHAI_CODE, STORES, filler_accounts
 from app.web import create_app
-
-
-@pytest.fixture()
-def tmp_db(tmp_path, monkeypatch):
-    path = tmp_path / "t.db"
-    monkeypatch.setenv("STORE_DAILY_DB", str(path))
-    monkeypatch.setenv("STORE_DAILY_DATA", str(tmp_path))
-    # 模块级路径在 import 时已算好，这里直接改
-    monkeypatch.setattr(db, "DB_PATH", Path(path))
-    monkeypatch.setattr(db, "DATA_DIR", Path(tmp_path))
-    monkeypatch.setattr(db, "is_locked", lambda *a, **k: False)
-    db.init_db()
-    return path
 
 
 def test_catalog_has_eleven_official_stores(tmp_db):
@@ -134,6 +118,8 @@ def test_legacy_coin_cut_moves_to_old_user(tmp_db):
             "INSERT INTO daily_facts(biz_date, store_id, metric_code, day_value) VALUES (?, ?, 'coin_cut', 2)",
             ("2026-08-10", store_id),
         )
+        # 模拟“还没迁移过”的旧库：清掉迁移记录，让 init_db 重跑 coin_cut → coin_cut_old 迁移
+        conn.execute("DELETE FROM schema_migrations")
     db.init_db()
     with db.get_db() as conn:
         moved = conn.execute(
