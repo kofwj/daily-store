@@ -40,7 +40,7 @@ def render_broadcast(
             spec = ROLLUPS["coin_cut_all"]
             day, cum = _sum_codes(values, spec["parts"] + spec["legacy"])
             visible.append(_line("金币直降", day, cum))
-        for code, name in section["metrics"]:
+        for code, name, _hint in section["metrics"]:
             if code in ROLLUPS["coin_cut_all"]["parts"]:
                 continue
             day, cum = values.get(code, (0, 0))

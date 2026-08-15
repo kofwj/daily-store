@@ -313,7 +313,8 @@ def test_broadcast_from_saved_facts(tmp_db):
         from app.broadcast import add_day_to_prev
 
         pairs = add_day_to_prev(prev, today)
-        text = render_broadcast(store["name"], date(2026, 8, 13), pairs)
+        text = render_broadcast(store["short_name"] or store["name"], date(2026, 8, 13), pairs)
+        assert text.startswith(f"8月13日\n{store['short_name']}\n")
         assert "当天手机销量：日1，累13" in text
         assert "宽带：日3，累10" in text
         assert "购机让利：日2，累8" in text

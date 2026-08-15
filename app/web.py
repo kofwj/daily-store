@@ -88,6 +88,10 @@ def create_app() -> Flask:
             short = (store.get("short_name") if hasattr(store, "get") else "") or ""
         return short or store["name"]
 
+    def broadcast_store_name(store) -> str:
+        """群消息只用简称，没有简称才用全称。"""
+        return store_label(store)
+
     def parse_date(raw: Optional[str], fallback: Optional[date] = None) -> date:
         if raw and DATE_RE.match(raw):
             try:
@@ -289,7 +293,7 @@ def create_app() -> Flask:
             report = db.get_report(conn, store["id"], biz_date)
             compact_sections = broadcast_compact_sections(conn)
             text = broadcast.render_broadcast(
-                store_label(store),
+                broadcast_store_name(store),
                 biz_date,
                 pairs,
                 compact=bool(compact_sections),
@@ -298,12 +302,13 @@ def create_app() -> Flask:
             grouped = []
             for section in SECTIONS:
                 items = []
-                for code, name in section["metrics"]:
+                for code, name, hint in section["metrics"]:
                     day, cum = pairs.get(code, (0, 0))
                     items.append(
                         {
                             "code": code,
                             "name": name,
+                            "hint": hint,
                             "day": day_vals.get(code, 0),
                             "cum": cum,
                             "target": 0,

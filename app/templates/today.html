@@ -76,6 +76,7 @@
         <div class="metric-label">
           <div class="name">{{ item.name }}</div>
           <div class="cum">累 {{ item.cum }}</div>
+          {% if item.hint %}<div class="hint">{{ item.hint }}</div>{% endif %}
         </div>
         <div class="stepper">
           <button type="button" class="ghost step" data-delta="-1" aria-label="减一">−</button>

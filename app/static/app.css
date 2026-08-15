@@ -163,6 +163,7 @@ button.ghost:hover, .btn.ghost:hover { background: var(--accent-soft); }
 .metric:last-of-type { border-bottom: 0; }
 .metric .name { font-size: 14px; }
 .metric .cum { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.metric .hint { font-size: 11px; color: #94a3b8; line-height: 1.4; margin-top: 2px; }
 .metric input { text-align: center; font-variant-numeric: tabular-nums; font-size: 16px; }
 .stepper { display: flex; align-items: center; gap: 6px; }
 .stepper input { width: 64px; padding: 10px 6px; }

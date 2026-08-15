@@ -12,10 +12,10 @@ SECTIONS: List[Dict] = [
         "header": None,
         "blank_before": False,
         "metrics": [
-            ("phone_sales", "当天手机销量"),
-            ("id_check", "查询身份证数"),
-            ("lead", "商机录入"),
-            ("reserve", "储备"),
+            ("phone_sales", "当天手机销量", ""),
+            ("id_check", "查询身份证数", ""),
+            ("lead", "商机录入", ""),
+            ("reserve", "储备", ""),
         ],
     },
     {
@@ -23,9 +23,9 @@ SECTIONS: List[Dict] = [
         "header": "重点业务",
         "blank_before": True,
         "metrics": [
-            ("bisuan", "比算新增"),
-            ("bisuan_high", "比算新增[高]"),
-            ("ai_contract", "Ai手机合约"),
+            ("bisuan", "比算新增", "纯新或低消迎回，有效插卡，ARPU>0"),
+            ("bisuan_high", "比算新增[高]", "上面这类里，折后主套105以上"),
+            ("ai_contract", "Ai手机合约", "店内考核项；结算文件没有单独科目"),
         ],
     },
     {
@@ -33,8 +33,8 @@ SECTIONS: List[Dict] = [
         "header": "新增类",
         "blank_before": True,
         "metrics": [
-            ("anxin_sub", "安心/副卡"),
-            ("other_card", "其他卡类"),
+            ("anxin_sub", "安心/副卡", "非主用卡：安心小号 / 副卡 / 畅享卡"),
+            ("other_card", "其他卡类", ""),
         ],
     },
     {
@@ -42,12 +42,14 @@ SECTIONS: List[Dict] = [
         "header": "家庭类",
         "blank_before": True,
         "metrics": [
-            ("broadband", "宽带"),
-            ("tv", "电视"),
-            ("tv_member", "电视会员"),
-            ("fttr", "FTTR"),
-            ("gigabit", "千兆"),
-            ("security", "安防"),
+            ("broadband", "宽带", "新装竣工一笔；续费走「宽带续费」；自倒、换号可能结算为0"),
+            ("broadband_renew", "宽带续费", "到期续费 / 转融合；新装走「宽带」"),
+            ("tv", "电视", "竣工且有登录"),
+            ("tv_member", "电视会员", "竣工且有登录"),
+            ("wifi", "普通组网", "不含FTTR；组网竣工且有登录"),
+            ("fttr", "FTTR", "全光组网；单主光猫可能不结算"),
+            ("gigabit", "千兆", ""),
+            ("security", "安防", ""),
         ],
     },
     {
@@ -55,15 +57,15 @@ SECTIONS: List[Dict] = [
         "header": "终端合约",
         "blank_before": True,
         "metrics": [
-            ("coin_cut_old", "老用户直降"),
-            ("coin_cut_new_recharge", "新用户直降·充值"),
-            ("coin_cut_new_sesame", "新用户直降·芝麻免充"),
-            ("coin_cut_new_savings", "新用户直降·储蓄卡冻结"),
-            ("coin_cut_new_full", "新用户直降·全品类"),
-            ("coin_cut_xtc", "小天才直降"),
-            ("phone_discount", "购机让利"),
-            ("gift_2g", "送2G流量"),
-            ("welcome_back", "底部迎回"),
+            ("coin_cut_old", "老用户直降", "不算进考核"),
+            ("coin_cut_new_recharge", "新用户直降·充值", "考核看四项合计"),
+            ("coin_cut_new_sesame", "新用户直降·芝麻免充", "考核看四项合计"),
+            ("coin_cut_new_savings", "新用户直降·储蓄卡冻结", "考核看四项合计"),
+            ("coin_cut_new_full", "新用户直降·全品类", "考核看四项合计"),
+            ("coin_cut_xtc", "小天才直降", "不算进考核"),
+            ("phone_discount", "购机让利", ""),
+            ("gift_2g", "送2G流量", ""),
+            ("welcome_back", "底部迎回", ""),
         ],
     },
     {
@@ -71,21 +73,21 @@ SECTIONS: List[Dict] = [
         "header": "数字化",
         "blank_before": True,
         "metrics": [
-            ("fangzha", "防诈宝"),
-            ("he_msg", "和留言"),
-            ("cloud_disk", "云盘"),
-            ("direct_pack", "定向包"),
-            ("crbt", "彩铃"),
-            ("migu", "咪咕视频"),
-            ("safe_mgr", "安全管家"),
-            ("watch_pack", "观赛包"),
-            ("addon", "叠加包"),
-            ("fund", "基金通"),
-            ("health", "健康无忧"),
-            ("pet", "萌宠无忧"),
-            ("new_call", "新通话"),
-            ("renwoxuan", "任我选会员"),
-            ("min_spend", "个人/全家保底"),
+            ("fangzha", "防诈宝", ""),
+            ("he_msg", "和留言", ""),
+            ("cloud_disk", "云盘", ""),
+            ("direct_pack", "定向包", ""),
+            ("crbt", "彩铃", ""),
+            ("migu", "咪咕视频", ""),
+            ("safe_mgr", "安全管家", ""),
+            ("watch_pack", "观赛包", ""),
+            ("addon", "叠加包", ""),
+            ("fund", "基金通", ""),
+            ("health", "健康无忧", ""),
+            ("pet", "萌宠无忧", ""),
+            ("new_call", "新通话", ""),
+            ("renwoxuan", "任我选会员", ""),
+            ("min_spend", "个人/全家保底", ""),
         ],
     },
 ]
@@ -96,7 +98,7 @@ def all_metrics() -> List[Tuple[str, str, str, int]]:
     rows: List[Tuple[str, str, str, int]] = []
     sort = 10
     for section in SECTIONS:
-        for code, name in section["metrics"]:
+        for code, name, _hint in section["metrics"]:
             rows.append((code, name, section["code"], sort))
             sort += 10
     return rows
