@@ -18,7 +18,7 @@
 ```text
 店员手机 ──HTTP──► 192.168.100.5:8099   ← 唯一生产
                       │
-                      │ 每天凌晨 backup_offsite.sh
+                      │ 每小时 backup_offsite.sh（生产机 cron）
                       ├──────► 192.168.100.109  ~/store-daily-backups/
                       └──────► 公网 VPS         ~/store-daily-backups/
 ```
@@ -80,32 +80,35 @@ KEEP_DAYS=30 \
   env/env_offsite_YYYYMMDD_HHMMSS.env   # 权限 600
 ```
 
-### 3. 定时（cron）
+### 3. 定时（cron，推荐生产机每小时）
 
-在 **109 或 Mac** 上：
+Mac 睡觉会漏备份，所以 **cron 装在 5 上**，每小时推 109 + pve。
 
 ```bash
-crontab -e
+# 从 Mac 同步脚本后：
+ssh root@192.168.100.5 /opt/store-daily/scripts/install_backup_cron.sh
 ```
+
+会写入：
 
 ```cron
-# 每天 02:15，从生产拉库推到 109 + 远端
-15 2 * * * cd /path/to/store-daily && \
-  PRIMARY_HOST=192.168.100.5 \
-  LAN_BACKUP_HOST=192.168.100.109 \
-  LAN_BACKUP_USER=你的用户 \
-  REMOTE_BACKUP=ubuntu@公网IP \
-  ./scripts/backup_offsite.sh >>/tmp/store-daily-backup.log 2>&1
+5 * * * * /opt/store-daily/scripts/backup_offsite.sh >>/var/log/store-daily-offsite.log 2>&1
 ```
 
-生产机自己也可以再留一份应用内备份（设置页或 cron 调容器）：
+并生成本机 SSH 钥匙。把打印出的公钥加到：
+
+- `root@pve.anemy.org`（`~/.ssh/authorized_keys`）
+- `jian@192.168.100.109:8022`（Termux，手机要开着）
+
+109 暂时连不上时脚本会告警，**仍会推 pve**。
+
+看日志：
 
 ```bash
-# 在 192.168.100.5 上，每天 02:00 容器内快照
-0 2 * * * cd /opt/store-daily && docker compose exec -T app \
-  python -c 'from app import backup; print(backup.snapshot("cron"))' \
-  >>/var/log/store-daily-backup.log 2>&1
+ssh root@192.168.100.5 'tail -50 /var/log/store-daily-offsite.log'
 ```
+
+生产机自己也还有应用内备份（设置页「立即备份」）。
 
 ---
 

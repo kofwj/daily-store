@@ -16,14 +16,24 @@
 #   - 端口默认 8022（LAN_BACKUP_SSH_PORT）
 #   - 目录用相对家目录：store-daily-backups（不要写 Mac 的 $HOME）
 #
-# cron 示例（Mac，每天 02:15）：
-#   15 2 * * * cd /path/to/store-daily && ./scripts/backup_offsite.sh \
-#     >>/tmp/store-daily-backup.log 2>&1
+# cron 示例（生产机 5，每小时；推荐，Mac 睡觉也不漏）：
+#   5 * * * * /opt/store-daily/scripts/backup_offsite.sh \
+#     >>/var/log/store-daily-offsite.log 2>&1
+# 安装：ssh root@192.168.100.5 /opt/store-daily/scripts/install_backup_cron.sh
 
 set -euo pipefail
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"${TMPDIR:-/tmp}/store-daily-backup.lock"
+  if ! flock -n 9; then
+    echo "另一份备份还在跑，跳过"
+    exit 0
+  fi
+fi
 
 # 可选本地配置：scripts/backup.env（勿提交密钥类内容；仅 host/user）
 if [[ -f "${ROOT}/scripts/backup.env" ]]; then
@@ -104,8 +114,17 @@ rsync_p() {
   rsync -az -e "ssh -o ConnectTimeout=15 -o BatchMode=yes -p ${port}" "$@"
 }
 
+ON_PRIMARY=0
+if [[ -f "${PRIMARY_DIR}/data/store_daily.db" ]]; then
+  ON_PRIMARY=1
+fi
+
 echo "== 备份开始 ${STAMP} =="
-echo "生产: ${PRIMARY}:${PRIMARY_DIR} (ssh ${PRIMARY_SSH_PORT})"
+if [[ "${ON_PRIMARY}" == "1" ]]; then
+  echo "生产: 本机 ${PRIMARY_DIR}"
+else
+  echo "生产: ${PRIMARY}:${PRIMARY_DIR} (ssh ${PRIMARY_SSH_PORT})"
+fi
 echo "局域网: ${LAN}:${LAN_BACKUP_DIR} (ssh ${LAN_BACKUP_SSH_PORT})"
 if [[ -n "${REMOTE_TARGET}" ]]; then
   echo "远端: ${REMOTE_TARGET}:${REMOTE_BACKUP_DIR} (ssh ${REMOTE_BACKUP_SSH_PORT})"
@@ -113,9 +132,44 @@ else
   echo "远端: (未设置 REMOTE_BACKUP，跳过)"
 fi
 
+snapshot_primary() {
+  set -euo pipefail
+  mkdir -p "${PRIMARY_DIR}/data/backups"
+  local host_db="${PRIMARY_DIR}/data/store_daily.db"
+  local host_snap="${PRIMARY_DIR}/data/backups/${REMOTE_SNAP_NAME}"
+  local host_env="${PRIMARY_DIR}/data/backups/${REMOTE_ENV_NAME}"
+  if [[ ! -f "${host_db}" ]]; then
+    echo "找不到生产库: ${host_db}" >&2
+    return 1
+  fi
+  if command -v docker >/dev/null 2>&1 && \
+     docker compose -f "${PRIMARY_DIR}/docker-compose.yml" ps --status running 2>/dev/null | grep -q app; then
+    # </dev/null 防止 exec 吞掉后续 stdin
+    docker compose -f "${PRIMARY_DIR}/docker-compose.yml" exec -T app \
+      python -c "import sqlite3; s=sqlite3.connect('/app/data/store_daily.db'); d=sqlite3.connect('/app/data/backups/${REMOTE_SNAP_NAME}'); s.backup(d); d.close(); s.close(); print('/app/data/backups/${REMOTE_SNAP_NAME}')" \
+      </dev/null
+  else
+    python3 -c "import sqlite3; s=sqlite3.connect('${host_db}'); d=sqlite3.connect('${host_snap}'); s.backup(d); d.close(); s.close(); print('${host_snap}')"
+  fi
+  if [[ ! -f "${host_snap}" ]]; then
+    echo "快照未生成: ${host_snap}" >&2
+    return 1
+  fi
+  if [[ -f "${PRIMARY_DIR}/.env" ]]; then
+    cp -f "${PRIMARY_DIR}/.env" "${host_env}"
+    chmod 600 "${host_env}" || true
+    echo "已附带 .env -> ${host_env}"
+  else
+    echo "警告: 生产机没有 .env" >&2
+  fi
+  ls -la "${host_snap}" "${host_env}" 2>/dev/null || ls -la "${host_snap}"
+}
+
 echo "→ 生产机打一致性快照"
 if [[ "${DRY_RUN}" == "1" ]]; then
   echo "  [dry-run] snapshot on ${PRIMARY}"
+elif [[ "${ON_PRIMARY}" == "1" ]]; then
+  snapshot_primary
 else
   ssh_p "${PRIMARY_SSH_PORT}" "${PRIMARY}" \
     "PRIMARY_DIR=$(printf %q "${PRIMARY_DIR}") SNAP_NAME=$(printf %q "${REMOTE_SNAP_NAME}") ENV_NAME=$(printf %q "${REMOTE_ENV_NAME}") bash -s" <<'EOS'
@@ -160,10 +214,16 @@ LOCAL_ENV="${WORKDIR}/${REMOTE_ENV_NAME}"
 
 echo "→ 拉回临时目录并校验"
 if [[ "${DRY_RUN}" == "1" ]]; then
-  echo "  [dry-run] scp ${REMOTE_SNAP}"
+  echo "  [dry-run] copy snapshot"
+elif [[ "${ON_PRIMARY}" == "1" ]]; then
+  cp -f "${REMOTE_SNAP}" "${LOCAL_DB}"
+  [[ -f "${REMOTE_ENV}" ]] && cp -f "${REMOTE_ENV}" "${LOCAL_ENV}" || true
 else
   scp_p "${PRIMARY_SSH_PORT}" "${PRIMARY}:${REMOTE_SNAP}" "${LOCAL_DB}"
   scp_p "${PRIMARY_SSH_PORT}" "${PRIMARY}:${REMOTE_ENV}" "${LOCAL_ENV}" 2>/dev/null || true
+fi
+
+if [[ "${DRY_RUN}" != "1" ]]; then
   python3 - <<PY
 import os, sqlite3, sys
 p = "${LOCAL_DB}"
@@ -206,18 +266,48 @@ ls -lt "${DIR}/db" 2>/dev/null | head -5 || true
 EOS
 }
 
+PUSH_OK=0
+PUSH_FAIL=0
 if [[ -n "${LAN_BACKUP_HOST}" ]]; then
-  push_one "${LAN}" "${LAN_BACKUP_DIR}" "${LAN_BACKUP_SSH_PORT}"
+  if push_one "${LAN}" "${LAN_BACKUP_DIR}" "${LAN_BACKUP_SSH_PORT}"; then
+    PUSH_OK=1
+  else
+    echo "警告: 局域网备份失败（${LAN}），继续远端" >&2
+    PUSH_FAIL=1
+  fi
 fi
 
 if [[ -n "${REMOTE_TARGET}" ]]; then
-  push_one "${REMOTE_TARGET}" "${REMOTE_BACKUP_DIR}" "${REMOTE_BACKUP_SSH_PORT}"
+  if push_one "${REMOTE_TARGET}" "${REMOTE_BACKUP_DIR}" "${REMOTE_BACKUP_SSH_PORT}"; then
+    PUSH_OK=1
+  else
+    echo "警告: 远端备份失败（${REMOTE_TARGET})" >&2
+    PUSH_FAIL=1
+  fi
 fi
 
+prune_local() {
+  find "${PRIMARY_DIR}/data/backups" -type f \
+    \( -name 'store_daily_offsite_*.db' -o -name 'env_offsite_*.env' \) \
+    -mtime +"${KEEP_DAYS}" -delete 2>/dev/null || true
+}
+
 if [[ "${DRY_RUN}" != "1" ]]; then
-  ssh_p "${PRIMARY_SSH_PORT}" "${PRIMARY}" \
-    "find $(printf %q "${PRIMARY_DIR}/data/backups") -type f \\( -name 'store_daily_offsite_*.db' -o -name 'env_offsite_*.env' \\) -mtime +${KEEP_DAYS} -delete 2>/dev/null || true"
+  if [[ "${ON_PRIMARY}" == "1" ]]; then
+    prune_local
+  else
+    ssh_p "${PRIMARY_SSH_PORT}" "${PRIMARY}" \
+      "find $(printf %q "${PRIMARY_DIR}/data/backups") -type f \\( -name 'store_daily_offsite_*.db' -o -name 'env_offsite_*.env' \\) -mtime +${KEEP_DAYS} -delete 2>/dev/null || true"
+  fi
 fi
 
 echo "== 备份完成 =="
 echo "恢复步骤：docs/backup-dr.md"
+# 至少推成功一处（通常是 pve）即成功；109 关机不让整次失败
+if [[ "${PUSH_OK}" != "1" && ( -n "${LAN_BACKUP_HOST}" || -n "${REMOTE_TARGET}" ) ]]; then
+  echo "错误: 机外备份全部失败" >&2
+  exit 1
+fi
+if [[ "${PUSH_FAIL}" == "1" ]]; then
+  echo "（部分目标失败，见上方警告）"
+fi
