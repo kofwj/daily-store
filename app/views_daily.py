@@ -287,33 +287,49 @@ def register_daily(app) -> None:
     @app.route("/deal/records")
     @login_required
     def deal_records():
-        """成交播报记录页：按门店 + 近 N 天，分页。"""
+        """成交播报记录页。管理员默认定看今天全店；店员仍看本店近几天。"""
         with db.get_db() as conn:
-            store, stores = pick_store(conn, request.args.get("store_id"))
+            is_admin = g.user["role"] == "admin"
+            raw_sid = (request.args.get("store_id") or "").strip()
+            all_stores = is_admin and raw_sid in ("", "all")
+            store, stores = pick_store(conn, None if all_stores else raw_sid)
             if store is None:
                 return render_template("empty.html")
             today_d = db.today_local()
+            default_days = "1" if all_stores else "7"
             try:
-                days_int = max(1, min(int(request.args.get("days", "7")), 90))
+                days_int = max(1, min(int(request.args.get("days", default_days)), 90))
             except ValueError:
-                days_int = 7
+                days_int = 1 if all_stores else 7
             start = today_d - timedelta(days=days_int - 1)
-            total = db.count_deal_posts(conn, store["id"], start, today_d)
+            sid = None if all_stores else store["id"]
+            total = db.count_deal_posts(conn, sid, start, today_d)
             page, pages = pagination(request.args.get("page"), total)
             rows = db.list_deal_posts(
-                conn, store["id"], start, today_d, limit=50, offset=(page - 1) * 50
+                conn, sid, start, today_d, limit=50, offset=(page - 1) * 50
             )
             month_start = today_d.replace(day=1)
             store_ids = [s["id"] for s in stores]
             today_counts = db.deal_counts(conn, store_ids, today_d, today_d)
             month_counts = db.deal_counts(conn, store_ids, month_start, today_d)
-            mine_today = today_counts.get(store["id"], {"total": 0, "closed": 0})
-            mine_month = month_counts.get(store["id"], {"total": 0, "closed": 0})
+            if all_stores:
+                mine_today = {
+                    "total": sum(v["total"] for v in today_counts.values()),
+                    "closed": sum(v["closed"] for v in today_counts.values()),
+                }
+                mine_month = {
+                    "total": sum(v["total"] for v in month_counts.values()),
+                    "closed": sum(v["closed"] for v in month_counts.values()),
+                }
+            else:
+                mine_today = today_counts.get(store["id"], {"total": 0, "closed": 0})
+                mine_month = month_counts.get(store["id"], {"total": 0, "closed": 0})
             return render_template(
                 "deal_records.html",
                 store=store,
                 stores=stores,
-                is_admin=g.user["role"] == "admin",
+                all_stores=all_stores,
+                is_admin=is_admin,
                 rows=rows,
                 days=days_int,
                 page=page,

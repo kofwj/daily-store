@@ -230,8 +230,16 @@ def record_deal_post(
     return new_id
 
 def count_deal_posts(
-    conn: sqlite3.Connection, store_id: int, start: date, end: date
+    conn: sqlite3.Connection, store_id: Optional[int], start: date, end: date
 ) -> int:
+    if store_id is None:
+        return int(
+            conn.execute(
+                "SELECT COUNT(*) FROM deal_posts WHERE biz_date>=? AND biz_date<=?",
+                (start.isoformat(), end.isoformat()),
+            ).fetchone()[0]
+            or 0
+        )
     return int(
         conn.execute(
             "SELECT COUNT(*) FROM deal_posts WHERE store_id=? AND biz_date>=? AND biz_date<=?",
@@ -242,17 +250,35 @@ def count_deal_posts(
 
 def list_deal_posts(
     conn: sqlite3.Connection,
-    store_id: int,
+    store_id: Optional[int],
     start: date,
     end: date,
     limit: int = 50,
     offset: int = 0,
 ) -> List[sqlite3.Row]:
+    if store_id is None:
+        return list(
+            conn.execute(
+                """
+                SELECT d.*, st.name AS store_name, st.short_name AS store_short,
+                       u.display_name AS submitter_name
+                FROM deal_posts d
+                JOIN stores st ON st.id = d.store_id
+                LEFT JOIN users u ON u.id = d.user_id
+                WHERE d.biz_date>=? AND d.biz_date<=?
+                ORDER BY d.id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (start.isoformat(), end.isoformat(), limit, offset),
+            )
+        )
     return list(
         conn.execute(
             """
-            SELECT d.*, u.display_name AS submitter_name
+            SELECT d.*, st.name AS store_name, st.short_name AS store_short,
+                   u.display_name AS submitter_name
             FROM deal_posts d
+            JOIN stores st ON st.id = d.store_id
             LEFT JOIN users u ON u.id = d.user_id
             WHERE d.store_id=? AND d.biz_date>=? AND d.biz_date<=?
             ORDER BY d.id DESC

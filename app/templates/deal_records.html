@@ -1,19 +1,20 @@
 {% extends "base.html" %}
 {% from "_pager.html" import pager %}
-{% block title %}成交记录 · {{ store.short_name or store.name }}{% endblock %}
+{% block title %}{% if all_stores %}成交记录 · 全部{% else %}成交记录 · {{ store.short_name or store.name }}{% endif %}{% endblock %}
 {% block body %}
 <div class="page-head">
   <div class="page-title">
-    <h1>成交记录</h1>
-    <p class="muted">当天的可以点进去改、再复制；往日的只能查看。号码默认打码。</p>
+    <h1>{% if all_stores %}今天全店成交{% else %}成交记录{% endif %}</h1>
+    <p class="muted">{% if all_stores %}一页看所有店今天的成交。要查某家店或往日，用右边筛选。{% else %}当天的可以点进去改、再复制；往日的只能查看。号码默认打码。{% endif %}</p>
   </div>
   <form method="get" class="page-filters">
     {% if is_admin and stores|length > 1 %}
     <label class="filter">
       <span>门店</span>
       <select name="store_id" onchange="this.form.submit()">
+        <option value="all" {% if all_stores %}selected{% endif %}>全部</option>
         {% for s in stores %}
-        <option value="{{ s.id }}" {% if s.id == store.id %}selected{% endif %}>{{ s.short_name or s.name }}</option>
+        <option value="{{ s.id }}" {% if not all_stores and s.id == store.id %}selected{% endif %}>{{ s.short_name or s.name }}</option>
         {% endfor %}
       </select>
     </label>
@@ -21,6 +22,7 @@
     <label class="filter">
       <span>近 N 天</span>
       <select name="days" onchange="this.form.submit()">
+        <option value="1" {% if days == 1 %}selected{% endif %}>今天</option>
         {% for d in [7, 14, 30, 90] %}
         <option value="{{ d }}" {% if d == days %}selected{% endif %}>{{ d }} 天</option>
         {% endfor %}
@@ -29,15 +31,15 @@
   </form>
 </div>
 <div class="kpi-row deal-records-kpis">
-  <div class="kpi"><div class="muted">今日</div><div class="kpi-num">{{ mine_today.total }}</div><div class="muted">成交 {{ mine_today.closed }}</div></div>
-  <div class="kpi"><div class="muted">本月</div><div class="kpi-num">{{ mine_month.total }}</div><div class="muted">成交 {{ mine_month.closed }}</div></div>
+  <div class="kpi"><div class="muted">今日{% if all_stores %}全店{% endif %}</div><div class="kpi-num">{{ mine_today.total }}</div><div class="muted">成交 {{ mine_today.closed }}</div></div>
+  <div class="kpi"><div class="muted">本月{% if all_stores %}全店{% endif %}</div><div class="kpi-num">{{ mine_month.total }}</div><div class="muted">成交 {{ mine_month.closed }}</div></div>
 </div>
 
 <div class="card deal-records">
   {% if is_admin %}
   <div class="records-toolbar">
-    <span class="muted">近 {{ days }} 天 · 上面列表按当前门店显示，导出含全部门店</span>
-    <a class="btn ghost" href="{{ url_for('deal_export', days=days) }}">导出全部门店 Excel</a>
+    <span class="muted">{% if all_stores %}{{ start.isoformat() }} ~ {{ end.isoformat() }} · 全部门店{% else %}近 {{ days }} 天 · 当前门店{% endif %}</span>
+    <a class="btn ghost" href="{{ url_for('deal_export', days=days) }}">导出 Excel</a>
   </div>
   {% endif %}
   {% if rows %}
@@ -58,10 +60,12 @@
       </thead>
       <tbody>
         {% for r in rows %}
+        {% set row_store_id = r.store_id %}
+        {% set row_store_name = r.store_short or r.store_name or store.short_name or store.name %}
         <tr>
           <td class="left">{{ (r.created_at or '')[:16] }}</td>
-          {% if is_admin %}<td class="left">{{ store.short_name or store.name }}</td>{% endif %}
-          <td class="left"><a href="{{ url_for('deal_page', store_id=store.id, deal_id=r.id) }}">{{ r.model or '—' }}</a></td>
+          {% if is_admin %}<td class="left">{{ row_store_name }}</td>{% endif %}
+          <td class="left"><a href="{{ url_for('deal_page', store_id=row_store_id, deal_id=r.id) }}">{{ r.model or '—' }}</a></td>
           <td class="left">{{ r.phone[:-4] + '****' if r.phone|length >= 4 else (r.phone or '—') }}</td>
           <td>{{ r.spend or '—' }}</td>
           <td class="left">{{ r.recommend or '—' }}</td>
@@ -71,7 +75,7 @@
           <td class="right">
             {% if r.biz_date == today %}
             <form method="post" action="{{ url_for('deal_delete') }}" onsubmit="return confirm('删除这条成交播报？此操作不可恢复。')">
-              <input type="hidden" name="store_id" value="{{ store.id }}">
+              <input type="hidden" name="store_id" value="{{ row_store_id }}">
               <input type="hidden" name="deal_id" value="{{ r.id }}">
               <button class="ghost del-day" type="submit" title="删除">删</button>
             </form>
@@ -85,9 +89,9 @@
       </tbody>
     </table>
   </div>
-  {{ pager(page, pages, total, 'deal_records', label=start.isoformat() + ' ~ ' + end.isoformat(), store_id=store.id, days=days) }}
+  {{ pager(page, pages, total, 'deal_records', label=start.isoformat() + ' ~ ' + end.isoformat(), store_id=('all' if all_stores else store.id), days=days) }}
   {% else %}
-  <p class="muted">近 {{ days }} 天还没有成交播报。</p>
+  <p class="muted">{% if days == 1 %}今天还没有成交播报。{% else %}近 {{ days }} 天还没有成交播报。{% endif %}</p>
   {% endif %}
 </div>
 {% endblock %}

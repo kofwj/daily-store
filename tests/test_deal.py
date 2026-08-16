@@ -119,6 +119,34 @@ def test_deal_post_counts_by_store(client):
     assert "需要管理员权限" in blocked.get_data(as_text=True)
 
 
+def test_admin_records_page_shows_all_stores_today(client):
+    client.post("/login", data={"username": "admin", "pin": "1234"})
+    with db.get_db() as conn:
+        sid_a = conn.execute("SELECT id, short_name FROM stores WHERE short_name='通州金沙'").fetchone()
+        sid_b = conn.execute("SELECT id, short_name FROM stores WHERE short_name='海门金花'").fetchone()
+        uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        db.record_deal_post(
+            conn, store_id=sid_a["id"], user_id=uid, model="S60全店", phone="13811110001", closed=True
+        )
+        db.record_deal_post(
+            conn, store_id=sid_b["id"], user_id=uid, model="X300全店", phone="13822220002", closed=False
+        )
+    page = client.get("/deal/records").get_data(as_text=True)
+    assert "今天全店成交" in page
+    assert "S60全店" in page
+    assert "X300全店" in page
+    assert "通州金沙" in page
+    assert "海门金花" in page
+    one = client.get(f"/deal/records?store_id={sid_a['id']}").get_data(as_text=True)
+    assert "S60全店" in one
+    assert "X300全店" not in one
+    client.get("/logout")
+    client.post("/login", data={"username": "jinsha", "pin": "123456"})
+    filler = client.get("/deal/records").get_data(as_text=True)
+    assert "今天全店成交" not in filler
+    assert "全部" not in filler
+
+
 def test_admin_exports_all_stores_deal_csv(client):
     client.post("/login", data={"username": "admin", "pin": "1234"})
     with db.get_db() as conn:
