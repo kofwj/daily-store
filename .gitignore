@@ -9,3 +9,4 @@ data/*.db-journal
 data/backups/
 .DS_Store
 .env
+scripts/backup.env

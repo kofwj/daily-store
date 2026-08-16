@@ -25,6 +25,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# 可选本地配置：scripts/backup.env（勿提交密钥类内容；仅 host/user）
+if [[ -f "${ROOT}/scripts/backup.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "${ROOT}/scripts/backup.env"
+  set +a
+fi
+
 DRY_RUN=0
 for arg in "$@"; do
   case "$arg" in
@@ -51,10 +59,12 @@ LAN_BACKUP_USER="${LAN_BACKUP_USER:-jian}"
 LAN_BACKUP_DIR="${LAN_BACKUP_DIR:-store-daily-backups}"
 LAN_BACKUP_SSH_PORT="${LAN_BACKUP_SSH_PORT:-8022}"
 
-# 例：ubuntu@1.2.3.4 ；空则跳过远端
-REMOTE_BACKUP="${REMOTE_BACKUP:-}"
+# 公网灾备（可用 user@host，或只写 host + REMOTE_BACKUP_USER）
+# 例：pve.anemy.org 端口 8022
+REMOTE_BACKUP="${REMOTE_BACKUP:-pve.anemy.org}"
+REMOTE_BACKUP_USER="${REMOTE_BACKUP_USER:-}"
 REMOTE_BACKUP_DIR="${REMOTE_BACKUP_DIR:-store-daily-backups}"
-REMOTE_BACKUP_SSH_PORT="${REMOTE_BACKUP_SSH_PORT:-22}"
+REMOTE_BACKUP_SSH_PORT="${REMOTE_BACKUP_SSH_PORT:-8022}"
 
 KEEP_DAYS="${KEEP_DAYS:-30}"
 STAMP="$(TZ=Asia/Shanghai date +%Y%m%d_%H%M%S)"
@@ -65,6 +75,17 @@ trap cleanup EXIT
 
 PRIMARY="${PRIMARY_USER}@${PRIMARY_HOST}"
 LAN="${LAN_BACKUP_USER}@${LAN_BACKUP_HOST}"
+# 规范化远端：允许 REMOTE_BACKUP=user@host 或 host + REMOTE_BACKUP_USER
+REMOTE_TARGET=""
+if [[ -n "${REMOTE_BACKUP}" ]]; then
+  if [[ "${REMOTE_BACKUP}" == *@* ]]; then
+    REMOTE_TARGET="${REMOTE_BACKUP}"
+  elif [[ -n "${REMOTE_BACKUP_USER}" ]]; then
+    REMOTE_TARGET="${REMOTE_BACKUP_USER}@${REMOTE_BACKUP}"
+  else
+    REMOTE_TARGET="${USER}@${REMOTE_BACKUP}"
+  fi
+fi
 REMOTE_SNAP_NAME="store_daily_${TAG}.db"
 REMOTE_ENV_NAME="env_${TAG}.env"
 REMOTE_SNAP="${PRIMARY_DIR}/data/backups/${REMOTE_SNAP_NAME}"
@@ -86,8 +107,8 @@ rsync_p() {
 echo "== 备份开始 ${STAMP} =="
 echo "生产: ${PRIMARY}:${PRIMARY_DIR} (ssh ${PRIMARY_SSH_PORT})"
 echo "局域网: ${LAN}:${LAN_BACKUP_DIR} (ssh ${LAN_BACKUP_SSH_PORT})"
-if [[ -n "${REMOTE_BACKUP}" ]]; then
-  echo "远端: ${REMOTE_BACKUP}:${REMOTE_BACKUP_DIR} (ssh ${REMOTE_BACKUP_SSH_PORT})"
+if [[ -n "${REMOTE_TARGET}" ]]; then
+  echo "远端: ${REMOTE_TARGET}:${REMOTE_BACKUP_DIR} (ssh ${REMOTE_BACKUP_SSH_PORT})"
 else
   echo "远端: (未设置 REMOTE_BACKUP，跳过)"
 fi
@@ -189,8 +210,8 @@ if [[ -n "${LAN_BACKUP_HOST}" ]]; then
   push_one "${LAN}" "${LAN_BACKUP_DIR}" "${LAN_BACKUP_SSH_PORT}"
 fi
 
-if [[ -n "${REMOTE_BACKUP}" ]]; then
-  push_one "${REMOTE_BACKUP}" "${REMOTE_BACKUP_DIR}" "${REMOTE_BACKUP_SSH_PORT}"
+if [[ -n "${REMOTE_TARGET}" ]]; then
+  push_one "${REMOTE_TARGET}" "${REMOTE_BACKUP_DIR}" "${REMOTE_BACKUP_SSH_PORT}"
 fi
 
 if [[ "${DRY_RUN}" != "1" ]]; then
