@@ -973,7 +973,12 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
   overflow: hidden;
   background: #fff; border: 1px solid var(--line); border-radius: 12px;
   box-shadow: 0 12px 32px rgba(16, 24, 40, 0.16);
-  display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
+  /* 不要写死 display:grid，否则会盖掉 [hidden] 的 display:none，搜索框一直露在外面 */
+}
+.store-pick-panel[hidden] { display: none !important; }
+.store-pick-panel:not([hidden]) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 .store-pick-search { padding: 8px; border-bottom: 1px solid var(--line); background: #fff; }
 .store-pick-q {
