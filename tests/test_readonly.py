@@ -73,7 +73,7 @@ def test_readonly_cannot_write(client):
         data={"store_id": str(sid), "model": "X200", "closed": "1"},
         follow_redirects=True,
     ).get_data(as_text=True)
-    assert "只读账号不能填成交播报" in resp
+    assert "只读账号不能填触客播报" in resp
     # 不能填垫资
     resp = client.post(
         "/advance",

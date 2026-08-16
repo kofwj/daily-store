@@ -152,6 +152,21 @@ def parse_date(raw: Optional[str], fallback: Optional[date] = None) -> date:
     return fallback or db.today_local()
 
 
+def close_rate(closed: int, total: int) -> str:
+    """触客成功率：已成交 / 全部触客。没填过显示 —。"""
+    closed_n = int(closed or 0)
+    total_n = int(total or 0)
+    if total_n <= 0:
+        return "—"
+    return f"{round(closed_n * 100 / total_n)}%"
+
+
+def with_close_rate(counts: Dict[str, int]) -> Dict[str, Any]:
+    out = dict(counts or {"total": 0, "closed": 0})
+    out["rate"] = close_rate(out.get("closed", 0), out.get("total", 0))
+    return out
+
+
 def accessible_stores(conn) -> List[Any]:
     return db.list_user_stores(conn, g.user)
 

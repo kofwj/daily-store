@@ -288,8 +288,8 @@ def test_board_shows_deals_and_exports_xlsx(tmp_db):
             spend="99",
         )
     page = c.get("/board").get_data(as_text=True)
-    assert "成交播报" in page
-    assert "已成交 / 全部" in page
+    assert "触客" in page
+    assert "成交/触客" in page
     assert "海门金花" in page
     assert "/report?" in page
     r = c.get("/board.xlsx?view=today")
@@ -299,7 +299,7 @@ def test_board_shows_deals_and_exports_xlsx(tmp_db):
     wb = openpyxl.load_workbook(BytesIO(r.get_data()))
     header = [cell.value for cell in wb.active[1]]
     assert header[:3] == ["排名", "门店", "地市"]
-    assert "成交" in header and "已成交" in header
+    assert "触客" in header and "成功率" in header
 
 
 def test_bulletin_skips_stores_without_mobile_code(app_client):

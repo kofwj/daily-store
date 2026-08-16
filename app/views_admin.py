@@ -14,6 +14,7 @@ from .helpers import (
     accessible_stores,
     admin_required,
     build_diff,
+    close_rate,
     deal_diff,
     incentive_rules,
     pagination,
@@ -24,6 +25,7 @@ from .helpers import (
     store_forecast,
     store_label,
     values_for_broadcast,
+    with_close_rate,
     xlsx_bytes,
     xlsx_response,
 )
@@ -105,8 +107,8 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
             )
         rep = db.get_report(conn, sid, biz_date)
         reported_this_month = sid in reported_ids
-        deal_today = deal_today_map.get(sid, {"total": 0, "closed": 0})
-        deal_month = deal_month_map.get(sid, {"total": 0, "closed": 0})
+        deal_today = with_close_rate(deal_today_map.get(sid, {"total": 0, "closed": 0}))
+        deal_month = with_close_rate(deal_month_map.get(sid, {"total": 0, "closed": 0}))
         rows.append(
             {
                 "store": store,
@@ -174,6 +176,8 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
         "month_total": sum(int(r["deal_month"]["total"]) for r in rows),
         "month_closed": sum(int(r["deal_month"]["closed"]) for r in rows),
     }
+    deal_grand["day_rate"] = close_rate(deal_grand["day_closed"], deal_grand["day_total"])
+    deal_grand["month_rate"] = close_rate(deal_grand["month_closed"], deal_grand["month_total"])
     return {
         "biz_date": biz_date,
         "view": view,
@@ -219,7 +223,7 @@ def register_admin(app) -> None:
             payload = _board_payload(conn, biz_date, view, city)
         header = ["排名", "门店", "地市"]
         header += [g["name"] for g in payload["grand"]]
-        header += ["成交", "已成交", "考核", "奖罚"]
+        header += ["触客", "成交", "成功率", "考核", "奖罚"]
         data_rows = []
         for r in payload["ranked"]:
             deal = r["deal_today"] if view == "today" else r["deal_month"]
@@ -231,6 +235,7 @@ def register_admin(app) -> None:
                     *[k["day"] if view == "today" else k["month"] for k in r["kpis"]],
                     deal["total"],
                     deal["closed"],
+                    deal["rate"],
                     r["forecast"]["label"],
                     r["forecast"]["money_text"],
                 ]
@@ -456,9 +461,9 @@ def register_admin(app) -> None:
                 before, after = {}, {}
             if r["kind"] == "deal":
                 if r.get("action") == "create":
-                    prefix = "新增成交："
+                    prefix = "新增触客："
                 elif r.get("action") == "delete":
-                    prefix = "删除成交："
+                    prefix = "删除触客："
                 else:
                     prefix = "覆盖："
                 r["diff"] = prefix + deal_diff(before, after)

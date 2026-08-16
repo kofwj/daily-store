@@ -440,7 +440,7 @@ def summary(
         head,
         "【今日】",
         f"销量：AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin}",
-        f"成交：{day_count} 笔（成交 {day_closed}）",
+        f"触客：{day_count} 笔（成交 {day_closed}）",
     ]
     if praise:
         lines.append("表扬")
@@ -451,7 +451,7 @@ def summary(
         [
             "【本月】",
             f"累计：AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin}",
-            f"成交：{month_count} 笔（成交 {month_closed}）",
+            f"触客：{month_count} 笔（成交 {month_closed}）",
             f"综合标杆：{top_name}（AI {top['month_ai']}，笔算 {top['month_bisuan']}，直降 {top.get('month_coin') or 0}）",
         ]
     )

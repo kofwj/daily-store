@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_store_picker.html" import store_picker %}
-{% block title %}成交播报 · {{ store.short_name or store.name }}{% endblock %}
+{% block title %}触客播报 · {{ store.short_name or store.name }}{% endblock %}
 {% block body_class %}deal-page-body{% endblock %}
 {% block body %}
 <div class="deal-page">
@@ -22,8 +22,8 @@
   </div>
 
   <div class="kpi-row deal-head-kpis">
-    <div class="kpi"><div class="muted">今日</div><div class="kpi-num">{{ mine_today.total }}</div><div class="muted">成交 {{ mine_today.closed }}</div></div>
-    <div class="kpi"><div class="muted">本月</div><div class="kpi-num">{{ mine_month.total }}</div><div class="muted">成交 {{ mine_month.closed }}</div></div>
+    <div class="kpi"><div class="muted">今日触客</div><div class="kpi-num">{{ mine_today.total }}</div><div class="muted">成交 {{ mine_today.closed }} · {{ mine_today.rate }}</div></div>
+    <div class="kpi"><div class="muted">本月触客</div><div class="kpi-num">{{ mine_month.total }}</div><div class="muted">成交 {{ mine_month.closed }} · {{ mine_month.rate }}</div></div>
   </div>
 
   <div class="deal-main">
@@ -60,7 +60,7 @@
       </div>
       <p class="span-2">
         <label>情况描述</label>
-        <textarea name="note" rows="3" placeholder="过程 + 为什么成交/没成">{{ form.note }}</textarea>
+        <textarea name="note" rows="3" placeholder="过程 + 为什么成交/没成（这一单是触客）">{{ form.note }}</textarea>
       </p>
     </div>
     <div class="toolbar desktop-save">
@@ -72,7 +72,7 @@
   </form>
   {% else %}
   <div class="card deal-form deal-readonly">
-    <p class="muted">往日成交只能查看，不能改。</p>
+    <p class="muted">往日触客只能查看，不能改。</p>
     <div class="deal-grid">
       <p><label>机型</label><span>{{ form.model or '—' }}</span></p>
       <p><label>号码</label><span>{{ form.phone or '—' }}</span></p>
@@ -101,13 +101,13 @@
     {% elif editable %}
     <p class="muted">先填左边的单，点「生成播报」。</p>
     {% else %}
-    <p class="muted">这条往日成交没有保存播报全文。</p>
+    <p class="muted">这条往日触客没有保存播报全文。</p>
     {% endif %}
   </div>
   </div>
 
   <div class="deal-records-link">
-    <a class="btn ghost" href="{{ url_for('deal_records', store_id=store.id) }}">查看成交记录 →</a>
+    <a class="btn ghost" href="{{ url_for('deal_records', store_id=store.id) }}">查看触客记录 →</a>
   </div>
 </div>
 <script>

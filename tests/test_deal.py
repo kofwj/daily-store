@@ -4,7 +4,13 @@ import openpyxl
 
 from app import db
 from app.deal import form_values, render_deal
-from app.helpers import deal_diff
+from app.helpers import close_rate, deal_diff, with_close_rate
+
+
+def test_close_rate_text():
+    assert close_rate(0, 0) == "—"
+    assert close_rate(1, 2) == "50%"
+    assert with_close_rate({"total": 4, "closed": 1})["rate"] == "25%"
 
 
 def test_closed_deal_uses_short_layout():
@@ -87,9 +93,9 @@ def test_deal_post_counts_by_store(client):
         assert rows[0]["phone"] == "15514408478"
         assert rows[0]["note"] == "改过"
         assert "通州金沙" in rows[0]["text"]
-    assert "查看成交记录" in page  # 填报页不再内嵌记录表，只留跳转入口
+    assert "查看触客记录" in page  # 填报页不再内嵌记录表，只留跳转入口
     rec = client.get(f"/deal/records?store_id={sid}").get_data(as_text=True)
-    assert "成交记录" in rec
+    assert "触客记录" in rec
     assert "S60" in rec
     assert "1551440****" in rec
     assert "15514408478" not in rec
@@ -104,7 +110,7 @@ def test_deal_post_counts_by_store(client):
         data={"store_id": str(sid), "deal_id": str(deal_id)},
         follow_redirects=True,
     ).get_data(as_text=True)
-    assert "已删除该成交播报" in gone
+    assert "已删除该触客记录" in gone
     with db.get_db() as conn:
         left = conn.execute("SELECT COUNT(*) AS n FROM deal_posts WHERE store_id=?", (sid,)).fetchone()["n"]
         assert left == 1
@@ -132,7 +138,7 @@ def test_admin_records_page_shows_all_stores_today(client):
             conn, store_id=sid_b["id"], user_id=uid, model="X300全店", phone="13822220002", closed=False
         )
     page = client.get("/deal/records").get_data(as_text=True)
-    assert "今天全店成交" in page
+    assert "今天全店触客" in page
     assert "S60全店" in page
     assert "X300全店" in page
     assert "通州金沙" in page
@@ -143,7 +149,7 @@ def test_admin_records_page_shows_all_stores_today(client):
     client.get("/logout")
     client.post("/login", data={"username": "jinsha", "pin": "123456"})
     filler = client.get("/deal/records").get_data(as_text=True)
-    assert "今天全店成交" not in filler
+    assert "今天全店触客" not in filler
     assert "全部" not in filler
 
 
@@ -199,7 +205,7 @@ def test_admin_exports_all_stores_deal_csv(client):
     assert r.headers.get("Content-Disposition", "").endswith(".xlsx")
     wb = openpyxl.load_workbook(io.BytesIO(r.get_data()))
     ws = wb.active
-    assert ws.title == "成交播报"
+    assert ws.title == "触客记录"
     header = [c.value for c in ws[1]]
     assert header == ["日期", "门店", "机型", "号码", "消费", "推荐套餐", "开口/导购", "结果", "备注"]
     cells = list(ws.iter_rows(min_row=2, values_only=True))
@@ -305,11 +311,11 @@ def test_edits_page_filters_by_kind(tmp_db):
         )
     deal_html = c.get("/edits?kind=deal").get_data(as_text=True)
     assert "成交" in deal_html
-    assert "新增成交" in deal_html
+    assert "新增触客" in deal_html
     assert "S60" in deal_html
     # 按门店过滤成交
     scoped = c.get(f"/edits?kind=deal&store_id={sid}").get_data(as_text=True)
-    assert "新增成交" in scoped
+    assert "新增触客" in scoped
     # 全部默认同时含两种类型（日报造一条）
     page = c.get("/edits").get_data(as_text=True)
     assert "日报" in page and "成交" in page
@@ -346,7 +352,7 @@ def test_past_deal_is_readonly(client):
             biz_date=today,
         )
     past_page = client.get(f"/deal?store_id={sid}&deal_id={past_id}").get_data(as_text=True)
-    assert "往日成交只能查看" in past_page
+    assert "往日触客只能查看" in past_page
     assert "昨日机" in past_page
     assert 'name="model"' not in past_page
     assert "生成播报" not in past_page
@@ -364,7 +370,7 @@ def test_past_deal_is_readonly(client):
         },
         follow_redirects=True,
     ).get_data(as_text=True)
-    assert "往日成交只能查看，不能改" in blocked
+    assert "往日触客只能查看，不能改" in blocked
     rec = client.get(f"/deal/records?store_id={sid}&days=7").get_data(as_text=True)
     assert "只读" in rec
     gone = client.post(
@@ -372,7 +378,7 @@ def test_past_deal_is_readonly(client):
         data={"store_id": str(sid), "deal_id": str(past_id)},
         follow_redirects=True,
     ).get_data(as_text=True)
-    assert "往日成交只能查看，不能删" in gone
+    assert "往日触客只能查看，不能删" in gone
     with db.get_db() as conn:
         still = conn.execute("SELECT model, note FROM deal_posts WHERE id=?", (past_id,)).fetchone()
         assert still["model"] == "昨日机"

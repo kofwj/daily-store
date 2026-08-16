@@ -18,6 +18,7 @@ from .helpers import (
     request_scope,
     store_forecast,
     values_for_broadcast,
+    with_close_rate,
     xlsx_bytes,
     xlsx_response,
 )
@@ -205,7 +206,7 @@ def register_daily(app) -> None:
                     values["opener"] = (g.user["display_name"] or "").strip()
             if request.method == "POST":
                 if g.user["role"] == "readonly":
-                    flash("只读账号不能填成交播报", "error")
+                    flash("只读账号不能填触客播报", "error")
                     return redirect(url_for("deal_records", store_id=store["id"]))
                 deal_id = request.form.get("deal_id") or values.get("deal_id") or ""
                 try:
@@ -216,7 +217,7 @@ def register_daily(app) -> None:
                     db.get_deal_post(conn, deal_id_int, store["id"]) if deal_id_int else None
                 )
                 if existing is not None and not deal.is_today_deal(existing, today_d):
-                    flash("往日成交只能查看，不能改。", "error")
+                    flash("往日触客只能查看，不能改。", "error")
                     return redirect(
                         url_for("deal_page", store_id=store["id"], deal_id=deal_id_int)
                     )
@@ -247,8 +248,8 @@ def register_daily(app) -> None:
             store_ids = [s["id"] for s in stores]
             today_counts = db.deal_counts(conn, store_ids, today_d, today_d)
             month_counts = db.deal_counts(conn, store_ids, month_start, today_d)
-            mine_today = today_counts.get(store["id"], {"total": 0, "closed": 0})
-            mine_month = month_counts.get(store["id"], {"total": 0, "closed": 0})
+            mine_today = with_close_rate(today_counts.get(store["id"], {"total": 0, "closed": 0}))
+            mine_month = with_close_rate(month_counts.get(store["id"], {"total": 0, "closed": 0}))
             return render_template(
                 "deal.html",
                 store=store,
@@ -278,9 +279,9 @@ def register_daily(app) -> None:
             if row is None:
                 flash("这条记录不存在，或已删除。", "error")
             elif not deal.is_today_deal(row, db.today_local()):
-                flash("往日成交只能查看，不能删。", "error")
+                flash("往日触客只能查看，不能删。", "error")
             elif db.delete_deal_post(conn, did, sid, user_id=g.user["id"]):
-                flash("已删除该成交播报。", "ok")
+                flash("已删除该触客记录。", "ok")
             else:
                 flash("这条记录不存在，或已删除。", "error")
         return redirect(url_for("deal_records", store_id=sid))
@@ -316,17 +317,17 @@ def register_daily(app) -> None:
             today_counts = db.deal_counts(conn, kpi_ids, today_d, today_d)
             month_counts = db.deal_counts(conn, kpi_ids, month_start, today_d)
             if all_stores:
-                mine_today = {
+                mine_today = with_close_rate({
                     "total": sum(v["total"] for v in today_counts.values()),
                     "closed": sum(v["closed"] for v in today_counts.values()),
-                }
-                mine_month = {
+                })
+                mine_month = with_close_rate({
                     "total": sum(v["total"] for v in month_counts.values()),
                     "closed": sum(v["closed"] for v in month_counts.values()),
-                }
+                })
             else:
-                mine_today = today_counts.get(store["id"], {"total": 0, "closed": 0})
-                mine_month = month_counts.get(store["id"], {"total": 0, "closed": 0})
+                mine_today = with_close_rate(today_counts.get(store["id"], {"total": 0, "closed": 0}))
+                mine_month = with_close_rate(month_counts.get(store["id"], {"total": 0, "closed": 0}))
             return render_template(
                 "deal_records.html",
                 store=store,
@@ -375,7 +376,7 @@ def register_daily(app) -> None:
         ]
         filename = f"deal_export_{start.isoformat()}_{today_d.isoformat()}.xlsx"
         return xlsx_response(
-            xlsx_bytes(header, data_rows, sheet="成交播报"),
+            xlsx_bytes(header, data_rows, sheet="触客记录"),
             filename,
         )
 
