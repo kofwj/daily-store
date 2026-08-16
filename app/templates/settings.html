@@ -269,27 +269,31 @@
     </div>
     <div class="stores-desk">
       <aside class="store-list card" id="storeList">
-        <div class="store-list-head">
-          <h2>目录</h2>
-          <span class="muted">{{ stores|length }} 家</span>
+        <div class="store-list-sticky">
+          <div class="store-list-head">
+            <h2>目录</h2>
+            <span class="muted" id="storeCount">{{ stores|length }} 家</span>
+          </div>
+          <label class="store-search">
+            <span class="sr-only">搜索门店</span>
+            <input type="search" id="storeFilter" placeholder="筛简称、店长、地市" autocomplete="off" enterkeyhint="search">
+          </label>
+          <a class="store-list-item add {{ 'active' if not current_store else '' }}" href="{{ url_for('settings', tab='stores', store_id='new') }}">添加门店</a>
         </div>
-        <label class="store-search">
-          <span class="sr-only">搜索门店</span>
-          <input type="search" id="storeFilter" placeholder="搜简称、店长、地市" autocomplete="off">
-        </label>
-        <a class="store-list-item add {{ 'active' if not current_store else '' }}" href="{{ url_for('settings', tab='stores', store_id='new') }}">添加门店</a>
-        {% for group in store_groups %}
-        <div class="store-group" data-city="{{ group.city }}">
-          <div class="store-list-city">{{ group.city }}</div>
-          {% for s in group.stores %}
-          <a class="store-list-item {{ 'active' if current_store and s.id == current_store.id else '' }}" href="{{ url_for('settings', tab='stores', store_id=s.id) }}" data-text="{{ store_label(s) }} {{ s.name }} {{ s.store_manager }} {{ s.area_manager }} {{ s.city }}">
-            <span class="store-list-name">{{ store_label(s) }}</span>
-            <span class="muted store-list-people">{{ s.store_manager or '未设店长' }}{% if s.store_grade %} · {{ s.store_grade }}类{% endif %}</span>
-          </a>
+        <div class="store-list-body">
+          {% for group in store_groups %}
+          <div class="store-group" data-city="{{ group.city }}">
+            <div class="store-list-city">{{ group.city }}</div>
+            {% for s in group.stores %}
+            <a class="store-list-item {{ 'active' if current_store and s.id == current_store.id else '' }}" href="{{ url_for('settings', tab='stores', store_id=s.id) }}" data-text="{{ store_label(s) }} {{ s.name }} {{ s.store_manager }} {{ s.area_manager }} {{ s.city }} {{ s.mobile_code }} {{ s.region_group }}">
+              <span class="store-list-name">{{ store_label(s) }}</span>
+              <span class="muted store-list-people">{{ s.store_manager or '未设店长' }}{% if s.store_grade %} · {{ s.store_grade }}类{% endif %}</span>
+            </a>
+            {% endfor %}
+          </div>
           {% endfor %}
+          <p class="muted store-empty" id="storeEmpty" hidden>没有匹配的门店</p>
         </div>
-        {% endfor %}
-        <p class="muted store-empty" id="storeEmpty" hidden>没有匹配的门店</p>
       </aside>
 
       <div class="store-editor card">
@@ -407,18 +411,42 @@
     (function () {
       var input = document.getElementById('storeFilter');
       var empty = document.getElementById('storeEmpty');
-      if (input) input.addEventListener('input', function () {
-        var q = (input.value || '').trim().toLowerCase();
-        document.querySelectorAll('.store-group').forEach(function (group) {
+      var count = document.getElementById('storeCount');
+      var list = document.getElementById('storeList');
+      if (!input || !list) return;
+      function norm(s) {
+        return String(s || '').toLowerCase().replace(/\s+/g, '').replace(/[市县区]/g, '');
+      }
+      function match(text, raw) {
+        var q = String(raw || '').trim().toLowerCase();
+        if (!q) return true;
+        var h = norm(text);
+        if (h.indexOf(norm(q)) !== -1) return true;
+        return q.split(/\s+/).filter(Boolean).every(function (p) {
+          return h.indexOf(norm(p)) !== -1;
+        });
+      }
+      function filter() {
+        var q = input.value || '';
+        var total = 0;
+        list.querySelectorAll('.store-group').forEach(function (group) {
           var shown = 0;
+          var city = group.getAttribute('data-city') || '';
           group.querySelectorAll('.store-list-item').forEach(function (item) {
-            var hit = !q || (item.getAttribute('data-text') || '').toLowerCase().indexOf(q) !== -1;
+            var text = (item.getAttribute('data-text') || '') + ' ' + city;
+            var hit = match(text, q);
             item.hidden = !hit;
             if (hit) shown += 1;
           });
           group.hidden = shown === 0;
+          total += shown;
         });
-        if (empty) empty.hidden = !!document.querySelector('.store-group:not([hidden])');
+        if (empty) empty.hidden = total !== 0;
+        if (count) count.textContent = total + ' 家';
+      }
+      input.addEventListener('input', filter);
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') e.preventDefault();
       });
     })();
     </script>
