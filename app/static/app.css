@@ -980,24 +980,47 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
   box-shadow: 0 16px 40px rgba(16, 24, 40, 0.18);
 }
 .sp-filter {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 10px;
+  display: flex; align-items: center; gap: 6px;
+  height: 36px; padding: 0 10px;
   border-bottom: 1px solid var(--line);
   background: #fff;
+  box-sizing: border-box;
 }
 .sp-search-icon {
   flex: 0 0 auto;
-  width: 18px; text-align: center;
-  color: var(--muted); font-size: 14px; line-height: 1;
+  width: 14px; text-align: center;
+  color: var(--muted); font-size: 12px; line-height: 1;
+  opacity: .75;
 }
+/* 盖掉全局 input 的大 padding / 边框 / 聚焦光晕 */
+.sp-panel .sp-q,
 .sp-q {
-  flex: 1; min-width: 0; height: 32px; margin: 0; padding: 0;
-  border: 0; border-radius: 0; background: transparent;
-  font: inherit; font-size: 14px; color: var(--ink);
+  flex: 1 1 auto;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 22px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  font: inherit;
+  font-size: 13px !important;
+  font-weight: 400 !important;
+  line-height: 22px !important;
+  color: var(--ink);
   box-shadow: none !important;
+  outline: none !important;
+  transition: none !important;
 }
-.sp-q:focus { outline: none; }
-.sp-q::placeholder { color: #9ca3af; }
+.sp-panel .sp-q:focus,
+.sp-q:focus {
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+.sp-q::placeholder { color: #9ca3af; font-size: 13px; }
 .sp-list {
   overflow: auto; min-height: 0;
   padding: 6px;

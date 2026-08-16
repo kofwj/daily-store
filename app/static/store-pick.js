@@ -87,7 +87,7 @@
     var gap = 6;
     var vw = window.innerWidth;
     var vh = window.innerHeight;
-    var width = Math.min(vw <= 800 ? vw - 16 : 340, vw - 16);
+    var width = Math.min(vw <= 800 ? vw - 16 : 280, vw - 16);
     var left = Math.min(Math.max(8, rect.left), vw - width - 8);
     panel.style.width = width + "px";
     panel.style.left = left + "px";
