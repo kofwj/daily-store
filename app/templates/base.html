@@ -58,6 +58,60 @@
       f.appendChild(i);
     }
   }, true);
+  // 可搜索门店选择：点开搜简称，选完提交所在表单
+  document.addEventListener('click', function (e) {
+    var pick = e.target.closest('.store-pick');
+    document.querySelectorAll('.store-pick.open').forEach(function (el) {
+      if (el !== pick) {
+        el.classList.remove('open');
+        var panel = el.querySelector('.store-pick-panel');
+        if (panel) panel.hidden = true;
+        var btn = el.querySelector('.store-pick-btn');
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+      }
+    });
+    if (!pick) return;
+    var panel = pick.querySelector('.store-pick-panel');
+    var btn = pick.querySelector('.store-pick-btn');
+    var hidden = pick.querySelector('input[type="hidden"]');
+    var label = pick.querySelector('.store-pick-label');
+    if (e.target.closest('.store-pick-btn')) {
+      var open = pick.classList.toggle('open');
+      if (panel) panel.hidden = !open;
+      if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) {
+        var q = pick.querySelector('.store-pick-q');
+        if (q) { q.value = ''; q.focus(); }
+        pick.querySelectorAll('.store-pick-opt').forEach(function (opt) { opt.hidden = false; });
+        var empty = pick.querySelector('.store-pick-empty');
+        if (empty) empty.hidden = true;
+      }
+      return;
+    }
+    var opt = e.target.closest('.store-pick-opt');
+    if (!opt || !hidden) return;
+    hidden.value = opt.getAttribute('data-value') || '';
+    if (label) label.textContent = opt.textContent.trim();
+    pick.classList.remove('open');
+    if (panel) panel.hidden = true;
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+    var form = pick.closest('form');
+    if (form && pick.getAttribute('data-autosubmit') !== '0') form.submit();
+  });
+  document.addEventListener('input', function (e) {
+    if (!e.target.classList.contains('store-pick-q')) return;
+    var pick = e.target.closest('.store-pick');
+    if (!pick) return;
+    var q = (e.target.value || '').trim().toLowerCase();
+    var shown = 0;
+    pick.querySelectorAll('.store-pick-opt').forEach(function (opt) {
+      var hit = !q || (opt.getAttribute('data-text') || '').toLowerCase().indexOf(q) !== -1;
+      opt.hidden = !hit;
+      if (hit) shown += 1;
+    });
+    var empty = pick.querySelector('.store-pick-empty');
+    if (empty) empty.hidden = shown !== 0;
+  });
   </script>
 </body>
 </html>

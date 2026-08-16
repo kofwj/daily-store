@@ -1,0 +1,32 @@
+{# 可搜索的门店选择。28 家店时原生 select 不好找。
+   selected: 当前值（门店 id 或 all_value）
+   all_value 有值时第一项是「全部」 #}
+{% macro store_picker(stores, selected='', name='store_id', all_value=none, all_label='全部', autosubmit=true) %}
+<div class="store-pick" {% if not autosubmit %}data-autosubmit="0"{% endif %}>
+  <input type="hidden" name="{{ name }}" value="{{ selected }}">
+  <button type="button" class="store-pick-btn" aria-haspopup="listbox" aria-expanded="false">
+    <span class="store-pick-label">
+      {% if all_value is not none and selected|string == all_value|string %}{{ all_label }}
+      {% else %}
+        {% set ns = namespace(label='') %}
+        {% for s in stores %}
+          {% if s.id|string == selected|string %}{% set ns.label = s.short_name or s.name %}{% endif %}
+        {% endfor %}
+        {{ ns.label or '选门店' }}
+      {% endif %}
+    </span>
+  </button>
+  <div class="store-pick-panel" hidden>
+    <input type="search" class="store-pick-q" placeholder="搜简称、店长、地市" autocomplete="off">
+    <div class="store-pick-list" role="listbox">
+      {% if all_value is not none %}
+      <button type="button" class="store-pick-opt {{ 'active' if selected|string == all_value|string else '' }}" data-value="{{ all_value }}" data-text="全部 all">{{ all_label }}</button>
+      {% endif %}
+      {% for s in stores %}
+      <button type="button" class="store-pick-opt {{ 'active' if s.id|string == selected|string else '' }}" data-value="{{ s.id }}" data-text="{{ s.short_name or s.name }} {{ s.name }} {{ s.store_manager }} {{ s.area_manager }} {{ s.city }}">{{ s.short_name or s.name }}</button>
+      {% endfor %}
+    </div>
+    <p class="muted store-pick-empty" hidden>没有匹配的门店</p>
+  </div>
+</div>
+{% endmacro %}

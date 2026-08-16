@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_store_picker.html" import store_picker %}
 {% block title %}报表 · {{ store.short_name or store.name }}{% endblock %}
 {% block body_class %}report-page-body{% endblock %}
 {% block body %}
@@ -14,11 +15,7 @@
       {% if stores|length > 1 %}
       <label class="filter">
         <span>门店</span>
-        <select name="store_id" onchange="this.form.submit()">
-          {% for s in stores %}
-          <option value="{{ s.id }}" {% if s.id == store.id %}selected{% endif %}>{{ s.short_name or s.name }}</option>
-          {% endfor %}
-        </select>
+        {{ store_picker(stores, selected=store.id) }}
       </label>
       {% endif %}
       <label class="filter">

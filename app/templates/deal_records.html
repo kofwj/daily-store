@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_pager.html" import pager %}
+{% from "_store_picker.html" import store_picker %}
 {% block title %}{% if all_stores %}成交记录 · 全部{% else %}成交记录 · {{ store.short_name or store.name }}{% endif %}{% endblock %}
 {% block body %}
 <div class="page-head">
@@ -11,12 +12,7 @@
     {% if is_admin and stores|length > 1 %}
     <label class="filter">
       <span>门店</span>
-      <select name="store_id" onchange="this.form.submit()">
-        <option value="all" {% if all_stores %}selected{% endif %}>全部</option>
-        {% for s in stores %}
-        <option value="{{ s.id }}" {% if not all_stores and s.id == store.id %}selected{% endif %}>{{ s.short_name or s.name }}</option>
-        {% endfor %}
-      </select>
+      {{ store_picker(stores, selected=('all' if all_stores else store.id), all_value='all', all_label='全部') }}
     </label>
     {% endif %}
     <label class="filter">

@@ -1,20 +1,17 @@
 {% extends "base.html" %}
-{% block title %}垫资 · {{ store.short_name or store.name }}{% endblock %}
+{% from "_store_picker.html" import store_picker %}
+{% block title %}{% if all_stores %}垫资 · 全部{% else %}垫资 · {{ store.short_name or store.name }}{% endif %}{% endblock %}
 {% block body %}
 <div class="page-head">
   <div class="page-title">
-    <h1>垫资</h1>
-    <p class="muted">本月垫资记在本页下方。未兑付的点「改」或「删」就能纠错；管理员兑付后会锁住，填错了让管理员取消兑付再改。</p>
+    <h1>{% if all_stores %}本月全店垫资{% else %}垫资{% endif %}</h1>
+    <p class="muted">{% if all_stores %}一页看所有店本月流水。要记一笔或改某家店，用右边选店。{% else %}本月垫资记在本页下方。未兑付的点「改」或「删」就能纠错；管理员兑付后会锁住，填错了让管理员取消兑付再改。{% endif %}</p>
   </div>
   <form method="get" class="page-filters">
     {% if stores|length > 1 %}
     <label class="filter">
       <span>门店</span>
-      <select name="store_id" onchange="this.form.submit()">
-        {% for s in stores %}
-        <option value="{{ s.id }}" {% if s.id == store.id %}selected{% endif %}>{{ s.short_name or s.name }}</option>
-        {% endfor %}
-      </select>
+      {{ store_picker(stores, selected=('all' if all_stores else store.id), all_value=('all' if is_admin else none), all_label='全部') }}
     </label>
     {% endif %}
     {% if is_admin %}
@@ -23,14 +20,14 @@
   </form>
 </div>
 <div class="kpi-row">
-  <div class="kpi"><div class="muted">本月合计</div><div class="kpi-num">{{ '%.2f'|format(totals.total) }}</div></div>
+  <div class="kpi"><div class="muted">本月合计{% if all_stores %} · 全店{% endif %}</div><div class="kpi-num">{{ '%.2f'|format(totals.total) }}</div></div>
   <div class="kpi"><div class="muted">宽带调测</div><div class="kpi-num">{{ '%.2f'|format(totals.broadband) }}</div></div>
   <div class="kpi"><div class="muted">购机让利</div><div class="kpi-num">{{ '%.2f'|format(totals.rebate) }}</div></div>
   <div class="kpi"><div class="muted">其他</div><div class="kpi-num">{{ '%.2f'|format(totals.other) }}</div></div>
 </div>
 
+{% if not is_viewer and not all_stores %}
 <form method="post" class="card advance-form">
-  {% if is_viewer %}{% else %}
   <input type="hidden" name="store_id" value="{{ store.id }}">
   <input type="hidden" name="advance_id" value="{{ form.advance_id }}">
   <div class="deal-grid">
@@ -71,7 +68,7 @@
 <div class="card deal-records">
   <div class="records-toolbar">
     <strong>本月记录</strong>
-    <span class="muted">{{ month.year }}年{{ month.month }}月 · {{ rows|length }} 笔{% if totals.unpaid %} · 未兑 {{ totals.unpaid }}{% endif %}</span>
+    <span class="muted">{{ month.year }}年{{ month.month }}月{% if all_stores %} · 全店{% endif %} · {{ rows|length }} 笔{% if totals.unpaid %} · 未兑 {{ totals.unpaid }}{% endif %}</span>
   </div>
   {% if rows %}
   <div class="table-wrap advance-desk">
@@ -79,6 +76,7 @@
       <thead>
         <tr>
           <th class="left">日期</th>
+          {% if all_stores %}<th class="left">门店</th>{% endif %}
           <th class="left">号码</th>
           <th>宽带</th>
           <th>让利</th>
@@ -91,8 +89,11 @@
       </thead>
       <tbody>
         {% for r in rows %}
+        {% set row_store_id = r.store_id %}
+        {% set row_store_name = r.store_short or r.store_name or store.short_name or store.name %}
         <tr>
           <td class="left">{{ r.biz_date }}</td>
+          {% if all_stores %}<td class="left">{{ row_store_name }}</td>{% endif %}
           <td class="left">{{ r.phone or '—' }}</td>
           <td>{{ '%.2f'|format(r.broadband) if r.broadband else '—' }}</td>
           <td>{{ '%.2f'|format(r.rebate) if r.rebate else '—' }}</td>
@@ -109,9 +110,9 @@
           </td>
           <td class="right">
             {% if not r.paid and not is_viewer %}
-            <a class="btn ghost" href="{{ url_for('advance_page', store_id=store.id, advance_id=r.id) }}">改</a>
+            <a class="btn ghost" href="{{ url_for('advance_page', store_id=row_store_id, advance_id=r.id) }}">改</a>
             <form method="post" action="{{ url_for('advance_delete') }}" onsubmit="return confirm('删除这笔垫资？')">
-              <input type="hidden" name="store_id" value="{{ store.id }}">
+              <input type="hidden" name="store_id" value="{{ row_store_id }}">
               <input type="hidden" name="advance_id" value="{{ r.id }}">
               <button class="ghost del-day" type="submit">删</button>
             </form>
@@ -128,10 +129,12 @@
   </div>
   <div class="advance-cards">
     {% for r in rows %}
+    {% set row_store_id = r.store_id %}
+    {% set row_store_name = r.store_short or r.store_name or store.short_name or store.name %}
     <article class="advance-card">
       <div class="advance-card-top">
         <div>
-          <strong>{{ r.biz_date }}</strong>
+          <strong>{{ r.biz_date }}{% if all_stores %} · {{ row_store_name }}{% endif %}</strong>
           <div class="muted">{{ r.phone or '无号码' }}</div>
         </div>
         <div class="advance-card-sum">
@@ -151,9 +154,9 @@
       {% if r.note %}<p class="muted advance-card-note">{{ r.note }}</p>{% endif %}
       <div class="advance-card-actions">
         {% if not r.paid and not is_viewer %}
-        <a class="btn ghost" href="{{ url_for('advance_page', store_id=store.id, advance_id=r.id) }}">改</a>
+        <a class="btn ghost" href="{{ url_for('advance_page', store_id=row_store_id, advance_id=r.id) }}">改</a>
         <form method="post" action="{{ url_for('advance_delete') }}" onsubmit="return confirm('删除这笔垫资？')">
-          <input type="hidden" name="store_id" value="{{ store.id }}">
+          <input type="hidden" name="store_id" value="{{ row_store_id }}">
           <input type="hidden" name="advance_id" value="{{ r.id }}">
           <button class="ghost del-day" type="submit">删</button>
         </form>

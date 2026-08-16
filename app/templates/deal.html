@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_store_picker.html" import store_picker %}
 {% block title %}成交播报 · {{ store.short_name or store.name }}{% endblock %}
 {% block body_class %}deal-page-body{% endblock %}
 {% block body %}
@@ -10,15 +11,11 @@
       <p class="muted deal-fullname">{{ store.name }}</p>
       {% endif %}
     </div>
-    {% if is_admin and stores|length > 1 %}
+    {% if stores|length > 1 %}
     <form method="get" class="page-filters">
       <label class="filter">
         <span>门店</span>
-        <select name="store_id" onchange="this.form.submit()">
-          {% for s in stores %}
-          <option value="{{ s.id }}" {% if s.id == store.id %}selected{% endif %}>{{ s.short_name or s.name }}</option>
-          {% endfor %}
-        </select>
+        {{ store_picker(stores, selected=store.id) }}
       </label>
     </form>
     {% endif %}

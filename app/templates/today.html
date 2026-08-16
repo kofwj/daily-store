@@ -1,18 +1,20 @@
 {% extends "base.html" %}
-{% block title %}今日填报 · {{ store.name }}{% endblock %}
+{% from "_store_picker.html" import store_picker %}
+{% block title %}今日填报 · {{ store.short_name or store.name }}{% endblock %}
 {% block body_class %}today-page{% endblock %}
 {% block body %}
 <div class="page-head today-head">
-  <h1>{{ store.name }}</h1>
+  <div class="page-title">
+    <h1>{{ store.short_name or store.name }}</h1>
+    {% if store.short_name and store.short_name != store.name %}
+    <p class="muted">{{ store.name }}</p>
+    {% endif %}
+  </div>
   <form method="get" class="page-filters">
-    {% if is_admin and stores|length > 1 %}
+    {% if stores|length > 1 %}
     <label class="filter">
       <span>门店</span>
-      <select name="store_id" onchange="this.form.submit()">
-        {% for s in stores %}
-        <option value="{{ s.id }}" {% if s.id == store.id %}selected{% endif %}>{{ s.name }}</option>
-        {% endfor %}
-      </select>
+      {{ store_picker(stores, selected=store.id) }}
     </label>
     {% endif %}
     <label class="filter">

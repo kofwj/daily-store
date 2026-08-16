@@ -946,6 +946,39 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
 .filter input[type="month"] {
   height: 38px;
 }
+.store-pick { position: relative; min-width: 180px; }
+.store-pick-btn {
+  width: 100%; height: 38px; padding: 0 12px;
+  display: flex; align-items: center; justify-content: space-between;
+  background: #fff; border: 1px solid var(--line); border-radius: 10px;
+  font: inherit; font-size: 13px; color: var(--ink); cursor: pointer;
+}
+.store-pick-btn::after { content: ""; width: 0; height: 0; margin-left: 8px;
+  border-left: 4px solid transparent; border-right: 4px solid transparent;
+  border-top: 5px solid var(--muted); }
+.store-pick.open .store-pick-btn { border-color: var(--ink); }
+.store-pick-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.store-pick-panel {
+  position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0;
+  min-width: 220px; max-height: 320px; overflow: hidden;
+  background: #fff; border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.12);
+  display: grid; grid-template-rows: auto 1fr auto;
+}
+.store-pick-q {
+  width: 100%; height: 36px; margin: 0; padding: 8px 10px;
+  border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+  font: inherit; font-size: 13px;
+}
+.store-pick-list { overflow: auto; max-height: 240px; padding: 4px; }
+.store-pick-opt {
+  display: block; width: 100%; text-align: left;
+  padding: 8px 10px; border: 0; background: transparent;
+  border-radius: 8px; font: inherit; font-size: 13px; color: var(--ink); cursor: pointer;
+}
+.store-pick-opt:hover { background: var(--accent-soft); }
+.store-pick-opt.active { background: var(--ink); color: #fff; }
+.store-pick-empty { margin: 0; padding: 8px 10px 10px; }
 .page-filters > button,
 .page-filters > .btn {
   height: 38px;

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_pager.html" import pager %}
+{% from "_store_picker.html" import store_picker %}
 {% block title %}修改审计{% endblock %}
 {% block body %}
 <div class="page-head">
@@ -27,12 +28,7 @@
     </label>
     <label class="filter">
       <span>门店</span>
-      <select name="store_id" onchange="this.form.submit()">
-        <option value="">全部</option>
-        {% for s in stores %}
-        <option value="{{ s.id }}" {% if s.id|string == store_id %}selected{% endif %}>{{ s.short_name or s.name }}</option>
-        {% endfor %}
-      </select>
+      {{ store_picker(stores, selected=store_id, all_value='', all_label='全部') }}
     </label>
   </form>
 </div>

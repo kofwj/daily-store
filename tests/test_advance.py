@@ -226,6 +226,37 @@ def test_filler_cannot_open_pay_page(client):
     assert "需要管理员权限" in r.get_data(as_text=True)
 
 
+def test_admin_advance_defaults_to_all_stores(client):
+    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    with db.get_db() as conn:
+        sid_a = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid_b = conn.execute("SELECT id FROM stores WHERE code='tongzhou-jinsha'").fetchone()["id"]
+    today = db.today_local().isoformat()
+    client.post(
+        "/advance",
+        data={"store_id": str(sid_a), "biz_date": today, "phone": "13900009111", "rebate": "10"},
+    )
+    client.get("/logout")
+    client.post("/login", data={"username": "jinsha", "pin": "123456"})
+    client.post(
+        "/advance",
+        data={"store_id": str(sid_b), "biz_date": today, "phone": "13900009222", "rebate": "20"},
+    )
+    client.get("/logout")
+    client.post("/login", data={"username": "admin", "pin": "1234"})
+    page = client.get("/advance").get_data(as_text=True)
+    assert "本月全店垫资" in page
+    assert "13900009111" in page
+    assert "13900009222" in page
+    assert "海门金花" in page
+    assert "通州金沙" in page
+    assert "记一笔垫资" not in page
+    one = client.get(f"/advance?store_id={sid_a}").get_data(as_text=True)
+    assert "记一笔垫资" in one
+    assert "13900009111" in one
+    assert "13900009222" not in one
+
+
 def test_store_sees_month_list_and_admin_sees_today_inbox(client):
     client.post("/login", data={"username": "jinhua", "pin": "123456"})
     with db.get_db() as conn:

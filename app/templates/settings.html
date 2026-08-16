@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_store_picker.html" import store_picker %}
 {% block title %}设置{% endblock %}
 {% block body_class %}settings-body{% endblock %}
 {% block body %}
@@ -152,12 +153,7 @@
                   <input type="hidden" name="action" value="set_stores">
                   <input type="hidden" name="tab" value="people">
                   <input type="hidden" name="user_id" value="{{ u.id }}">
-                  <select name="store_ids" onchange="this.form.submit()">
-                    <option value="">未分配</option>
-                    {% for s in stores %}
-                    <option value="{{ s.id }}" {% if p.store_id == s.id %}selected{% endif %}>{{ store_label(s) }}</option>
-                    {% endfor %}
-                  </select>
+                  {{ store_picker(stores, selected=p.store_id or '', name='store_ids', all_value='', all_label='未分配') }}
                 </form>
                 {% endif %}
               </td>
@@ -213,12 +209,7 @@
         <div id="addStoreField">
           <p>
             <label>所属门店</label>
-            <select name="store_ids">
-              <option value="">先选一家店</option>
-              {% for s in stores %}
-              <option value="{{ s.id }}">{{ store_label(s) }}</option>
-              {% endfor %}
-            </select>
+            {{ store_picker(stores, selected='', name='store_ids', all_value='', all_label='先选一家店', autosubmit=false) }}
           </p>
         </div>
         <div id="addAreaField" hidden>

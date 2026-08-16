@@ -55,20 +55,33 @@ def _empty_form(today: date) -> Dict[str, str]:
     }
 
 
-def _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d):
+def _sum_totals(maps):
+    out = {"broadband": 0.0, "rebate": 0.0, "other": 0.0, "total": 0.0}
+    for item in maps:
+        for key in out:
+            out[key] += float(item.get(key) or 0)
+    return out
+
+
+def _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d, *, all_stores=False):
     month = today_d.replace(day=1)
     month_end = _month_end(month)
+    sid = None if all_stores else store["id"]
     rows = db.list_advances(
-        conn, store_id=store["id"], start=month, end=month_end, limit=200, offset=0
+        conn, store_id=sid, start=month, end=month_end, limit=200, offset=0
     )
-    totals = db.advance_month_totals(conn, [store["id"]], today_d).get(
-        store["id"], {"broadband": 0, "rebate": 0, "other": 0, "total": 0}
-    )
+    if all_stores:
+        totals = _sum_totals(db.advance_month_totals(conn, [s["id"] for s in stores], today_d).values())
+    else:
+        totals = db.advance_month_totals(conn, [store["id"]], today_d).get(
+            store["id"], {"broadband": 0, "rebate": 0, "other": 0, "total": 0}
+        )
     totals["unpaid"] = sum(1 for r in rows if not int(r["paid"] or 0))
     return render_template(
         "advance.html",
         store=store,
         stores=stores,
+        all_stores=all_stores,
         form=form,
         is_admin=is_admin,
         is_viewer=is_viewer,
@@ -83,12 +96,14 @@ def register_advance(app) -> None:
     @login_required
     def advance_page():
         with db.get_db() as conn:
-            store, stores = pick_store(conn, request.values.get("store_id"))
+            is_admin = g.user["role"] == "admin"
+            raw_sid = (request.values.get("store_id") or "").strip()
+            all_stores = is_admin and request.method == "GET" and raw_sid in ("", "all") and not request.args.get("advance_id")
+            store, stores = pick_store(conn, None if all_stores else raw_sid)
             if store is None:
                 flash("还没有可填的门店，请管理员先建店", "error")
                 return render_template("empty.html")
             today_d = db.today_local()
-            is_admin = g.user["role"] == "admin"
             is_viewer = g.user["role"] == "readonly"
             form = _empty_form(today_d)
             if request.method == "GET":
@@ -163,7 +178,7 @@ def register_advance(app) -> None:
                     return redirect(url_for("advance_page", store_id=store["id"]))
                 flash("垫资已保存，可在下方本月记录里核对；填错了点「改」。", "ok")
                 return redirect(url_for("advance_page", store_id=store["id"]))
-            return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
+            return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d, all_stores=all_stores)
 
     @app.route("/advance/delete", methods=["POST"])
     @login_required
