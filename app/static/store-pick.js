@@ -1,6 +1,4 @@
-/* 门店选择：对齐 GitHub Primer SelectPanel
- * 关闭时只显示触发按钮；打开后面板挂到 body，顶部过滤 + 分组列表。
- */
+/* 门店选择：关闭只显示触发器；打开后搜索 + 按地市/经理分组。 */
 (function () {
   "use strict";
 
@@ -21,7 +19,6 @@
       .replace(/[市县区]/g, "");
   }
 
-  /* 部分匹配：整串包含，或按空格拆词每段都命中 */
   function matches(hay, raw) {
     var q = String(raw || "").trim().toLowerCase();
     if (!q) return true;
@@ -32,6 +29,18 @@
     return parts.every(function (p) {
       return h.indexOf(norm(p)) !== -1;
     });
+  }
+
+  function groupBy(panel) {
+    var on = panel.querySelector(".sp-gb.is-on");
+    return on ? String(on.getAttribute("data-group") || "city") : "city";
+  }
+
+  function groupKey(opt, mode) {
+    if (mode === "manager") {
+      return (opt.getAttribute("data-manager") || "").trim() || "未设经理";
+    }
+    return (opt.getAttribute("data-city") || "").trim() || "未分地市";
   }
 
   function visibleOpts(panel) {
@@ -55,40 +64,55 @@
     el.scrollIntoView({ block: "nearest" });
   }
 
-  function facetValue(panel, name) {
-    var on = panel.querySelector('.sp-chip.is-on[data-facet="' + name + '"]');
-    return on ? String(on.getAttribute("data-value") || "") : "";
+  function paintMeta(opt, mode) {
+    var meta = $(".sp-meta", opt);
+    if (!meta) return;
+    if (mode === "manager") {
+      meta.textContent = meta.getAttribute("data-alt-city") || "";
+    } else {
+      meta.textContent = meta.getAttribute("data-alt-mgr") || "";
+    }
   }
 
   function filterPanel(panel, raw) {
-    var shown = 0;
-    var cityF = facetValue(panel, "city");
-    var mgrF = facetValue(panel, "manager");
-    $all(".sp-group", panel).forEach(function (group) {
-      var g = 0;
-      var city = group.getAttribute("data-city") || "";
-      $all(".sp-opt", group).forEach(function (opt) {
-        var text =
-          (opt.getAttribute("data-text") || "") + " " + city + " " + (opt.textContent || "");
-        var hit = matches(text, raw);
-        if (cityF && (opt.getAttribute("data-city") || city) !== cityF) hit = false;
-        if (mgrF && (opt.getAttribute("data-manager") || "") !== mgrF) hit = false;
-        opt.hidden = !hit;
-        if (hit) g += 1;
-      });
-      group.hidden = g === 0;
-      shown += g;
-    });
-    $all(".sp-opt-all", panel).forEach(function (opt) {
-      var hit = matches(opt.getAttribute("data-text") || opt.textContent || "", raw);
-      /* 有地市/经理筛选时「全部门店」仍可选 */
-      opt.hidden = !hit;
-      if (hit) shown += 1;
-    });
-    var empty = $(".sp-empty", panel);
-    if (empty) empty.hidden = shown !== 0;
+    var mode = groupBy(panel);
     var list = $(".sp-list", panel);
-    if (list) list.hidden = shown === 0;
+    if (!list) return;
+    $all(".sp-city", list).forEach(function (el) {
+      el.parentNode.removeChild(el);
+    });
+
+    var shown = [];
+    $all(".sp-opt", list).forEach(function (opt) {
+      var text = (opt.getAttribute("data-text") || "") + " " + (opt.textContent || "");
+      var hit = matches(text, raw);
+      opt.hidden = !hit;
+      if (hit) {
+        paintMeta(opt, mode);
+        shown.push(opt);
+      }
+    });
+
+    var lastKey = null;
+    shown.forEach(function (opt) {
+      if (opt.classList.contains("sp-opt-all")) {
+        lastKey = null;
+        return;
+      }
+      var key = groupKey(opt, mode);
+      if (key !== lastKey) {
+        var head = document.createElement("div");
+        head.className = "sp-city";
+        head.setAttribute("role", "presentation");
+        head.textContent = key;
+        list.insertBefore(head, opt);
+        lastKey = key;
+      }
+    });
+
+    var empty = $(".sp-empty", panel);
+    if (empty) empty.hidden = shown.length !== 0;
+    list.hidden = shown.length === 0;
     setActive(panel, 0);
   }
 
@@ -97,15 +121,15 @@
     var gap = 6;
     var vw = window.innerWidth;
     var vh = window.innerHeight;
-    /* 不必一次露全部门店：封顶约 8～9 行，多的列表里滚 */
-    var CAP = vw <= 800 ? 260 : 280;
-    var width = Math.min(vw <= 800 ? vw - 16 : 280, vw - 16);
+    var phone = vw <= 800;
+    var CAP = phone ? 360 : 420;
+    var width = Math.min(phone ? vw - 16 : 320, vw - 16);
     var left = Math.min(Math.max(8, rect.left), vw - width - 8);
     var below = vh - rect.bottom - 12;
     var above = rect.top - 12;
-    var openUp = below < 180 && above > below;
+    var openUp = below < 220 && above > below;
     var room = openUp ? above : below;
-    var maxH = Math.min(CAP, Math.max(160, room));
+    var maxH = Math.min(CAP, Math.max(200, room));
     panel.style.width = width + "px";
     panel.style.left = left + "px";
     panel.style.right = "auto";
@@ -130,7 +154,6 @@
     if (panel) {
       panel.hidden = true;
       panel.classList.remove("is-open");
-      /* 还回原位 */
       if (home && panel.parentNode !== home) home.appendChild(panel);
     }
     document.body.classList.remove("sp-open");
@@ -147,20 +170,18 @@
     openPick = { pick: pick, panel: panel, trigger: trigger, home: panel.parentNode };
     pick.classList.add("is-open");
     trigger.setAttribute("aria-expanded", "true");
-    /* 挂到 body，避免被卡片 overflow 裁切 */
     document.body.appendChild(panel);
     document.body.classList.add("sp-open");
     panel.classList.add("is-open");
     if (q) q.value = "";
-    $all(".sp-facet-row", panel).forEach(function (row) {
-      $all(".sp-chip", row).forEach(function (chip, i) {
-        chip.classList.toggle("is-on", i === 0);
-      });
+    $all(".sp-gb", panel).forEach(function (btn, i) {
+      var on = i === 0;
+      btn.classList.toggle("is-on", on);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
     });
     filterPanel(panel, "");
     placePanel(trigger, panel);
     if (q) {
-      /* 下一帧再 focus，避免移动端键盘顶掉定位 */
       requestAnimationFrame(function () {
         q.focus();
         placePanel(trigger, panel);
@@ -178,7 +199,6 @@
     $all(".sp-opt", pick).forEach(function (el) {
       el.classList.toggle("is-selected", el === opt);
     });
-    /* 面板可能已挂到 body，也要更新里面的选中态 */
     if (openPick && openPick.panel) {
       $all(".sp-opt", openPick.panel).forEach(function (el) {
         el.classList.toggle("is-selected", el === opt);
@@ -202,15 +222,14 @@
       else open(pick);
       return;
     }
-    var chip = e.target.closest(".sp-chip");
-    if (chip && openPick && openPick.panel.contains(chip)) {
+    var gb = e.target.closest(".sp-gb");
+    if (gb && openPick && openPick.panel.contains(gb)) {
       e.preventDefault();
-      var row = chip.closest(".sp-facet-row");
-      if (row) {
-        $all(".sp-chip", row).forEach(function (el) {
-          el.classList.toggle("is-on", el === chip);
-        });
-      }
+      $all(".sp-gb", openPick.panel).forEach(function (el) {
+        var on = el === gb;
+        el.classList.toggle("is-on", on);
+        el.setAttribute("aria-selected", on ? "true" : "false");
+      });
       var q = $(".sp-q", openPick.panel);
       filterPanel(openPick.panel, q ? q.value : "");
       placePanel(openPick.trigger, openPick.panel);

@@ -599,11 +599,12 @@ details.extra summary { cursor: pointer; font-weight: 600; }
   padding: 2px 6px 8px;
 }
 .store-list-head h1, .store-list-head h2 { margin: 0; font-size: 16px; }
-.store-facets {
-  padding: 0 0 8px;
+.store-list-tools {
+  display: flex; flex-direction: column; gap: 8px;
+  margin: 0 0 8px;
 }
-.store-facets .sp-facet-k { width: 28px; }
-.store-search { display: block; margin: 0 0 8px; }
+.store-list-tools .sp-groupby { align-self: flex-start; }
+.store-search { display: block; margin: 0; }
 .store-search input {
   height: 34px;
   padding: 6px 10px;
@@ -1019,21 +1020,51 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
 .sp-panel[hidden] { display: none !important; }
 .sp-panel {
   position: fixed; z-index: 1000;
-  display: grid;
-  grid-template-rows: 36px minmax(0, 1fr);
-  max-height: 280px; /* JS 还会按视口再收，这里兜底 */
+  display: flex; flex-direction: column;
+  max-height: 420px;
   overflow: hidden;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 12px;
   box-shadow: 0 16px 40px rgba(16, 24, 40, 0.18);
 }
-.sp-filter {
-  display: flex; align-items: center; gap: 6px;
-  height: 36px; padding: 0 10px;
+.sp-toolbar {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--line);
   background: #fff;
+}
+.sp-filter {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fafafa;
   box-sizing: border-box;
+}
+.sp-groupby {
+  flex: 0 0 auto;
+  display: flex;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f3f4f6;
+}
+.sp-gb {
+  height: 26px; padding: 0 9px;
+  border: 0; border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit; font-size: 12px; font-weight: 650;
+  cursor: pointer;
+}
+.sp-gb.is-on {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
 }
 .sp-search-icon {
   flex: 0 0 auto;
@@ -1070,40 +1101,11 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
   outline: none !important;
 }
 .sp-q::placeholder { color: #9ca3af; font-size: 13px; }
-.sp-facets {
-  padding: 6px 8px 4px;
-  border-bottom: 1px solid var(--line);
-  background: #fafafa;
-}
-.sp-facet-row {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
-  padding: 2px 0;
-}
-.sp-facet-k {
-  flex: 0 0 auto;
-  width: 28px;
-  font-size: 11px; font-weight: 700; color: var(--muted);
-}
-.sp-chip {
-  flex: 0 0 auto;
-  height: 22px; padding: 0 8px;
-  border: 1px solid var(--line); border-radius: 999px;
-  background: #fff; color: var(--ink);
-  font: inherit; font-size: 11px; line-height: 20px;
-  cursor: pointer;
-}
-.sp-chip:hover { background: var(--accent-soft); }
-.sp-chip.is-on {
-  border-color: var(--ink);
-  background: var(--ink);
-  color: #fff;
-  font-weight: 650;
-}
 .sp-list {
+  flex: 1 1 auto;
   overflow-x: hidden;
   overflow-y: auto;
   min-height: 0;
-  max-height: 244px; /* 280 - 36 过滤条，多店内部滚 */
   padding: 4px 6px 6px;
   -webkit-overflow-scrolling: touch;
 }

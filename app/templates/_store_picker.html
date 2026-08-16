@@ -1,4 +1,4 @@
-{# GitHub SelectPanel 风格门店选择：关闭时只有触发器，打开后顶部过滤 + 分组列表。 #}
+{# 门店选择：关闭只有触发器；打开后搜索 + 按地市/经理分组。 #}
 {% macro store_picker(stores, selected='', name='store_id', all_value=none, all_label='全部门店', autosubmit=true) %}
 {% set ns = namespace(label='选门店') %}
 {% if all_value is not none and selected|string == all_value|string %}
@@ -28,32 +28,18 @@
     <span class="sp-caret" aria-hidden="true"></span>
   </button>
   <div class="sp-panel" hidden role="dialog" aria-label="选择门店">
-    <div class="sp-filter">
-      <span class="sp-search-icon" aria-hidden="true">⌕</span>
-      <input type="text" class="sp-q" placeholder="店名、地址、经理…" autocomplete="off" autocapitalize="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="true">
-    </div>
-    {% if city_ns.order|length > 1 or city_ns.managers|length > 1 %}
-    <div class="sp-facets">
-      {% if city_ns.order|length > 1 %}
-      <div class="sp-facet-row" data-facet="city">
-        <span class="sp-facet-k">地市</span>
-        <button type="button" class="sp-chip is-on" data-facet="city" data-value="">全部</button>
-        {% for city in city_ns.order %}
-        <button type="button" class="sp-chip" data-facet="city" data-value="{{ city }}">{{ city|replace('市','') }}</button>
-        {% endfor %}
+    <div class="sp-toolbar">
+      <div class="sp-filter">
+        <span class="sp-search-icon" aria-hidden="true">⌕</span>
+        <input type="text" class="sp-q" placeholder="搜店名、地址…" autocomplete="off" autocapitalize="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="true">
       </div>
-      {% endif %}
-      {% if city_ns.managers|length > 1 %}
-      <div class="sp-facet-row" data-facet="manager">
-        <span class="sp-facet-k">经理</span>
-        <button type="button" class="sp-chip is-on" data-facet="manager" data-value="">全部</button>
-        {% for mgr in city_ns.managers %}
-        <button type="button" class="sp-chip" data-facet="manager" data-value="{{ mgr }}">{{ mgr }}</button>
-        {% endfor %}
+      {% if city_ns.order|length > 1 or city_ns.managers|length > 1 %}
+      <div class="sp-groupby" role="tablist" aria-label="分组">
+        <button type="button" class="sp-gb is-on" role="tab" aria-selected="true" data-group="city">地市</button>
+        <button type="button" class="sp-gb" role="tab" aria-selected="false" data-group="manager">经理</button>
       </div>
       {% endif %}
     </div>
-    {% endif %}
     <div class="sp-list" role="listbox">
       {% if all_value is not none %}
       <button type="button" class="sp-opt sp-opt-all {{ 'is-selected' if selected|string == all_value|string else '' }}" role="option" data-value="{{ all_value }}" data-city="" data-manager="" data-text="{{ all_label }} 全部 all">
@@ -61,19 +47,16 @@
         <span class="sp-name">{{ all_label }}</span>
       </button>
       {% endif %}
-      {% for city in city_ns.order %}
-      <div class="sp-group" data-city="{{ city }}">
-        <div class="sp-city" role="presentation">{{ city }}</div>
-        {% for s in stores if ((s.city or '')|trim or '未分地市') == city %}
-        <button type="button" class="sp-opt {{ 'is-selected' if s.id|string == selected|string else '' }}" role="option" data-value="{{ s.id }}" data-city="{{ city }}" data-manager="{{ (s.area_manager or '')|trim }}" data-text="{{ s.short_name or s.name }} {{ s.name }} {{ s.store_manager }} {{ s.area_manager }} {{ s.city }} {{ s.code }}">
-          <span class="sp-check" aria-hidden="true"></span>
-          <span class="sp-main">
-            <span class="sp-name">{{ s.short_name or s.name }}</span>
-            {% if s.area_manager %}<span class="sp-meta">{{ s.area_manager }}</span>{% endif %}
-          </span>
-        </button>
-        {% endfor %}
-      </div>
+      {% for s in stores %}
+      {% set city = (s.city or '')|trim or '未分地市' %}
+      {% set mgr = (s.area_manager or '')|trim %}
+      <button type="button" class="sp-opt {{ 'is-selected' if s.id|string == selected|string else '' }}" role="option" data-value="{{ s.id }}" data-city="{{ city }}" data-manager="{{ mgr }}" data-text="{{ s.short_name or s.name }} {{ s.name }} {{ s.store_manager }} {{ mgr }} {{ city }} {{ s.code }}">
+        <span class="sp-check" aria-hidden="true"></span>
+        <span class="sp-main">
+          <span class="sp-name">{{ s.short_name or s.name }}</span>
+          <span class="sp-meta" data-alt-city="{{ city|replace('市','') }}" data-alt-mgr="{{ mgr }}">{% if mgr %}{{ mgr }}{% endif %}</span>
+        </span>
+      </button>
       {% endfor %}
     </div>
     <div class="sp-empty" hidden>没有匹配的门店</div>
