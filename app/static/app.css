@@ -972,7 +972,8 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
 .sp-panel {
   position: fixed; z-index: 1000;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: 36px minmax(0, 1fr);
+  max-height: 280px; /* JS 还会按视口再收，这里兜底 */
   overflow: hidden;
   background: #fff;
   border: 1px solid var(--line);
@@ -1022,8 +1023,11 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
 }
 .sp-q::placeholder { color: #9ca3af; font-size: 13px; }
 .sp-list {
-  overflow: auto; min-height: 0;
-  padding: 6px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  min-height: 0;
+  max-height: 244px; /* 280 - 36 过滤条，多店内部滚 */
+  padding: 4px 6px 6px;
   -webkit-overflow-scrolling: touch;
 }
 .sp-group { margin-bottom: 4px; }

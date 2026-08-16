@@ -87,26 +87,25 @@
     var gap = 6;
     var vw = window.innerWidth;
     var vh = window.innerHeight;
+    /* 不必一次露全部门店：封顶约 8～9 行，多的列表里滚 */
+    var CAP = vw <= 800 ? 260 : 280;
     var width = Math.min(vw <= 800 ? vw - 16 : 280, vw - 16);
     var left = Math.min(Math.max(8, rect.left), vw - width - 8);
+    var below = vh - rect.bottom - 12;
+    var above = rect.top - 12;
+    var openUp = below < 180 && above > below;
+    var room = openUp ? above : below;
+    var maxH = Math.min(CAP, Math.max(160, room));
     panel.style.width = width + "px";
     panel.style.left = left + "px";
     panel.style.right = "auto";
     panel.style.bottom = "auto";
-    panel.style.maxHeight = "";
+    panel.style.maxHeight = maxH + "px";
     panel.hidden = false;
-    /* 先放到下方测高度 */
-    panel.style.top = Math.round(rect.bottom + gap) + "px";
-    var ph = panel.getBoundingClientRect().height || 300;
-    var below = vh - rect.bottom - 12;
-    var above = rect.top - 12;
-    if (below < Math.min(ph, 220) && above > below) {
-      var maxH = Math.max(200, above);
-      panel.style.maxHeight = maxH + "px";
-      ph = Math.min(ph, maxH);
-      panel.style.top = Math.round(Math.max(8, rect.top - gap - ph)) + "px";
+    if (openUp) {
+      panel.style.top = Math.round(Math.max(8, rect.top - gap - maxH)) + "px";
     } else {
-      panel.style.maxHeight = Math.max(200, below) + "px";
+      panel.style.top = Math.round(rect.bottom + gap) + "px";
     }
   }
 
