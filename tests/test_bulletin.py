@@ -238,10 +238,24 @@ def test_summary_review_text():
     text = summary(rows, date(2026, 8, 13), "南通", day_deal=(7, 5), month_deal=(60, 42))
     lines = text.split("\n")
     assert lines[0] == "2026-08-13 南通vivo零售运营中心"
-    assert lines[1] == "今日销量：AI手机合约 5，笔算业务 5，金币直降 1"  # 2+3 / 4+1 / 1+0
-    assert lines[2] == "累计销量：AI手机合约 17，笔算业务 14，金币直降 8"  # 5+12 / 8+6 / 3+5
-    assert lines[3] == "成交播报：今日 7 笔（成交 5）；本月 60 笔（成交 42）"
-    assert lines[4] == "本月标杆：启东人民（AI 12，笔算 6，直降 5）"  # 12+6+5=23 最高，用简称
+    assert "【今日】" in lines
+    assert "销量：AI 5 · 笔算 5 · 直降 1" in lines
+    assert "成交：7 笔（成交 5）" in lines
+    assert "AI有量：海门金花、启东人民" in lines
+    assert "笔算有量：海门金花、启东人民" in lines
+    assert "直降有量：海门金花" in lines
+    assert "今日三项都有：海门金花" in lines
+    assert "通州金沙" not in text  # 今日三项都是 0，不进表扬
+    assert "累计：AI 17 · 笔算 14 · 直降 8" in lines
+    assert "成交：60 笔（成交 42）" in lines
+    assert "综合标杆：启东人民（AI 12，笔算 6，直降 5）" in lines
+    assert "单项第一：AI 启东人民 · 笔算 海门金花 · 直降 启东人民" in lines
+    empty = summary(
+        [{"name": "空店", "short_name": "空店", "month_ai": 0, "month_bisuan": 0, "month_coin": 0,
+          "day_ai": 0, "day_bisuan": 0, "day_coin": 0}],
+        date(2026, 8, 13),
+    )
+    assert "今日暂无单项破零" in empty
     assert summary([], date(2026, 8, 13)) == "2026-08-13 暂无门店通报数据。"
 
 

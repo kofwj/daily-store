@@ -340,6 +340,38 @@ def csv_rows(rows: Sequence[Mapping[str, Any]], biz_date: date) -> List[List[str
     return out
 
 
+def _row_name(row: Mapping[str, Any]) -> str:
+    return (row.get("short_name") or row.get("name") or "").strip() or "未命名"
+
+
+def _metric(row: Mapping[str, Any], key: str) -> int:
+    return int(row.get(key) or 0)
+
+
+def _join_names(names: Sequence[str]) -> str:
+    return "、".join(names)
+
+
+def _hitters(rows: Sequence[Mapping[str, Any]], key: str) -> List[str]:
+    names = [_row_name(r) for r in rows if _metric(r, key) > 0]
+    # 保序去重，方便贴群点名
+    seen = set()
+    out: List[str] = []
+    for name in names:
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    return out
+
+
+def _best_name(rows: Sequence[Mapping[str, Any]], key: str) -> str:
+    ranked = sorted(rows, key=lambda r: _metric(r, key), reverse=True)
+    if not ranked or _metric(ranked[0], key) <= 0:
+        return ""
+    return _row_name(ranked[0])
+
+
 def summary(
     rows: Sequence[Mapping[str, Any]],
     biz_date: date,
@@ -348,7 +380,7 @@ def summary(
     day_deal: Tuple[int, int] = (0, 0),
     month_deal: Tuple[int, int] = (0, 0),
 ) -> str:
-    """通报表的一句话复盘：日期标题 + 今日销量 / 累计销量 / 成交播报 / 本月标杆。"""
+    """可贴群复盘：今日销量 + 单项表扬 + 本月累计 / 标杆。"""
     if not rows:
         return f"{biz_date.isoformat()} 暂无门店通报数据。"
     total = totals_row(rows)
@@ -366,23 +398,63 @@ def summary(
     month_count, month_closed = int(month_deal[0] or 0), int(month_deal[1] or 0)
     ranked = sorted(
         rows,
-        key=lambda r: (
-            int(r["month_ai"] or 0)
-            + int(r["month_bisuan"] or 0)
-            + int(r.get("month_coin") or 0)
-        ),
+        key=lambda r: _metric(r, "month_ai") + _metric(r, "month_bisuan") + _metric(r, "month_coin"),
         reverse=True,
     )
     top = ranked[0]
-    top_name = top.get("short_name") or top["name"]
+    top_name = _row_name(top)
     head = biz_date.isoformat()
     if title_city:
         head = f"{head} {title_city}vivo零售运营中心"
+
+    ai_hit = _hitters(rows, "day_ai")
+    bisuan_hit = _hitters(rows, "day_bisuan")
+    coin_hit = _hitters(rows, "day_coin")
+    triple = [
+        _row_name(r)
+        for r in rows
+        if _metric(r, "day_ai") > 0 and _metric(r, "day_bisuan") > 0 and _metric(r, "day_coin") > 0
+    ]
+    praise: List[str] = []
+    if ai_hit:
+        praise.append(f"AI有量：{_join_names(ai_hit)}")
+    if bisuan_hit:
+        praise.append(f"笔算有量：{_join_names(bisuan_hit)}")
+    if coin_hit:
+        praise.append(f"直降有量：{_join_names(coin_hit)}")
+    if triple:
+        praise.append(f"今日三项都有：{_join_names(triple)}")
+
+    month_ai_best = _best_name(rows, "month_ai")
+    month_bisuan_best = _best_name(rows, "month_bisuan")
+    month_coin_best = _best_name(rows, "month_coin")
+    month_bits = []
+    if month_ai_best:
+        month_bits.append(f"AI {month_ai_best}")
+    if month_bisuan_best:
+        month_bits.append(f"笔算 {month_bisuan_best}")
+    if month_coin_best:
+        month_bits.append(f"直降 {month_coin_best}")
+
     lines = [
         head,
-        f"今日销量：AI手机合约 {day_ai}，笔算业务 {day_bisuan}，金币直降 {day_coin}",
-        f"累计销量：AI手机合约 {month_ai}，笔算业务 {month_bisuan}，金币直降 {month_coin}",
-        f"成交播报：今日 {day_count} 笔（成交 {day_closed}）；本月 {month_count} 笔（成交 {month_closed}）",
-        f"本月标杆：{top_name}（AI {top['month_ai']}，笔算 {top['month_bisuan']}，直降 {top.get('month_coin') or 0}）",
+        "【今日】",
+        f"销量：AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin}",
+        f"成交：{day_count} 笔（成交 {day_closed}）",
     ]
+    if praise:
+        lines.append("表扬")
+        lines.extend(praise)
+    else:
+        lines.append("表扬：今日暂无单项破零，继续加油")
+    lines.extend(
+        [
+            "【本月】",
+            f"累计：AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin}",
+            f"成交：{month_count} 笔（成交 {month_closed}）",
+            f"综合标杆：{top_name}（AI {top['month_ai']}，笔算 {top['month_bisuan']}，直降 {top.get('month_coin') or 0}）",
+        ]
+    )
+    if month_bits:
+        lines.append("单项第一：" + " · ".join(month_bits))
     return "\n".join(lines)
