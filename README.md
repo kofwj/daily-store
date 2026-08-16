@@ -15,7 +15,7 @@ python3 -m venv .venv
 .venv/bin/python wsgi.py
 ```
 
-浏览器打开 http://127.0.0.1:5055
+浏览器打开 http://127.0.0.1:5055（生产部署必须设置随机 `STORE_DAILY_SECRET`；缺失或示例密钥会拒绝启动）。
 
 | 账号 | 口令 | 角色 |
 |---|---|---|
@@ -67,7 +67,7 @@ cd /Users/jian/Downloads/store-daily
 ./scripts/sync_to_vps.sh
 ```
 
-同一 Wi‑Fi / 内网打开 http://192.168.100.5:8099  。详见 [docs/deploy-vps.md](docs/deploy-vps.md)。
+默认优先使用受控 TLS 或 Cloudflare Tunnel（`STORE_DAILY_SECURE=1`）；LAN HTTP 必须显式设置 `STORE_DAILY_SECURE=0`，仅限受控内网并有明文凭据风险。详见 [docs/deploy-vps.md](docs/deploy-vps.md)。
 
 ## 数据
 

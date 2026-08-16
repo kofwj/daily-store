@@ -173,6 +173,7 @@ MIGRATIONS: List[Tuple[int, str, callable]] = [
     (2, "split_new_user_coin_cut", "_split_new_user_coin_cut"),
     (3, "expand_user_roles_readonly", "_expand_user_roles_readonly"),
     (4, "add_must_change_pin", "_add_must_change_pin"),
+    (5, "add_advance_edits", "_ensure_advance_edits"),
 ]
 
 def _now() -> str:
@@ -223,6 +224,7 @@ def init_db() -> None:
         _ensure_deal_posts(conn)
         _ensure_deal_edits(conn)
         _ensure_advance_posts(conn)
+        _ensure_advance_edits(conn)
         _ensure_app_meta(conn)
         _ensure_login_attempts(conn)
         # 种子（建表/加列/回填默认）每次幂等执行即可；真正“动数据”的迁移走 migrate() 一次
@@ -254,6 +256,7 @@ def migrate() -> None:
             "_split_new_user_coin_cut": _split_new_user_coin_cut,
             "_expand_user_roles_readonly": _expand_user_roles_readonly,
             "_add_must_change_pin": _add_must_change_pin,
+            "_ensure_advance_edits": _ensure_advance_edits,
         }
         for version, name, fn_name in sorted(MIGRATIONS):
             if version in applied:
@@ -378,6 +381,20 @@ def _ensure_deal_edits(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_deal_edits_store_date ON deal_edits(store_id, biz_date)"
     )
+
+
+def _ensure_advance_edits(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS advance_edits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            advance_id INTEGER NOT NULL, store_id INTEGER NOT NULL REFERENCES stores(id),
+            user_id INTEGER REFERENCES users(id), biz_date TEXT NOT NULL,
+            edited_at TEXT NOT NULL, action TEXT NOT NULL DEFAULT '',
+            before_json TEXT NOT NULL DEFAULT '', after_json TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT ''
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_advance_edits_store_date ON advance_edits(store_id, biz_date)")
 
 
 def _ensure_advance_posts(conn: sqlite3.Connection) -> None:

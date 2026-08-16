@@ -13,6 +13,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 
 from . import db
 from .helpers import (
+    _xlsx_safe,
     accessible_stores,
     admin_required,
     login_required,
@@ -129,6 +130,9 @@ def register_advance(app) -> None:
                     "note": note,
                 }
                 same_month = biz_date.year == today_d.year and biz_date.month == today_d.month
+                if not is_admin and biz_date > today_d:
+                    flash("非管理员不能记未来日期。", "error")
+                    return redirect(url_for("advance_page", store_id=store["id"]))
                 if not is_admin and not same_month:
                     flash("门店只能记本月垫资。", "error")
                     return redirect(url_for("advance_page", store_id=store["id"]))
@@ -182,7 +186,7 @@ def register_advance(app) -> None:
                 flash("这条垫资不存在，或已删除。", "error")
             elif int(row["paid"] or 0):
                 flash("已兑付的垫资不能删。", "error")
-            elif db.delete_advance(conn, aid, sid):
+            elif db.delete_advance(conn, aid, sid, user_id=g.user["id"]):
                 flash("已删除这条垫资。", "ok")
             else:
                 flash("这条垫资不存在，或已删除。", "error")
@@ -296,7 +300,7 @@ def _build_advance_xlsx(stores, rows, month: date) -> bytes:
     wb = openpyxl.Workbook()
     summary = wb.active
     summary.title = "汇总表"
-    summary["A1"] = f"{month.month}月通泰零售运营中心移动垫资费用报销汇总"
+    summary["A1"] = _xlsx_safe(f"{month.month}月通泰零售运营中心移动垫资费用报销汇总")
     summary["A1"].font = Font(bold=True, size=14)
     summary.merge_cells("A1:E1")
     for col, text in enumerate(["门店", "宽带调测费", "购机让利", "其他业务垫资", "合计"], start=1):
@@ -313,7 +317,7 @@ def _build_advance_xlsx(stores, rows, month: date) -> bytes:
         broadband = round(sum(float(r["broadband"] or 0) for r in items), 2)
         rebate = round(sum(float(r["rebate"] or 0) for r in items), 2)
         other = round(sum(float(r["other"] or 0) for r in items), 2)
-        summary.cell(excel_row, 1, store["name"])
+        summary.cell(excel_row, 1, _xlsx_safe(store["name"]))
         summary.cell(excel_row, 2, broadband)
         summary.cell(excel_row, 3, rebate)
         summary.cell(excel_row, 4, other)
@@ -326,7 +330,7 @@ def _build_advance_xlsx(stores, rows, month: date) -> bytes:
         excel_row += 1
         _write_store_sheet(wb, store, items, header_fill, header_font, total_fill)
     if nt_rows:
-        summary.cell(excel_row, 1, "南通财顺电子有限公司")
+        summary.cell(excel_row, 1, _xlsx_safe("南通财顺电子有限公司"))
         for col, letter in enumerate(["B", "C", "D", "E"], start=2):
             joined = "+".join(f"{letter}{r}" for r in nt_rows)
             cell = summary.cell(excel_row, col, "=" + joined)
@@ -334,7 +338,7 @@ def _build_advance_xlsx(stores, rows, month: date) -> bytes:
             cell.font = Font(bold=True)
         excel_row += 1
     if tz_rows:
-        summary.cell(excel_row, 1, "泰州市财汇电子有限公司")
+        summary.cell(excel_row, 1, _xlsx_safe("泰州市财汇电子有限公司"))
         for col, letter in enumerate(["B", "C", "D", "E"], start=2):
             joined = "+".join(f"{letter}{r}" for r in tz_rows)
             cell = summary.cell(excel_row, col, "=" + joined)
@@ -344,7 +348,7 @@ def _build_advance_xlsx(stores, rows, month: date) -> bytes:
     if nt_rows or tz_rows:
         last = excel_row - 1
         first_company = last - (1 if nt_rows and tz_rows else 0)
-        summary.cell(excel_row, 1, "通泰零售运营中心")
+        summary.cell(excel_row, 1, _xlsx_safe("通泰零售运营中心"))
         for col, letter in enumerate(["B", "C", "D", "E"], start=2):
             cell = summary.cell(excel_row, col, f"={letter}{first_company}+{letter}{last}" if nt_rows and tz_rows else f"={letter}{last}")
             cell.fill = total_fill
@@ -366,7 +370,7 @@ def _write_store_sheet(wb, store, items, header_fill, header_font, total_fill) -
         name = f"{base[:28]}_{n}"
         n += 1
     ws = wb.create_sheet(name)
-    ws["A1"] = store["name"]
+    ws["A1"] = _xlsx_safe(store["name"])
     ws["A1"].font = Font(bold=True, size=13)
     ws.merge_cells("A1:I1")
     headers = ["日期", "号码", "宽带调测费", "购机让利", "其他业务", "合计", "备注", "是否报销", "报销日期"]
@@ -377,15 +381,15 @@ def _write_store_sheet(wb, store, items, header_fill, header_font, total_fill) -
     start = 3
     for i, row in enumerate(items):
         r = start + i
-        ws.cell(r, 1, row["biz_date"])
-        ws.cell(r, 2, row["phone"] or "")
+        ws.cell(r, 1, _xlsx_safe(row["biz_date"]))
+        ws.cell(r, 2, _xlsx_safe(row["phone"] or ""))
         ws.cell(r, 3, float(row["broadband"] or 0) or None)
         ws.cell(r, 4, float(row["rebate"] or 0) or None)
         ws.cell(r, 5, float(row["other"] or 0) or None)
         ws.cell(r, 6, f"=SUM(C{r}:E{r})")
-        ws.cell(r, 7, row["note"] or "")
-        ws.cell(r, 8, "是" if int(row["paid"] or 0) else "")
-        ws.cell(r, 9, row["paid_at"] or "")
+        ws.cell(r, 7, _xlsx_safe(row["note"] or ""))
+        ws.cell(r, 8, _xlsx_safe("是" if int(row["paid"] or 0) else ""))
+        ws.cell(r, 9, _xlsx_safe(row["paid_at"] or ""))
     end = start + max(len(items), 1) - 1
     total_row = end + 1
     ws.cell(total_row, 1, "合计")

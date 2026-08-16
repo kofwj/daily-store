@@ -42,6 +42,9 @@ def register_daily(app) -> None:
                 filler_month = db.get_setting(conn, "filler_edit_month", "0") == "1"
                 same_month = biz_date.year == today.year and biz_date.month == today.month
                 if g.user["role"] != "admin":
+                    if biz_date > today:
+                        flash("非管理员不能填写未来日期。", "error")
+                        return redirect(url_for("today", store_id=store["id"], date=biz_date.isoformat()))
                     if biz_date != today and not (filler_month and same_month):
                         flash("只能改当天（管理员开启『本月可改』后可补录本月）。历史跨月需找管理员修改。", "error")
                         return redirect(url_for("today", store_id=store["id"]))

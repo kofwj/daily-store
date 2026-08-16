@@ -1,22 +1,48 @@
 """垫资台账：门店记流水，管理员兑付，月底按店汇总。"""
 from __future__ import annotations
 
+import json
+import math
 import sqlite3
 from datetime import date
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from .db_core import _now, month_bounds, today_local
 
+MAX_AMOUNT = 10_000_000.0
+
+
+def _finite_amount(value: Any) -> float:
+    number = float(value or 0)
+    if not math.isfinite(number) or abs(number) > MAX_AMOUNT:
+        raise ValueError("金额必须是有限数字且不超过 1000 万")
+    return round(number, 2)
+
 
 def parse_money(raw: Any) -> float:
     text = str(raw or "").strip().replace(",", "").replace("，", "")
     if not text:
         return 0.0
-    return round(float(text), 2)
+    return _finite_amount(text)
 
 
 def money_ok(*amounts: float) -> bool:
-    return any(abs(v) >= 0.005 for v in amounts)
+    values = [_finite_amount(v) for v in amounts]
+    return any(abs(v) >= 0.005 for v in values)
+
+
+def _snapshot(row) -> dict:
+    return {key: row[key] for key in row.keys()} if row is not None else {}
+
+
+def _audit(conn, row, *, user_id: int, action: str, before: dict, after: dict, note: str = "") -> None:
+    conn.execute(
+        """INSERT INTO advance_edits(advance_id, store_id, user_id, biz_date, edited_at,
+           action, before_json, after_json, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (row["id"], row["store_id"], user_id, row["biz_date"], _now(), action,
+         json.dumps(before, ensure_ascii=False, default=str),
+         json.dumps(after, ensure_ascii=False, default=str), note),
+    )
 
 
 def record_advance(
@@ -37,9 +63,9 @@ def record_advance(
         "updated_at": _now(),
         "biz_date": biz_date.isoformat(),
         "phone": (phone or "").strip()[:20],
-        "broadband": round(float(broadband or 0), 2),
-        "rebate": round(float(rebate or 0), 2),
-        "other": round(float(other or 0), 2),
+        "broadband": _finite_amount(broadband),
+        "rebate": _finite_amount(rebate),
+        "other": _finite_amount(other),
         "note": (note or "").strip()[:500],
     }
     if advance_id:
@@ -51,6 +77,7 @@ def record_advance(
             raise ValueError("missing")
         if int(row["paid"] or 0):
             raise ValueError("paid_locked")
+        before = _snapshot(row)
         conn.execute(
             """
             UPDATE advance_posts
@@ -61,6 +88,8 @@ def record_advance(
             """,
             {**payload, "id": int(advance_id)},
         )
+        after = conn.execute("SELECT * FROM advance_posts WHERE id=?", (int(advance_id),)).fetchone()
+        _audit(conn, after, user_id=user_id, action="update", before=before, after=_snapshot(after))
         return int(advance_id)
     cur = conn.execute(
         """
@@ -83,6 +112,8 @@ def record_advance(
             payload["note"],
         ),
     )
+    created = conn.execute("SELECT * FROM advance_posts WHERE id=?", (int(cur.lastrowid),)).fetchone()
+    _audit(conn, created, user_id=user_id, action="create", before={}, after=_snapshot(created))
     return int(cur.lastrowid)
 
 
@@ -94,15 +125,14 @@ def get_advance(conn: sqlite3.Connection, advance_id: int, store_id: int):
 
 
 def delete_advance(
-    conn: sqlite3.Connection, advance_id: int, store_id: int
+    conn: sqlite3.Connection, advance_id: int, store_id: int, *, user_id: int
 ) -> bool:
     row = get_advance(conn, advance_id, store_id)
     if row is None or int(row["paid"] or 0):
         return False
-    conn.execute(
-        "DELETE FROM advance_posts WHERE id=? AND store_id=?",
-        (advance_id, store_id),
-    )
+    before = _snapshot(row)
+    conn.execute("DELETE FROM advance_posts WHERE id=? AND store_id=?", (advance_id, store_id))
+    _audit(conn, row, user_id=user_id, action="delete", before=before, after={})
     return True
 
 
@@ -118,6 +148,7 @@ def set_advance_paid(
     if not ids:
         return 0
     placeholders = ",".join("?" * len(ids))
+    rows = list(conn.execute(f"SELECT * FROM advance_posts WHERE id IN ({placeholders})", ids))
     if paid:
         day = (paid_at or today_local()).isoformat()
         cur = conn.execute(
@@ -137,7 +168,16 @@ def set_advance_paid(
             """,
             [_now(), *ids],
         )
-    return int(cur.rowcount or 0)
+    changed = int(cur.rowcount or 0)
+    for old in rows:
+        if paid and int(old["paid"] or 0):
+            continue
+        if not paid and not int(old["paid"] or 0):
+            continue
+        new = conn.execute("SELECT * FROM advance_posts WHERE id=?", (old["id"],)).fetchone()
+        _audit(conn, new, user_id=user_id, action="pay" if paid else "unpay",
+               before=_snapshot(old), after=_snapshot(new), note="兑付状态变更")
+    return changed
 
 
 def count_advances(

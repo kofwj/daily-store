@@ -351,7 +351,7 @@ def register_admin(app) -> None:
         store_id = request.args.get("store_id", "")
         days = request.args.get("days", "7")
         kind = request.args.get("kind", "all")
-        if kind not in ("all", "daily", "deal"):
+        if kind not in ("all", "daily", "deal", "advance"):
             kind = "all"
         try:
             days_int = max(1, min(int(days), 90))
@@ -394,6 +394,19 @@ def register_admin(app) -> None:
                 f"WHERE {w}"
             )
             params += ps
+        if kind in ("advance", "all"):
+            w = "an.edited_at >= ?"
+            ps = [cutoff]
+            if sid:
+                w += " AND an.store_id=?"
+                ps.append(sid)
+            parts.append(
+                "SELECT 'advance' AS kind, an.id, an.biz_date, an.edited_at, an.note, "
+                "an.before_json, an.after_json, an.action, s.name AS store_name, u.username AS user_name "
+                "FROM advance_edits an LEFT JOIN stores s ON s.id=an.store_id "
+                "LEFT JOIN users u ON u.id=an.user_id WHERE " + w
+            )
+            params += ps
         union_sql = " UNION ALL ".join(parts) if parts else \
             "SELECT 'daily' AS kind, NULL AS id, '' AS biz_date, '' AS edited_at, '' AS note, " \
             "'{}' AS before_json, '{}' AS after_json, '' AS store_name, '' AS user_name " \
@@ -431,6 +444,9 @@ def register_admin(app) -> None:
                 else:
                     prefix = "覆盖："
                 r["diff"] = prefix + deal_diff(before, after)
+            elif r["kind"] == "advance":
+                action = {"create": "新增垫资：", "update": "覆盖垫资：", "delete": "删除垫资：", "pay": "兑付：", "unpay": "取消兑付："}.get(r.get("action"), "垫资：")
+                r["diff"] = action + json.dumps({"before": before, "after": after}, ensure_ascii=False, default=str)
             else:
                 r["diff"] = build_diff(before, after, names)
             r["store_name"] = r["store_name"] or "?"

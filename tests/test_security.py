@@ -3,8 +3,21 @@
 import sqlite3
 from datetime import timedelta
 
+import pytest
+
 from app import backup, db
 from app.web import create_app
+
+
+def test_production_rejects_missing_or_example_secret(monkeypatch):
+    monkeypatch.delenv("STORE_DAILY_SECRET", raising=False)
+    with pytest.raises(RuntimeError):
+        create_app()
+    monkeypatch.setenv("STORE_DAILY_SECRET", "replace-with-random-secret")
+    with pytest.raises(RuntimeError):
+        create_app()
+    monkeypatch.setenv("STORE_DAILY_SECRET", "test-" + "b" * 48)
+    assert create_app().config["SECRET_KEY"].startswith("test-")
 
 
 def test_login_locks_after_five_failures(client):
@@ -59,6 +72,18 @@ def test_default_pin_must_change_before_using_app(client):
     assert "口令已改" in ok.get_data(as_text=True)
     today = client.get("/today", follow_redirects=True)
     assert today.request.path == "/today"
+
+
+def test_xlsx_escapes_formula_like_strings():
+    from io import BytesIO
+
+    import openpyxl
+
+    from app.helpers import xlsx_bytes
+
+    book = openpyxl.load_workbook(BytesIO(xlsx_bytes(["名称"], [["=HYPERLINK(\"https://bad\")"], ["+cmd"], ["-1"], ["@x"]])))
+    values = [book.active.cell(row, 1).value for row in range(2, 6)]
+    assert values == ["'=HYPERLINK(\"https://bad\")", "'+cmd", "'-1", "'@x"]
 
 
 def test_restore_rejects_sqlite_without_core_tables(tmp_db):

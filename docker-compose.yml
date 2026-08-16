@@ -8,7 +8,8 @@ services:
       STORE_DAILY_DB: /app/data/store_daily.db
       STORE_DAILY_DATA: /app/data
       STORE_DAILY_SECRET: ${STORE_DAILY_SECRET:?set STORE_DAILY_SECRET in .env}
-      STORE_DAILY_SECURE: ${STORE_DAILY_SECURE:-0}
+      STORE_DAILY_SECURE: ${STORE_DAILY_SECURE:?set STORE_DAILY_SECURE=1 for TLS/Cloudflare; explicit 0 only for LAN HTTP}
+      STORE_DAILY_TRUST_PROXY: ${STORE_DAILY_TRUST_PROXY:-0}
       STORE_DAILY_LOCK_HOUR: ${STORE_DAILY_LOCK_HOUR:-23}
       STORE_DAILY_LOCK_MINUTE: ${STORE_DAILY_LOCK_MINUTE:-0}
     volumes:
@@ -26,7 +27,7 @@ services:
   caddy:
     image: caddy:2-alpine
     ports:
-      # 局域网要绑 0.0.0.0；127.0.0.1 只有 VPS 自己打得开
+      # LAN HTTP is an explicit opt-in; prefer CADDYFILE.tunnel + Cloudflare/TLS.
       - "${CADDY_BIND:-0.0.0.0}:${CADDY_PORT:-8099}:80"
     volumes:
       - ${CADDYFILE:-./caddy/Caddyfile.lan}:/etc/caddy/Caddyfile:ro

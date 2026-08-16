@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+from secrets import token_hex
 from typing import List
 
 from . import db_core
@@ -12,7 +13,8 @@ from . import db_core
 BACKUP_DIR_NAME = "backups"
 BACKUP_PREFIX = "store_daily_"
 MAX_KEEP = 20
-REQUIRED_TABLES = ("stores", "users")
+REQUIRED_TABLES = ("stores", "users", "metrics", "daily_reports", "daily_facts", "advance_posts")
+MAX_RESTORE_BYTES = 32 * 1024 * 1024
 
 
 def backup_dir() -> Path:
@@ -27,7 +29,7 @@ def _stamp() -> str:
 
 def snapshot(tag: str = "manual") -> Path:
     """把当前库拷一份到 backups，返回文件路径。"""
-    dest = backup_dir() / f"{BACKUP_PREFIX}{tag}_{_stamp()}.db"
+    dest = backup_dir() / f"{BACKUP_PREFIX}{tag}_{_stamp()}_{token_hex(4)}.db"
     src = sqlite3.connect(str(db_core.DB_PATH))
     dst = sqlite3.connect(str(dest))
     try:
@@ -66,12 +68,13 @@ def is_sqlite(data: bytes) -> bool:
 
 
 def restore_bytes(data: bytes) -> Path:
+    if len(data) > MAX_RESTORE_BYTES:
+        raise ValueError("备份文件不能超过 32 MiB")
     if not is_sqlite(data):
         raise ValueError("这不是 SQLite 备份文件")
     if len(data) < 4096:
         raise ValueError("备份文件太小，不像完整库")
-    safety = snapshot("before_restore")
-    tmp = backup_dir() / f"_incoming_{_stamp()}.db"
+    tmp = backup_dir() / f"_incoming_{_stamp()}_{token_hex(8)}.db"
     tmp.write_bytes(data)
     try:
         probe = sqlite3.connect(str(tmp))
@@ -83,8 +86,17 @@ def restore_bytes(data: bytes) -> Path:
             missing = [name for name in REQUIRED_TABLES if name not in names]
             if missing:
                 raise ValueError("备份里缺表：" + "、".join(missing))
+            if probe.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise ValueError("备份完整性校验失败")
+            required_columns = {"users": {"id", "username", "pin_hash", "role"}, "advance_posts": {"id", "store_id", "biz_date", "paid"}}
+            for table, columns in required_columns.items():
+                actual = {row[1] for row in probe.execute(f"PRAGMA table_info({table})")}
+                if not columns <= actual:
+                    raise ValueError(f"备份表结构不完整：{table}")
         finally:
             probe.close()
+        # Validation is complete: only now preserve live state and replace it.
+        safety = snapshot("before_restore")
         dest = Path(db_core.DB_PATH)
         dest.parent.mkdir(parents=True, exist_ok=True)
         src = sqlite3.connect(str(tmp))

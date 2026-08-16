@@ -47,6 +47,18 @@ def test_filler_month_switch_off_blocks_this_month_past(tmp_db, monkeypatch):
         assert db.get_report(conn, sid, past) is None
 
 
+def test_filler_month_switch_still_rejects_future_date(tmp_db):
+    client = _client_auth(username="admin", pin="1234")
+    client.post("/settings", data={"action": "save_permissions", "tab": "permissions", "filler_edit_month": "1"})
+    client.post("/logout")
+    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    with db.get_db() as conn:
+        sid = _store_id(conn)
+    future = date.today() + __import__("datetime").timedelta(days=1)
+    response = client.post("/today", data={"store_id": sid, "date": future.isoformat(), "m_phone_sales": "1"}, follow_redirects=True)
+    assert "未来日期" in response.get_data(as_text=True)
+
+
 def test_filler_month_switch_on_allows_this_month(tmp_db, monkeypatch):
     client = _client_auth(username="admin", pin="1234")
     # 管理员开开关

@@ -130,6 +130,18 @@ def test_admin_can_save_without_phone_and_fills_settlement(tmp_db):
     assert book["海门金花"]["G3"].value == "芝麻服务费"
 
 
+def test_filler_rejects_future_and_nonfinite_amounts(client):
+    from datetime import timedelta
+
+    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+    future = client.post("/advance", data={"store_id": sid, "biz_date": (db.today_local() + timedelta(days=1)).isoformat(), "phone": "13900000000", "rebate": "10"}, follow_redirects=True)
+    assert "未来日期" in future.get_data(as_text=True)
+    invalid = client.post("/advance", data={"store_id": sid, "biz_date": db.today_local().isoformat(), "phone": "13900000000", "rebate": "nan"}, follow_redirects=True)
+    assert "金额请填数字" in invalid.get_data(as_text=True)
+
+
 def test_filler_can_save_negative_amount(client):
     client.post("/login", data={"username": "jinhua", "pin": "123456"})
     with db.get_db() as conn:
@@ -153,6 +165,25 @@ def test_filler_can_save_negative_amount(client):
             (sid,),
         ).fetchone()
         assert float(row["broadband"]) == -100
+
+
+def test_advance_actions_are_audited(client):
+    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+    today = db.today_local().isoformat()
+    client.post("/advance", data={"store_id": sid, "biz_date": today, "phone": "13900007777", "rebate": "10"})
+    with db.get_db() as conn:
+        aid = conn.execute("SELECT id FROM advance_posts WHERE phone='13900007777'").fetchone()["id"]
+    client.post("/advance", data={"store_id": sid, "advance_id": aid, "biz_date": today, "phone": "13900007777", "rebate": "20"})
+    client.get("/logout")
+    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/advance/pay", data={"action": "pay", "advance_id": [str(aid)]})
+    client.post("/advance/pay", data={"action": "unpay", "advance_id": [str(aid)]})
+    client.post("/advance/delete", data={"store_id": sid, "advance_id": aid})
+    with db.get_db() as conn:
+        actions = [row["action"] for row in conn.execute("SELECT action FROM advance_edits ORDER BY id")]
+    assert actions == ["create", "update", "pay", "unpay", "delete"]
 
 
 def test_anonymous_cannot_delete_advance(client):

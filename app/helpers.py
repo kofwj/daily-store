@@ -317,6 +317,13 @@ def pagination(raw_page: Optional[str], total: int, per_page: int = 50) -> Tuple
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
+def _xlsx_safe(value: Any) -> Any:
+    """Prevent formula injection while preserving real numeric cells and templates."""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@"):
+        return "'" + value
+    return value
+
+
 def xlsx_bytes(
     header: Sequence[str],
     rows: Sequence[Sequence[Any]],
@@ -331,7 +338,7 @@ def xlsx_bytes(
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = (sheet or "Sheet1")[:31]  # Excel sheet 名最长 31 字符
-    ws.append(list(header))
+    ws.append([_xlsx_safe(value) for value in header])
     fill = PatternFill("solid", fgColor="D9E2F3")
     for col in range(1, len(header) + 1):
         cell = ws.cell(row=1, column=col)
@@ -340,7 +347,7 @@ def xlsx_bytes(
         cell.alignment = Alignment(vertical="center")
     if rows:
         for r in rows:
-            ws.append(list(r))
+            ws.append([_xlsx_safe(value) for value in r])
     ws.freeze_panes = "A2"
     if autofilter:
         ws.auto_filter.ref = ws.dimensions

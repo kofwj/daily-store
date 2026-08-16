@@ -12,6 +12,13 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 SYNC_DB=1
 SETUP_ONLY=0
+SNAPSHOT_DB=""
+cleanup_snapshot() {
+  if [[ -n "${SNAPSHOT_DB}" && -f "${SNAPSHOT_DB}" ]]; then
+    rm -f -- "${SNAPSHOT_DB}"
+  fi
+}
+trap cleanup_snapshot EXIT
 
 for arg in "$@"; do
   case "$arg" in
@@ -51,6 +58,19 @@ echo "同步到 ${REMOTE}:${VPS_DIR}"
 
 ssh -o ConnectTimeout=8 "${REMOTE}" "mkdir -p '${VPS_DIR}/data' '${VPS_DIR}/scripts' '${VPS_DIR}/caddy'"
 
+# A live WAL database must never be copied as just its main file.  Ask SQLite's
+# backup API for a consistent temporary image, then rsync that image only.
+if [[ "${SYNC_DB}" == "1" ]]; then
+  SNAPSHOT_DB="$(mktemp "${ROOT}/data/.sync_snapshot.XXXXXX.db")"
+  python3 - "${ROOT}/data/store_daily.db" "${SNAPSHOT_DB}" <<'PY'
+import sqlite3, sys
+source, target = sys.argv[1:]
+with sqlite3.connect(source) as src, sqlite3.connect(target) as dst:
+    src.backup(dst)
+PY
+  chmod 600 "${SNAPSHOT_DB}"
+fi
+
 RSYNC=(
   rsync -az --delete
   --exclude '.venv/'
@@ -59,18 +79,21 @@ RSYNC=(
   --exclude '.ruff_cache/'
   --exclude '.git/'
   --exclude '.DS_Store'
+  --exclude 'data/*.db'
   --exclude 'data/*.db-shm'
   --exclude 'data/*.db-wal'
 )
 
-if [[ "${SYNC_DB}" != "1" ]]; then
-  RSYNC+=(--exclude 'data/*.db')
-fi
-
+SYNC_SOURCES=(./app ./caddy ./scripts ./tests \
+  Dockerfile docker-compose.yml requirements.txt wsgi.py README.md .env .gitignore)
 "${RSYNC[@]}" \
-  ./app ./caddy ./scripts ./tests \
+  "${SYNC_SOURCES[@]}" \
   Dockerfile docker-compose.yml requirements.txt wsgi.py README.md .env .gitignore \
   "${REMOTE}:${VPS_DIR}/"
+
+if [[ "${SYNC_DB}" == "1" ]]; then
+  rsync -az --chmod=F600 "${SNAPSHOT_DB}" "${REMOTE}:${VPS_DIR}/data/store_daily.db"
+fi
 
 # docs 可选
 if [[ -d docs ]]; then

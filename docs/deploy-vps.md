@@ -32,7 +32,7 @@ chmod +x scripts/sync_to_vps.sh scripts/deploy_vps.sh
 | 远端目录 | `/opt/store-daily` |
 | 端口 | `8099`（不抢 8088） |
 | 绑定 | `0.0.0.0`（局域网可访问） |
-| Cookie | `STORE_DAILY_SECURE=0`（HTTP 必须关） |
+| Cookie | TLS/Cloudflare 推荐 `STORE_DAILY_SECURE=1`；LAN HTTP 的 `0` 仅为显式 opt-in |
 
 账号不是 root 时：
 
@@ -69,13 +69,24 @@ CADDY_PORT=8100
 
 ## 打开
 
-同一局域网里：
+LAN HTTP 仅在确认内网可信、且接受明文凭据风险时使用：
 
-```text
-http://192.168.100.5:8099
+```env
+STORE_DAILY_SECURE=0
+STORE_DAILY_TRUST_PROXY=0
+CADDYFILE=./caddy/Caddyfile.lan
 ```
 
-预置账号：`admin / 1234`，`ninghai / 0000`。进去立刻改口令。
+更安全的默认方式是受控 TLS 或 Cloudflare Tunnel：
+
+```env
+STORE_DAILY_SECURE=1
+STORE_DAILY_TRUST_PROXY=1
+CADDY_BIND=127.0.0.1
+CADDYFILE=./caddy/Caddyfile.tunnel
+```
+
+预置账号：`admin / 1234`，`ninghai / 0000`。进去立刻改口令；生产必须使用随机 `STORE_DAILY_SECRET`，且不能使用示例值。
 
 VPS 上自检：
 

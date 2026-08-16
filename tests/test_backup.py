@@ -42,6 +42,20 @@ def test_admin_can_backup_download_and_restore(tmp_db, client):
         assert n == 0
 
 
+def test_restore_failure_does_not_change_live_db(tmp_db):
+    with db.get_db() as conn:
+        conn.execute("INSERT INTO app_meta(key, value) VALUES ('live_marker', 'keep')")
+    broken = tmp_db.parent / "broken.db"
+    probe = __import__("sqlite3").connect(broken)
+    probe.execute("CREATE TABLE stores(id INTEGER)")
+    probe.commit()
+    probe.close()
+    with __import__("pytest").raises(ValueError):
+        backup.restore_bytes(broken.read_bytes())
+    with db.get_db() as conn:
+        assert conn.execute("SELECT value FROM app_meta WHERE key='live_marker'").fetchone()["value"] == "keep"
+
+
 def test_filler_cannot_open_backup(client):
     client.post("/login", data={"username": "jinhua", "pin": "123456"})
     page = client.get("/settings?tab=backup").get_data(as_text=True)
