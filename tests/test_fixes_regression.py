@@ -334,3 +334,14 @@ def test_bulletin_skips_stores_without_mobile_code(app_client):
     empty = app_client.get("/bulletin?city=泰州市").get_data(as_text=True).replace("\ufeff", "")
     assert "测试有编码店" in empty  # 非法地市回退到南通
     assert "兴化吾悦" not in empty
+
+
+def test_store_picker_has_city_and_manager_facets(app_client):
+    app_client.post("/login", data={"username": "admin", "pin": "1234"})
+    rec = app_client.get("/deal/records").get_data(as_text=True)
+    assert 'data-facet="city"' in rec
+    assert 'data-facet="manager"' in rec
+    assert "黄雍青" in rec
+    settings = app_client.get("/settings?tab=stores").get_data(as_text=True)
+    assert 'id="storeFacets"' in settings
+    assert 'data-facet="manager"' in settings

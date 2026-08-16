@@ -599,6 +599,10 @@ details.extra summary { cursor: pointer; font-weight: 600; }
   padding: 2px 6px 8px;
 }
 .store-list-head h1, .store-list-head h2 { margin: 0; font-size: 16px; }
+.store-facets {
+  padding: 0 0 8px;
+}
+.store-facets .sp-facet-k { width: 28px; }
 .store-search { display: block; margin: 0 0 8px; }
 .store-search input {
   height: 34px;
@@ -1066,6 +1070,35 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
   outline: none !important;
 }
 .sp-q::placeholder { color: #9ca3af; font-size: 13px; }
+.sp-facets {
+  padding: 6px 8px 4px;
+  border-bottom: 1px solid var(--line);
+  background: #fafafa;
+}
+.sp-facet-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  padding: 2px 0;
+}
+.sp-facet-k {
+  flex: 0 0 auto;
+  width: 28px;
+  font-size: 11px; font-weight: 700; color: var(--muted);
+}
+.sp-chip {
+  flex: 0 0 auto;
+  height: 22px; padding: 0 8px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: #fff; color: var(--ink);
+  font: inherit; font-size: 11px; line-height: 20px;
+  cursor: pointer;
+}
+.sp-chip:hover { background: var(--accent-soft); }
+.sp-chip.is-on {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #fff;
+  font-weight: 650;
+}
 .sp-list {
   overflow-x: hidden;
   overflow-y: auto;

@@ -55,8 +55,15 @@
     el.scrollIntoView({ block: "nearest" });
   }
 
+  function facetValue(panel, name) {
+    var on = panel.querySelector('.sp-chip.is-on[data-facet="' + name + '"]');
+    return on ? String(on.getAttribute("data-value") || "") : "";
+  }
+
   function filterPanel(panel, raw) {
     var shown = 0;
+    var cityF = facetValue(panel, "city");
+    var mgrF = facetValue(panel, "manager");
     $all(".sp-group", panel).forEach(function (group) {
       var g = 0;
       var city = group.getAttribute("data-city") || "";
@@ -64,6 +71,8 @@
         var text =
           (opt.getAttribute("data-text") || "") + " " + city + " " + (opt.textContent || "");
         var hit = matches(text, raw);
+        if (cityF && (opt.getAttribute("data-city") || city) !== cityF) hit = false;
+        if (mgrF && (opt.getAttribute("data-manager") || "") !== mgrF) hit = false;
         opt.hidden = !hit;
         if (hit) g += 1;
       });
@@ -72,6 +81,7 @@
     });
     $all(".sp-opt-all", panel).forEach(function (opt) {
       var hit = matches(opt.getAttribute("data-text") || opt.textContent || "", raw);
+      /* 有地市/经理筛选时「全部门店」仍可选 */
       opt.hidden = !hit;
       if (hit) shown += 1;
     });
@@ -141,12 +151,13 @@
     document.body.appendChild(panel);
     document.body.classList.add("sp-open");
     panel.classList.add("is-open");
-    if (q) {
-      q.value = "";
-      filterPanel(panel, "");
-    } else {
-      filterPanel(panel, "");
-    }
+    if (q) q.value = "";
+    $all(".sp-facet-row", panel).forEach(function (row) {
+      $all(".sp-chip", row).forEach(function (chip, i) {
+        chip.classList.toggle("is-on", i === 0);
+      });
+    });
+    filterPanel(panel, "");
     placePanel(trigger, panel);
     if (q) {
       /* 下一帧再 focus，避免移动端键盘顶掉定位 */
@@ -189,6 +200,20 @@
       e.preventDefault();
       if (openPick && openPick.pick === pick) close();
       else open(pick);
+      return;
+    }
+    var chip = e.target.closest(".sp-chip");
+    if (chip && openPick && openPick.panel.contains(chip)) {
+      e.preventDefault();
+      var row = chip.closest(".sp-facet-row");
+      if (row) {
+        $all(".sp-chip", row).forEach(function (el) {
+          el.classList.toggle("is-on", el === chip);
+        });
+      }
+      var q = $(".sp-q", openPick.panel);
+      filterPanel(openPick.panel, q ? q.value : "");
+      placePanel(openPick.trigger, openPick.panel);
       return;
     }
     var opt = e.target.closest(".sp-opt");

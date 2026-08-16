@@ -276,8 +276,38 @@
           </div>
           <label class="store-search">
             <span class="sr-only">搜索门店</span>
-            <input type="search" id="storeFilter" placeholder="筛简称、店长、地市" autocomplete="off" enterkeyhint="search">
+            <input type="search" id="storeFilter" placeholder="店名、地址、经理…" autocomplete="off" enterkeyhint="search">
           </label>
+          <div class="store-facets" id="storeFacets">
+            {% set facet_cities = store_groups|map(attribute='city')|list %}
+            {% set facet_mgrs = namespace(items=[]) %}
+            {% for group in store_groups %}
+              {% for s in group.stores %}
+                {% set mgr = (s.area_manager or '')|trim %}
+                {% if mgr and mgr not in facet_mgrs.items %}
+                  {% set _ = facet_mgrs.items.append(mgr) %}
+                {% endif %}
+              {% endfor %}
+            {% endfor %}
+            {% if facet_cities|length > 1 %}
+            <div class="sp-facet-row" data-facet="city">
+              <span class="sp-facet-k">地市</span>
+              <button type="button" class="sp-chip is-on" data-facet="city" data-value="">全部</button>
+              {% for city in facet_cities %}
+              <button type="button" class="sp-chip" data-facet="city" data-value="{{ city }}">{{ city|replace('市','') }}</button>
+              {% endfor %}
+            </div>
+            {% endif %}
+            {% if facet_mgrs.items|length > 1 %}
+            <div class="sp-facet-row" data-facet="manager">
+              <span class="sp-facet-k">经理</span>
+              <button type="button" class="sp-chip is-on" data-facet="manager" data-value="">全部</button>
+              {% for mgr in facet_mgrs.items %}
+              <button type="button" class="sp-chip" data-facet="manager" data-value="{{ mgr }}">{{ mgr }}</button>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </div>
           <a class="store-list-item add {{ 'active' if not current_store else '' }}" href="{{ url_for('settings', tab='stores', store_id='new') }}">添加门店</a>
         </div>
         <div class="store-list-body">
@@ -285,7 +315,7 @@
           <div class="store-group" data-city="{{ group.city }}">
             <div class="store-list-city">{{ group.city }}</div>
             {% for s in group.stores %}
-            <a class="store-list-item {{ 'active' if current_store and s.id == current_store.id else '' }}" href="{{ url_for('settings', tab='stores', store_id=s.id) }}" data-text="{{ store_label(s) }} {{ s.name }} {{ s.store_manager }} {{ s.area_manager }} {{ s.city }} {{ s.mobile_code }} {{ s.region_group }}">
+            <a class="store-list-item {{ 'active' if current_store and s.id == current_store.id else '' }}" href="{{ url_for('settings', tab='stores', store_id=s.id) }}" data-city="{{ group.city }}" data-manager="{{ (s.area_manager or '')|trim }}" data-text="{{ store_label(s) }} {{ s.name }} {{ s.store_manager }} {{ s.area_manager }} {{ s.city }} {{ s.mobile_code }} {{ s.region_group }}">
               <span class="store-list-name">{{ store_label(s) }}</span>
               <span class="muted store-list-people">{{ s.store_manager or '未设店长' }}{% if s.store_grade %} · {{ s.store_grade }}类{% endif %}</span>
             </a>
@@ -426,8 +456,14 @@
           return h.indexOf(norm(p)) !== -1;
         });
       }
+      function facetValue(name) {
+        var on = list.querySelector('.sp-chip.is-on[data-facet="' + name + '"]');
+        return on ? String(on.getAttribute('data-value') || '') : '';
+      }
       function filter() {
         var q = input.value || '';
+        var cityF = facetValue('city');
+        var mgrF = facetValue('manager');
         var total = 0;
         list.querySelectorAll('.store-group').forEach(function (group) {
           var shown = 0;
@@ -435,6 +471,8 @@
           group.querySelectorAll('.store-list-item').forEach(function (item) {
             var text = (item.getAttribute('data-text') || '') + ' ' + city;
             var hit = match(text, q);
+            if (cityF && (item.getAttribute('data-city') || city) !== cityF) hit = false;
+            if (mgrF && (item.getAttribute('data-manager') || '') !== mgrF) hit = false;
             item.hidden = !hit;
             if (hit) shown += 1;
           });
@@ -447,6 +485,17 @@
       input.addEventListener('input', filter);
       input.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') e.preventDefault();
+      });
+      list.addEventListener('click', function (e) {
+        var chip = e.target.closest('.sp-chip');
+        if (!chip) return;
+        e.preventDefault();
+        var row = chip.closest('.sp-facet-row');
+        if (!row) return;
+        row.querySelectorAll('.sp-chip').forEach(function (el) {
+          el.classList.toggle('is-on', el === chip);
+        });
+        filter();
       });
     })();
     </script>
