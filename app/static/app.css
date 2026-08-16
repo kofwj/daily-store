@@ -946,77 +946,103 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
 .filter input[type="month"] {
   height: 38px;
 }
+/* ===== 门店 SelectPanel（GitHub Primer 风格） ===== */
 .filter .store-pick { min-width: 168px; max-width: 240px; }
 .store-pick { position: relative; min-width: 148px; }
-.store-pick-btn {
+.sp-trigger {
   width: 100%; height: 38px; padding: 0 12px;
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   background: #fff; border: 1px solid var(--line); border-radius: 10px;
   font: inherit; font-size: 13px; font-weight: 600; color: var(--ink); cursor: pointer;
 }
-.store-pick-btn::after {
-  content: ""; width: 0; height: 0; flex: 0 0 auto;
-  border-left: 4px solid transparent; border-right: 4px solid transparent;
-  border-top: 5px solid var(--muted);
-}
-.store-pick.open .store-pick-btn,
-.store-pick-btn:focus-visible {
+.sp-trigger:hover { background: #fafafa; }
+.store-pick.is-open .sp-trigger,
+.sp-trigger:focus-visible {
   border-color: var(--ink);
   outline: none;
   box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.08);
 }
-.store-pick-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
-.store-pick-panel {
-  position: fixed; z-index: 80;
-  width: min(320px, calc(100vw - 20px));
-  max-height: min(420px, calc(100vh - 24px));
-  overflow: hidden;
-  background: #fff; border: 1px solid var(--line); border-radius: 12px;
-  box-shadow: 0 12px 32px rgba(16, 24, 40, 0.16);
-  /* 不要写死 display:grid，否则会盖掉 [hidden] 的 display:none，搜索框一直露在外面 */
+.sp-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.sp-caret {
+  width: 0; height: 0; flex: 0 0 auto;
+  border-left: 4px solid transparent; border-right: 4px solid transparent;
+  border-top: 5px solid var(--muted);
 }
-.store-pick-panel[hidden] { display: none !important; }
-.store-pick-panel:not([hidden]) {
+.sp-panel[hidden] { display: none !important; }
+.sp-panel {
+  position: fixed; z-index: 1000;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(16, 24, 40, 0.18);
 }
-.store-pick-search { padding: 8px; border-bottom: 1px solid var(--line); background: #fff; }
-.store-pick-q {
-  width: 100%; height: 36px; margin: 0; padding: 8px 10px;
-  border: 1px solid var(--line); border-radius: 8px;
-  font: inherit; font-size: 13px; background: #fafafa;
+.sp-filter {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
 }
-.store-pick-q:focus { outline: none; border-color: var(--ink); background: #fff; }
-.store-pick-list { overflow: auto; min-height: 0; padding: 6px; -webkit-overflow-scrolling: touch; }
-.store-pick-group { display: grid; gap: 2px; margin-bottom: 6px; }
-.store-pick-group:last-child { margin-bottom: 0; }
-.store-pick-city {
+.sp-search-icon {
+  flex: 0 0 auto;
+  width: 18px; text-align: center;
+  color: var(--muted); font-size: 14px; line-height: 1;
+}
+.sp-q {
+  flex: 1; min-width: 0; height: 32px; margin: 0; padding: 0;
+  border: 0; border-radius: 0; background: transparent;
+  font: inherit; font-size: 14px; color: var(--ink);
+  box-shadow: none !important;
+}
+.sp-q:focus { outline: none; }
+.sp-q::placeholder { color: #9ca3af; }
+.sp-list {
+  overflow: auto; min-height: 0;
+  padding: 6px;
+  -webkit-overflow-scrolling: touch;
+}
+.sp-group { margin-bottom: 4px; }
+.sp-group:last-child { margin-bottom: 0; }
+.sp-city {
   position: sticky; top: 0; z-index: 1;
   padding: 8px 10px 4px;
   font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
   color: var(--muted); background: #fff;
 }
-.store-pick-opt {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+.sp-opt {
+  display: flex; align-items: center; gap: 8px;
   width: 100%; text-align: left;
-  padding: 9px 10px; border: 0; background: transparent;
+  padding: 8px 10px; border: 0; background: transparent;
   border-radius: 8px; font: inherit; font-size: 13px; color: var(--ink); cursor: pointer;
 }
-.store-pick-opt:hover { background: var(--accent-soft); }
-.store-pick-opt.active { background: var(--ink); color: #fff; }
-.store-pick-opt.active .muted { color: rgba(255,255,255,.72); }
-.store-pick-all { font-weight: 650; margin-bottom: 4px; }
-.store-pick-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.store-pick-meta { flex: 0 0 auto; font-size: 12px; }
-.store-pick-empty { margin: 0; padding: 10px 12px 12px; }
+.sp-opt:hover,
+.sp-opt.is-active { background: var(--accent-soft); }
+.sp-opt.is-selected { font-weight: 650; }
+.sp-opt.is-selected .sp-check::before { content: "✓"; }
+.sp-check {
+  flex: 0 0 16px; width: 16px; height: 16px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--ink); font-size: 12px; font-weight: 700;
+}
+.sp-main {
+  min-width: 0; flex: 1;
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+}
+.sp-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-meta { flex: 0 0 auto; font-size: 12px; color: var(--muted); }
+.sp-opt-all { margin-bottom: 2px; }
+.sp-empty {
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
 .inline-store .store-pick { min-width: 140px; max-width: 200px; }
-body.store-pick-open { overflow: hidden; }
+body.sp-open { overflow: hidden; }
 @media (max-width: 800px) {
   .filter .store-pick { min-width: 0; max-width: none; width: 100%; flex: 1 1 100%; }
-  .store-pick-panel {
-    width: calc(100vw - 20px);
-    max-height: min(70vh, 480px);
-  }
   .inline-store .store-pick { max-width: none; width: 100%; }
 }
 .page-filters > button,

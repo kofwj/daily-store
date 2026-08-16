@@ -1,7 +1,4 @@
-{# 可搜索门店选择：按地市分组，面板 fixed 定位避免被裁切。
-   selected: 当前值（门店 id 或 all_value）
-   all_value 有值时第一项是「全部」
-   autosubmit=false 时只改 hidden，不提交表单（添加账号用） #}
+{# GitHub SelectPanel 风格门店选择：关闭时只有触发器，打开后顶部过滤 + 分组列表。 #}
 {% macro store_picker(stores, selected='', name='store_id', all_value=none, all_label='全部门店', autosubmit=true) %}
 {% set ns = namespace(label='选门店') %}
 {% if all_value is not none and selected|string == all_value|string %}
@@ -20,32 +17,40 @@
     {% set _ = city_ns.order.append(city) %}
   {% endif %}
 {% endfor %}
-<div class="store-pick{% if not autosubmit %} store-pick-static{% endif %}" data-autosubmit="{{ '1' if autosubmit else '0' }}">
+<div class="store-pick" data-autosubmit="{{ '1' if autosubmit else '0' }}">
   <input type="hidden" name="{{ name }}" value="{{ selected }}">
-  <button type="button" class="store-pick-btn" aria-haspopup="listbox" aria-expanded="false">
-    <span class="store-pick-label">{{ ns.label }}</span>
+  <button type="button" class="sp-trigger" aria-haspopup="listbox" aria-expanded="false">
+    <span class="sp-label">{{ ns.label }}</span>
+    <span class="sp-caret" aria-hidden="true"></span>
   </button>
-  <div class="store-pick-panel" hidden>
-    <div class="store-pick-search">
-      <input type="search" class="store-pick-q" placeholder="搜简称、地市、店长" autocomplete="off" enterkeyhint="search">
+  <div class="sp-panel" hidden role="dialog" aria-label="选择门店">
+    <div class="sp-filter">
+      <span class="sp-search-icon" aria-hidden="true">⌕</span>
+      <input type="text" class="sp-q" placeholder="筛选门店…" autocomplete="off" autocapitalize="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="true">
     </div>
-    <div class="store-pick-list" role="listbox">
+    <div class="sp-list" role="listbox">
       {% if all_value is not none %}
-      <button type="button" class="store-pick-opt store-pick-all {{ 'active' if selected|string == all_value|string else '' }}" data-value="{{ all_value }}" data-text="{{ all_label }} all 全部">{{ all_label }}</button>
+      <button type="button" class="sp-opt sp-opt-all {{ 'is-selected' if selected|string == all_value|string else '' }}" role="option" data-value="{{ all_value }}" data-text="{{ all_label }} 全部 all">
+        <span class="sp-check" aria-hidden="true"></span>
+        <span class="sp-name">{{ all_label }}</span>
+      </button>
       {% endif %}
       {% for city in city_ns.order %}
-      <div class="store-pick-group" data-city="{{ city }}">
-        <div class="store-pick-city">{{ city }}</div>
+      <div class="sp-group" data-city="{{ city }}">
+        <div class="sp-city" role="presentation">{{ city }}</div>
         {% for s in stores if ((s.city or '')|trim or '未分地市') == city %}
-        <button type="button" class="store-pick-opt {{ 'active' if s.id|string == selected|string else '' }}" data-value="{{ s.id }}" data-text="{{ s.short_name or s.name }} {{ s.name }} {{ s.store_manager }} {{ s.area_manager }} {{ s.city }}">
-          <span class="store-pick-name">{{ s.short_name or s.name }}</span>
-          {% if s.store_manager %}<span class="muted store-pick-meta">{{ s.store_manager }}</span>{% endif %}
+        <button type="button" class="sp-opt {{ 'is-selected' if s.id|string == selected|string else '' }}" role="option" data-value="{{ s.id }}" data-text="{{ s.short_name or s.name }} {{ s.name }} {{ s.store_manager }} {{ s.area_manager }} {{ s.city }} {{ s.code }}">
+          <span class="sp-check" aria-hidden="true"></span>
+          <span class="sp-main">
+            <span class="sp-name">{{ s.short_name or s.name }}</span>
+            {% if s.store_manager %}<span class="sp-meta">{{ s.store_manager }}</span>{% endif %}
+          </span>
         </button>
         {% endfor %}
       </div>
       {% endfor %}
     </div>
-    <p class="muted store-pick-empty" hidden>没有匹配的门店</p>
+    <div class="sp-empty" hidden>没有匹配的门店</div>
   </div>
 </div>
 {% endmacro %}
