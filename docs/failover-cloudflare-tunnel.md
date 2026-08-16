@@ -3,18 +3,21 @@
 ## 拓扑（当前）
 
 ```text
-店员 → Cloudflare 域名 ──Tunnel──► 192.168.100.5:8099   【生产，写库】
-                                      │
-                                      │ backup_offsite.sh
-                                      ├─► 192.168.100.109 安卓（只收盘）
-                                      └─► pve.anemy.org
-                                            /opt/store-daily     【灾备，可起服务】
-                                            ~/store-daily-backups 【备份文件】
+店员 → Cloudflare 域名
+         │
+         ├─【正常】Tunnel（5 上）──► 192.168.100.5:8099     生产写库
+         │
+         └─【故障】Tunnel（pve 上）► 127.0.0.1:8099         灾备写库
+                                      ↑
+                         pve: store-daily + cloudflared(host 网络)
+                         备份: ~/store-daily-backups +
+                               109 安卓
 ```
 
-- 生产穿透：Cloudflare Tunnel（cloudflared）指 5  
-- pve：另一处电脑，DDNS + 端口转发（SSH 8022）；**店员不要收藏 pve 地址**  
-- 灾备站默认 **Caddy 只绑 127.0.0.1**，不接公网，只等 Tunnel 指过来  
+- 生产穿透：Cloudflare Tunnel 指 5  
+- pve 已跑 `store-daily-cloudflared`（**host 网络** + `restart unless-stopped`）  
+- 灾备 Caddy **只绑 127.0.0.1:8099**；店员不要收藏 pve IP  
+- Tunnel 用 **Dashboard token 模式**：Public Hostname 在 Zero Trust 面板配  
 
 ---
 
@@ -62,20 +65,26 @@ curl -sS http://127.0.0.1:8099/health
 
 ### B. Cloudflare Tunnel 改指 pve（推荐两种里选一）
 
-#### 方式 1：同一 hostname 改到 pve 上的 Tunnel（推荐）
+#### 方式 1：在 pve 的 Tunnel 上挂「日报域名」（推荐）
 
-前提：pve 上已用**同一 Cloudflare 账号**装好 cloudflared，并加过 public hostname（可先禁用）。
+pve 上 Tunnel 往往**已经有别的 hostname**（例如爱快 `ikuai.…` → 路由器）。  
+**不要改掉原有条目**，只在同一 Tunnel 里**再加一条**日报域名。
 
 1. 打开 [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → **Networks** → **Tunnels**  
-2. 找到 **pve 上的 Tunnel** → Configure → **Public Hostname**  
-3. 添加或启用与生产**相同的域名**（如 `daily.xxx.com`）：  
-   - Type: HTTP  
-   - URL: `http://127.0.0.1:8099`  
-4. 到 **5 上那条 Tunnel** 里，**删掉或禁用** 同一 hostname（避免两台抢）  
-5. 若 5 已死，直接只保留 pve 的 hostname 即可  
-6. 手机开无痕访问该域名，登录试填一笔  
+2. 找到 **pve 上正在跑的那条 Tunnel**（connector 在线）→ **Configure** → **Public Hostname**  
+3. **Add a public hostname**（与生产店员用的域名相同，如 `daily.你的域`）：  
+   - Type: **HTTP**  
+   - URL: **`http://127.0.0.1:8099`**  
+     （pve 上 cloudflared 已用 host 网络，能打到本机 Caddy）  
+4. 到 **5 上那条 Tunnel** 里，对**同一域名**：**Delete / 禁用**（避免两台抢 DNS/流量）  
+5. 若 5 整机已死：只保留 pve 上这一条即可  
+6. 手机无痕打开该域名 → 登录 → 试填一笔  
 
-> 注意：同一个 hostname 同一时间只应指向一个后端。
+> 同一 hostname **同一时间只能有一个后端**。  
+> 爱快等其它 hostname 原样保留，互不影响。
+
+**平时（未故障）**：pve 上可以**先不配**日报 hostname，或配了但 5 上仍占着该域名；  
+故障时再「pve 添加/启用 + 5 删除」。
 
 #### 方式 2：5 的 Tunnel 还活着，只改 Service URL（少见）
 
