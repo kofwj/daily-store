@@ -255,6 +255,8 @@ def migrate() -> None:
             )
             """
         )
+        # 多 worker 同时启动时抢一把写锁，避免两人各跑一遍再撞 UNIQUE
+        conn.execute("BEGIN IMMEDIATE")
         applied = {int(row["version"]) for row in conn.execute("SELECT version FROM schema_migrations")}
         fns: Dict[str, callable] = {
             "_retire_legacy_coin_cut": _retire_legacy_coin_cut,
@@ -274,7 +276,7 @@ def migrate() -> None:
                 raise RuntimeError(f"迁移 {version} {fn_name} 未注册")
             fn(conn)
             conn.execute(
-                "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+                "INSERT OR IGNORE INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
                 (version, name, _now()),
             )
 
