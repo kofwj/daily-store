@@ -111,17 +111,26 @@ fi
 
 if command -v docker >/dev/null 2>&1 && \
    docker compose -f "${PRIMARY_DIR}/docker-compose.yml" ps --status running 2>/dev/null | grep -q app; then
+  # </dev/null 防止 exec 吞掉 bash -s 剩余脚本（否则 .env 拷贝不会执行）
   docker compose -f "${PRIMARY_DIR}/docker-compose.yml" exec -T app \
-    python -c "import sqlite3; s=sqlite3.connect('/app/data/store_daily.db'); d=sqlite3.connect('/app/data/backups/${SNAP_NAME}'); s.backup(d); d.close(); s.close(); print('/app/data/backups/${SNAP_NAME}')"
+    python -c "import sqlite3; s=sqlite3.connect('/app/data/store_daily.db'); d=sqlite3.connect('/app/data/backups/${SNAP_NAME}'); s.backup(d); d.close(); s.close(); print('/app/data/backups/${SNAP_NAME}')" \
+    </dev/null
 else
   python3 -c "import sqlite3; s=sqlite3.connect('${HOST_DB}'); d=sqlite3.connect('${HOST_SNAP}'); s.backup(d); d.close(); s.close(); print('${HOST_SNAP}')"
 fi
 
-if [[ -f "${PRIMARY_DIR}/.env" ]]; then
-  cp -a "${PRIMARY_DIR}/.env" "${HOST_ENV}"
-  chmod 600 "${HOST_ENV}"
+if [[ ! -f "${HOST_SNAP}" ]]; then
+  echo "快照未生成: ${HOST_SNAP}" >&2
+  exit 1
 fi
-ls -la "${HOST_SNAP}"
+if [[ -f "${PRIMARY_DIR}/.env" ]]; then
+  cp -f "${PRIMARY_DIR}/.env" "${HOST_ENV}"
+  chmod 600 "${HOST_ENV}" || true
+  echo "已附带 .env -> ${HOST_ENV}"
+else
+  echo "警告: 生产机没有 .env" >&2
+fi
+ls -la "${HOST_SNAP}" "${HOST_ENV}" 2>/dev/null || ls -la "${HOST_SNAP}"
 EOS
 fi
 
