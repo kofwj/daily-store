@@ -41,19 +41,19 @@
     </p>
     <p>
       <label>号码</label>
-      <input type="text" name="phone" value="{{ form.phone }}" inputmode="numeric" placeholder="11位手机号" autocomplete="off">
+      <input type="text" name="phone" value="{{ form.phone }}" inputmode="numeric" pattern="\d*" maxlength="11" placeholder="11位手机号" autocomplete="off"{% if not is_admin %} required{% endif %}>
     </p>
     <p>
       <label>宽带调测费</label>
-      <input type="text" name="broadband" value="{{ form.broadband }}" inputmode="decimal" placeholder="可空，退款填负数" autocomplete="off">
+      <input type="text" name="broadband" value="{{ form.broadband }}" inputmode="decimal" pattern="-?\d*\.?\d*" placeholder="可空，退款填负数" autocomplete="off">
     </p>
     <p>
       <label>购机让利</label>
-      <input type="text" name="rebate" value="{{ form.rebate }}" inputmode="decimal" placeholder="可空，退款填负数" autocomplete="off">
+      <input type="text" name="rebate" value="{{ form.rebate }}" inputmode="decimal" pattern="-?\d*\.?\d*" placeholder="可空，退款填负数" autocomplete="off">
     </p>
     <p>
       <label>其他业务</label>
-      <input type="text" name="other" value="{{ form.other }}" inputmode="decimal" placeholder="可空，退款填负数" autocomplete="off">
+      <input type="text" name="other" value="{{ form.other }}" inputmode="decimal" pattern="-?\d*\.?\d*" placeholder="可空，退款填负数" autocomplete="off">
     </p>
     <p>
       <label>备注（项目 + 串码）</label>
