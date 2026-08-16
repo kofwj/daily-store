@@ -608,6 +608,12 @@ details.extra summary { cursor: pointer; font-weight: 600; }
 .store-empty { margin: 12px 6px 4px; }
 .store-group { display: grid; gap: 2px; margin-bottom: 6px; }
 .store-group:last-child { margin-bottom: 0; }
+/* display:grid 会盖掉 [hidden] 的 display:none，筛完数字动、名单不动 */
+.store-group[hidden],
+.store-list-item[hidden],
+.store-empty[hidden] {
+  display: none !important;
+}
 .store-list-city {
   position: sticky; top: 0; z-index: 1;
   margin: 0;
