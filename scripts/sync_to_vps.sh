@@ -43,20 +43,30 @@ if [[ ! -f .env ]]; then
   echo "已写入 .env（密钥已随机生成）。" >&2
 fi
 
+# 命令行/环境变量优先于 .env（否则 .env 里的 VPS_HOST 会盖掉灾备机地址）
+_OVERR_VPS_HOST="${VPS_HOST-}"
+_OVERR_VPS_USER="${VPS_USER-}"
+_OVERR_VPS_DIR="${VPS_DIR-}"
+_OVERR_VPS_SSH_PORT="${VPS_SSH_PORT-}"
+_OVERR_CADDY_PORT="${CADDY_PORT-}"
+
 set -a
 # shellcheck disable=SC1091
 . ./.env
 set +a
 
-VPS_HOST="${VPS_HOST:-192.168.100.5}"
-VPS_USER="${VPS_USER:-root}"
-VPS_DIR="${VPS_DIR:-/opt/store-daily}"
-CADDY_PORT="${CADDY_PORT:-8099}"
+VPS_HOST="${_OVERR_VPS_HOST:-${VPS_HOST:-192.168.100.5}}"
+VPS_USER="${_OVERR_VPS_USER:-${VPS_USER:-root}}"
+VPS_DIR="${_OVERR_VPS_DIR:-${VPS_DIR:-/opt/store-daily}}"
+VPS_SSH_PORT="${_OVERR_VPS_SSH_PORT:-${VPS_SSH_PORT:-22}}"
+CADDY_PORT="${_OVERR_CADDY_PORT:-${CADDY_PORT:-8099}}"
 
 REMOTE="${VPS_USER}@${VPS_HOST}"
-echo "同步到 ${REMOTE}:${VPS_DIR}"
+SSH=(ssh -o ConnectTimeout=12 -o BatchMode=yes -p "${VPS_SSH_PORT}")
+RSYNC_SSH="ssh -o ConnectTimeout=12 -o BatchMode=yes -p ${VPS_SSH_PORT}"
+echo "同步到 ${REMOTE}:${VPS_DIR} (ssh ${VPS_SSH_PORT})"
 
-ssh -o ConnectTimeout=8 "${REMOTE}" "mkdir -p '${VPS_DIR}/data' '${VPS_DIR}/scripts' '${VPS_DIR}/caddy'"
+"${SSH[@]}" "${REMOTE}" "mkdir -p '${VPS_DIR}/data' '${VPS_DIR}/scripts' '${VPS_DIR}/caddy'"
 
 # A live WAL database must never be copied as just its main file.  Ask SQLite's
 # backup API for a consistent temporary image, then rsync that image only.
@@ -73,6 +83,7 @@ fi
 
 RSYNC=(
   rsync -az --delete
+  -e "${RSYNC_SSH}"
   --exclude '.venv/'
   --exclude '__pycache__/'
   --exclude '.pytest_cache/'
@@ -82,6 +93,7 @@ RSYNC=(
   --exclude 'data/*.db'
   --exclude 'data/*.db-shm'
   --exclude 'data/*.db-wal'
+  --exclude 'data/backups/'
 )
 
 SYNC_SOURCES=(./app ./caddy ./scripts ./tests \
@@ -92,22 +104,24 @@ SYNC_SOURCES=(./app ./caddy ./scripts ./tests \
   "${REMOTE}:${VPS_DIR}/"
 
 if [[ "${SYNC_DB}" == "1" ]]; then
-  rsync -az --chmod=F600 "${SNAPSHOT_DB}" "${REMOTE}:${VPS_DIR}/data/store_daily.db"
+  rsync -az -e "${RSYNC_SSH}" --chmod=F600 "${SNAPSHOT_DB}" "${REMOTE}:${VPS_DIR}/data/store_daily.db" \
+    || rsync -az -e "${RSYNC_SSH}" "${SNAPSHOT_DB}" "${REMOTE}:${VPS_DIR}/data/store_daily.db"
 fi
 
 # docs 可选
 if [[ -d docs ]]; then
-  rsync -az docs/ "${REMOTE}:${VPS_DIR}/docs/"
+  rsync -az -e "${RSYNC_SSH}" docs/ "${REMOTE}:${VPS_DIR}/docs/"
 fi
 
 if [[ "${SETUP_ONLY}" == "1" ]]; then
   echo "文件已拷完。到 VPS 上执行："
-  echo "  ssh ${REMOTE}"
+  echo "  ssh -p ${VPS_SSH_PORT} ${REMOTE}"
   echo "  cd ${VPS_DIR} && ./scripts/deploy_vps.sh"
   exit 0
 fi
 
-ssh "${REMOTE}" "cd '${VPS_DIR}' && chmod +x scripts/*.sh && ./scripts/deploy_vps.sh"
+"${SSH[@]}" "${REMOTE}" "cd '${VPS_DIR}' && chmod +x scripts/*.sh && ./scripts/deploy_vps.sh"
 echo
 PORT="${CADDY_PORT:-8099}"
-echo "本机浏览器打开：http://${VPS_HOST}:${PORT}"
+echo "目标机本机健康检查: ssh -p ${VPS_SSH_PORT} ${REMOTE} curl -s http://127.0.0.1:${PORT}/health"
+echo "若 CADDY_BIND=0.0.0.0 可试: http://${VPS_HOST}:${PORT}"
