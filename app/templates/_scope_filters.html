@@ -1,0 +1,25 @@
+{# 列表页按地市 / 区域经理筛整批数据（不是门店下拉里的分组）。 #}
+{% macro scope_filters(cities, managers, city='', manager='') %}
+{% if cities|length > 1 %}
+<label class="filter">
+  <span>地市</span>
+  <select name="city" onchange="this.form.submit()">
+    <option value="">全部地市</option>
+    {% for c in cities %}
+    <option value="{{ c }}" {% if c == city %}selected{% endif %}>{{ c }}</option>
+    {% endfor %}
+  </select>
+</label>
+{% endif %}
+{% if managers|length > 1 %}
+<label class="filter">
+  <span>区域经理</span>
+  <select name="area_manager" onchange="this.form.submit()">
+    <option value="">全部经理</option>
+    {% for m in managers %}
+    <option value="{{ m }}" {% if m == manager %}selected{% endif %}>{{ m }}</option>
+    {% endfor %}
+  </select>
+</label>
+{% endif %}
+{% endmacro %}

@@ -5,9 +5,16 @@ import json
 import math
 import sqlite3
 from datetime import date
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .db_core import _now, month_bounds, today_local
+
+
+def _store_in(column: str, store_ids: Optional[Sequence[int]]) -> Tuple[str, List[int]]:
+    ids = [int(i) for i in (store_ids or [])]
+    if not ids:
+        return "1=0", []
+    return f"{column} IN ({','.join('?' * len(ids))})", ids
 
 MAX_AMOUNT = 10_000_000.0
 
@@ -211,12 +218,17 @@ def count_advances(
     start: date,
     end: date,
     paid: Optional[int] = None,
+    store_ids: Optional[Sequence[int]] = None,
 ) -> int:
     where = ["biz_date>=?", "biz_date<=?"]
     params: List[Any] = [start.isoformat(), end.isoformat()]
     if store_id:
         where.append("store_id=?")
         params.append(store_id)
+    elif store_ids is not None:
+        clause, ids = _store_in("store_id", store_ids)
+        where.append(clause)
+        params.extend(ids)
     if paid is not None:
         where.append("paid=?")
         params.append(int(paid))
@@ -238,12 +250,17 @@ def list_advances(
     paid: Optional[int] = None,
     limit: int = 50,
     offset: int = 0,
+    store_ids: Optional[Sequence[int]] = None,
 ) -> List[sqlite3.Row]:
     where = ["a.biz_date>=?", "a.biz_date<=?"]
     params: List[Any] = [start.isoformat(), end.isoformat()]
     if store_id:
         where.append("a.store_id=?")
         params.append(store_id)
+    elif store_ids is not None:
+        clause, ids = _store_in("a.store_id", store_ids)
+        where.append(clause)
+        params.extend(ids)
     if paid is not None:
         where.append("a.paid=?")
         params.append(int(paid))

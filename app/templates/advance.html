@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 {% from "_store_picker.html" import store_picker %}
+{% from "_scope_filters.html" import scope_filters %}
 {% block title %}{% if all_stores %}垫资 · 全部{% else %}垫资 · {{ store.short_name or store.name }}{% endif %}{% endblock %}
 {% block body %}
 <div class="page-head">
   <div class="page-title">
-    <h1>{% if all_stores %}本月全店垫资{% else %}垫资{% endif %}</h1>
-    <p class="muted">{% if all_stores %}一页看所有店本月流水。要记一笔或改某家店，用右边选店。{% else %}本月垫资记在本页下方。未兑付的点「改」或「删」就能纠错；管理员兑付后会锁住，填错了让管理员取消兑付再改。{% endif %}</p>
+    <h1>{% if all_stores %}{% if scope.active %}{{ scope.label }}垫资{% else %}本月全店垫资{% endif %}{% else %}垫资{% endif %}</h1>
+    <p class="muted">{% if all_stores %}一页看{% if scope.active %}{{ scope.label }}{% else %}所有店{% endif %}本月流水。可按地市、区域经理筛，或右边选店记一笔。{% else %}本月垫资记在本页下方。未兑付的点「改」或「删」就能纠错；管理员兑付后会锁住，填错了让管理员取消兑付再改。{% endif %}</p>
   </div>
   <form method="get" class="page-filters">
     {% if stores|length > 1 %}
@@ -13,6 +14,9 @@
       <span>门店</span>
       {{ store_picker(stores, selected=('all' if all_stores else store.id), all_value=('all' if is_admin else none), all_label='全部门店') }}
     </label>
+    {% if all_stores %}
+    {{ scope_filters(scope.cities, scope.managers, city=scope.city, manager=scope.manager) }}
+    {% endif %}
     {% endif %}
     {% if is_admin %}
     <a class="btn ghost" href="{{ url_for('advance_pay', month=month.strftime('%Y-%m')) }}">去兑付</a>
@@ -20,7 +24,7 @@
   </form>
 </div>
 <div class="kpi-row">
-  <div class="kpi"><div class="muted">本月合计{% if all_stores %} · 全店{% endif %}</div><div class="kpi-num">{{ '%.2f'|format(totals.total) }}</div></div>
+  <div class="kpi"><div class="muted">本月合计{% if all_stores %} · {{ scope.label }}{% endif %}</div><div class="kpi-num">{{ '%.2f'|format(totals.total) }}</div></div>
   <div class="kpi"><div class="muted">宽带调测</div><div class="kpi-num">{{ '%.2f'|format(totals.broadband) }}</div></div>
   <div class="kpi"><div class="muted">购机让利</div><div class="kpi-num">{{ '%.2f'|format(totals.rebate) }}</div></div>
   <div class="kpi"><div class="muted">其他</div><div class="kpi-num">{{ '%.2f'|format(totals.other) }}</div></div>

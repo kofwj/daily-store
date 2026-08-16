@@ -19,6 +19,8 @@ from .helpers import (
     pagination,
     parse_date,
     readonly_required,
+    request_scope,
+    sql_in,
     store_forecast,
     store_label,
     values_for_broadcast,
@@ -362,12 +364,20 @@ def register_admin(app) -> None:
         sid = int(store_id) if store_id.isdigit() else None
         parts: List[str] = []
         params: List[Any] = []
+        with db.get_db() as conn:
+            all_stores = accessible_stores(conn)
+            city_scope = request_scope(all_stores)
+            scoped_ids = city_scope["ids"] if (not sid and city_scope["active"]) else []
         if kind in ("daily", "all"):
             w = "rn.edited_at >= ?"
             ps: List[Any] = [cutoff]
             if sid:
                 w += " AND rn.store_id=?"
                 ps.append(sid)
+            elif scoped_ids:
+                clause, ids = sql_in("rn.store_id", scoped_ids)
+                w += f" AND {clause}"
+                ps.extend(ids)
             parts.append(
                 "SELECT 'daily' AS kind, rn.id, rn.biz_date, rn.edited_at, rn.note, "
                 "rn.before_json, rn.after_json, '' AS action, "
@@ -384,6 +394,10 @@ def register_admin(app) -> None:
             if sid:
                 w += " AND dn.store_id=?"
                 ps.append(sid)
+            elif scoped_ids:
+                clause, ids = sql_in("dn.store_id", scoped_ids)
+                w += f" AND {clause}"
+                ps.extend(ids)
             parts.append(
                 "SELECT 'deal' AS kind, dn.id, dn.biz_date, dn.edited_at, dn.note, "
                 "dn.before_json, dn.after_json, dn.action, "
@@ -400,6 +414,10 @@ def register_admin(app) -> None:
             if sid:
                 w += " AND an.store_id=?"
                 ps.append(sid)
+            elif scoped_ids:
+                clause, ids = sql_in("an.store_id", scoped_ids)
+                w += f" AND {clause}"
+                ps.extend(ids)
             parts.append(
                 "SELECT 'advance' AS kind, an.id, an.biz_date, an.edited_at, an.note, "
                 "an.before_json, an.after_json, an.action, s.name AS store_name, u.username AS user_name "
@@ -460,6 +478,7 @@ def register_admin(app) -> None:
             pages=pages,
             total=total,
             kind=kind,
+            city_scope=city_scope,
         )
 
     @app.route("/bulletin.xlsx")

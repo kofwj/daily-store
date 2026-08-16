@@ -15,6 +15,7 @@ from .helpers import (
     pagination,
     parse_date,
     pick_store,
+    request_scope,
     store_forecast,
     values_for_broadcast,
     xlsx_bytes,
@@ -295,6 +296,7 @@ def register_daily(app) -> None:
             store, stores = pick_store(conn, None if all_stores else raw_sid)
             if store is None:
                 return render_template("empty.html")
+            scope = request_scope(stores)
             today_d = db.today_local()
             default_days = "1" if all_stores else "7"
             try:
@@ -303,15 +305,16 @@ def register_daily(app) -> None:
                 days_int = 1 if all_stores else 7
             start = today_d - timedelta(days=days_int - 1)
             sid = None if all_stores else store["id"]
-            total = db.count_deal_posts(conn, sid, start, today_d)
+            scoped_ids = None if (not all_stores or not scope["active"]) else scope["ids"]
+            total = db.count_deal_posts(conn, sid, start, today_d, store_ids=scoped_ids)
             page, pages = pagination(request.args.get("page"), total)
             rows = db.list_deal_posts(
-                conn, sid, start, today_d, limit=50, offset=(page - 1) * 50
+                conn, sid, start, today_d, limit=50, offset=(page - 1) * 50, store_ids=scoped_ids
             )
             month_start = today_d.replace(day=1)
-            store_ids = [s["id"] for s in stores]
-            today_counts = db.deal_counts(conn, store_ids, today_d, today_d)
-            month_counts = db.deal_counts(conn, store_ids, month_start, today_d)
+            kpi_ids = [store["id"]] if not all_stores else (scope["ids"] if scope["active"] else [s["id"] for s in stores])
+            today_counts = db.deal_counts(conn, kpi_ids, today_d, today_d)
+            month_counts = db.deal_counts(conn, kpi_ids, month_start, today_d)
             if all_stores:
                 mine_today = {
                     "total": sum(v["total"] for v in today_counts.values()),
@@ -340,6 +343,7 @@ def register_daily(app) -> None:
                 today=today_d.isoformat(),
                 mine_today=mine_today,
                 mine_month=mine_month,
+                scope=scope,
             )
 
     @app.route("/deal/export")

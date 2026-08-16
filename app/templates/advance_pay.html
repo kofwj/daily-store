@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_pager.html" import pager %}
 {% from "_store_picker.html" import store_picker %}
+{% from "_scope_filters.html" import scope_filters %}
 {% block title %}垫资兑付{% endblock %}
 {% block body %}
 <div class="page-head">
@@ -22,6 +23,9 @@
       <span>门店</span>
       {{ store_picker(stores, selected=store_id, all_value='', all_label='全部门店') }}
     </label>
+    {% if not store_id %}
+    {{ scope_filters(city_scope.cities, city_scope.managers, city=city_scope.city, manager=city_scope.manager) }}
+    {% endif %}
     <label class="filter">
       <span>状态</span>
       <select name="paid" onchange="this.form.submit()">
@@ -117,7 +121,7 @@
       </table>
     </div>
   </form>
-  {{ pager(page, pages, total, 'advance_pay', month=month.strftime('%Y-%m'), store_id=store_id, paid=paid, scope=scope) }}
+  {{ pager(page, pages, total, 'advance_pay', month=month.strftime('%Y-%m'), store_id=store_id, paid=paid, scope=scope, city=city_scope.city, area_manager=city_scope.manager) }}
   {% else %}
   <p class="muted">这个筛选下没有垫资。</p>
   {% endif %}

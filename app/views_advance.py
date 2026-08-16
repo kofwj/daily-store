@@ -20,6 +20,7 @@ from .helpers import (
     pagination,
     parse_date,
     pick_store,
+    request_scope,
     viewer_only,
     xlsx_response,
 )
@@ -66,12 +67,15 @@ def _sum_totals(maps):
 def _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d, *, all_stores=False):
     month = today_d.replace(day=1)
     month_end = _month_end(month)
+    scope = request_scope(stores)
     sid = None if all_stores else store["id"]
+    scoped_ids = None if (not all_stores or not scope["active"]) else scope["ids"]
     rows = db.list_advances(
-        conn, store_id=sid, start=month, end=month_end, limit=200, offset=0
+        conn, store_id=sid, start=month, end=month_end, limit=200, offset=0, store_ids=scoped_ids
     )
     if all_stores:
-        totals = _sum_totals(db.advance_month_totals(conn, [s["id"] for s in stores], today_d).values())
+        kpi_ids = scope["ids"] if scope["active"] else [s["id"] for s in stores]
+        totals = _sum_totals(db.advance_month_totals(conn, kpi_ids, today_d).values())
     else:
         totals = db.advance_month_totals(conn, [store["id"]], today_d).get(
             store["id"], {"broadband": 0, "rebate": 0, "other": 0, "total": 0}
@@ -88,6 +92,7 @@ def _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d, *, 
         rows=rows,
         month=month,
         totals=totals,
+        scope=scope,
     )
 
 
@@ -227,11 +232,18 @@ def register_advance(app) -> None:
         end = today_d if scope == "today" else month_end
         with db.get_db() as conn:
             stores = accessible_stores(conn)
+            city_scope = request_scope(stores)
             sid = int(store_id) if store_id.isdigit() else None
             if sid and not any(s["id"] == sid for s in stores):
                 sid = None
+            scoped_ids = None if (sid or not city_scope["active"]) else city_scope["ids"]
             inbox = db.advance_today_inbox(conn, today_d)
-            total = db.count_advances(conn, store_id=sid, start=start, end=end, paid=paid)
+            if scoped_ids is not None:
+                allow = set(scoped_ids)
+                inbox = [r for r in inbox if int(r["store_id"]) in allow]
+            total = db.count_advances(
+                conn, store_id=sid, start=start, end=end, paid=paid, store_ids=scoped_ids
+            )
             page, pages = pagination(request.args.get("page"), total)
             rows = db.list_advances(
                 conn,
@@ -241,11 +253,15 @@ def register_advance(app) -> None:
                 paid=paid,
                 limit=50,
                 offset=(page - 1) * 50,
+                store_ids=scoped_ids,
             )
             sums = {"broadband": 0.0, "rebate": 0.0, "other": 0.0, "total": 0.0, "unpaid": 0}
             all_rows = db.list_all_advances(conn, start, end)
+            allow = set(scoped_ids) if scoped_ids is not None else None
             for r in all_rows:
                 if sid and int(r["store_id"]) != sid:
+                    continue
+                if allow is not None and int(r["store_id"]) not in allow:
                     continue
                 sums["broadband"] += float(r["broadband"] or 0)
                 sums["rebate"] += float(r["rebate"] or 0)
@@ -262,6 +278,7 @@ def register_advance(app) -> None:
                 store_id=str(sid or ""),
                 paid=paid_raw,
                 scope=scope,
+                city_scope=city_scope,
                 inbox=inbox,
                 page=page,
                 pages=pages,

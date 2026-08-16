@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_pager.html" import pager %}
 {% from "_store_picker.html" import store_picker %}
+{% from "_scope_filters.html" import scope_filters %}
 {% block title %}修改审计{% endblock %}
 {% block body %}
 <div class="page-head">
@@ -30,6 +31,9 @@
       <span>门店</span>
       {{ store_picker(stores, selected=store_id, all_value='', all_label='全部门店') }}
     </label>
+    {% if not store_id %}
+    {{ scope_filters(city_scope.cities, city_scope.managers, city=city_scope.city, manager=city_scope.manager) }}
+    {% endif %}
   </form>
 </div>
 
@@ -59,7 +63,7 @@
       {% endfor %}
     </tbody>
   </table>
-  {{ pager(page, pages, total, 'edits_page', days=days, store_id=store_id, kind=kind) }}
+  {{ pager(page, pages, total, 'edits_page', days=days, store_id=store_id, kind=kind, city=city_scope.city, area_manager=city_scope.manager) }}
   {% else %}
   <p class="muted">近 {{ days }} 天还没有修改记录。</p>
   {% endif %}

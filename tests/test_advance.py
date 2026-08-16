@@ -257,6 +257,22 @@ def test_admin_advance_defaults_to_all_stores(client):
     assert "13900009222" not in one
 
 
+def test_admin_advance_filter_by_city(client):
+    client.post("/login", data={"username": "admin", "pin": "1234"})
+    with db.get_db() as conn:
+        nt = conn.execute("SELECT id FROM stores WHERE short_name='通州金沙'").fetchone()["id"]
+        tz = conn.execute("SELECT id FROM stores WHERE short_name='靖江吾悦'").fetchone()["id"]
+    today = db.today_local().isoformat()
+    client.post("/advance", data={"store_id": str(nt), "biz_date": today, "phone": "13900009333", "rebate": "11"})
+    client.post("/advance", data={"store_id": str(tz), "biz_date": today, "phone": "13900009444", "rebate": "22"})
+    all_page = client.get("/advance").get_data(as_text=True)
+    assert "13900009333" in all_page
+    assert "13900009444" in all_page
+    city = client.get("/advance?city=泰州市").get_data(as_text=True)
+    assert "13900009444" in city
+    assert "13900009333" not in city
+
+
 def test_store_sees_month_list_and_admin_sees_today_inbox(client):
     client.post("/login", data={"username": "jinhua", "pin": "123456"})
     with db.get_db() as conn:

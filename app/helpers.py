@@ -156,6 +156,68 @@ def accessible_stores(conn) -> List[Any]:
     return db.list_user_stores(conn, g.user)
 
 
+def sql_in(column: str, ids: Sequence[int]) -> Tuple[str, List[int]]:
+    clean = [int(i) for i in ids]
+    if not clean:
+        return "1=0", []
+    return f"{column} IN ({','.join('?' * len(clean))})", clean
+
+
+def scope_options(stores: Sequence[Any]) -> Tuple[List[str], List[str]]:
+    cities: List[str] = []
+    managers: List[str] = []
+    for store in stores:
+        city = (store["city"] or "").strip() or "未分地市"
+        if city not in cities:
+            cities.append(city)
+        manager = (store["area_manager"] or "").strip()
+        if manager and manager not in managers:
+            managers.append(manager)
+    return cities, managers
+
+
+def filter_stores(stores: Sequence[Any], city: str = "", manager: str = "") -> List[Any]:
+    city = (city or "").strip()
+    manager = (manager or "").strip()
+    out: List[Any] = []
+    for store in stores:
+        store_city = (store["city"] or "").strip() or "未分地市"
+        store_manager = (store["area_manager"] or "").strip()
+        if city and store_city != city:
+            continue
+        if manager and store_manager != manager:
+            continue
+        out.append(store)
+    return list(out)
+
+
+def request_scope(stores: Sequence[Any]) -> Dict[str, Any]:
+    """从 ?city= & ?area_manager= 得到当前可见门店。"""
+    city = (request.args.get("city") or "").strip()
+    manager = (request.args.get("area_manager") or "").strip()
+    cities, managers = scope_options(stores)
+    if city and city not in cities:
+        city = ""
+    if manager and manager not in managers:
+        manager = ""
+    scoped = filter_stores(stores, city, manager)
+    bits = [p for p in (city, manager) if p]
+    if bits:
+        label = " · ".join(bits) + f"（{len(scoped)}家）"
+    else:
+        label = "全部门店"
+    return {
+        "city": city,
+        "manager": manager,
+        "cities": cities,
+        "managers": managers,
+        "stores": scoped,
+        "ids": [int(s["id"]) for s in scoped],
+        "label": label,
+        "active": bool(city or manager),
+    }
+
+
 def pick_store(conn, raw_id: Optional[str]):
     stores = accessible_stores(conn)
     if not stores:

@@ -147,6 +147,28 @@ def test_admin_records_page_shows_all_stores_today(client):
     assert "全部" not in filler
 
 
+def test_admin_records_filter_by_city_and_manager(client):
+    client.post("/login", data={"username": "admin", "pin": "1234"})
+    with db.get_db() as conn:
+        nt = conn.execute("SELECT id FROM stores WHERE short_name='通州金沙'").fetchone()["id"]
+        tz = conn.execute("SELECT id FROM stores WHERE short_name='靖江吾悦'").fetchone()["id"]
+        uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        db.record_deal_post(conn, store_id=nt, user_id=uid, model="南通机", phone="13800001111", closed=True)
+        db.record_deal_post(conn, store_id=tz, user_id=uid, model="泰州机", phone="13800002222", closed=True)
+        mgr = conn.execute("SELECT area_manager FROM stores WHERE id=?", (nt,)).fetchone()["area_manager"]
+    page = client.get("/deal/records").get_data(as_text=True)
+    assert "全部地市" in page
+    assert "全部经理" in page
+    assert "南通机" in page
+    assert "泰州机" in page
+    city = client.get("/deal/records?city=泰州市").get_data(as_text=True)
+    assert "泰州机" in city
+    assert "南通机" not in city
+    one = client.get(f"/deal/records?area_manager={mgr}").get_data(as_text=True)
+    assert "南通机" in one
+    assert "泰州机" not in one
+
+
 def test_admin_exports_all_stores_deal_csv(client):
     client.post("/login", data={"username": "admin", "pin": "1234"})
     with db.get_db() as conn:

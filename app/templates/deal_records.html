@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 {% from "_pager.html" import pager %}
 {% from "_store_picker.html" import store_picker %}
+{% from "_scope_filters.html" import scope_filters %}
 {% block title %}{% if all_stores %}成交记录 · 全部{% else %}成交记录 · {{ store.short_name or store.name }}{% endif %}{% endblock %}
 {% block body %}
 <div class="page-head">
   <div class="page-title">
-    <h1>{% if all_stores %}今天全店成交{% else %}成交记录{% endif %}</h1>
-    <p class="muted">{% if all_stores %}一页看所有店今天的成交。要查某家店或往日，用右边筛选。{% else %}当天的可以点进去改、再复制；往日的只能查看。号码默认打码。{% endif %}</p>
+    <h1>{% if all_stores %}{% if scope.active %}{{ scope.label }}成交{% else %}今天全店成交{% endif %}{% else %}成交记录{% endif %}</h1>
+    <p class="muted">{% if all_stores %}一页看{% if scope.active %}{{ scope.label }}{% else %}所有店{% endif %}今天的成交。可按地市、区域经理筛，或右边切单店。{% else %}当天的可以点进去改、再复制；往日的只能查看。号码默认打码。{% endif %}</p>
   </div>
   <form method="get" class="page-filters">
     {% if is_admin and stores|length > 1 %}
@@ -14,6 +15,9 @@
       <span>门店</span>
       {{ store_picker(stores, selected=('all' if all_stores else store.id), all_value='all', all_label='全部门店') }}
     </label>
+    {% if all_stores %}
+    {{ scope_filters(scope.cities, scope.managers, city=scope.city, manager=scope.manager) }}
+    {% endif %}
     {% endif %}
     <label class="filter">
       <span>近 N 天</span>
@@ -27,14 +31,14 @@
   </form>
 </div>
 <div class="kpi-row deal-records-kpis">
-  <div class="kpi"><div class="muted">今日{% if all_stores %}全店{% endif %}</div><div class="kpi-num">{{ mine_today.total }}</div><div class="muted">成交 {{ mine_today.closed }}</div></div>
-  <div class="kpi"><div class="muted">本月{% if all_stores %}全店{% endif %}</div><div class="kpi-num">{{ mine_month.total }}</div><div class="muted">成交 {{ mine_month.closed }}</div></div>
+  <div class="kpi"><div class="muted">今日{% if all_stores %}{% if scope.active %} · {{ scope.label }}{% else %}全店{% endif %}{% endif %}</div><div class="kpi-num">{{ mine_today.total }}</div><div class="muted">成交 {{ mine_today.closed }}</div></div>
+  <div class="kpi"><div class="muted">本月{% if all_stores %}{% if scope.active %} · {{ scope.label }}{% else %}全店{% endif %}{% endif %}</div><div class="kpi-num">{{ mine_month.total }}</div><div class="muted">成交 {{ mine_month.closed }}</div></div>
 </div>
 
 <div class="card deal-records">
   {% if is_admin %}
   <div class="records-toolbar">
-    <span class="muted">{% if all_stores %}{{ start.isoformat() }} ~ {{ end.isoformat() }} · 全部门店{% else %}近 {{ days }} 天 · 当前门店{% endif %}</span>
+    <span class="muted">{% if all_stores %}{{ start.isoformat() }} ~ {{ end.isoformat() }} · {{ scope.label }}{% else %}近 {{ days }} 天 · 当前门店{% endif %}</span>
     <a class="btn ghost" href="{{ url_for('deal_export', days=days) }}">导出 Excel</a>
   </div>
   {% endif %}
@@ -85,7 +89,7 @@
       </tbody>
     </table>
   </div>
-  {{ pager(page, pages, total, 'deal_records', label=start.isoformat() + ' ~ ' + end.isoformat(), store_id=('all' if all_stores else store.id), days=days) }}
+  {{ pager(page, pages, total, 'deal_records', label=start.isoformat() + ' ~ ' + end.isoformat(), store_id=('all' if all_stores else store.id), days=days, city=scope.city, area_manager=scope.manager) }}
   {% else %}
   <p class="muted">{% if days == 1 %}今天还没有成交播报。{% else %}近 {{ days }} 天还没有成交播报。{% endif %}</p>
   {% endif %}

@@ -3,9 +3,16 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .db_core import _now, today_local
+
+
+def _store_in(column: str, store_ids: Optional[Sequence[int]]) -> Tuple[str, List[int]]:
+    ids = [int(i) for i in (store_ids or [])]
+    if not ids:
+        return "1=0", []
+    return f"{column} IN ({','.join('?' * len(ids))})", ids
 
 
 def _deal_payload(
@@ -230,20 +237,25 @@ def record_deal_post(
     return new_id
 
 def count_deal_posts(
-    conn: sqlite3.Connection, store_id: Optional[int], start: date, end: date
+    conn: sqlite3.Connection,
+    store_id: Optional[int],
+    start: date,
+    end: date,
+    store_ids: Optional[Sequence[int]] = None,
 ) -> int:
-    if store_id is None:
-        return int(
-            conn.execute(
-                "SELECT COUNT(*) FROM deal_posts WHERE biz_date>=? AND biz_date<=?",
-                (start.isoformat(), end.isoformat()),
-            ).fetchone()[0]
-            or 0
-        )
+    where = ["biz_date>=?", "biz_date<=?"]
+    params: List[Any] = [start.isoformat(), end.isoformat()]
+    if store_id is not None:
+        where.append("store_id=?")
+        params.append(store_id)
+    elif store_ids is not None:
+        clause, ids = _store_in("store_id", store_ids)
+        where.append(clause)
+        params.extend(ids)
     return int(
         conn.execute(
-            "SELECT COUNT(*) FROM deal_posts WHERE store_id=? AND biz_date>=? AND biz_date<=?",
-            (store_id, start.isoformat(), end.isoformat()),
+            f"SELECT COUNT(*) FROM deal_posts WHERE {' AND '.join(where)}",
+            params,
         ).fetchone()[0]
         or 0
     )
@@ -255,36 +267,31 @@ def list_deal_posts(
     end: date,
     limit: int = 50,
     offset: int = 0,
+    store_ids: Optional[Sequence[int]] = None,
 ) -> List[sqlite3.Row]:
-    if store_id is None:
-        return list(
-            conn.execute(
-                """
-                SELECT d.*, st.name AS store_name, st.short_name AS store_short,
-                       u.display_name AS submitter_name
-                FROM deal_posts d
-                JOIN stores st ON st.id = d.store_id
-                LEFT JOIN users u ON u.id = d.user_id
-                WHERE d.biz_date>=? AND d.biz_date<=?
-                ORDER BY d.id DESC
-                LIMIT ? OFFSET ?
-                """,
-                (start.isoformat(), end.isoformat(), limit, offset),
-            )
-        )
+    where = ["d.biz_date>=?", "d.biz_date<=?"]
+    params: List[Any] = [start.isoformat(), end.isoformat()]
+    if store_id is not None:
+        where.append("d.store_id=?")
+        params.append(store_id)
+    elif store_ids is not None:
+        clause, ids = _store_in("d.store_id", store_ids)
+        where.append(clause)
+        params.extend(ids)
+    params.extend([limit, offset])
     return list(
         conn.execute(
-            """
+            f"""
             SELECT d.*, st.name AS store_name, st.short_name AS store_short,
                    u.display_name AS submitter_name
             FROM deal_posts d
             JOIN stores st ON st.id = d.store_id
             LEFT JOIN users u ON u.id = d.user_id
-            WHERE d.store_id=? AND d.biz_date>=? AND d.biz_date<=?
+            WHERE {' AND '.join(where)}
             ORDER BY d.id DESC
             LIMIT ? OFFSET ?
             """,
-            (store_id, start.isoformat(), end.isoformat(), limit, offset),
+            params,
         )
     )
 
