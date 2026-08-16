@@ -5,7 +5,7 @@ from __future__ import annotations
 from flask import flash, redirect, render_template, request, session, url_for
 
 from . import db
-from .helpers import login_required
+from .helpers import default_home, login_required
 
 
 def register_auth(app) -> None:
@@ -23,9 +23,11 @@ def register_auth(app) -> None:
                 if user and db.verify_pin(pin, user["pin_hash"]):
                     session.clear()
                     session["user_id"] = user["id"]
-                    nxt = request.args.get("next") or url_for("today")
+                    nxt = request.args.get("next") or default_home(user)
                     if not nxt.startswith("/") or nxt.startswith("//") or "\\" in nxt:
-                        nxt = url_for("today")
+                        nxt = default_home(user)
+                    if user["role"] == "readonly" and nxt.startswith("/today"):
+                        nxt = default_home(user)
                     return redirect(nxt)
             flash("账号或口令不对", "error")
         return render_template("login.html")
@@ -43,7 +45,7 @@ def register_auth(app) -> None:
     @app.route("/")
     @login_required
     def home():
-        return redirect(url_for("today"))
+        return redirect(default_home())
 
     @app.route("/admin")
     @login_required

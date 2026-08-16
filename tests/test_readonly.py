@@ -104,6 +104,17 @@ def test_readonly_cannot_admin(client):
     assert "保存口令" in settings
 
 
+def test_readonly_login_lands_on_report(client):
+    _mk_readonly(client, username="rd_home", store_code="haimen-jinhua")
+    client.get("/logout")
+    landed = client.post(
+        "/login", data={"username": "rd_home", "pin": "123456"}, follow_redirects=True
+    )
+    assert landed.request.path == "/report"
+    home = client.get("/", follow_redirects=True)
+    assert home.request.path == "/report"
+
+
 def test_admin_still_sees_all(client):
     _mk_readonly(client, username="rd_admin", store_code="haimen-jinhua")
     client.get("/logout")

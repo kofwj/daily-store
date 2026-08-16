@@ -152,9 +152,12 @@ def register_daily(app) -> None:
                 is_today=biz_date == today,
                 filler_month=filler_month,
                 can_edit=(
-                    g.user["role"] == "admin"
-                    or biz_date == today
-                    or (filler_month and biz_date.year == today.year and biz_date.month == today.month)
+                    g.user["role"] != "readonly"
+                    and (
+                        g.user["role"] == "admin"
+                        or biz_date == today
+                        or (filler_month and biz_date.year == today.year and biz_date.month == today.month)
+                    )
                 ),
                 grouped=grouped,
                 report=report,

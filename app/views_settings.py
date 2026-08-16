@@ -68,7 +68,7 @@ def register_settings(app) -> None:
         with db.get_db() as conn:
             if request.method == "POST":
                 action = request.form.get("action")
-                tab = request.form.get("tab") or tab
+                tab = _settings_tab()
                 try:
                     if action == "change_pin":
                         _change_own_pin()

@@ -162,6 +162,7 @@ def register_advance(app) -> None:
             return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
 
     @app.route("/advance/delete", methods=["POST"])
+    @login_required
     @viewer_only
     def advance_delete():
         store_id = request.form.get("store_id") or ""

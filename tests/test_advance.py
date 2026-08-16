@@ -155,6 +155,40 @@ def test_filler_can_save_negative_amount(client):
         assert float(row["broadband"]) == -100
 
 
+def test_anonymous_cannot_delete_advance(client):
+    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+    today = db.today_local().isoformat()
+    client.post(
+        "/advance",
+        data={
+            "store_id": str(sid),
+            "biz_date": today,
+            "phone": "13900006666",
+            "rebate": "10",
+        },
+        follow_redirects=True,
+    )
+    with db.get_db() as conn:
+        aid = conn.execute(
+            "SELECT id FROM advance_posts WHERE phone='13900006666'"
+        ).fetchone()["id"]
+    client.get("/logout")
+    resp = client.post(
+        "/advance/delete",
+        data={"store_id": str(sid), "advance_id": str(aid)},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    assert "/login" in (resp.headers.get("Location") or "")
+    with db.get_db() as conn:
+        n = conn.execute(
+            "SELECT COUNT(*) AS n FROM advance_posts WHERE id=?", (aid,)
+        ).fetchone()["n"]
+        assert n == 1
+
+
 def test_filler_cannot_open_pay_page(client):
     client.post("/login", data={"username": "jinhua", "pin": "123456"})
     r = client.get("/advance/pay", follow_redirects=True)

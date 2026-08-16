@@ -428,8 +428,11 @@ def _expand_user_roles_readonly(conn: sqlite3.Connection) -> None:
             SELECT id, username, display_name, pin_hash, role, '', active, created_at FROM users_old
             """
         )
-    # 重置 sqlite 自增序列，避免新用户 id 撞旧值
+    # 保留自增水位，避免重建后新用户 id 从 1 起重撞旧值
+    max_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM users").fetchone()[0]
     conn.execute("DELETE FROM sqlite_sequence WHERE name='users'")
+    if max_id:
+        conn.execute("INSERT INTO sqlite_sequence(name, seq) VALUES ('users', ?)", (max_id,))
     conn.execute("DROP TABLE users_old")
     conn.execute("PRAGMA foreign_keys=ON")
 

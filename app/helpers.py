@@ -51,6 +51,14 @@ def _compare_digest(a: str, b: str) -> bool:
     return secrets.compare_digest(a, b)
 
 
+def default_home(user=None) -> str:
+    """只读账号没有填报入口，登录后进报表。"""
+    row = user if user is not None else g.user
+    if row is not None and row["role"] == "readonly":
+        return url_for("report")
+    return url_for("today")
+
+
 def login_required(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -68,7 +76,7 @@ def admin_required(fn):
             return redirect(url_for("login", next=request.path))
         if g.user["role"] != "admin":
             flash("需要管理员权限", "error")
-            return redirect(url_for("today"))
+            return redirect(default_home())
         return fn(*args, **kwargs)
 
     return wrapper
@@ -82,7 +90,7 @@ def readonly_required(fn):
             return redirect(url_for("login", next=request.path))
         if g.user["role"] not in ("admin", "readonly"):
             flash("需要管理员或只读权限", "error")
-            return redirect(url_for("today"))
+            return redirect(default_home())
         return fn(*args, **kwargs)
 
     return wrapper
