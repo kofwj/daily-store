@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from flask import flash, redirect, render_template, request, session, url_for
+from flask import flash, g, redirect, render_template, request, session, url_for
 
 from . import db
-from .helpers import default_home, login_required
+from .helpers import client_ip, default_home, login_required
 
 
 def _lock_message(seconds: int) -> str:
@@ -23,7 +23,7 @@ def register_auth(app) -> None:
         if request.method == "POST":
             username = (request.form.get("username") or "").strip()
             pin = request.form.get("pin") or ""
-            ip = (request.remote_addr or "").strip()
+            ip = client_ip()
             with db.get_db() as conn:
                 remaining = db.login_lock_remaining(conn, username, ip)
                 if remaining > 0:
@@ -32,6 +32,7 @@ def register_auth(app) -> None:
                 user = db.get_user_by_username(conn, username)
                 if user and db.verify_pin(pin, user["pin_hash"]):
                     db.clear_login_failures(conn, username, ip)
+                    db.record_auth_event(conn, user=user, action="login", ip=ip)
                     session.clear()
                     session["user_id"] = user["id"]
                     session.permanent = True
@@ -52,6 +53,10 @@ def register_auth(app) -> None:
 
     @app.route("/logout")
     def logout():
+        if g.user is not None:
+            ip = client_ip()
+            with db.get_db() as conn:
+                db.record_auth_event(conn, user=g.user, action="logout", ip=ip)
         session.clear()
         return redirect(url_for("login"))
 

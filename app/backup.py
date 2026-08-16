@@ -112,6 +112,7 @@ def restore_bytes(data: bytes) -> Path:
             had_flag = "must_change_pin" in cols
             db_core._ensure_user_columns(conn)
             db_core._ensure_login_attempts(conn)
+            db_core._ensure_auth_events(conn)
             db_core._ensure_advance_edits(conn)
             if not had_flag:
                 db_core._add_must_change_pin(conn)

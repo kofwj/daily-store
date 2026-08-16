@@ -519,3 +519,49 @@ def register_admin(app) -> None:
                 city=(request.args.get("city") or "").strip(),
             )
         )
+
+    @app.route("/logins")
+    @admin_required
+    def logins_page():
+        days = request.args.get("days", "7")
+        action = request.args.get("action", "all")
+        role = request.args.get("role", "all")
+        q = (request.args.get("q") or "").strip()
+        if action not in ("all", "login", "logout"):
+            action = "all"
+        if role not in ("all", "admin", "filler", "readonly"):
+            role = "all"
+        try:
+            days_int = max(1, min(int(days), 90))
+        except ValueError:
+            days_int = 7
+        cutoff = (datetime.now(db.TZ) - timedelta(days=days_int)).strftime("%Y-%m-%d %H:%M:%S")
+        with db.get_db() as conn:
+            total = db.count_auth_events(
+                conn,
+                cutoff=cutoff,
+                action="" if action == "all" else action,
+                role="" if role == "all" else role,
+                q=q,
+            )
+            page, pages = pagination(request.args.get("page"), total)
+            rows = db.list_auth_events(
+                conn,
+                cutoff=cutoff,
+                action="" if action == "all" else action,
+                role="" if role == "all" else role,
+                q=q,
+                limit=50,
+                offset=(page - 1) * 50,
+            )
+        return render_template(
+            "logins.html",
+            rows=rows,
+            days=days_int,
+            action=action,
+            role=role,
+            q=q,
+            page=page,
+            pages=pages,
+            total=total,
+        )

@@ -177,6 +177,7 @@ MIGRATIONS: List[Tuple[int, str, callable]] = [
     (5, "add_advance_edits", "_ensure_advance_edits"),
     (6, "audit_edited_at_indexes", "_ensure_audit_edited_at_indexes"),
     (7, "advance_amounts_to_cents", "_advance_amounts_to_cents"),
+    (8, "add_auth_events", "_ensure_auth_events"),
 ]
 
 def _now() -> str:
@@ -230,6 +231,7 @@ def init_db() -> None:
         _ensure_advance_edits(conn)
         _ensure_app_meta(conn)
         _ensure_login_attempts(conn)
+        _ensure_auth_events(conn)
         # 种子（建表/加列/回填默认）每次幂等执行即可；真正“动数据”的迁移走 migrate() 一次
         _seed_metrics(conn)
         _seed_kpi_targets(conn)
@@ -262,6 +264,7 @@ def migrate() -> None:
             "_ensure_advance_edits": _ensure_advance_edits,
             "_ensure_audit_edited_at_indexes": _ensure_audit_edited_at_indexes,
             "_advance_amounts_to_cents": _advance_amounts_to_cents,
+            "_ensure_auth_events": _ensure_auth_events,
         }
         for version, name, fn_name in sorted(MIGRATIONS):
             if version in applied:
@@ -541,6 +544,106 @@ def _expand_user_roles_readonly(conn: sqlite3.Connection) -> None:
         conn.execute("INSERT INTO sqlite_sequence(name, seq) VALUES ('users', ?)", (max_id,))
     conn.execute("DROP TABLE users_old")
     conn.execute("PRAGMA foreign_keys=ON")
+
+
+AUTH_EVENT_KEEP_DAYS = 90
+
+
+def _ensure_auth_events(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS auth_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT NOT NULL DEFAULT '',
+            display_name TEXT NOT NULL DEFAULT '',
+            role TEXT NOT NULL DEFAULT '',
+            action TEXT NOT NULL DEFAULT 'login',
+            ip TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_auth_events_created ON auth_events(created_at DESC, id DESC)"
+    )
+
+
+def record_auth_event(
+    conn: sqlite3.Connection,
+    *,
+    user,
+    action: str,
+    ip: str = "",
+) -> None:
+    _ensure_auth_events(conn)
+    name = ""
+    display = ""
+    role = ""
+    uid = None
+    if user is not None:
+        uid = int(user["id"])
+        name = user["username"] or ""
+        display = user["display_name"] or ""
+        role = user["role"] or ""
+    conn.execute(
+        """
+        INSERT INTO auth_events(user_id, username, display_name, role, action, ip, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (uid, name, display, role, action, (ip or "").strip()[:80], _now()),
+    )
+    cutoff = (datetime.now(TZ) - timedelta(days=AUTH_EVENT_KEEP_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("DELETE FROM auth_events WHERE created_at < ?", (cutoff,))
+
+
+def count_auth_events(
+    conn: sqlite3.Connection,
+    *,
+    cutoff: str,
+    action: str = "",
+    role: str = "",
+    q: str = "",
+) -> int:
+    where, params = _auth_event_where(cutoff, action, role, q)
+    return int(conn.execute(f"SELECT COUNT(*) FROM auth_events WHERE {where}", params).fetchone()[0] or 0)
+
+
+def list_auth_events(
+    conn: sqlite3.Connection,
+    *,
+    cutoff: str,
+    action: str = "",
+    role: str = "",
+    q: str = "",
+    limit: int = 50,
+    offset: int = 0,
+) -> List[sqlite3.Row]:
+    where, params = _auth_event_where(cutoff, action, role, q)
+    params.extend([limit, offset])
+    return list(
+        conn.execute(
+            f"SELECT * FROM auth_events WHERE {where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+            params,
+        )
+    )
+
+
+def _auth_event_where(cutoff: str, action: str, role: str, q: str) -> Tuple[str, List]:
+    where = ["created_at >= ?"]
+    params: List = [cutoff]
+    if action in ("login", "logout"):
+        where.append("action=?")
+        params.append(action)
+    if role in ("admin", "filler", "readonly"):
+        where.append("role=?")
+        params.append(role)
+    text = (q or "").strip()
+    if text:
+        where.append("(username LIKE ? OR display_name LIKE ? OR ip LIKE ?)")
+        like = f"%{text}%"
+        params.extend([like, like, like])
+    return " AND ".join(where), params
 
 
 def _ensure_login_attempts(conn: sqlite3.Connection) -> None:

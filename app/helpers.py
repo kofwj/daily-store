@@ -73,6 +73,11 @@ def default_home(user=None) -> str:
     return url_for("today")
 
 
+def client_ip() -> str:
+    """优先用反代传来的真实 IP；没开 TRUST_PROXY 时就是 remote_addr。"""
+    return (request.remote_addr or "").strip()
+
+
 def login_required(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):

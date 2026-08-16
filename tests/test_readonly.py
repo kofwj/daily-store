@@ -95,6 +95,7 @@ def test_readonly_cannot_admin(client):
         ("/board", "多店看板"),
         ("/incentive", "月度考核"),
         ("/edits", "修改审计"),
+        ("/logins", "登录日志"),
         ("/advance/pay", "垫资兑付"),
     ):
         resp = client.get(path, follow_redirects=True)

@@ -100,6 +100,26 @@ def test_restore_rejects_sqlite_without_core_tables(tmp_db):
         assert "缺表" in str(exc)
 
 
+def test_successful_login_and_logout_are_logged(client):
+    client.post("/login", data={"username": "admin", "pin": "1234"})
+    with db.get_db() as conn:
+        rows = conn.execute(
+            "SELECT action, username, role FROM auth_events ORDER BY id"
+        ).fetchall()
+    assert [r["action"] for r in rows] == ["login"]
+    assert rows[0]["username"] == "admin"
+    page = client.get("/logins").get_data(as_text=True)
+    assert "登录日志" in page
+    assert "admin" in page
+    client.get("/logout", follow_redirects=True)
+    with db.get_db() as conn:
+        actions = [r["action"] for r in conn.execute("SELECT action FROM auth_events ORDER BY id")]
+    assert actions == ["login", "logout"]
+    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    blocked = client.get("/logins", follow_redirects=True)
+    assert "需要管理员权限" in blocked.get_data(as_text=True)
+
+
 def test_session_lasts_24_hours(tmp_db):
     app = create_app()
     app.config["TESTING"] = True
