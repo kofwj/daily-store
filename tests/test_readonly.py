@@ -21,6 +21,7 @@ def _mk_readonly(client, *, username, scope="", store_code=""):
             store_ids=store_ids,
             scope=scope,
         )
+        conn.execute("UPDATE users SET must_change_pin=0 WHERE username=?", (username,))
     client.post("/login", data={"username": username, "pin": "123456"}, follow_redirects=True)
 
 

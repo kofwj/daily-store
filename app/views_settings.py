@@ -20,6 +20,8 @@ def _settings_tab() -> str:
         return "account"
     if g.user["role"] != "admin" and tab != "account":
         return "account"
+    if int(g.user["must_change_pin"] or 0) and tab != "account":
+        return "account"
     return tab
 
 
@@ -39,6 +41,8 @@ def _change_own_pin() -> None:
         raise ValueError(f"新口令至少 {min_len} 位")
     if new != again:
         raise ValueError("两次新口令不一致")
+    if db.is_weak_new_pin(new):
+        raise ValueError("新口令不能再用系统默认口令")
     if not db.verify_pin(old, g.user["pin_hash"]):
         raise ValueError("当前口令不对")
     with db.get_db() as conn:
@@ -74,6 +78,8 @@ def register_settings(app) -> None:
                         _change_own_pin()
                         flash("口令已改，下次用新口令登录", "ok")
                         return redirect(url_for("settings", tab="account"))
+                    if int(g.user["must_change_pin"] or 0):
+                        raise ValueError("请先改掉默认口令")
                     if g.user["role"] != "admin":
                         raise ValueError("需要管理员权限")
                     if action == "add_store":

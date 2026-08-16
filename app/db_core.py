@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from contextlib import contextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from hashlib import pbkdf2_hmac
 from pathlib import Path
 from secrets import token_hex
@@ -33,7 +33,15 @@ ADMIN_PIN_MIN = 4
 
 DEFAULT_FILLER_PIN = "123456"
 
+DEFAULT_ADMIN_PIN = "1234"
+
+DEFAULT_PINS = frozenset({DEFAULT_ADMIN_PIN, DEFAULT_FILLER_PIN})
+
 FILLER_PIN_RESET_KEY = "filler_default_pin_v1"
+
+LOGIN_FAIL_LIMIT = 5
+
+LOGIN_LOCK_SECONDS = 15 * 60
 
 TZ = ZoneInfo("Asia/Shanghai")
 
@@ -70,6 +78,7 @@ CREATE TABLE IF NOT EXISTS users (
     pin_hash TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('admin', 'filler', 'readonly')),
     scope TEXT NOT NULL DEFAULT '',
+    must_change_pin INTEGER NOT NULL DEFAULT 0,
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
 );
@@ -149,6 +158,13 @@ CREATE TABLE IF NOT EXISTS deal_posts (
     text TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_deal_posts_store_date ON deal_posts(store_id, biz_date);
+
+CREATE TABLE IF NOT EXISTS login_attempts (
+    key TEXT PRIMARY KEY,
+    fail_count INTEGER NOT NULL DEFAULT 0,
+    locked_until TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
 """
 
 MIGRATIONS: List[Tuple[int, str, callable]] = [
@@ -156,6 +172,7 @@ MIGRATIONS: List[Tuple[int, str, callable]] = [
     (1, "retire_legacy_coin_cut", "_retire_legacy_coin_cut"),
     (2, "split_new_user_coin_cut", "_split_new_user_coin_cut"),
     (3, "expand_user_roles_readonly", "_expand_user_roles_readonly"),
+    (4, "add_must_change_pin", "_add_must_change_pin"),
 ]
 
 def _now() -> str:
@@ -207,6 +224,7 @@ def init_db() -> None:
         _ensure_deal_edits(conn)
         _ensure_advance_posts(conn)
         _ensure_app_meta(conn)
+        _ensure_login_attempts(conn)
         # 种子（建表/加列/回填默认）每次幂等执行即可；真正“动数据”的迁移走 migrate() 一次
         _seed_metrics(conn)
         _seed_kpi_targets(conn)
@@ -235,6 +253,7 @@ def migrate() -> None:
             "_retire_legacy_coin_cut": _retire_legacy_coin_cut,
             "_split_new_user_coin_cut": _split_new_user_coin_cut,
             "_expand_user_roles_readonly": _expand_user_roles_readonly,
+            "_add_must_change_pin": _add_must_change_pin,
         }
         for version, name, fn_name in sorted(MIGRATIONS):
             if version in applied:
@@ -276,9 +295,15 @@ def _ensure_store_columns(conn: sqlite3.Connection) -> None:
 
 def _ensure_user_columns(conn: sqlite3.Connection) -> None:
     cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
-    if "scope" not in cols:
+    extra = {
+        "scope": "TEXT NOT NULL DEFAULT ''",
+        "must_change_pin": "INTEGER NOT NULL DEFAULT 0",
+    }
+    for name, ddl in extra.items():
+        if name in cols:
+            continue
         try:
-            conn.execute("ALTER TABLE users ADD COLUMN scope TEXT NOT NULL DEFAULT ''")
+            conn.execute(f"ALTER TABLE users ADD COLUMN {name} {ddl}")
         except sqlite3.OperationalError as exc:
             if "duplicate column" not in str(exc).lower():
                 raise
@@ -409,12 +434,21 @@ def _expand_user_roles_readonly(conn: sqlite3.Connection) -> None:
             pin_hash TEXT NOT NULL,
             role TEXT NOT NULL CHECK (role IN ('admin', 'filler', 'readonly')),
             scope TEXT NOT NULL DEFAULT '',
+            must_change_pin INTEGER NOT NULL DEFAULT 0,
             active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL
         )
         """
     )
-    if exists_scope:
+    has_must = "must_change_pin" in cols
+    if exists_scope and has_must:
+        conn.execute(
+            """
+            INSERT INTO users(id, username, display_name, pin_hash, role, scope, must_change_pin, active, created_at)
+            SELECT id, username, display_name, pin_hash, role, scope, must_change_pin, active, created_at FROM users_old
+            """
+        )
+    elif exists_scope:
         conn.execute(
             """
             INSERT INTO users(id, username, display_name, pin_hash, role, scope, active, created_at)
@@ -435,6 +469,116 @@ def _expand_user_roles_readonly(conn: sqlite3.Connection) -> None:
         conn.execute("INSERT INTO sqlite_sequence(name, seq) VALUES ('users', ?)", (max_id,))
     conn.execute("DROP TABLE users_old")
     conn.execute("PRAGMA foreign_keys=ON")
+
+
+def _ensure_login_attempts(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS login_attempts (
+            key TEXT PRIMARY KEY,
+            fail_count INTEGER NOT NULL DEFAULT 0,
+            locked_until TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+
+def _add_must_change_pin(conn: sqlite3.Connection) -> None:
+    """给已有账号补改密标记：还是默认口令的，下次登录必须改。"""
+    _ensure_user_columns(conn)
+    rows = conn.execute(
+        "SELECT id, pin_hash FROM users WHERE must_change_pin=0"
+    ).fetchall()
+    for row in rows:
+        if pin_is_default(row["pin_hash"]):
+            conn.execute("UPDATE users SET must_change_pin=1 WHERE id=?", (row["id"],))
+
+
+def pin_is_default(stored: str) -> bool:
+    return any(verify_pin(pin, stored) for pin in DEFAULT_PINS)
+
+
+def is_weak_new_pin(pin: str) -> bool:
+    return pin in DEFAULT_PINS
+
+
+def _login_keys(username: str, ip: str) -> List[str]:
+    name = (username or "").strip().lower() or "-"
+    addr = (ip or "").strip() or "-"
+    return [f"user:{name}", f"ip:{addr}"]
+
+
+def login_lock_remaining(conn: sqlite3.Connection, username: str, ip: str) -> int:
+    """还在冷却的秒数；0 表示可以继续试。"""
+    now = datetime.now(TZ)
+    remaining = 0
+    for key in _login_keys(username, ip):
+        row = conn.execute(
+            "SELECT locked_until FROM login_attempts WHERE key=?", (key,)
+        ).fetchone()
+        if not row or not row["locked_until"]:
+            continue
+        try:
+            until = datetime.strptime(row["locked_until"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ)
+        except ValueError:
+            continue
+        left = int((until - now).total_seconds())
+        if left > remaining:
+            remaining = left
+    return remaining
+
+
+def record_login_failure(conn: sqlite3.Connection, username: str, ip: str) -> int:
+    """记一次失败，满 5 次锁 15 分钟。返回剩余冷却秒数。"""
+    now = datetime.now(TZ)
+    remaining = 0
+    for key in _login_keys(username, ip):
+        row = conn.execute(
+            "SELECT fail_count, locked_until FROM login_attempts WHERE key=?", (key,)
+        ).fetchone()
+        count = int(row["fail_count"] or 0) + 1 if row else 1
+        locked_until = ""
+        if row and row["locked_until"]:
+            try:
+                until = datetime.strptime(row["locked_until"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ)
+                if until > now:
+                    locked_until = row["locked_until"]
+                    count = max(count, LOGIN_FAIL_LIMIT)
+                else:
+                    count = 1
+            except ValueError:
+                pass
+        if count >= LOGIN_FAIL_LIMIT and not locked_until:
+            locked_until = (now + timedelta(seconds=LOGIN_LOCK_SECONDS)).strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute(
+            """
+            INSERT INTO login_attempts(key, fail_count, locked_until, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                fail_count=excluded.fail_count,
+                locked_until=excluded.locked_until,
+                updated_at=excluded.updated_at
+            """,
+            (key, count, locked_until, _now()),
+        )
+        if locked_until:
+            try:
+                until = datetime.strptime(locked_until, "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ)
+                left = int((until - now).total_seconds())
+                if left > remaining:
+                    remaining = left
+            except ValueError:
+                remaining = max(remaining, LOGIN_LOCK_SECONDS)
+    return remaining
+
+
+def clear_login_failures(conn: sqlite3.Connection, username: str, ip: str) -> None:
+    keys = _login_keys(username, ip)
+    conn.execute(
+        f"DELETE FROM login_attempts WHERE key IN ({','.join('?' * len(keys))})",
+        keys,
+    )
 
 
 def _ensure_app_meta(conn: sqlite3.Connection) -> None:
@@ -464,7 +608,10 @@ def _reset_filler_pins_once(conn: sqlite3.Connection) -> None:
     if done:
         return
     hashed = hash_pin(DEFAULT_FILLER_PIN)
-    conn.execute("UPDATE users SET pin_hash=? WHERE role='filler'", (hashed,))
+    conn.execute(
+        "UPDATE users SET pin_hash=?, must_change_pin=1 WHERE role='filler'",
+        (hashed,),
+    )
     conn.execute(
         "INSERT INTO app_meta(key, value) VALUES (?, ?)",
         (FILLER_PIN_RESET_KEY, _now()),
@@ -731,10 +878,10 @@ def _seed_defaults(conn: sqlite3.Connection) -> None:
     if admin is None:
         conn.execute(
             """
-            INSERT INTO users(username, display_name, pin_hash, role, active, created_at)
-            VALUES (?, ?, ?, 'admin', 1, ?)
+            INSERT INTO users(username, display_name, pin_hash, role, must_change_pin, active, created_at)
+            VALUES (?, ?, ?, 'admin', 1, 1, ?)
             """,
-            ("admin", "管理员", hash_pin("1234"), _now()),
+            ("admin", "管理员", hash_pin(DEFAULT_ADMIN_PIN), _now()),
         )
         admin_id = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
     else:
@@ -762,8 +909,8 @@ def _seed_store_fillers(conn: sqlite3.Connection) -> None:
         if existing is None:
             conn.execute(
                 """
-                INSERT INTO users(username, display_name, pin_hash, role, active, created_at)
-                VALUES (?, ?, ?, 'filler', 1, ?)
+                INSERT INTO users(username, display_name, pin_hash, role, must_change_pin, active, created_at)
+                VALUES (?, ?, ?, 'filler', 1, 1, ?)
                 """,
                 (username, display, hash_pin(DEFAULT_FILLER_PIN), _now()),
             )
@@ -984,12 +1131,13 @@ def create_user(
 ) -> int:
     if role not in ("admin", "filler", "readonly"):
         raise ValueError("role")
+    must_change = 1 if is_weak_new_pin(pin) else 0
     conn.execute(
         """
-        INSERT INTO users(username, display_name, pin_hash, role, scope, active, created_at)
-        VALUES (?, ?, ?, ?, ?, 1, ?)
+        INSERT INTO users(username, display_name, pin_hash, role, scope, must_change_pin, active, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 1, ?)
         """,
-        (username.strip(), display_name.strip(), hash_pin(pin), role, scope.strip(), _now()),
+        (username.strip(), display_name.strip(), hash_pin(pin), role, scope.strip(), must_change, _now()),
     )
     user_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
     for store_id in store_ids:
@@ -1003,7 +1151,11 @@ def set_user_scope(conn: sqlite3.Connection, user_id: int, scope: str) -> None:
     conn.execute("UPDATE users SET scope=? WHERE id=?", (scope.strip(), user_id))
 
 def update_user_pin(conn: sqlite3.Connection, user_id: int, pin: str) -> None:
-    conn.execute("UPDATE users SET pin_hash=? WHERE id=?", (hash_pin(pin), user_id))
+    must_change = 1 if is_weak_new_pin(pin) else 0
+    conn.execute(
+        "UPDATE users SET pin_hash=?, must_change_pin=? WHERE id=?",
+        (hash_pin(pin), must_change, user_id),
+    )
 
 def set_user_stores(conn: sqlite3.Connection, user_id: int, store_ids: Iterable[int]) -> None:
     conn.execute("DELETE FROM user_stores WHERE user_id=?", (user_id,))

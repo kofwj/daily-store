@@ -12,6 +12,7 @@ from . import db_core
 BACKUP_DIR_NAME = "backups"
 BACKUP_PREFIX = "store_daily_"
 MAX_KEEP = 20
+REQUIRED_TABLES = ("stores", "users")
 
 
 def backup_dir() -> Path:
@@ -75,7 +76,13 @@ def restore_bytes(data: bytes) -> Path:
     try:
         probe = sqlite3.connect(str(tmp))
         try:
-            probe.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchone()
+            names = {
+                row[0]
+                for row in probe.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            missing = [name for name in REQUIRED_TABLES if name not in names]
+            if missing:
+                raise ValueError("备份里缺表：" + "、".join(missing))
         finally:
             probe.close()
         dest = Path(db_core.DB_PATH)
@@ -87,6 +94,14 @@ def restore_bytes(data: bytes) -> Path:
         finally:
             dst.close()
             src.close()
+        # 旧备份可能缺新列/表，恢复后补上，避免当场把登录打挂
+        with db_core.get_db() as conn:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+            had_flag = "must_change_pin" in cols
+            db_core._ensure_user_columns(conn)
+            db_core._ensure_login_attempts(conn)
+            if not had_flag:
+                db_core._add_must_change_pin(conn)
     finally:
         try:
             tmp.unlink()

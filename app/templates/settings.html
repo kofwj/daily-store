@@ -14,7 +14,7 @@
       <span class="settings-nav-label">个人</span>
       <a href="{{ url_for('settings', tab='account') }}" class="{{ 'active' if tab=='account' else '' }}">账号</a>
     </div>
-    {% if g.user['role'] == 'admin' %}
+    {% if g.user['role'] == 'admin' and not g.user['must_change_pin'] %}
     <div class="settings-nav-group">
       <span class="settings-nav-label">组织</span>
       <a href="{{ url_for('settings', tab='stores') }}" class="{{ 'active' if tab=='stores' else '' }}">组织</a>
@@ -37,7 +37,7 @@
     {% if tab == 'account' %}
     <div class="settings-page-head">
       <h1>账号</h1>
-      <p class="muted">登录身份和口令。口令只保存在本机，改完下次用新口令登。</p>
+      <p class="muted">{% if g.user['must_change_pin'] %}还在用系统默认口令，先改成自己的再继续用。{% else %}登录身份和口令。口令只保存在本机，改完下次用新口令登。{% endif %}</p>
     </div>
     <div class="card settings-card">
       <div class="settings-card-head">
@@ -65,7 +65,7 @@
     <div class="card settings-card">
       <div class="settings-card-head">
         <h2>改口令</h2>
-        <p class="muted">填报员至少 6 位，管理员至少 4 位。</p>
+        <p class="muted">{% if g.user['must_change_pin'] %}默认口令必须改掉，也不能改回 1234 / 123456。{% else %}填报员至少 6 位，管理员至少 4 位。{% endif %}</p>
       </div>
       <form method="post" class="settings-form">
         <input type="hidden" name="action" value="change_pin">

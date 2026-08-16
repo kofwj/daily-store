@@ -16,14 +16,14 @@ from __future__ import annotations
 
 import os
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import Flask, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import db
 from .errors import register_errors
-from .helpers import csrf_protect, load_user
+from .helpers import csrf_protect, load_user, pin_change_required
 from .views_admin import register_admin
 from .views_advance import register_advance
 from .views_auth import register_auth
@@ -44,6 +44,8 @@ def create_app() -> Flask:
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_SECURE"] = secure
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=24)
+    app.config["SESSION_REFRESH_EACH_REQUEST"] = True
     app.config["PREFERRED_URL_SCHEME"] = "https" if secure else "http"
     app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
@@ -53,6 +55,7 @@ def create_app() -> Flask:
 
     app.before_request(load_user)
     app.before_request(csrf_protect)
+    app.before_request(pin_change_required)
 
     @app.context_processor
     def inject_now():

@@ -31,6 +31,20 @@ def load_user() -> None:
         g.user = row
 
 
+def pin_change_required():
+    """还是默认口令的账号，只能去改口令或退出。"""
+    if g.user is None:
+        return None
+    keys = g.user.keys()
+    if "must_change_pin" not in keys or not int(g.user["must_change_pin"] or 0):
+        return None
+    endpoint = request.endpoint or ""
+    if endpoint in {"settings", "logout", "login", "health", "static"}:
+        return None
+    flash("请先改掉默认口令，再继续使用", "error")
+    return redirect(url_for("settings", tab="account"))
+
+
 def csrf_protect():
     """非安全方法必须有合法 CSRF token。测试环境（TESTING）关闭。"""
     if current_app.config.get("TESTING"):

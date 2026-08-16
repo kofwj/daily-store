@@ -23,6 +23,9 @@ def tmp_db(tmp_path, monkeypatch):
     monkeypatch.setattr(db_core, "DATA_DIR", Path(tmp_path))
     monkeypatch.setattr(db, "is_locked", lambda *a, **k: False)
     db.init_db()
+    # 种子账号仍是默认口令；正式环境会强制改密，测试里先放开以免打挂现有用例
+    with db.get_db() as conn:
+        conn.execute("UPDATE users SET must_change_pin=0")
     return path
 
 
