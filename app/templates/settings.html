@@ -5,7 +5,7 @@
 <div class="page-head settings-head">
   <div class="page-title">
     <h1>设置</h1>
-    <p class="muted">{% if g.user['role'] == 'admin' %}账号、组织、业务规则和备份{% else %}改自己的登录口令{% endif %}</p>
+    <p class="muted">{% if g.user['role'] == 'admin' %}账号、门店、业务规则和备份{% else %}改自己的登录口令{% endif %}</p>
   </div>
 </div>
 <div class="settings">
@@ -16,8 +16,9 @@
     </div>
     {% if g.user['role'] == 'admin' and not g.user['must_change_pin'] %}
     <div class="settings-nav-group">
-      <span class="settings-nav-label">组织</span>
-      <a href="{{ url_for('settings', tab='stores') }}" class="{{ 'active' if tab=='stores' else '' }}">组织</a>
+      <span class="settings-nav-label">管理</span>
+      <a href="{{ url_for('settings', tab='people') }}" class="{{ 'active' if tab=='people' else '' }}">账户</a>
+      <a href="{{ url_for('settings', tab='stores') }}" class="{{ 'active' if tab=='stores' else '' }}">门店</a>
     </div>
     <div class="settings-nav-group">
       <span class="settings-nav-label">业务</span>
@@ -78,10 +79,202 @@
     </div>
     {% endif %}
 
+    {% if tab == 'people' and g.user['role'] == 'admin' %}
+    <div class="settings-page-head">
+      <h1>账户</h1>
+      <p class="muted">谁能登录、看哪家店。门店档案去「门店」页改。</p>
+    </div>
+    <div class="card settings-card people-card">
+      <div class="people-toolbar toolbar">
+        <label class="people-search">
+          <span class="sr-only">搜索账号</span>
+          <input type="search" id="peopleFilter" placeholder="搜姓名、账号、门店" autocomplete="off">
+        </label>
+        <label class="people-filter">
+          <span class="sr-only">按角色筛</span>
+          <select id="peopleRole">
+            <option value="">全部角色</option>
+            <option value="admin">管理员</option>
+            <option value="filler">填报员</option>
+            <option value="manager">店长</option>
+            <option value="area">区域经理</option>
+          </select>
+        </label>
+        <span class="muted" id="peopleCount">{{ people|length + 1 }} 人</span>
+      </div>
+      <div class="table-wrap">
+        <table class="people-table">
+          <thead>
+            <tr>
+              <th>成员</th>
+              <th>角色</th>
+              <th>可见范围</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="people-row" data-text="{{ g.user.display_name }} {{ g.user.username }} 管理员" data-role="admin">
+              <td class="people-identity">
+                <strong>{{ g.user.display_name }}</strong>
+                <span class="people-sub"><code>{{ g.user.username }}</code></span>
+              </td>
+              <td><span class="role-chip admin">管理员</span></td>
+              <td class="muted">全部门店</td>
+              <td>使用中</td>
+              <td class="muted">当前登录</td>
+            </tr>
+            {% for p in people %}
+            {% set u = p.user %}
+            {% set kind = 'area' if u.role == 'readonly' and (u.scope or '')|trim else ('manager' if u.role == 'readonly' else u.role) %}
+            <tr class="people-row {{ 'off' if not u.active else '' }}" data-text="{{ u.display_name }} {{ u.username }} {{ p.store_label }}" data-role="{{ kind }}">
+              <td class="people-identity">
+                <strong>{{ u.display_name }}</strong>
+                <span class="people-sub"><code>{{ u.username }}</code></span>
+              </td>
+              <td>
+                {% if kind == 'area' %}<span class="role-chip view">区域经理</span>
+                {% elif kind == 'manager' %}<span class="role-chip view">店长</span>
+                {% else %}<span class="role-chip fill">填报员</span>{% endif %}
+              </td>
+              <td>
+                {% if kind == 'area' %}
+                <form method="post" class="inline-store">
+                  <input type="hidden" name="action" value="set_stores">
+                  <input type="hidden" name="tab" value="people">
+                  <input type="hidden" name="user_id" value="{{ u.id }}">
+                  <input type="hidden" name="bind" value="area">
+                  <input name="scope" value="{{ u.scope }}" placeholder="区域经理姓名" autocomplete="off" class="area-scope">
+                  <button class="ghost" type="submit">保存</button>
+                </form>
+                {% else %}
+                <form method="post" class="inline-store">
+                  <input type="hidden" name="action" value="set_stores">
+                  <input type="hidden" name="tab" value="people">
+                  <input type="hidden" name="user_id" value="{{ u.id }}">
+                  <select name="store_ids" onchange="this.form.submit()">
+                    <option value="">未分配</option>
+                    {% for s in stores %}
+                    <option value="{{ s.id }}" {% if p.store_id == s.id %}selected{% endif %}>{{ store_label(s) }}</option>
+                    {% endfor %}
+                  </select>
+                </form>
+                {% endif %}
+              </td>
+              <td>{% if u.active %}使用中{% else %}已停用{% endif %}</td>
+              <td>
+                <div class="org-person-actions">
+                  <form method="post" class="inline-reset">
+                    <input type="hidden" name="action" value="reset_pin">
+                    <input type="hidden" name="tab" value="people">
+                    <input type="hidden" name="user_id" value="{{ u.id }}">
+                    <input name="pin" type="password" inputmode="numeric" placeholder="{{ '6 位' if u.role == 'filler' else '至少 4 位' }}" minlength="{{ 6 if u.role == 'filler' else 4 }}" required>
+                    <button class="ghost" type="submit">重置口令</button>
+                  </form>
+                  {% if u.id != g.user.id %}
+                  <form method="post">
+                    <input type="hidden" name="action" value="toggle_user">
+                    <input type="hidden" name="tab" value="people">
+                    <input type="hidden" name="user_id" value="{{ u.id }}">
+                    <input type="hidden" name="active" value="{{ 0 if u.active else 1 }}">
+                    <button class="ghost" type="submit">{{ '停用' if u.active else '启用' }}</button>
+                  </form>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="muted" id="peopleEmpty" hidden>没有匹配的账号</p>
+    </div>
+    <div class="card settings-card">
+      <div class="settings-card-head">
+        <h2>添加账号</h2>
+        <p class="muted">账号用姓名全拼。店长看一家店，区域经理按姓名看整片区。</p>
+      </div>
+      <form method="post" class="org-add-user" id="addUserForm">
+        <input type="hidden" name="action" value="add_user">
+        <input type="hidden" name="tab" value="people">
+        <div class="add-user-grid">
+          <p>
+            <label>角色</label>
+            <select name="role" id="addRole">
+              <option value="filler">填报员</option>
+              <option value="manager">店长（只读）</option>
+              <option value="area">区域经理（只读）</option>
+            </select>
+          </p>
+          <p><label>账号（姓名全拼）</label><input name="username" required placeholder="zhangsan" autocomplete="off"></p>
+          <p><label>显示名</label><input name="display_name" required placeholder="张三" autocomplete="off"></p>
+          <p><label>口令</label><input name="pin" type="password" inputmode="numeric" required minlength="6" placeholder="至少 6 位"></p>
+        </div>
+        <div id="addStoreField">
+          <p>
+            <label>所属门店</label>
+            <select name="store_ids">
+              <option value="">先选一家店</option>
+              {% for s in stores %}
+              <option value="{{ s.id }}">{{ store_label(s) }}</option>
+              {% endfor %}
+            </select>
+          </p>
+        </div>
+        <div id="addAreaField" hidden>
+          <p>
+            <label>区域经理姓名</label>
+            <input name="scope" placeholder="如 黄雍青、赵家才" autocomplete="off">
+            <input type="hidden" name="bind" value="area">
+          </p>
+        </div>
+        <div class="toolbar"><button type="submit">添加账号</button></div>
+      </form>
+    </div>
+    <script>
+    (function () {
+      var q = document.getElementById('peopleFilter');
+      var role = document.getElementById('peopleRole');
+      var empty = document.getElementById('peopleEmpty');
+      var count = document.getElementById('peopleCount');
+      function syncFilter() {
+        var text = ((q && q.value) || '').trim().toLowerCase();
+        var kind = (role && role.value) || '';
+        var shown = 0;
+        document.querySelectorAll('.people-row').forEach(function (row) {
+          var hitText = !text || (row.getAttribute('data-text') || '').toLowerCase().indexOf(text) !== -1;
+          var hitRole = !kind || row.getAttribute('data-role') === kind;
+          var hit = hitText && hitRole;
+          row.hidden = !hit;
+          if (hit) shown += 1;
+        });
+        if (empty) empty.hidden = shown !== 0;
+        if (count) count.textContent = shown + ' 人';
+      }
+      if (q) q.addEventListener('input', syncFilter);
+      if (role) role.addEventListener('change', syncFilter);
+      var addRole = document.getElementById('addRole');
+      var storeField = document.getElementById('addStoreField');
+      var areaField = document.getElementById('addAreaField');
+      if (addRole && storeField && areaField) {
+        var bind = areaField.querySelector('[name="bind"]');
+        function syncRole() {
+          var isArea = addRole.value === 'area';
+          storeField.hidden = isArea;
+          areaField.hidden = !isArea;
+          if (bind) bind.disabled = !isArea;
+        }
+        addRole.addEventListener('change', syncRole);
+        syncRole();
+      }
+    })();
+    </script>
+    {% endif %}
+
     {% if tab == 'stores' and g.user['role'] == 'admin' %}
     <div class="settings-page-head">
-      <h1>组织</h1>
-      <p class="muted">左边选店，右边改档案和本店账号。顾问写姓名走「AI+新用户直降≥10」，空着走双破 0。</p>
+      <h1>门店</h1>
+      <p class="muted">改店档、考核口径和顾问。账号去「账户」页管。</p>
     </div>
     <div class="stores-desk">
       <aside class="store-list card" id="storeList">
@@ -176,106 +369,6 @@
           </div>
           <div class="toolbar"><button type="submit">保存这家店</button></div>
         </form>
-        {% set store_people = people_by_store.get(current_store.id, []) %}
-        {% set store_areas = area_by_store.get(current_store.id, []) %}
-        <section class="org-people">
-          <div class="settings-card-head">
-            <div>
-              <h3>本店账号</h3>
-              <p class="muted">填报员和店长挂在这家店；区域经理按区域经理姓名匹配。</p>
-            </div>
-          </div>
-          {% if store_people or store_areas %}
-          <ul class="org-people-list">
-            {% for p in store_people %}
-            {% set u = p.user %}
-            <li class="org-person {{ 'off' if not u.active else '' }}">
-              <div class="org-person-main">
-                <strong>{{ u.display_name }}</strong>
-                <span class="people-sub"><code>{{ u.username }}</code>
-                  {% if u.role == 'readonly' %}<span class="role-chip view">店长(只读)</span>
-                  {% else %}<span class="role-chip fill">填报员</span>{% endif %}{% if not u.active %} · 已停用{% endif %}
-                </span>
-              </div>
-              <div class="org-person-actions">
-                <form method="post" class="inline-reset">
-                  <input type="hidden" name="action" value="reset_pin">
-                  <input type="hidden" name="tab" value="stores">
-                  <input type="hidden" name="back_store_id" value="{{ current_store.id }}">
-                  <input type="hidden" name="user_id" value="{{ u.id }}">
-                  <input name="pin" type="password" inputmode="numeric" placeholder="{{ '6 位' if u.role == 'filler' else '至少 4 位' }}" minlength="{{ 6 if u.role == 'filler' else 4 }}" required>
-                  <button class="ghost" type="submit">重置</button>
-                </form>
-                {% if u.id != g.user.id %}
-                <form method="post">
-                  <input type="hidden" name="action" value="toggle_user">
-                  <input type="hidden" name="tab" value="stores">
-                  <input type="hidden" name="back_store_id" value="{{ current_store.id }}">
-                  <input type="hidden" name="user_id" value="{{ u.id }}">
-                  <input type="hidden" name="active" value="{{ 0 if u.active else 1 }}">
-                  <button class="ghost" type="submit">{{ '停用' if u.active else '启用' }}</button>
-                </form>
-                {% endif %}
-              </div>
-            </li>
-            {% endfor %}
-            {% for p in store_areas %}
-            {% set u = p.user %}
-            <li class="org-person {{ 'off' if not u.active else '' }}">
-              <div class="org-person-main">
-                <strong>{{ u.display_name }}</strong>
-                <span class="people-sub"><code>{{ u.username }}</code>
-                  <span class="role-chip view">区域经理</span>
-                  <span class="muted">{{ u.scope }}</span>
-                  {% if not u.active %} · 已停用{% endif %}
-                </span>
-              </div>
-              <div class="org-person-actions">
-                <form method="post" class="inline-reset">
-                  <input type="hidden" name="action" value="reset_pin">
-                  <input type="hidden" name="tab" value="stores">
-                  <input type="hidden" name="back_store_id" value="{{ current_store.id }}">
-                  <input type="hidden" name="user_id" value="{{ u.id }}">
-                  <input name="pin" type="password" inputmode="numeric" placeholder="至少 4 位" minlength="4" required>
-                  <button class="ghost" type="submit">重置</button>
-                </form>
-              </div>
-            </li>
-            {% endfor %}
-          </ul>
-          {% else %}
-          <p class="muted">这家店还没有账号。</p>
-          {% endif %}
-          <form method="post" class="org-add-user" id="addUserForm">
-            <input type="hidden" name="action" value="add_user">
-            <input type="hidden" name="tab" value="stores">
-            <h3 class="settings-section">添加本店账号</h3>
-            <div class="add-user-grid">
-              <p>
-                <label>角色</label>
-                <select name="role" id="addRole">
-                  <option value="filler">填报员</option>
-                  <option value="readonly">只读 · 店长</option>
-                  <option value="readonly" class="ro-area">只读 · 区域经理</option>
-                </select>
-              </p>
-              <p><label>账号（姓名全拼）</label><input name="username" required placeholder="zhangsan" autocomplete="off"></p>
-              <p><label>显示名</label><input name="display_name" required placeholder="张三" autocomplete="off"></p>
-              <p><label>口令</label><input name="pin" type="password" inputmode="numeric" required minlength="6" placeholder="6 位"></p>
-            </div>
-            <div id="addStoreField">
-              <input type="hidden" name="store_ids" value="{{ current_store.id }}">
-            </div>
-            <div id="addAreaField" hidden>
-              <p>
-                <label>区域经理姓名</label>
-                <input name="scope" value="{{ current_store.area_manager }}" placeholder="如 黄雍青、赵家才" autocomplete="off">
-                <input type="hidden" name="bind" value="area">
-              </p>
-            </div>
-            <div class="toolbar"><button type="submit">添加</button></div>
-          </form>
-        </section>
         {% else %}
         <div class="store-editor-head">
           <div>
@@ -319,70 +412,6 @@
         {% endif %}
       </div>
     </div>
-    {% if area_people or unassigned_people %}
-    <div class="org-extra">
-      {% if area_people %}
-      <div class="card settings-card">
-        <div class="settings-card-head">
-          <h2>区域经理</h2>
-          <span class="muted">{{ area_people|length }} 人 · 按区域经理姓名看整片区</span>
-        </div>
-        <ul class="org-people-list">
-          {% for p in area_people %}
-          {% set u = p.user %}
-          <li class="org-person {{ 'off' if not u.active else '' }}">
-            <div class="org-person-main">
-              <strong>{{ u.display_name }}</strong>
-              <span class="people-sub"><code>{{ u.username }}</code>
-                <span class="role-chip view">区域经理</span>
-                <span class="muted">{{ u.scope }}</span>
-              </span>
-            </div>
-            <form method="post" class="inline-store">
-              <input type="hidden" name="action" value="set_stores">
-              <input type="hidden" name="tab" value="stores">
-              <input type="hidden" name="user_id" value="{{ u.id }}">
-              <input type="hidden" name="bind" value="area">
-              <input name="scope" value="{{ u.scope }}" placeholder="区域经理姓名" autocomplete="off" class="area-scope">
-              <button class="ghost" type="submit">存</button>
-            </form>
-          </li>
-          {% endfor %}
-        </ul>
-      </div>
-      {% endif %}
-      {% if unassigned_people %}
-      <div class="card settings-card">
-        <div class="settings-card-head">
-          <h2>未分配</h2>
-          <span class="muted">{{ unassigned_people|length }} 人</span>
-        </div>
-        <ul class="org-people-list">
-          {% for p in unassigned_people %}
-          {% set u = p.user %}
-          <li class="org-person {{ 'off' if not u.active else '' }}">
-            <div class="org-person-main">
-              <strong>{{ u.display_name }}</strong>
-              <span class="people-sub"><code>{{ u.username }}</code></span>
-            </div>
-            <form method="post" class="inline-store">
-              <input type="hidden" name="action" value="set_stores">
-              <input type="hidden" name="tab" value="stores">
-              <input type="hidden" name="user_id" value="{{ u.id }}">
-              <select name="store_ids" onchange="this.form.submit()">
-                <option value="">未分配</option>
-                {% for s in stores %}
-                <option value="{{ s.id }}">{{ store_label(s) }}</option>
-                {% endfor %}
-              </select>
-            </form>
-          </li>
-          {% endfor %}
-        </ul>
-      </div>
-      {% endif %}
-    </div>
-    {% endif %}
     <script>
     (function () {
       var input = document.getElementById('storeFilter');
@@ -400,26 +429,6 @@
         });
         if (empty) empty.hidden = !!document.querySelector('.store-group:not([hidden])');
       });
-      var role = document.getElementById('addRole');
-      var storeField = document.getElementById('addStoreField');
-      var areaField = document.getElementById('addAreaField');
-      if (role && storeField && areaField) {
-        var bind = areaField.querySelector('[name="bind"]');
-        function sync() {
-          var isArea = role.options[role.selectedIndex] && role.options[role.selectedIndex].classList.contains('ro-area');
-          if (isArea) {
-            storeField.hidden = true;
-            areaField.hidden = false;
-            if (bind) bind.value = 'area';
-          } else {
-            storeField.hidden = false;
-            areaField.hidden = true;
-            if (bind) bind.value = '';
-          }
-        }
-        role.addEventListener('change', sync);
-        sync();
-      }
     })();
     </script>
     {% endif %}

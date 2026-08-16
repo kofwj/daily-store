@@ -13,9 +13,7 @@ from .metrics_seed import KPI_TARGETS
 
 def _settings_tab() -> str:
     tab = request.values.get("tab") or "account"
-    if tab == "people":
-        tab = "stores"
-    allowed = {"account", "stores", "targets", "permissions", "broadcast", "rules", "backup"}
+    allowed = {"account", "people", "stores", "targets", "permissions", "broadcast", "rules", "backup"}
     if tab not in allowed:
         return "account"
     if g.user["role"] != "admin" and tab != "account":
@@ -25,7 +23,11 @@ def _settings_tab() -> str:
     return tab
 
 
-def _org_redirect(store_id=None):
+def _people_redirect():
+    return redirect(url_for("settings", tab="people"))
+
+
+def _store_redirect(store_id=None):
     sid = store_id or request.form.get("back_store_id") or request.form.get("store_id")
     if sid and str(sid).strip() and str(sid) != "new":
         return redirect(url_for("settings", tab="stores", store_id=sid))
@@ -138,19 +140,25 @@ def register_settings(app) -> None:
                         username = (request.form.get("username") or "").strip()
                         display = (request.form.get("display_name") or "").strip()
                         pin = request.form.get("pin") or ""
-                        role = request.form.get("role") or "filler"
-                        if role not in ("filler", "readonly"):
+                        kind = request.form.get("role") or "filler"
+                        if kind not in ("filler", "readonly", "manager", "area"):
                             raise ValueError("只支持填报员或只读账号")
-                        scope = ""
-                        if role == "readonly" and request.form.get("bind") == "area":
+                        if kind == "area":
+                            role = "readonly"
                             scope = (request.form.get("scope") or "").strip()
                             if not scope:
                                 raise ValueError("区域经理没填区域经理姓名")
                             store_ids = []
-                        else:
-                            store_ids = [int(x) for x in request.form.getlist("store_ids")]
-                            if role == "readonly" and not store_ids:
+                        elif kind in ("readonly", "manager"):
+                            role = "readonly"
+                            scope = ""
+                            store_ids = [int(x) for x in request.form.getlist("store_ids") if str(x).strip().isdigit()]
+                            if not store_ids:
                                 raise ValueError("店长要选一家店")
+                        else:
+                            role = "filler"
+                            scope = ""
+                            store_ids = [int(x) for x in request.form.getlist("store_ids") if str(x).strip().isdigit()]
                         if not username or not display or not pin:
                             raise ValueError("账号、姓名、口令都要填")
                         min_len = db.FILLER_PIN_MIN
@@ -165,8 +173,8 @@ def register_settings(app) -> None:
                             store_ids=store_ids,
                             scope=scope,
                         )
-                        flash("人员已加", "ok")
-                        return _org_redirect(store_ids[0] if store_ids else None)
+                        flash("账号已加", "ok")
+                        return _people_redirect()
                     elif action == "reset_pin":
                         uid = int(request.form.get("user_id") or 0)
                         pin = request.form.get("pin") or ""
@@ -176,8 +184,8 @@ def register_settings(app) -> None:
                             raise ValueError(f"口令至少 {min_len} 位")
                         db.update_user_pin(conn, uid, pin)
                         flash("口令已改", "ok")
-                        if (request.form.get("tab") or "") == "stores":
-                            return _org_redirect()
+                        if (request.form.get("tab") or "") in ("people", "stores"):
+                            return _people_redirect()
                     elif action == "set_stores":
                         uid = int(request.form.get("user_id") or 0)
                         target = conn.execute("SELECT role, scope FROM users WHERE id=?", (uid,)).fetchone()
@@ -197,17 +205,17 @@ def register_settings(app) -> None:
                             if target["role"] == "readonly":
                                 db.set_user_scope(conn, uid, "")
                         flash("门店权限已改", "ok")
-                        if (request.form.get("tab") or "") == "stores":
-                            return _org_redirect()
+                        if (request.form.get("tab") or "") in ("people", "stores"):
+                            return _people_redirect()
                     elif action == "toggle_user":
                         uid = int(request.form.get("user_id") or 0)
                         active = request.form.get("active") == "1"
                         if uid == g.user["id"] and not active:
                             raise ValueError("不能停用自己")
                         db.set_user_active(conn, uid, active)
-                        flash("人员状态已改", "ok")
-                        if (request.form.get("tab") or "") == "stores":
-                            return _org_redirect()
+                        flash("账号状态已改", "ok")
+                        if (request.form.get("tab") or "") in ("people", "stores"):
+                            return _people_redirect()
                     elif action == "set_targets":
                         for code, _name, _note in KPI_TARGETS:
                             raw = request.form.get(f"t_{code}", "0")
