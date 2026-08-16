@@ -85,8 +85,8 @@ def test_filler_saves_and_admin_pays(client):
     with db.get_db() as conn:
         row = conn.execute("SELECT paid, rebate, broadband FROM advance_posts WHERE id=?", (aid,)).fetchone()
         assert int(row["paid"]) == 1
-        assert float(row["broadband"]) == 200
-        assert float(row["rebate"]) == 100
+        assert int(row["broadband"]) == 20000
+        assert int(row["rebate"]) == 10000
 
 
 def test_admin_can_save_without_phone_and_fills_settlement(tmp_db):
@@ -164,7 +164,7 @@ def test_filler_can_save_negative_amount(client):
             "SELECT broadband FROM advance_posts WHERE store_id=? AND phone='13900004444'",
             (sid,),
         ).fetchone()
-        assert float(row["broadband"]) == -100
+        assert int(row["broadband"]) == -10000
 
 
 def test_advance_actions_are_audited(client):
@@ -252,3 +252,29 @@ def test_store_sees_month_list_and_admin_sees_today_inbox(client):
     assert "今天待兑" in inbox
     assert "海门金花" in inbox
     assert "1笔" in inbox
+
+
+def test_advance_stores_cents_and_reads_yuan(client):
+    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+    client.post(
+        "/advance",
+        data={
+            "store_id": str(sid),
+            "biz_date": db.today_local().isoformat(),
+            "phone": "13900008888",
+            "other": "39.99",
+        },
+        follow_redirects=True,
+    )
+    with db.get_db() as conn:
+        raw = conn.execute(
+            "SELECT other FROM advance_posts WHERE phone='13900008888'"
+        ).fetchone()
+        viewed = db.get_advance(conn, conn.execute(
+            "SELECT id FROM advance_posts WHERE phone='13900008888'"
+        ).fetchone()["id"], sid)
+    assert int(raw["other"]) == 3999
+    assert float(viewed["other"]) == 39.99
+    assert float(viewed["total"]) == 39.99

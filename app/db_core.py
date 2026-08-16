@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS report_edits (
     note TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_edits_store_date ON report_edits(store_id, biz_date);
+CREATE INDEX IF NOT EXISTS idx_report_edits_edited_at ON report_edits(edited_at DESC, id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_facts_store_date ON daily_facts(store_id, biz_date);
 CREATE INDEX IF NOT EXISTS idx_reports_date ON daily_reports(biz_date);
@@ -174,6 +175,8 @@ MIGRATIONS: List[Tuple[int, str, callable]] = [
     (3, "expand_user_roles_readonly", "_expand_user_roles_readonly"),
     (4, "add_must_change_pin", "_add_must_change_pin"),
     (5, "add_advance_edits", "_ensure_advance_edits"),
+    (6, "audit_edited_at_indexes", "_ensure_audit_edited_at_indexes"),
+    (7, "advance_amounts_to_cents", "_advance_amounts_to_cents"),
 ]
 
 def _now() -> str:
@@ -257,6 +260,8 @@ def migrate() -> None:
             "_expand_user_roles_readonly": _expand_user_roles_readonly,
             "_add_must_change_pin": _add_must_change_pin,
             "_ensure_advance_edits": _ensure_advance_edits,
+            "_ensure_audit_edited_at_indexes": _ensure_audit_edited_at_indexes,
+            "_advance_amounts_to_cents": _advance_amounts_to_cents,
         }
         for version, name, fn_name in sorted(MIGRATIONS):
             if version in applied:
@@ -381,6 +386,9 @@ def _ensure_deal_edits(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_deal_edits_store_date ON deal_edits(store_id, biz_date)"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_deal_edits_edited_at ON deal_edits(edited_at DESC, id DESC)"
+    )
 
 
 def _ensure_advance_edits(conn: sqlite3.Connection) -> None:
@@ -395,6 +403,53 @@ def _ensure_advance_edits(conn: sqlite3.Connection) -> None:
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_advance_edits_store_date ON advance_edits(store_id, biz_date)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_advance_edits_edited_at ON advance_edits(edited_at DESC, id DESC)"
+    )
+
+
+def _ensure_audit_edited_at_indexes(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_report_edits_edited_at ON report_edits(edited_at DESC, id DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_deal_edits_edited_at ON deal_edits(edited_at DESC, id DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_advance_edits_edited_at ON advance_edits(edited_at DESC, id DESC)"
+    )
+
+
+def _advance_amounts_to_cents(conn: sqlite3.Connection) -> None:
+    """把垫资金额从元(REAL)迁到分(INTEGER)。已是整数分的库跳过。"""
+    cols = {row[1]: row[2] for row in conn.execute("PRAGMA table_info(advance_posts)")}
+    if not cols:
+        return
+    sample = conn.execute(
+        "SELECT broadband, rebate, other FROM advance_posts LIMIT 20"
+    ).fetchall()
+    looks_yuan = False
+    for row in sample:
+        for raw in row:
+            try:
+                value = float(raw or 0)
+            except (TypeError, ValueError):
+                continue
+            if abs(value - round(value)) > 1e-9 or (0 < abs(value) < 1):
+                looks_yuan = True
+                break
+        if looks_yuan:
+            break
+    # 空表或全是整数：按列声明判断。旧库是 REAL，新库是 INTEGER。
+    declared = (cols.get("broadband") or "").upper()
+    if not sample and declared == "INTEGER":
+        return
+    if sample and not looks_yuan and declared == "INTEGER":
+        return
+    conn.execute(
+        "UPDATE advance_posts SET broadband=CAST(ROUND(broadband * 100) AS INTEGER), "
+        "rebate=CAST(ROUND(rebate * 100) AS INTEGER), other=CAST(ROUND(other * 100) AS INTEGER)"
+    )
 
 
 def _ensure_advance_posts(conn: sqlite3.Connection) -> None:
@@ -409,9 +464,9 @@ def _ensure_advance_posts(conn: sqlite3.Connection) -> None:
             updated_at TEXT NOT NULL DEFAULT '',
             biz_date TEXT NOT NULL,
             phone TEXT NOT NULL DEFAULT '',
-            broadband REAL NOT NULL DEFAULT 0,
-            rebate REAL NOT NULL DEFAULT 0,
-            other REAL NOT NULL DEFAULT 0,
+            broadband INTEGER NOT NULL DEFAULT 0,
+            rebate INTEGER NOT NULL DEFAULT 0,
+            other INTEGER NOT NULL DEFAULT 0,
             note TEXT NOT NULL DEFAULT '',
             paid INTEGER NOT NULL DEFAULT 0,
             paid_at TEXT NOT NULL DEFAULT '',
@@ -810,6 +865,24 @@ def list_kpi_targets(conn: sqlite3.Connection) -> Dict[str, int]:
     out = {code: 0 for code, _name, _note in KPI_TARGETS}
     for row in conn.execute("SELECT code, monthly_target FROM kpi_targets"):
         out[row["code"]] = int(row["monthly_target"] or 0)
+    return out
+
+
+def metric_target_map(conn: sqlite3.Connection) -> Dict[str, int]:
+    """报表/填报用的指标目标：考核 KPI 只读 kpi_targets，普通指标读 metrics.monthly_target。"""
+    from .metrics_seed import ROLLUPS
+
+    out = {
+        row["code"]: int(row["monthly_target"] or 0)
+        for row in conn.execute("SELECT code, monthly_target FROM metrics WHERE active=1")
+    }
+    kpis = list_kpi_targets(conn)
+    for code, target in kpis.items():
+        if code in out:
+            out[code] = target
+        if code in ROLLUPS:
+            for part in ROLLUPS[code]["parts"]:
+                out[part] = target
     return out
 
 def set_kpi_target(conn: sqlite3.Connection, code: str, target: int) -> None:

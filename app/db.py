@@ -14,6 +14,7 @@ from __future__ import annotations
 from .db_advances import (  # noqa: F401
     advance_month_totals,
     advance_today_inbox,
+    cents_to_yuan,
     count_advances,
     delete_advance,
     get_advance,
@@ -23,6 +24,7 @@ from .db_advances import (  # noqa: F401
     parse_money,
     record_advance,
     set_advance_paid,
+    yuan_to_cents,
 )
 from .db_core import *  # noqa: F401,F403 — 公开 API 由 core 汇集
 from .db_core import _now  # noqa: F401 — 测试直接调用 db._now()

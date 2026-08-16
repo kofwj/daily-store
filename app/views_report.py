@@ -101,11 +101,12 @@ def register_report(app) -> None:
                     }
                 )
 
-            # 指标行：按 SECTIONS 分组；KPI 成员标记高亮；普通指标目标读 metrics.monthly_target
+            # 指标行：按 SECTIONS 分组；考核 KPI 目标走 kpi_targets，普通指标走 metrics
+            metric_targets = db.metric_target_map(conn)
             rows = []
             for m in metrics:
                 total = totals[m["code"]]
-                month_target = int(m["monthly_target"] or 0)
+                month_target = int(metric_targets.get(m["code"], 0) or 0)
                 rows.append(
                     {
                         "code": m["code"],

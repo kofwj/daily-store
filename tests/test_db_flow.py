@@ -315,3 +315,26 @@ def test_broadcast_from_saved_facts(tmp_db):
         assert "宽带：日3，累10" in text
         assert "购机让利：日2，累8" in text
         assert "金币直降：日0，累1" in text
+
+
+def test_metric_target_map_prefers_kpi_targets(tmp_db):
+    with db.get_db() as conn:
+        db.set_kpi_target(conn, "ai_contract", 12)
+        db.set_kpi_target(conn, "coin_cut", 8)
+        conn.execute("UPDATE metrics SET monthly_target=99 WHERE code='ai_contract'")
+        conn.execute("UPDATE metrics SET monthly_target=3 WHERE code='broadband'")
+        targets = db.metric_target_map(conn)
+    assert targets["ai_contract"] == 12
+    assert targets["coin_cut_new_recharge"] == 8
+    assert targets["broadband"] == 3
+
+
+def test_audit_tables_have_edited_at_index(tmp_db):
+    with db.get_db() as conn:
+        names = {
+            row["name"]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")
+        }
+    assert "idx_report_edits_edited_at" in names
+    assert "idx_deal_edits_edited_at" in names
+    assert "idx_advance_edits_edited_at" in names

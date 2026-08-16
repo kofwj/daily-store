@@ -12,27 +12,47 @@ from .db_core import _now, month_bounds, today_local
 MAX_AMOUNT = 10_000_000.0
 
 
-def _finite_amount(value: Any) -> float:
+def yuan_to_cents(value: Any) -> int:
     number = float(value or 0)
     if not math.isfinite(number) or abs(number) > MAX_AMOUNT:
         raise ValueError("金额必须是有限数字且不超过 1000 万")
-    return round(number, 2)
+    return int(round(number * 100))
+
+
+def cents_to_yuan(value: Any) -> float:
+    return round(int(value or 0) / 100, 2)
 
 
 def parse_money(raw: Any) -> float:
     text = str(raw or "").strip().replace(",", "").replace("，", "")
     if not text:
         return 0.0
-    return _finite_amount(text)
+    return cents_to_yuan(yuan_to_cents(text))
 
 
 def money_ok(*amounts: float) -> bool:
-    values = [_finite_amount(v) for v in amounts]
-    return any(abs(v) >= 0.005 for v in values)
+    return any(abs(yuan_to_cents(v)) >= 1 for v in amounts)
 
 
-def _snapshot(row) -> dict:
-    return {key: row[key] for key in row.keys()} if row is not None else {}
+def _money_select(alias: str = "a") -> str:
+    prefix = f"{alias}." if alias else ""
+    return (
+        f"ROUND({prefix}broadband / 100.0, 2) AS broadband, "
+        f"ROUND({prefix}rebate / 100.0, 2) AS rebate, "
+        f"ROUND({prefix}other / 100.0, 2) AS other, "
+        f"ROUND(({prefix}broadband + {prefix}rebate + {prefix}other) / 100.0, 2) AS total"
+    )
+
+
+def _snapshot(row, *, cents: bool = False) -> dict:
+    if row is None:
+        return {}
+    out = {key: row[key] for key in row.keys()}
+    if cents:
+        for key in ("broadband", "rebate", "other"):
+            if key in out:
+                out[key] = cents_to_yuan(out[key])
+    return out
 
 
 def _audit(conn, row, *, user_id: int, action: str, before: dict, after: dict, note: str = "") -> None:
@@ -63,9 +83,9 @@ def record_advance(
         "updated_at": _now(),
         "biz_date": biz_date.isoformat(),
         "phone": (phone or "").strip()[:20],
-        "broadband": _finite_amount(broadband),
-        "rebate": _finite_amount(rebate),
-        "other": _finite_amount(other),
+        "broadband": yuan_to_cents(broadband),
+        "rebate": yuan_to_cents(rebate),
+        "other": yuan_to_cents(other),
         "note": (note or "").strip()[:500],
     }
     if advance_id:
@@ -77,7 +97,7 @@ def record_advance(
             raise ValueError("missing")
         if int(row["paid"] or 0):
             raise ValueError("paid_locked")
-        before = _snapshot(row)
+        before = _snapshot(row, cents=True)
         conn.execute(
             """
             UPDATE advance_posts
@@ -89,7 +109,7 @@ def record_advance(
             {**payload, "id": int(advance_id)},
         )
         after = conn.execute("SELECT * FROM advance_posts WHERE id=?", (int(advance_id),)).fetchone()
-        _audit(conn, after, user_id=user_id, action="update", before=before, after=_snapshot(after))
+        _audit(conn, after, user_id=user_id, action="update", before=before, after=_snapshot(after, cents=True))
         return int(advance_id)
     cur = conn.execute(
         """
@@ -113,13 +133,17 @@ def record_advance(
         ),
     )
     created = conn.execute("SELECT * FROM advance_posts WHERE id=?", (int(cur.lastrowid),)).fetchone()
-    _audit(conn, created, user_id=user_id, action="create", before={}, after=_snapshot(created))
+    _audit(conn, created, user_id=user_id, action="create", before={}, after=_snapshot(created, cents=True))
     return int(cur.lastrowid)
 
 
 def get_advance(conn: sqlite3.Connection, advance_id: int, store_id: int):
     return conn.execute(
-        "SELECT * FROM advance_posts WHERE id=? AND store_id=?",
+        f"""
+        SELECT id, store_id, user_id, created_at, updated_at, biz_date, phone, note,
+               paid, paid_at, paid_by, {_money_select('')}
+        FROM advance_posts WHERE id=? AND store_id=?
+        """,
         (advance_id, store_id),
     ).fetchone()
 
@@ -130,7 +154,7 @@ def delete_advance(
     row = get_advance(conn, advance_id, store_id)
     if row is None or int(row["paid"] or 0):
         return False
-    before = _snapshot(row)
+    before = _snapshot(row)  # get_advance() 已按元返回
     conn.execute("DELETE FROM advance_posts WHERE id=? AND store_id=?", (advance_id, store_id))
     _audit(conn, row, user_id=user_id, action="delete", before=before, after={})
     return True
@@ -176,7 +200,7 @@ def set_advance_paid(
             continue
         new = conn.execute("SELECT * FROM advance_posts WHERE id=?", (old["id"],)).fetchone()
         _audit(conn, new, user_id=user_id, action="pay" if paid else "unpay",
-               before=_snapshot(old), after=_snapshot(new), note="兑付状态变更")
+               before=_snapshot(old, cents=True), after=_snapshot(new, cents=True), note="兑付状态变更")
     return changed
 
 
@@ -227,10 +251,12 @@ def list_advances(
     return list(
         conn.execute(
             f"""
-            SELECT a.*, st.name AS store_name, st.short_name AS store_short,
+            SELECT a.id, a.store_id, a.user_id, a.created_at, a.updated_at, a.biz_date,
+                   a.phone, a.note, a.paid, a.paid_at, a.paid_by,
+                   {_money_select('a')},
+                   st.name AS store_name, st.short_name AS store_short,
                    st.city AS store_city, u.display_name AS submitter_name,
-                   p.display_name AS payer_name,
-                   ROUND(a.broadband + a.rebate + a.other, 2) AS total
+                   p.display_name AS payer_name
             FROM advance_posts a
             JOIN stores st ON st.id = a.store_id
             LEFT JOIN users u ON u.id = a.user_id
@@ -249,10 +275,12 @@ def list_all_advances(
 ) -> List[sqlite3.Row]:
     return list(
         conn.execute(
-            """
-            SELECT a.*, st.name AS store_name, st.short_name AS store_short,
-                   st.city AS store_city, st.sort_order AS store_sort,
-                   ROUND(a.broadband + a.rebate + a.other, 2) AS total
+            f"""
+            SELECT a.id, a.store_id, a.user_id, a.created_at, a.updated_at, a.biz_date,
+                   a.phone, a.note, a.paid, a.paid_at, a.paid_by,
+                   {_money_select('a')},
+                   st.name AS store_name, st.short_name AS store_short,
+                   st.city AS store_city, st.sort_order AS store_sort
             FROM advance_posts a
             JOIN stores st ON st.id = a.store_id
             WHERE a.biz_date>=? AND a.biz_date<=?
@@ -272,7 +300,7 @@ def advance_today_inbox(conn: sqlite3.Connection, day: date) -> List[sqlite3.Row
                    st.short_name AS store_short,
                    st.name AS store_name,
                    COUNT(*) AS n,
-                   ROUND(SUM(a.broadband + a.rebate + a.other), 2) AS total
+                   ROUND(SUM(a.broadband + a.rebate + a.other) / 100.0, 2) AS total
             FROM advance_posts a
             JOIN stores st ON st.id = a.store_id
             WHERE a.biz_date=? AND a.paid=0
@@ -299,9 +327,9 @@ def advance_month_totals(
     rows = conn.execute(
         f"""
         SELECT store_id,
-               ROUND(SUM(broadband), 2) AS broadband,
-               ROUND(SUM(rebate), 2) AS rebate,
-               ROUND(SUM(other), 2) AS other
+               ROUND(SUM(broadband) / 100.0, 2) AS broadband,
+               ROUND(SUM(rebate) / 100.0, 2) AS rebate,
+               ROUND(SUM(other) / 100.0, 2) AS other
         FROM advance_posts
         WHERE biz_date>=? AND biz_date<=? AND store_id IN ({placeholders})
         GROUP BY store_id
