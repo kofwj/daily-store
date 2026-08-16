@@ -11,7 +11,7 @@
     {% if stores|length > 1 %}
     <label class="filter">
       <span>门店</span>
-      {{ store_picker(stores, selected=('all' if all_stores else store.id), all_value=('all' if is_admin else none), all_label='全部') }}
+      {{ store_picker(stores, selected=('all' if all_stores else store.id), all_value=('all' if is_admin else none), all_label='全部门店') }}
     </label>
     {% endif %}
     {% if is_admin %}

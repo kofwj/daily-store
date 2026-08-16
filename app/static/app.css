@@ -946,39 +946,74 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
 .filter input[type="month"] {
   height: 38px;
 }
-.store-pick { position: relative; min-width: 180px; }
+.filter .store-pick { min-width: 168px; max-width: 240px; }
+.store-pick { position: relative; min-width: 148px; }
 .store-pick-btn {
   width: 100%; height: 38px; padding: 0 12px;
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
   background: #fff; border: 1px solid var(--line); border-radius: 10px;
-  font: inherit; font-size: 13px; color: var(--ink); cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--ink); cursor: pointer;
 }
-.store-pick-btn::after { content: ""; width: 0; height: 0; margin-left: 8px;
+.store-pick-btn::after {
+  content: ""; width: 0; height: 0; flex: 0 0 auto;
   border-left: 4px solid transparent; border-right: 4px solid transparent;
-  border-top: 5px solid var(--muted); }
-.store-pick.open .store-pick-btn { border-color: var(--ink); }
-.store-pick-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.store-pick-panel {
-  position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0;
-  min-width: 220px; max-height: 320px; overflow: hidden;
-  background: #fff; border: 1px solid var(--line); border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.12);
-  display: grid; grid-template-rows: auto 1fr auto;
+  border-top: 5px solid var(--muted);
 }
+.store-pick.open .store-pick-btn,
+.store-pick-btn:focus-visible {
+  border-color: var(--ink);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.08);
+}
+.store-pick-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.store-pick-panel {
+  position: fixed; z-index: 80;
+  width: min(320px, calc(100vw - 20px));
+  max-height: min(420px, calc(100vh - 24px));
+  overflow: hidden;
+  background: #fff; border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(16, 24, 40, 0.16);
+  display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.store-pick-search { padding: 8px; border-bottom: 1px solid var(--line); background: #fff; }
 .store-pick-q {
   width: 100%; height: 36px; margin: 0; padding: 8px 10px;
-  border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
-  font: inherit; font-size: 13px;
+  border: 1px solid var(--line); border-radius: 8px;
+  font: inherit; font-size: 13px; background: #fafafa;
 }
-.store-pick-list { overflow: auto; max-height: 240px; padding: 4px; }
+.store-pick-q:focus { outline: none; border-color: var(--ink); background: #fff; }
+.store-pick-list { overflow: auto; min-height: 0; padding: 6px; -webkit-overflow-scrolling: touch; }
+.store-pick-group { display: grid; gap: 2px; margin-bottom: 6px; }
+.store-pick-group:last-child { margin-bottom: 0; }
+.store-pick-city {
+  position: sticky; top: 0; z-index: 1;
+  padding: 8px 10px 4px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  color: var(--muted); background: #fff;
+}
 .store-pick-opt {
-  display: block; width: 100%; text-align: left;
-  padding: 8px 10px; border: 0; background: transparent;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; text-align: left;
+  padding: 9px 10px; border: 0; background: transparent;
   border-radius: 8px; font: inherit; font-size: 13px; color: var(--ink); cursor: pointer;
 }
 .store-pick-opt:hover { background: var(--accent-soft); }
 .store-pick-opt.active { background: var(--ink); color: #fff; }
-.store-pick-empty { margin: 0; padding: 8px 10px 10px; }
+.store-pick-opt.active .muted { color: rgba(255,255,255,.72); }
+.store-pick-all { font-weight: 650; margin-bottom: 4px; }
+.store-pick-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.store-pick-meta { flex: 0 0 auto; font-size: 12px; }
+.store-pick-empty { margin: 0; padding: 10px 12px 12px; }
+.inline-store .store-pick { min-width: 140px; max-width: 200px; }
+body.store-pick-open { overflow: hidden; }
+@media (max-width: 800px) {
+  .filter .store-pick { min-width: 0; max-width: none; width: 100%; flex: 1 1 100%; }
+  .store-pick-panel {
+    width: calc(100vw - 20px);
+    max-height: min(70vh, 480px);
+  }
+  .inline-store .store-pick { max-width: none; width: 100%; }
+}
 .page-filters > button,
 .page-filters > .btn {
   height: 38px;
