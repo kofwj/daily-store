@@ -38,7 +38,14 @@ def parse_money(raw: Any) -> float:
 
 
 def money_ok(*amounts: float) -> bool:
-    return any(abs(yuan_to_cents(v)) >= 1 for v in amounts)
+    """三类金额至少一项非零。不抛异常；非数字或超限视为 0。"""
+    for v in amounts:
+        try:
+            if abs(yuan_to_cents(v)) >= 1:
+                return True
+        except (ValueError, TypeError):
+            continue
+    return False
 
 
 def _money_select(alias: str = "a") -> str:

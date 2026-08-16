@@ -338,3 +338,36 @@ def test_audit_tables_have_edited_at_index(tmp_db):
     assert "idx_report_edits_edited_at" in names
     assert "idx_deal_edits_edited_at" in names
     assert "idx_advance_edits_edited_at" in names
+
+
+def test_advance_cents_migration_is_idempotent(tmp_db):
+    """迁移 v7 重跑不会把分再乘 100。"""
+    from app import db_core
+
+    with db.get_db() as conn:
+        conn.execute(
+            "INSERT INTO stores(name, code, sort_order, created_at) VALUES('t','t',1,'2026-01-01')"
+        )
+        conn.execute(
+            "INSERT INTO advance_posts(store_id, user_id, created_at, biz_date, phone, "
+            "broadband, rebate, other, note, paid) "
+            "VALUES(1,1,'2026-01-01','2026-01-01','139',3999,0,0,'x',0)"
+        )
+        conn.execute("DELETE FROM schema_migrations WHERE version=7")
+        conn.commit()
+        before = conn.execute("SELECT broadband FROM advance_posts").fetchone()[0]
+    db_core.migrate()
+    with db.get_db() as conn:
+        after = conn.execute("SELECT broadband FROM advance_posts").fetchone()[0]
+    assert before == 3999
+    assert after == 3999  # 绝不重复转换
+
+
+def test_money_ok_tolerates_nonfinite():
+    from app import db
+
+    assert db.money_ok(0, 0, 0) is False
+    assert db.money_ok(0, 0.01, 0) is True
+    assert db.money_ok(float("nan"), 0, 0) is False
+    assert db.money_ok(float("inf"), 0, 0) is False
+    assert db.money_ok("abc", 1, 0) is True

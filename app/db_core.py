@@ -426,13 +426,36 @@ def _ensure_audit_edited_at_indexes(conn: sqlite3.Connection) -> None:
 
 
 def _advance_amounts_to_cents(conn: sqlite3.Connection) -> None:
-    """把垫资金额从元(REAL)迁到分(INTEGER)。已是整数分的库跳过。"""
+    """把垫资金额从元(REAL)迁到分(INTEGER)。已是整数分的库跳过。
+
+    幂等保证：app_meta 里的 advance_cents_marker 会在迁移成功后写入。
+    即使 schema_migrations 记录丢失，只要标记存在就不会重跑。
+    """
+    _ensure_app_meta(conn)
+    marker = conn.execute(
+        "SELECT value FROM app_meta WHERE key='advance_cents_marker'"
+    ).fetchone()
+    if marker is not None:
+        return  # 已经转过，绝不重跑
+
     cols = {row[1]: row[2] for row in conn.execute("PRAGMA table_info(advance_posts)")}
     if not cols:
         return
+
     sample = conn.execute(
-        "SELECT broadband, rebate, other FROM advance_posts LIMIT 20"
+        "SELECT broadband, rebate, other FROM advance_posts LIMIT 50"
     ).fetchall()
+    declared = (cols.get("broadband") or "").upper()
+
+    # 新库列声明是 INTEGER：值已经是分，只写标记。
+    if declared == "INTEGER":
+        conn.execute(
+            "INSERT OR IGNORE INTO app_meta(key, value) VALUES('advance_cents_marker','1')"
+        )
+        return
+
+    # 旧库 REAL 列：靠值判断是元还是分。
+    # 有小数或 0<|v|<1 才认定是元；整数（含 0）无法区分，默认不转，只写标记。
     looks_yuan = False
     for row in sample:
         for raw in row:
@@ -445,15 +468,13 @@ def _advance_amounts_to_cents(conn: sqlite3.Connection) -> None:
                 break
         if looks_yuan:
             break
-    # 空表或全是整数：按列声明判断。旧库是 REAL，新库是 INTEGER。
-    declared = (cols.get("broadband") or "").upper()
-    if not sample and declared == "INTEGER":
-        return
-    if sample and not looks_yuan and declared == "INTEGER":
-        return
+    if looks_yuan:
+        conn.execute(
+            "UPDATE advance_posts SET broadband=CAST(ROUND(broadband * 100) AS INTEGER), "
+            "rebate=CAST(ROUND(rebate * 100) AS INTEGER), other=CAST(ROUND(other * 100) AS INTEGER)"
+        )
     conn.execute(
-        "UPDATE advance_posts SET broadband=CAST(ROUND(broadband * 100) AS INTEGER), "
-        "rebate=CAST(ROUND(rebate * 100) AS INTEGER), other=CAST(ROUND(other * 100) AS INTEGER)"
+        "INSERT OR IGNORE INTO app_meta(key, value) VALUES('advance_cents_marker','1')"
     )
 
 
