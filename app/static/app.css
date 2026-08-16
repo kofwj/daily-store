@@ -992,7 +992,9 @@ table.compare-grid td.best { color: #1e3a8a; font-weight: 700; }
 }
 .filter select,
 .filter input[type="date"],
-.filter input[type="month"] {
+.filter input[type="month"],
+.filter input[type="search"],
+.filter input[type="text"] {
   height: 38px;
 }
 /* ===== 门店 SelectPanel（GitHub Primer 风格） ===== */
