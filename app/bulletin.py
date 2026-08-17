@@ -561,14 +561,20 @@ def summary(
     )
     if month_bits:
         lines.append("单项第一：" + " · ".join(month_bits))
-    # 有移动取数时：合计 + 分店对照（上报同期 vs 移）
+    # 今天的移动取数更新到今天时，复盘才带合计+分店对照；
+    # 今天没更新（截止日早于通报表日）就不放对照，避免拿旧数当今天的对比
+    updated_today = any(
+        (r.get("month_bisuan_asof") or "").strip()[:10] == biz_date.isoformat()
+        for r in rows
+        if r.get("_month_bisuan_mobile_stored") is not None
+    )
     mobile_lines = []
     mobile_sum = 0
     report_asof_sum = 0
     asof_label = ""
     for r in rows:
         mobile = r.get("_month_bisuan_mobile_stored")
-        if mobile is None or mobile == "":
+        if mobile is None or mobile == "" or not updated_today:
             continue
         try:
             mob_i = int(mobile)
