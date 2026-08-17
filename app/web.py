@@ -23,6 +23,7 @@ from flask import Flask, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import db
+from . import version as app_version
 from .errors import register_errors
 from .helpers import csrf_protect, load_user, pin_change_required
 from .views_admin import register_admin
@@ -74,10 +75,14 @@ def create_app(*, testing: bool = False) -> Flask:
         # 首次访问就为会话生成 CSRF token，供表单使用
         if "_csrf_token" not in session:
             session["_csrf_token"] = secrets.token_hex(16)
+        info = app_version.current()
         return {
             "today_iso": db.today_local().isoformat(),
             "now": datetime.now(db.TZ),
             "csrf_token": session.get("_csrf_token", ""),
+            "app_version": info["version"],
+            "app_built_at": info["built_at"],
+            "app_summary": info["summary"],
         }
 
     register_auth(app)

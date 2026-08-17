@@ -185,7 +185,10 @@ def test_health_is_public(tmp_db):
     client = app.test_client()
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.get_json()["ok"] is True
+    payload = resp.get_json()
+    assert payload["ok"] is True
+    assert payload["service"] == "store-daily"
+    assert payload.get("version")
 
 
 def test_login_and_save_roundtrip(tmp_db):

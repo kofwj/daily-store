@@ -24,6 +24,7 @@
       <button type="submit">进入</button>
     </form>
     <p class="login-help">忘了口令，让管理员在「设置 → 人员」里重置。</p>
+    <p class="login-ver" title="{{ app_summary or '' }}">{{ app_version }}{% if app_built_at %} · {{ app_built_at }}{% endif %}</p>
   </div>
 </div>
 {% endblock %}

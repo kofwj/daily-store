@@ -5,6 +5,7 @@ from __future__ import annotations
 from flask import flash, g, redirect, render_template, request, session, url_for
 
 from . import db
+from . import version as app_version
 from .helpers import client_ip, default_home, login_required
 
 
@@ -16,7 +17,13 @@ def _lock_message(seconds: int) -> str:
 def register_auth(app) -> None:
     @app.route("/health")
     def health():
-        return {"ok": True, "service": "store-daily"}
+        info = app_version.current()
+        return {
+            "ok": True,
+            "service": "store-daily",
+            "version": info["version"],
+            "built_at": info["built_at"],
+        }
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
