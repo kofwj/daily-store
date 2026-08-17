@@ -8,10 +8,10 @@ from io import BytesIO
 from typing import Any, Dict, List
 
 import openpyxl
-from flask import flash, g, redirect, render_template, request, url_for
+from flask import flash, g, redirect, render_template, request, session, url_for
 from openpyxl.styles import Alignment, Font, PatternFill
 
-from . import db
+from . import db, sesame
 from .helpers import (
     _xlsx_safe,
     accessible_stores,
@@ -57,7 +57,7 @@ def _empty_form(today: date) -> Dict[str, str]:
 
 
 def _sum_totals(maps):
-    out = {"broadband": 0.0, "rebate": 0.0, "other": 0.0, "total": 0.0}
+    out = {"broadband": 0.0, "rebate": 0.0, "other": 0.0, "sesame": 0.0, "total": 0.0}
     for item in maps:
         for key in out:
             out[key] += float(item.get(key) or 0)
@@ -78,7 +78,7 @@ def _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d, *, 
         totals = _sum_totals(db.advance_month_totals(conn, kpi_ids, today_d).values())
     else:
         totals = db.advance_month_totals(conn, [store["id"]], today_d).get(
-            store["id"], {"broadband": 0, "rebate": 0, "other": 0, "total": 0}
+            store["id"], {"broadband": 0, "rebate": 0, "other": 0, "sesame": 0, "total": 0}
         )
     totals["unpaid"] = sum(1 for r in rows if not int(r["paid"] or 0))
     return render_template(
@@ -178,6 +178,8 @@ def register_advance(app) -> None:
                 except ValueError as exc:
                     if str(exc) == "paid_locked":
                         flash("已兑付的垫资不能改，先让管理员取消兑付。", "error")
+                    elif str(exc) == "imported_locked":
+                        flash("芝麻服务费是官方导入的，不能改。", "error")
                     else:
                         flash("这条垫资不存在。", "error")
                     return redirect(url_for("advance_page", store_id=store["id"]))
@@ -206,10 +208,20 @@ def register_advance(app) -> None:
                 flash("这条垫资不存在，或已删除。", "error")
             elif int(row["paid"] or 0):
                 flash("已兑付的垫资不能删。", "error")
-            elif db.delete_advance(conn, aid, sid, user_id=g.user["id"]):
-                flash("已删除这条垫资。", "ok")
             else:
-                flash("这条垫资不存在，或已删除。", "error")
+                allow_imported = g.user["role"] == "admin"
+                try:
+                    ok = db.delete_advance(
+                        conn, aid, sid, user_id=g.user["id"], allow_imported=allow_imported
+                    )
+                except ValueError as exc:
+                    if str(exc) == "imported_locked":
+                        flash("芝麻服务费是官方导入的，店员不能删。", "error")
+                        ok = False
+                    else:
+                        raise
+                else:
+                    flash("已删除这条垫资。" if ok else "这条垫资不存在，或已删除。", "ok" if ok else "error")
         return redirect(url_for("advance_page", store_id=sid))
 
     @app.route("/advance/pay")
@@ -255,7 +267,7 @@ def register_advance(app) -> None:
                 offset=(page - 1) * 50,
                 store_ids=scoped_ids,
             )
-            sums = {"broadband": 0.0, "rebate": 0.0, "other": 0.0, "total": 0.0, "unpaid": 0}
+            sums = {"broadband": 0.0, "rebate": 0.0, "other": 0.0, "sesame": 0.0, "total": 0.0, "unpaid": 0}
             all_rows = db.list_all_advances(conn, start, end)
             allow = set(scoped_ids) if scoped_ids is not None else None
             for r in all_rows:
@@ -266,6 +278,7 @@ def register_advance(app) -> None:
                 sums["broadband"] += float(r["broadband"] or 0)
                 sums["rebate"] += float(r["rebate"] or 0)
                 sums["other"] += float(r["other"] or 0)
+                sums["sesame"] += float(r["sesame"] or 0)
                 sums["total"] += float(r["total"] or 0)
                 if not int(r["paid"] or 0):
                     sums["unpaid"] += 1
@@ -308,6 +321,70 @@ def register_advance(app) -> None:
             flash(f"已兑付 {n} 笔。" if n else "没有可兑付的记录。", "ok" if n else "error")
         return redirect(url_for("advance_pay", month=month, store_id=store_id, paid=paid, scope=scope))
 
+    @app.route("/advance/sesame", methods=["GET"])
+    @admin_required
+    def advance_sesame_page():
+        preview = sesame.load_preview(session.get("sesame_token") or "")
+        return render_template("advance_sesame.html", preview=preview)
+
+    @app.route("/advance/sesame/preview", methods=["POST"])
+    @admin_required
+    def advance_sesame_preview():
+        uploaded = request.files.get("sesame_file")
+        if uploaded is None or not uploaded.filename:
+            flash("请选择芝麻服务费明细 xlsx。", "error")
+            return redirect(url_for("advance_sesame_page"))
+        old = session.pop("sesame_token", None)
+        if old:
+            sesame.drop_preview(old)
+        if not (uploaded.filename or "").lower().endswith(".xlsx"):
+            flash("只支持 .xlsx 文件。", "error")
+            return redirect(url_for("advance_sesame_page"))
+        data = uploaded.read()
+        try:
+            rows = sesame.parse_sesame_xlsx(data)
+        except ValueError as exc:
+            flash(f"解析失败：{exc}", "error")
+            return redirect(url_for("advance_sesame_page"))
+        with db.get_db() as conn:
+            stores = accessible_stores(conn)
+            groups = sesame.classify_sesame_rows(conn, rows, stores)
+        total_in = round(sum(r["amount"] for r in groups["ready"]), 2)
+        preview = {
+            "ready": groups["ready"][:200],
+            "ready_total": total_in,
+            "ready_count": len(groups["ready"]),
+            "skipped": groups["skipped"][:50],
+            "unmatched": groups["unmatched"][:50],
+            "ignored": groups["ignored"][:50],
+            "file_name": uploaded.filename,
+            "row_count": len(rows),
+        }
+        session["sesame_token"] = sesame.save_preview(preview)
+        if not groups["ready"]:
+            flash("没有可导入的新流水（可能都已导入，或对不上门店）。", "error")
+        return redirect(url_for("advance_sesame_page"))
+
+    @app.route("/advance/sesame/confirm", methods=["POST"])
+    @admin_required
+    def advance_sesame_confirm():
+        token = session.pop("sesame_token", None)
+        preview = sesame.load_preview(token or "")
+        sesame.drop_preview(token or "")
+        if not preview or not preview.get("ready"):
+            flash("预览已过期，请重新上传。", "error")
+            return redirect(url_for("advance_sesame_page"))
+        ready = preview["ready"]
+        with db.get_db() as conn:
+            # 再次校验未导入，避免并发重复
+            stores = accessible_stores(conn)
+            stores_by_id = {int(s["id"]): s for s in stores}
+            rows = [{**r, "store_id": int(r["store_id"])} for r in ready if int(r.get("store_id") or 0) in stores_by_id]
+            groups = sesame.classify_sesame_rows(conn, rows, stores)
+            n = sesame.import_sesame_rows(conn, groups["ready"], user_id=g.user["id"])
+        flash(f"已导入 {n} 笔芝麻服务费。", "ok" if n else "error")
+        return redirect(url_for("advance_page"))
+
     @app.route("/advance.xlsx")
     @admin_required
     def advance_xlsx():
@@ -334,8 +411,8 @@ def _build_advance_xlsx(stores, rows, month: date) -> bytes:
     summary.title = "汇总表"
     summary["A1"] = _xlsx_safe(f"{month.month}月通泰零售运营中心移动垫资费用报销汇总")
     summary["A1"].font = Font(bold=True, size=14)
-    summary.merge_cells("A1:E1")
-    for col, text in enumerate(["门店", "宽带调测费", "购机让利", "其他业务垫资", "合计"], start=1):
+    summary.merge_cells("A1:F1")
+    for col, text in enumerate(["门店", "宽带调测费", "购机让利", "其他业务垫资", "芝麻服务费", "合计"], start=1):
         cell = summary.cell(2, col, text)
         cell.fill = header_fill
         cell.font = header_font
@@ -349,11 +426,13 @@ def _build_advance_xlsx(stores, rows, month: date) -> bytes:
         broadband = round(sum(float(r["broadband"] or 0) for r in items), 2)
         rebate = round(sum(float(r["rebate"] or 0) for r in items), 2)
         other = round(sum(float(r["other"] or 0) for r in items), 2)
+        sesame = round(sum(float(r["sesame"] or 0) for r in items), 2)
         summary.cell(excel_row, 1, _xlsx_safe(store["name"]))
         summary.cell(excel_row, 2, broadband)
         summary.cell(excel_row, 3, rebate)
         summary.cell(excel_row, 4, other)
-        summary.cell(excel_row, 5, f"=SUM(B{excel_row}:D{excel_row})")
+        summary.cell(excel_row, 5, sesame)
+        summary.cell(excel_row, 6, f"=SUM(B{excel_row}:E{excel_row})")
         city = (store["city"] or "")
         if "泰州" in city:
             tz_rows.append(excel_row)
@@ -363,7 +442,7 @@ def _build_advance_xlsx(stores, rows, month: date) -> bytes:
         _write_store_sheet(wb, store, items, header_fill, header_font, total_fill)
     if nt_rows:
         summary.cell(excel_row, 1, _xlsx_safe("南通财顺电子有限公司"))
-        for col, letter in enumerate(["B", "C", "D", "E"], start=2):
+        for col, letter in enumerate(["B", "C", "D", "E", "F"], start=2):
             joined = "+".join(f"{letter}{r}" for r in nt_rows)
             cell = summary.cell(excel_row, col, "=" + joined)
             cell.fill = total_fill
@@ -371,7 +450,7 @@ def _build_advance_xlsx(stores, rows, month: date) -> bytes:
         excel_row += 1
     if tz_rows:
         summary.cell(excel_row, 1, _xlsx_safe("泰州市财汇电子有限公司"))
-        for col, letter in enumerate(["B", "C", "D", "E"], start=2):
+        for col, letter in enumerate(["B", "C", "D", "E", "F"], start=2):
             joined = "+".join(f"{letter}{r}" for r in tz_rows)
             cell = summary.cell(excel_row, col, "=" + joined)
             cell.fill = total_fill
@@ -381,11 +460,11 @@ def _build_advance_xlsx(stores, rows, month: date) -> bytes:
         last = excel_row - 1
         first_company = last - (1 if nt_rows and tz_rows else 0)
         summary.cell(excel_row, 1, _xlsx_safe("通泰零售运营中心"))
-        for col, letter in enumerate(["B", "C", "D", "E"], start=2):
+        for col, letter in enumerate(["B", "C", "D", "E", "F"], start=2):
             cell = summary.cell(excel_row, col, f"={letter}{first_company}+{letter}{last}" if nt_rows and tz_rows else f"={letter}{last}")
             cell.fill = total_fill
             cell.font = Font(bold=True)
-    for col, width in enumerate([40, 14, 12, 14, 12], start=1):
+    for col, width in enumerate([40, 14, 12, 14, 12, 12], start=1):
         summary.column_dimensions[openpyxl.utils.get_column_letter(col)].width = width
     if "Sheet" in wb.sheetnames:
         del wb["Sheet"]
@@ -404,8 +483,8 @@ def _write_store_sheet(wb, store, items, header_fill, header_font, total_fill) -
     ws = wb.create_sheet(name)
     ws["A1"] = _xlsx_safe(store["name"])
     ws["A1"].font = Font(bold=True, size=13)
-    ws.merge_cells("A1:I1")
-    headers = ["日期", "号码", "宽带调测费", "购机让利", "其他业务", "合计", "备注", "是否报销", "报销日期"]
+    ws.merge_cells("A1:J1")
+    headers = ["日期", "号码", "宽带调测费", "购机让利", "其他业务", "芝麻服务费", "合计", "备注", "是否报销", "报销日期"]
     for col, text in enumerate(headers, start=1):
         cell = ws.cell(2, col, text)
         cell.fill = header_fill
@@ -418,17 +497,18 @@ def _write_store_sheet(wb, store, items, header_fill, header_font, total_fill) -
         ws.cell(r, 3, float(row["broadband"] or 0) or None)
         ws.cell(r, 4, float(row["rebate"] or 0) or None)
         ws.cell(r, 5, float(row["other"] or 0) or None)
-        ws.cell(r, 6, f"=SUM(C{r}:E{r})")
-        ws.cell(r, 7, _xlsx_safe(row["note"] or ""))
-        ws.cell(r, 8, _xlsx_safe("是" if int(row["paid"] or 0) else ""))
-        ws.cell(r, 9, _xlsx_safe(row["paid_at"] or ""))
+        ws.cell(r, 6, float(row["sesame"] or 0) or None)
+        ws.cell(r, 7, f"=SUM(C{r}:F{r})")
+        ws.cell(r, 8, _xlsx_safe(row["note"] or ""))
+        ws.cell(r, 9, _xlsx_safe("是" if int(row["paid"] or 0) else ""))
+        ws.cell(r, 10, _xlsx_safe(row["paid_at"] or ""))
     end = start + max(len(items), 1) - 1
     total_row = end + 1
     ws.cell(total_row, 1, "合计")
-    for col, letter in enumerate(["C", "D", "E", "F"], start=3):
+    for col, letter in enumerate(["C", "D", "E", "F", "G"], start=3):
         cell = ws.cell(total_row, col, f"=SUM({letter}{start}:{letter}{end})")
         cell.fill = total_fill
         cell.font = Font(bold=True)
-    widths = [12, 14, 12, 12, 12, 10, 36, 10, 12]
+    widths = [12, 14, 12, 12, 12, 12, 10, 36, 10, 12]
     for i, width in enumerate(widths, start=1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width

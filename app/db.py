@@ -48,3 +48,8 @@ from .db_query import (  # noqa: F401
     set_day_value,
     stores_reported_in_month,
 )
+from .sesame import (  # noqa: F401
+    classify_sesame_rows,
+    import_sesame_rows,
+    parse_sesame_xlsx,
+)

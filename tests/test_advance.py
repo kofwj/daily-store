@@ -127,7 +127,7 @@ def test_admin_can_save_without_phone_and_fills_settlement(tmp_db):
     book = openpyxl.load_workbook(BytesIO(export.get_data()))
     assert "汇总表" in book.sheetnames
     assert "海门金花" in book.sheetnames
-    assert book["海门金花"]["G3"].value == "芝麻服务费"
+    assert book["海门金花"]["H3"].value == "芝麻服务费"
 
 
 def test_filler_rejects_future_and_nonfinite_amounts(client):

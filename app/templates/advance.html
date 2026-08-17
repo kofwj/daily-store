@@ -19,6 +19,7 @@
     {% endif %}
     {% endif %}
     {% if is_admin %}
+    <a class="btn ghost" href="{{ url_for('advance_sesame_page') }}">导入芝麻服务费</a>
     <a class="btn ghost" href="{{ url_for('advance_pay', month=month.strftime('%Y-%m')) }}">去兑付</a>
     {% endif %}
   </form>
@@ -28,6 +29,7 @@
   <div class="kpi"><div class="muted">宽带调测</div><div class="kpi-num">{{ '%.2f'|format(totals.broadband) }}</div></div>
   <div class="kpi"><div class="muted">购机让利</div><div class="kpi-num">{{ '%.2f'|format(totals.rebate) }}</div></div>
   <div class="kpi"><div class="muted">其他</div><div class="kpi-num">{{ '%.2f'|format(totals.other) }}</div></div>
+  <div class="kpi"><div class="muted">芝麻服务费</div><div class="kpi-num">{{ '%.2f'|format(totals.sesame) }}</div></div>
 </div>
 
 {% if not is_viewer and not all_stores %}
@@ -85,6 +87,7 @@
           <th>宽带</th>
           <th>让利</th>
           <th>其他</th>
+          <th>芝麻</th>
           <th>合计</th>
           <th class="left">备注</th>
           <th>兑付</th>
@@ -102,6 +105,7 @@
           <td>{{ '%.2f'|format(r.broadband) if r.broadband else '—' }}</td>
           <td>{{ '%.2f'|format(r.rebate) if r.rebate else '—' }}</td>
           <td>{{ '%.2f'|format(r.other) if r.other else '—' }}</td>
+          <td>{{ '%.2f'|format(r.sesame) if r.sesame else '—' }}</td>
           <td>{{ '%.2f'|format(r.total) }}</td>
           <td class="left">{{ r.note or '—' }}</td>
           <td>
@@ -113,15 +117,24 @@
             {% endif %}
           </td>
           <td class="right">
-            {% if not r.paid and not is_viewer %}
+            {% if r.paid %}
+            <span class="muted">已锁</span>
+            {% elif r.source == 'sesame' and is_admin %}
+            <span class="muted">导入</span>
+            <form method="post" action="{{ url_for('advance_delete') }}" onsubmit="return confirm('删除这笔官方导入的芝麻服务费？')">
+              <input type="hidden" name="store_id" value="{{ row_store_id }}">
+              <input type="hidden" name="advance_id" value="{{ r.id }}">
+              <button class="ghost del-day" type="submit">删</button>
+            </form>
+            {% elif r.source == 'sesame' %}
+            <span class="muted">导入</span>
+            {% elif not is_viewer %}
             <a class="btn ghost" href="{{ url_for('advance_page', store_id=row_store_id, advance_id=r.id) }}">改</a>
             <form method="post" action="{{ url_for('advance_delete') }}" onsubmit="return confirm('删除这笔垫资？')">
               <input type="hidden" name="store_id" value="{{ row_store_id }}">
               <input type="hidden" name="advance_id" value="{{ r.id }}">
               <button class="ghost del-day" type="submit">删</button>
             </form>
-            {% elif r.paid %}
-            <span class="muted">已锁</span>
             {% else %}
             <span class="muted">只读</span>
             {% endif %}
@@ -154,10 +167,11 @@
         <span>宽带 {{ '%.2f'|format(r.broadband) if r.broadband else '—' }}</span>
         <span>让利 {{ '%.2f'|format(r.rebate) if r.rebate else '—' }}</span>
         <span>其他 {{ '%.2f'|format(r.other) if r.other else '—' }}</span>
+        {% if r.sesame %}<span>芝麻 {{ '%.2f'|format(r.sesame) }}</span>{% endif %}
       </div>
       {% if r.note %}<p class="muted advance-card-note">{{ r.note }}</p>{% endif %}
       <div class="advance-card-actions">
-        {% if not r.paid and not is_viewer %}
+        {% if not r.paid and not is_viewer and r.source != 'sesame' %}
         <a class="btn ghost" href="{{ url_for('advance_page', store_id=row_store_id, advance_id=r.id) }}">改</a>
         <form method="post" action="{{ url_for('advance_delete') }}" onsubmit="return confirm('删除这笔垫资？')">
           <input type="hidden" name="store_id" value="{{ row_store_id }}">
@@ -166,6 +180,8 @@
         </form>
         {% elif r.paid %}
         <span class="muted">{{ r.paid_at }} 已锁</span>
+        {% elif r.source == 'sesame' %}
+        <span class="muted">导入</span>
         {% else %}
         <span class="muted">只读</span>
         {% endif %}

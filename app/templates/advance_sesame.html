@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}导入芝麻服务费{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div class="page-title">
+    <h1>导入芝麻服务费</h1>
+    <p class="muted">上传官方「芝麻服务费明细」xlsx，按门店编码对店，扣费记正数、退款记负数，自动进垫资。已导入的流水号会跳过，可重复上传。</p>
+  </div>
+</div>
+
+{% if not preview %}
+<div class="card">
+  <form method="post" action="{{ url_for('advance_sesame_preview') }}" enctype="multipart/form-data">
+    <p>
+      <label>选择文件</label>
+      <input type="file" name="sesame_file" accept=".xlsx" required>
+    </p>
+    <p class="muted">只支持 .xlsx，不超过 4 MiB。导入后进垫资台账，名称「芝麻服务费」，店员不能改删。</p>
+    <button type="submit">预览</button>
+    <a class="btn ghost" href="{{ url_for('advance_page') }}">返回垫资</a>
+  </form>
+</div>
+{% else %}
+<div class="card">
+  <div class="records-toolbar">
+    <strong>预览：{{ preview.file_name }}</strong>
+    <span class="muted">共 {{ preview.row_count }} 行 · 可导入 <strong>{{ preview.ready_count }}</strong> 笔 · 合计 <strong>{{ '%.2f'|format(preview.ready_total) }}</strong> 元</span>
+  </div>
+
+  {% if preview.ready %}
+  <h3 style="margin-top:12px">可导入（{{ preview.ready_count }} 笔，合计 {{ '%.2f'|format(preview.ready_total) }} 元）</h3>
+  <div class="table-wrap">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>日期</th>
+          <th class="left">门店</th>
+          <th class="left">平台店名</th>
+          <th>订单金额</th>
+          <th>服务费</th>
+          <th>入账金额</th>
+          <th class="left">类型</th>
+          <th class="left">流水号</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in preview.ready %}
+        <tr>
+          <td>{{ r.biz_date }}</td>
+          <td class="left">{{ r.store_name }}</td>
+          <td class="left">{{ r.platform_store }}</td>
+          <td>{{ '%.2f'|format(r.order_amt) }}</td>
+          <td>{{ '%.2f'|format(r.platform_fee) }}</td>
+          <td><strong>{{ '%.2f'|format(r.amount) }}</strong></td>
+          <td class="left">{% if r.refund %}<span class="tag">退款</span>{% else %}扣费{% endif %}</td>
+          <td class="left"><code>{{ r.ext_id }}</code></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if preview.skipped %}
+  <h3 class="muted" style="margin-top:16px">已导入跳过（{{ preview.skipped|length }} 笔）</h3>
+  <div class="table-wrap">
+    <table class="data">
+      <thead><tr><th class="left">流水号</th><th class="left">门店</th><th>金额</th></tr></thead>
+      <tbody>
+        {% for r in preview.skipped %}
+        <tr><td class="left"><code>{{ r.ext_id }}</code></td><td class="left">{{ r.store_name or r.platform_store }}</td><td>{{ '%.2f'|format(r.amount) }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if preview.unmatched %}
+  <h3 class="muted" style="margin-top:16px">对不上门店（{{ preview.unmatched|length }} 笔，不导入）</h3>
+  <div class="table-wrap">
+    <table class="data">
+      <thead><tr><th class="left">流水号</th><th class="left">平台店名</th><th class="left">编码</th><th>金额</th></tr></thead>
+      <tbody>
+        {% for r in preview.unmatched %}
+        <tr><td class="left"><code>{{ r.ext_id }}</code></td><td class="left">{{ r.platform_store }}</td><td class="left">{{ r.store_code }}</td><td>{{ '%.2f'|format(r.amount) }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if preview.ignored %}
+  <h3 class="muted" style="margin-top:16px">忽略（{{ preview.ignored|length }} 笔）</h3>
+  <div class="table-wrap">
+    <table class="data">
+      <thead><tr><th class="left">流水号</th><th class="left">原因</th><th>金额</th></tr></thead>
+      <tbody>
+        {% for r in preview.ignored %}
+        <tr><td class="left"><code>{{ r.ext_id }}</code></td><td class="left">{{ r.reason }}</td><td>{{ '%.2f'|format(r.amount) }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if preview.ready %}
+  <form method="post" action="{{ url_for('advance_sesame_confirm') }}" style="margin-top:16px">
+    <button type="submit">确认导入 {{ preview.ready_count }} 笔</button>
+    <a class="btn ghost" href="{{ url_for('advance_sesame_page') }}">重新上传</a>
+  </form>
+  {% else %}
+  <a class="btn ghost" href="{{ url_for('advance_sesame_page') }}">重新上传</a>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

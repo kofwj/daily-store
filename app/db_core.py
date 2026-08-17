@@ -178,6 +178,7 @@ MIGRATIONS: List[Tuple[int, str, callable]] = [
     (6, "audit_edited_at_indexes", "_ensure_audit_edited_at_indexes"),
     (7, "advance_amounts_to_cents", "_advance_amounts_to_cents"),
     (8, "add_auth_events", "_ensure_auth_events"),
+    (9, "add_advance_sesame", "_ensure_advance_sesame"),
 ]
 
 def _now() -> str:
@@ -228,6 +229,7 @@ def init_db() -> None:
         _ensure_deal_posts(conn)
         _ensure_deal_edits(conn)
         _ensure_advance_posts(conn)
+        _ensure_advance_sesame(conn)
         _ensure_advance_edits(conn)
         _ensure_app_meta(conn)
         _ensure_login_attempts(conn)
@@ -267,6 +269,7 @@ def migrate() -> None:
             "_ensure_audit_edited_at_indexes": _ensure_audit_edited_at_indexes,
             "_advance_amounts_to_cents": _advance_amounts_to_cents,
             "_ensure_auth_events": _ensure_auth_events,
+            "_ensure_advance_sesame": _ensure_advance_sesame,
         }
         for version, name, fn_name in sorted(MIGRATIONS):
             if version in applied:
@@ -493,6 +496,9 @@ def _ensure_advance_posts(conn: sqlite3.Connection) -> None:
             broadband INTEGER NOT NULL DEFAULT 0,
             rebate INTEGER NOT NULL DEFAULT 0,
             other INTEGER NOT NULL DEFAULT 0,
+            sesame INTEGER NOT NULL DEFAULT 0,
+            source TEXT NOT NULL DEFAULT '',
+            ext_id TEXT NOT NULL DEFAULT '',
             note TEXT NOT NULL DEFAULT '',
             paid INTEGER NOT NULL DEFAULT 0,
             paid_at TEXT NOT NULL DEFAULT '',
@@ -505,6 +511,23 @@ def _ensure_advance_posts(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_advance_posts_paid ON advance_posts(paid, biz_date)"
+    )
+    _ensure_advance_sesame(conn)
+
+
+def _ensure_advance_sesame(conn: sqlite3.Connection) -> None:
+    """垫资第四类：芝麻服务费 + 官方流水号去重。"""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(advance_posts)")}
+    if not cols:
+        return
+    if "sesame" not in cols:
+        conn.execute("ALTER TABLE advance_posts ADD COLUMN sesame INTEGER NOT NULL DEFAULT 0")
+    if "source" not in cols:
+        conn.execute("ALTER TABLE advance_posts ADD COLUMN source TEXT NOT NULL DEFAULT ''")
+    if "ext_id" not in cols:
+        conn.execute("ALTER TABLE advance_posts ADD COLUMN ext_id TEXT NOT NULL DEFAULT ''")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_advance_posts_ext_id ON advance_posts(ext_id) WHERE ext_id != ''"
     )
 
 
@@ -1087,6 +1110,11 @@ def _seed_catalog_stores(conn: sqlite3.Connection) -> None:
                     "UPDATE stores SET ai_target=? WHERE id=?",
                     (int(item.get("ai_target") or 10), row["id"]),
                 )
+            # 目录新补的移动编码：只填空，不覆盖管理员已改过的
+            if not (row["mobile_code"] if "mobile_code" in row.keys() else "" or "").strip():
+                code = (item.get("mobile_code") or "").strip()
+                if code:
+                    conn.execute("UPDATE stores SET mobile_code=? WHERE id=?", (code, row["id"]))
 
 def _seed_defaults(conn: sqlite3.Connection) -> None:
     all_ids = [row["id"] for row in conn.execute("SELECT id FROM stores WHERE active=1")]

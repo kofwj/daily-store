@@ -54,7 +54,9 @@ def _money_select(alias: str = "a") -> str:
         f"ROUND({prefix}broadband / 100.0, 2) AS broadband, "
         f"ROUND({prefix}rebate / 100.0, 2) AS rebate, "
         f"ROUND({prefix}other / 100.0, 2) AS other, "
-        f"ROUND(({prefix}broadband + {prefix}rebate + {prefix}other) / 100.0, 2) AS total"
+        f"ROUND({prefix}sesame / 100.0, 2) AS sesame, "
+        f"{prefix}source AS source, {prefix}ext_id AS ext_id, "
+        f"ROUND(({prefix}broadband + {prefix}rebate + {prefix}other + {prefix}sesame) / 100.0, 2) AS total"
     )
 
 
@@ -63,7 +65,7 @@ def _snapshot(row, *, cents: bool = False) -> dict:
         return {}
     out = {key: row[key] for key in row.keys()}
     if cents:
-        for key in ("broadband", "rebate", "other"):
+        for key in ("broadband", "rebate", "other", "sesame"):
             if key in out:
                 out[key] = cents_to_yuan(out[key])
     return out
@@ -89,7 +91,10 @@ def record_advance(
     broadband: float = 0,
     rebate: float = 0,
     other: float = 0,
+    sesame: float = 0,
     note: str = "",
+    source: str = "",
+    ext_id: str = "",
     advance_id: Optional[int] = None,
 ) -> int:
     payload = {
@@ -100,7 +105,10 @@ def record_advance(
         "broadband": yuan_to_cents(broadband),
         "rebate": yuan_to_cents(rebate),
         "other": yuan_to_cents(other),
+        "sesame": yuan_to_cents(sesame),
         "note": (note or "").strip()[:500],
+        "source": (source or "").strip()[:20],
+        "ext_id": (ext_id or "").strip()[:80],
     }
     if advance_id:
         row = conn.execute(
@@ -111,13 +119,15 @@ def record_advance(
             raise ValueError("missing")
         if int(row["paid"] or 0):
             raise ValueError("paid_locked")
+        if (row["source"] or "") == "sesame":
+            raise ValueError("imported_locked")
         before = _snapshot(row, cents=True)
         conn.execute(
             """
             UPDATE advance_posts
             SET user_id=:user_id, updated_at=:updated_at, biz_date=:biz_date,
                 phone=:phone, broadband=:broadband, rebate=:rebate, other=:other,
-                note=:note
+                sesame=:sesame, note=:note
             WHERE id=:id
             """,
             {**payload, "id": int(advance_id)},
@@ -129,9 +139,9 @@ def record_advance(
         """
         INSERT INTO advance_posts(
             store_id, user_id, created_at, updated_at, biz_date, phone,
-            broadband, rebate, other, note, paid, paid_at
+            broadband, rebate, other, sesame, source, ext_id, note, paid, paid_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '')
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '')
         """,
         (
             store_id,
@@ -143,6 +153,9 @@ def record_advance(
             payload["broadband"],
             payload["rebate"],
             payload["other"],
+            payload["sesame"],
+            payload["source"],
+            payload["ext_id"],
             payload["note"],
         ),
     )
@@ -163,11 +176,13 @@ def get_advance(conn: sqlite3.Connection, advance_id: int, store_id: int):
 
 
 def delete_advance(
-    conn: sqlite3.Connection, advance_id: int, store_id: int, *, user_id: int
+    conn: sqlite3.Connection, advance_id: int, store_id: int, *, user_id: int, allow_imported: bool = False
 ) -> bool:
     row = get_advance(conn, advance_id, store_id)
     if row is None or int(row["paid"] or 0):
         return False
+    if (row["source"] or "") == "sesame" and not allow_imported:
+        raise ValueError("imported_locked")
     before = _snapshot(row)  # get_advance() 已按元返回
     conn.execute("DELETE FROM advance_posts WHERE id=? AND store_id=?", (advance_id, store_id))
     _audit(conn, row, user_id=user_id, action="delete", before=before, after={})
@@ -324,7 +339,7 @@ def advance_today_inbox(conn: sqlite3.Connection, day: date) -> List[sqlite3.Row
                    st.short_name AS store_short,
                    st.name AS store_name,
                    COUNT(*) AS n,
-                   ROUND(SUM(a.broadband + a.rebate + a.other) / 100.0, 2) AS total
+                   ROUND(SUM(a.broadband + a.rebate + a.other + a.sesame) / 100.0, 2) AS total
             FROM advance_posts a
             JOIN stores st ON st.id = a.store_id
             WHERE a.biz_date=? AND a.paid=0
@@ -341,7 +356,7 @@ def advance_month_totals(
 ) -> Dict[int, Dict[str, float]]:
     ids = [int(sid) for sid in store_ids]
     out = {
-        sid: {"broadband": 0.0, "rebate": 0.0, "other": 0.0, "total": 0.0}
+        sid: {"broadband": 0.0, "rebate": 0.0, "other": 0.0, "sesame": 0.0, "total": 0.0}
         for sid in ids
     }
     if not ids:
@@ -353,7 +368,8 @@ def advance_month_totals(
         SELECT store_id,
                ROUND(SUM(broadband) / 100.0, 2) AS broadband,
                ROUND(SUM(rebate) / 100.0, 2) AS rebate,
-               ROUND(SUM(other) / 100.0, 2) AS other
+               ROUND(SUM(other) / 100.0, 2) AS other,
+               ROUND(SUM(sesame) / 100.0, 2) AS sesame
         FROM advance_posts
         WHERE biz_date>=? AND biz_date<=? AND store_id IN ({placeholders})
         GROUP BY store_id
@@ -365,10 +381,12 @@ def advance_month_totals(
         broadband = float(row["broadband"] or 0)
         rebate = float(row["rebate"] or 0)
         other = float(row["other"] or 0)
+        sesame = float(row["sesame"] or 0)
         out[sid] = {
             "broadband": broadband,
             "rebate": rebate,
             "other": other,
-            "total": round(broadband + rebate + other, 2),
+            "sesame": sesame,
+            "total": round(broadband + rebate + other + sesame, 2),
         }
     return out
