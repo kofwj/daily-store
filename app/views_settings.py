@@ -234,6 +234,16 @@ def register_settings(app) -> None:
                         db.set_setting(conn, "broadcast_compact", compact)
                         db.set_setting(conn, "broadcast_compact_family", family)
                         flash("播报设置已保存", "ok")
+                    elif action == "save_wecom":
+                        db.set_setting(conn, "wecom_global", (request.form.get("wecom_global") or "").strip())
+                        for city in ("南通市", "泰州市"):
+                            db.set_setting(conn, f"wecom_city_{city}", (request.form.get(f"wecom_city_{city}") or "").strip())
+                        flash("企业微信群机器人已保存", "ok")
+                    elif action == "test_wecom":
+                        from . import wecom
+                        url = (request.form.get("test_url") or "").strip()
+                        ok, msg = wecom.send_test(conn, url)
+                        flash(msg, "ok" if ok else "error")
                     elif action == "make_backup":
                         path = backup.snapshot("manual")
                         flash(f"已备份 {path.name}", "ok")
@@ -345,6 +355,11 @@ def register_settings(app) -> None:
                 filler_edit_month=db.get_setting(conn, "filler_edit_month", "0") == "1",
                 broadcast_compact=db.get_setting(conn, "broadcast_compact", "1") == "1",
                 broadcast_compact_family=db.get_setting(conn, "broadcast_compact_family", "0") == "1",
+                wecom_global=db.get_setting(conn, "wecom_global", ""),
+                wecom_cities={
+                    "南通市": db.get_setting(conn, "wecom_city_南通市", ""),
+                    "泰州市": db.get_setting(conn, "wecom_city_泰州市", ""),
+                },
                 incentive_rules=incentive_rules(conn),
                 backups=backup.list_backups() if g.user["role"] == "admin" else [],
             )

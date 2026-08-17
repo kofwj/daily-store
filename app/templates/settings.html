@@ -554,6 +554,37 @@
       </label>
       <div class="toolbar"><button type="submit">保存播报设置</button></div>
     </form>
+    <form method="post" class="card settings-card" style="margin-top:16px">
+      <input type="hidden" name="action" value="save_wecom">
+      <input type="hidden" name="tab" value="broadcast">
+      <h2 style="margin:0 0 8px">企业微信群机器人</h2>
+      <p class="muted">保存日报或触客后自动发群。先在企微群里加机器人拿 webhook 地址。全局地址所有店都发；按地市填的会覆盖全局。</p>
+      <label class="settings-field">
+        <span>全局 Webhook（所有店默认发这）</span>
+        <input type="url" name="wecom_global" value="{{ wecom_global }}" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." autocomplete="off">
+      </label>
+      <label class="settings-field">
+        <span>南通市 Webhook（覆盖全局）</span>
+        <input type="url" name="wecom_city_南通市" value="{{ wecom_cities.get('南通市', '') }}" placeholder="留空则用全局" autocomplete="off">
+      </label>
+      <label class="settings-field">
+        <span>泰州市 Webhook（覆盖全局）</span>
+        <input type="url" name="wecom_city_泰州市" value="{{ wecom_cities.get('泰州市', '') }}" placeholder="留空则用全局" autocomplete="off">
+      </label>
+      <div class="toolbar">
+        <button type="submit">保存机器人</button>
+      </div>
+    </form>
+    <form method="post" class="card settings-card" style="margin-top:16px">
+      <input type="hidden" name="action" value="test_wecom">
+      <input type="hidden" name="tab" value="broadcast">
+      <h2 style="margin:0 0 8px">测试发送</h2>
+      <label class="settings-field">
+        <span>Webhook 地址</span>
+        <input type="url" name="test_url" placeholder="贴一个 webhook 试发" autocomplete="off">
+      </label>
+      <div class="toolbar"><button type="submit">发送测试</button></div>
+    </form>
     {% endif %}
 
     {% if tab == 'rules' and g.user['role'] == 'admin' %}

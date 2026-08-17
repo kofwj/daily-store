@@ -53,3 +53,8 @@ from .sesame import (  # noqa: F401
     import_sesame_rows,
     parse_sesame_xlsx,
 )
+from .wecom import (  # noqa: F401
+    get_webhook,
+    send_test,
+    send_text,
+)
