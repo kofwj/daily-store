@@ -77,12 +77,12 @@
       <div class="metric">
         <div class="metric-label">
           <div class="name">{{ item.name }}</div>
-          <div class="cum">累 {{ item.cum }}</div>
+          <div class="cum">累 {{ item.cum_text }}</div>
           {% if item.hint %}<div class="hint">{{ item.hint }}</div>{% endif %}
         </div>
         <div class="stepper">
           <button type="button" class="ghost step" data-delta="-1" aria-label="减一">−</button>
-          <input type="number" min="0" step="1" name="m_{{ item.code }}" value="{{ item.day }}" inputmode="numeric" pattern="[0-9]*">
+          <input type="number" min="0" step="{{ item.step }}" name="m_{{ item.code }}" value="{{ item.day_text }}" inputmode="decimal">
           <button type="button" class="ghost step" data-delta="1" aria-label="加一">+</button>
         </div>
       </div>
@@ -110,8 +110,10 @@
 
 <script>
 function bumpInput(input, delta) {
-  const next = Math.max(0, (parseInt(input.value || '0', 10) || 0) + delta);
-  input.value = String(next);
+  const step = Number(input.step || '1') || 1;
+  const current = Number(input.value || '0') || 0;
+  const next = Math.max(0, Math.round((current + delta * step) * 10) / 10);
+  input.value = step < 1 ? next.toFixed(1) : String(Math.round(next));
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 document.querySelectorAll('.stepper .step').forEach((btn) => {

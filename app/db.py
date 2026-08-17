@@ -47,6 +47,7 @@ from .db_query import (  # noqa: F401
     save_daily,
     set_day_value,
     stores_reported_in_month,
+    week_metric_total,
 )
 from .sesame import (  # noqa: F401
     classify_sesame_rows,

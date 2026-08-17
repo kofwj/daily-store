@@ -206,7 +206,9 @@ def register_advance(app) -> None:
             row = db.get_advance(conn, aid, sid)
             if row is None:
                 flash("这条垫资不存在，或已删除。", "error")
-            elif int(row["paid"] or 0):
+            elif (row["source"] or "") == "sesame" and g.user["role"] != "admin":
+                flash("芝麻服务费是官方导入的，店员不能删。", "error")
+            elif int(row["paid"] or 0) and not (g.user["role"] == "admin" and (row["source"] or "") == "sesame"):
                 flash("已兑付的垫资不能删。", "error")
             else:
                 allow_imported = g.user["role"] == "admin"

@@ -41,6 +41,18 @@
         <a class="btn ghost" href="{{ url_for('report_xlsx', store_id=store.id, start=start.isoformat(), end=end.isoformat()) }}">导出 Excel</a>
       </div>
     </form>
+    {% if view == 'week' and g.user['role'] == 'admin' %}
+    <form method="post" action="{{ url_for('report_bisuan_week') }}" class="page-filters" style="margin-top:10px">
+      <input type="hidden" name="store_id" value="{{ store.id }}">
+      <input type="hidden" name="start" value="{{ start.isoformat() }}">
+      <input type="hidden" name="end" value="{{ end.isoformat() }}">
+      <label class="filter">
+        <span>本周移动官方笔算</span>
+        <input type="number" min="0" step="0.1" name="official" placeholder="例如 12.5" required>
+      </label>
+      <button type="submit">按官方数校准</button>
+    </form>
+    {% endif %}
   </div>
 
   <div class="kpi-row report-kpis">
@@ -80,7 +92,7 @@
           {% for row in grp.rows %}
           <tr class="{{ 'row-kpi' if row.code in ['bisuan','bisuan_high','ai_contract'] or row.code.startswith('coin_cut_new') else '' }}">
             <td class="left">{{ row.name }}{% if row.code in ['bisuan','bisuan_high','ai_contract'] or row.code.startswith('coin_cut_new') %} <span class="kpi-dot" title="考核指标">★</span>{% endif %}</td>
-            <td><b>{{ row.total }}</b></td>
+            <td><b>{{ row.total_text or row.total }}</b></td>
             <td class="muted">{{ row.avg or '—' }}</td>
           </tr>
           {% endfor %}
@@ -137,14 +149,14 @@
               <input type="hidden" name="view" value="{{ view }}">
               <input type="hidden" name="start" value="{{ start.isoformat() }}">
               <input type="hidden" name="end" value="{{ end.isoformat() }}">
-              <input type="number" min="0" step="1" name="value" value="{{ v }}" title="点格子改数，回车保存">
+              <input type="number" min="0" step="{{ row.step }}" name="value" value="{{ row.days_text[loop.index0] }}" title="点格子改数，回车保存">
             </form>
             {% else %}
-            {{ v if v else '·' }}
+            {{ row.days_text[loop.index0] if v else '·' }}
             {% endif %}
           </td>
           {% endfor %}
-          <td><b>{{ row.total }}</b></td>
+          <td><b>{{ row.total_text or row.total }}</b></td>
           <td class="muted avg-col">{{ row.avg or '—' }}</td>
         </tr>
         {% endfor %}
@@ -154,7 +166,7 @@
     </div>
     <p class="muted report-note">
       {% if g.user['role'] == 'admin' %}
-      管理员点某个格子改数，回车只保存这一格，其它数字不动，会记进审计。日均 = 区间合计 ÷ 已提交天数。
+      管理员点某个格子改数，回车只保存这一格。周报可填移动官方笔算，差额补到本周最后一天。日均 = 区间合计 ÷ 已提交天数。
       {% else %}
       「·」表示当日为 0。日均 = 区间合计 ÷ 已提交天数。
       {% endif %}

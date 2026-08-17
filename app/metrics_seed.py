@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 # 播报分组：与现有微信群格式对齐
 # header 为 None 表示基础项，直接跟在店名后面
@@ -23,8 +23,8 @@ SECTIONS: List[Dict] = [
         "header": "重点业务",
         "blank_before": True,
         "metrics": [
-            ("bisuan", "比算新增", "纯新或低消迎回，有效插卡，ARPU>0"),
-            ("bisuan_high", "比算新增[高]", "上面这类里，折后主套105以上"),
+            ("bisuan", "比算新增", "可填到 0.1。周报可用移动官方数校准"),
+            ("bisuan_high", "比算新增[高]", "可填到 0.1。上面这类里，折后主套105以上"),
             ("ai_contract", "Ai手机合约", ""),
         ],
     },
@@ -154,6 +154,48 @@ KPI_TARGETS = (
 )
 
 
+DECIMAL_METRICS = {"bisuan", "bisuan_high"}
+METRIC_SCALE = 10
+
+
+def is_decimal_metric(code: str) -> bool:
+    return code in DECIMAL_METRICS
+
+
+def to_stored(code: str, raw) -> int:
+    """页面数字 -> 库里的整数。笔算按 0.1 存成 10 倍。"""
+    text = str(raw or "").strip().replace(",", "").replace("，", "")
+    if not text:
+        return 0
+    try:
+        number = float(text)
+    except (TypeError, ValueError):
+        return 0
+    if is_decimal_metric(code):
+        return int(round(number * METRIC_SCALE))
+    return max(0, int(round(number)))
+
+
+def from_stored(code: str, stored) -> float:
+    value = float(stored or 0)
+    if is_decimal_metric(code):
+        return round(value / METRIC_SCALE, 1)
+    return value
+
+
+def format_stored(code: str, stored) -> str:
+    value = from_stored(code, stored)
+    if is_decimal_metric(code):
+        return f"{value:.1f}"
+    if abs(value - round(value)) < 1e-9:
+        return str(int(round(value)))
+    return str(value)
+
+
+def metric_step(code: str) -> str:
+    return "0.1" if is_decimal_metric(code) else "1"
+
+
 def rollup_pair(values: Dict, key: str) -> Tuple[int, int]:
     spec = ROLLUPS[key]
     codes = spec["parts"] + spec["legacy"]
@@ -165,4 +207,24 @@ def rollup_pair(values: Dict, key: str) -> Tuple[int, int]:
 def rollup_amount(values: Dict[str, int], key: str) -> int:
     spec = ROLLUPS[key]
     codes = spec["parts"] + spec["legacy"]
+    return sum(int(values.get(code, 0) or 0) for code in codes)
+
+
+def display_rollup(values: Dict[str, int], key: str) -> float:
+    stored = rollup_amount(values, key)
+    if key == "bisuan_total" or any(is_decimal_metric(code) for code in ROLLUPS[key]["parts"]):
+        return round(stored / METRIC_SCALE, 1)
+    return float(stored)
+
+
+def format_rollup(values: Dict[str, int], key: str) -> str:
+    value = display_rollup(values, key)
+    if key == "bisuan_total" or any(is_decimal_metric(code) for code in ROLLUPS[key]["parts"]):
+        return f"{value:.1f}"
+    if abs(value - round(value)) < 1e-9:
+        return str(int(round(value)))
+    return str(value)
+
+
+def sum_stored(codes: Iterable[str], values: Dict[str, int]) -> int:
     return sum(int(values.get(code, 0) or 0) for code in codes)

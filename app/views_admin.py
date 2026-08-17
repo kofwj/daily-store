@@ -29,7 +29,7 @@ from .helpers import (
     xlsx_bytes,
     xlsx_response,
 )
-from .metrics_seed import KPI_TARGETS, rollup_pair
+from .metrics_seed import KPI_TARGETS, format_stored, from_stored, rollup_pair
 
 
 def _bulletin_rows(conn, stores, biz_date: date):
@@ -94,15 +94,20 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
             else:
                 day, cum = rollup_pair(pairs, code)
             target = kpi_targets.get(code, 0)
-            day_sum += int(day)
+            scale = "bisuan" if code == "bisuan_total" else code
+            day_disp = from_stored(scale, day)
+            month_disp = from_stored(scale, cum)
+            day_sum += day_disp
             kpis.append(
                 {
                     "code": code,
                     "name": name,
-                    "day": int(day),
-                    "month": int(cum),
+                    "day": day_disp,
+                    "day_text": format_stored(scale, day),
+                    "month": month_disp,
+                    "month_text": format_stored(scale, cum),
                     "target": target,
-                    "progress": (int(cum) / target * 100) if target else None,
+                    "progress": (month_disp / target * 100) if target else None,
                 }
             )
         rep = db.get_report(conn, sid, biz_date)
@@ -475,6 +480,7 @@ def register_admin(app) -> None:
             r["store_name"] = r["store_name"] or "?"
         return render_template(
             "edits.html",
+            tab="edits",
             rows=rows,
             days=days_int,
             store_id=store_id,
@@ -556,6 +562,7 @@ def register_admin(app) -> None:
             )
         return render_template(
             "logins.html",
+            tab="logins",
             rows=rows,
             days=days_int,
             action=action,

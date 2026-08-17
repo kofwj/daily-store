@@ -214,6 +214,8 @@ MIGRATIONS: List[Tuple[int, str, callable]] = [
     (7, "advance_amounts_to_cents", "_advance_amounts_to_cents"),
     (8, "add_auth_events", "_ensure_auth_events"),
     (9, "add_advance_sesame", "_ensure_advance_sesame"),
+    (10, "mark_sesame_paid", "_mark_sesame_paid"),
+    (11, "scale_bisuan_tenths", "_scale_bisuan_tenths"),
 ]
 
 def _now() -> str:
@@ -305,6 +307,8 @@ def migrate() -> None:
             "_advance_amounts_to_cents": _advance_amounts_to_cents,
             "_ensure_auth_events": _ensure_auth_events,
             "_ensure_advance_sesame": _ensure_advance_sesame,
+            "_mark_sesame_paid": _mark_sesame_paid,
+            "_scale_bisuan_tenths": _scale_bisuan_tenths,
         }
         for version, name, fn_name in sorted(MIGRATIONS):
             if version in applied:
@@ -563,6 +567,29 @@ def _ensure_advance_sesame(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE advance_posts ADD COLUMN ext_id TEXT NOT NULL DEFAULT ''")
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_advance_posts_ext_id ON advance_posts(ext_id) WHERE ext_id != ''"
+    )
+
+
+def _mark_sesame_paid(conn: sqlite3.Connection) -> None:
+    """芝麻服务费是店已充的官方扣款，导入后直接记已兑，不进兑付清单。"""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(advance_posts)")}
+    if "source" not in cols or "paid" not in cols:
+        return
+    conn.execute(
+        """
+        UPDATE advance_posts
+        SET paid=1,
+            paid_at=CASE WHEN paid_at IS NULL OR paid_at='' THEN substr(created_at, 1, 10) ELSE paid_at END,
+            paid_by=COALESCE(paid_by, user_id)
+        WHERE source='sesame' AND paid=0
+        """
+    )
+
+
+def _scale_bisuan_tenths(conn: sqlite3.Connection) -> None:
+    """旧笔算按整数存；改成 0.1 精度后，历史数乘 10。"""
+    conn.execute(
+        "UPDATE daily_facts SET day_value = day_value * 10 WHERE metric_code IN ('bisuan', 'bisuan_high')"
     )
 
 

@@ -22,7 +22,16 @@ from .helpers import (
     xlsx_bytes,
     xlsx_response,
 )
-from .metrics_seed import KPI_TARGETS, SECTIONS, rollup_pair
+from .metrics_seed import (
+    KPI_TARGETS,
+    SECTIONS,
+    format_stored,
+    from_stored,
+    is_decimal_metric,
+    metric_step,
+    rollup_pair,
+    to_stored,
+)
 
 
 def register_daily(app) -> None:
@@ -63,11 +72,7 @@ def register_daily(app) -> None:
                     return redirect(url_for("today", store_id=store["id"], date=biz_date.isoformat()))
                 values = {}
                 for m in metrics:
-                    raw = request.form.get(f"m_{m['code']}", "0")
-                    try:
-                        values[m["code"]] = max(0, int(raw or 0))
-                    except ValueError:
-                        values[m["code"]] = 0
+                    values[m["code"]] = max(0, to_stored(m["code"], request.form.get(f"m_{m['code']}", "0")))
                 compact_sections = broadcast_compact_sections(conn)
                 note = (request.form.get("note") or "").strip()
                 before = db.day_values(conn, store["id"], biz_date)
@@ -138,8 +143,12 @@ def register_daily(app) -> None:
                             "code": code,
                             "name": name,
                             "hint": hint,
-                            "day": day_vals.get(code, 0),
-                            "cum": cum,
+                            "day": from_stored(code, day_vals.get(code, 0)),
+                            "day_text": format_stored(code, day_vals.get(code, 0)),
+                            "cum": from_stored(code, cum),
+                            "cum_text": format_stored(code, cum),
+                            "step": metric_step(code),
+                            "decimal": is_decimal_metric(code),
                             "target": 0,
                         }
                     )
@@ -151,15 +160,18 @@ def register_daily(app) -> None:
                 else:
                     day, cum = rollup_pair(pairs, code)
                 target = kpi_targets.get(code, 0)
+                scale = "bisuan" if code == "bisuan_total" else code
+                day_disp = from_stored(scale, day)
+                cum_disp = from_stored(scale, cum)
                 kpi_cards.append(
                     {
                         "code": code,
                         "name": name,
                         "note": note,
-                        "day": day,
-                        "cum": cum,
+                        "day": day_disp,
+                        "cum": cum_disp,
                         "target": target,
-                        "progress": (cum / target * 100) if target else None,
+                        "progress": (cum_disp / target * 100) if target else None,
                     }
                 )
             forecast = store_forecast(conn, store, biz_date)

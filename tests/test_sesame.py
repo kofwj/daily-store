@@ -120,9 +120,10 @@ def test_import_creates_advance_rows_and_dedup(tmp_db):
     # 库里检查
     with db.get_db() as conn:
         rows = list(conn.execute(
-            "SELECT sesame, source, ext_id, note FROM advance_posts WHERE source='sesame' ORDER BY ext_id"
+            "SELECT sesame, source, ext_id, note, paid FROM advance_posts WHERE source='sesame' ORDER BY ext_id"
         ))
     assert len(rows) == 3
+    assert all(int(r["paid"] or 0) == 1 for r in rows)
     amounts = sorted(float(r["sesame"]) / 100 for r in rows)
     assert amounts == [-9.58, 5.54, 9.58]
     # 再次预览：已导入的应跳过

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Dict, Iterable, Mapping, Tuple
 
-from .metrics_seed import ROLLUPS, SECTIONS
+from .metrics_seed import ROLLUPS, SECTIONS, format_stored
 
 DayCum = Tuple[int, int]
 
@@ -14,8 +14,12 @@ def format_biz_date(biz_date: date) -> str:
     return f"{biz_date.month}月{biz_date.day}日"
 
 
-def _line(name: str, day: int, cum: int) -> str:
-    return f"{name}：日{int(day)}，累{int(cum)}"
+def _fmt(code: str, value) -> str:
+    return format_stored(code, value)
+
+
+def _line(name: str, day, cum, *, code: str = "") -> str:
+    return f"{name}：日{_fmt(code, day)}，累{_fmt(code, cum)}"
 
 
 def render_broadcast(
@@ -39,15 +43,14 @@ def render_broadcast(
         if section["code"] == "contract":
             spec = ROLLUPS["coin_cut_all"]
             day, cum = _sum_codes(values, spec["parts"] + spec["legacy"])
-            visible.append(_line("金币直降", day, cum))
+            visible.append(_line("金币直降", day, cum, code="coin_cut_old"))
         for code, name, _hint in section["metrics"]:
             if code in ROLLUPS["coin_cut_all"]["parts"]:
                 continue
             day, cum = values.get(code, (0, 0))
-            day, cum = int(day or 0), int(cum or 0)
-            hide = compact and section["code"] in compact_set and day == 0 and cum == 0
+            hide = compact and section["code"] in compact_set and int(day or 0) == 0 and int(cum or 0) == 0
             if not hide:
-                visible.append(_line(name, day, cum))
+                visible.append(_line(name, day, cum, code=code))
 
         if not visible:
             continue

@@ -3,69 +3,79 @@
 {% from "_store_picker.html" import store_picker %}
 {% from "_scope_filters.html" import scope_filters %}
 {% block title %}修改审计{% endblock %}
+{% block body_class %}settings-body{% endblock %}
 {% block body %}
-<div class="page-head">
+<div class="page-head settings-head">
   <div class="page-title">
-    <h1>修改审计</h1>
-    <p class="muted">日报与触客播报的修改记录（锁定后覆盖、历史日期覆盖、删除都会记在这里）。</p>
+    <h1>设置</h1>
+    <p class="muted">账号、门店、业务规则和备份</p>
   </div>
-  <form method="get" class="page-filters">
-    <label class="filter">
-      <span>类型</span>
-      <select name="kind" onchange="this.form.submit()">
-        <option value="all" {% if kind == 'all' %}selected{% endif %}>全部</option>
-        <option value="daily" {% if kind == 'daily' %}selected{% endif %}>日报</option>
-        <option value="deal" {% if kind == 'deal' %}selected{% endif %}>触客播报</option>
-        <option value="advance" {% if kind == 'advance' %}selected{% endif %}>垫资</option>
-      </select>
-    </label>
-    <label class="filter">
-      <span>近 N 天</span>
-      <select name="days" onchange="this.form.submit()">
-        {% for d in [1, 3, 7, 14, 30, 90] %}
-        <option value="{{ d }}" {% if d == days %}selected{% endif %}>{{ d }} 天</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="filter">
-      <span>门店</span>
-      {{ store_picker(stores, selected=store_id, all_value='', all_label='全部门店') }}
-    </label>
-    {% if not store_id %}
-    {{ scope_filters(city_scope.cities, city_scope.managers, city=city_scope.city, manager=city_scope.manager) }}
-    {% endif %}
-  </form>
 </div>
+<div class="settings">
+  {% include "_settings_nav.html" %}
+  <div class="settings-main">
+    <div class="settings-page-head">
+      <h1>修改审计</h1>
+      <p class="muted">日报、触客、垫资谁在什么时候改过。锁定后覆盖、删记录都会记在这里。</p>
+    </div>
+    <form method="get" class="page-filters">
+      <label class="filter">
+        <span>类型</span>
+        <select name="kind" onchange="this.form.submit()">
+          <option value="all" {% if kind == 'all' %}selected{% endif %}>全部</option>
+          <option value="daily" {% if kind == 'daily' %}selected{% endif %}>日报</option>
+          <option value="deal" {% if kind == 'deal' %}selected{% endif %}>触客播报</option>
+          <option value="advance" {% if kind == 'advance' %}selected{% endif %}>垫资</option>
+        </select>
+      </label>
+      <label class="filter">
+        <span>近 N 天</span>
+        <select name="days" onchange="this.form.submit()">
+          {% for d in [1, 3, 7, 14, 30, 90] %}
+          <option value="{{ d }}" {% if d == days %}selected{% endif %}>{{ d }} 天</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="filter">
+        <span>门店</span>
+        {{ store_picker(stores, selected=store_id, all_value='', all_label='全部门店') }}
+      </label>
+      {% if not store_id %}
+      {{ scope_filters(city_scope.cities, city_scope.managers, city=city_scope.city, manager=city_scope.manager) }}
+      {% endif %}
+    </form>
 
-<div class="card" style="overflow:auto">
-  {% if rows %}
-  <table class="data">
-    <thead>
-      <tr>
-        <th>时间</th>
-        <th>类型</th>
-        <th>门店</th>
-        <th>操作人</th>
-        <th>日期</th>
-        <th>改动</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for r in rows %}
-      <tr>
-        <td>{{ r.edited_at }}</td>
-        <td>{% if r.kind == 'deal' %}<span class="tag tag-deal">触客</span>{% elif r.kind == 'advance' %}<span class="tag tag-deal">垫资</span>{% else %}<span class="tag tag-daily">日报</span>{% endif %}</td>
-        <td>{{ r.store_name }}</td>
-        <td><code>{{ r.user_name }}</code></td>
-        <td>{{ r.biz_date }}{% if r.note %} <span class="muted">（{{ r.note }}）</span>{% endif %}</td>
-        <td class="left">{{ r.diff }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {{ pager(page, pages, total, 'edits_page', days=days, store_id=store_id, kind=kind, city=city_scope.city, area_manager=city_scope.manager) }}
-  {% else %}
-  <p class="muted">近 {{ days }} 天还没有修改记录。</p>
-  {% endif %}
+    <div class="card" style="overflow:auto">
+      {% if rows %}
+      <table class="data">
+        <thead>
+          <tr>
+            <th>时间</th>
+            <th>类型</th>
+            <th>门店</th>
+            <th>操作人</th>
+            <th>日期</th>
+            <th>改动</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td>{{ r.edited_at }}</td>
+            <td>{% if r.kind == 'deal' %}<span class="tag tag-deal">触客</span>{% elif r.kind == 'advance' %}<span class="tag tag-deal">垫资</span>{% else %}<span class="tag tag-daily">日报</span>{% endif %}</td>
+            <td>{{ r.store_name }}</td>
+            <td><code>{{ r.user_name }}</code></td>
+            <td>{{ r.biz_date }}{% if r.note %} <span class="muted">（{{ r.note }}）</span>{% endif %}</td>
+            <td class="left">{{ r.diff }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {{ pager(page, pages, total, 'edits_page', days=days, store_id=store_id, kind=kind, city=city_scope.city, area_manager=city_scope.manager) }}
+      {% else %}
+      <p class="muted">近 {{ days }} 天还没有修改记录。</p>
+      {% endif %}
+    </div>
+  </div>
 </div>
 {% endblock %}

@@ -52,8 +52,8 @@ def test_bulletin_row_and_tsv_match_sheet():
     assert row["follow_ai"] is False
     assert row["follow_bisuan"] is True
     assert row["month_ai_text"] == "0"
-    assert row["month_bisuan_text"] == "10"
-    assert row["day_bisuan_text"] == "3"
+    assert row["month_bisuan_text"] == "1.0"
+    assert row["day_bisuan_text"] == "0.3"
     assert row["ai_zero"] is True
     assert row["bisuan_zero"] is False
 

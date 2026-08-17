@@ -111,6 +111,8 @@ def test_successful_login_and_logout_are_logged(client):
     page = client.get("/logins").get_data(as_text=True)
     assert "登录日志" in page
     assert "admin" in page
+    assert "settings-nav" in page
+    assert "备份恢复" in page
     client.get("/logout", follow_redirects=True)
     with db.get_db() as conn:
         actions = [r["action"] for r in conn.execute("SELECT action FROM auth_events ORDER BY id")]

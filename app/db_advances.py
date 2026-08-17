@@ -95,6 +95,7 @@ def record_advance(
     note: str = "",
     source: str = "",
     ext_id: str = "",
+    paid: bool = False,
     advance_id: Optional[int] = None,
 ) -> int:
     payload = {
@@ -117,10 +118,10 @@ def record_advance(
         ).fetchone()
         if row is None:
             raise ValueError("missing")
-        if int(row["paid"] or 0):
-            raise ValueError("paid_locked")
         if (row["source"] or "") == "sesame":
             raise ValueError("imported_locked")
+        if int(row["paid"] or 0):
+            raise ValueError("paid_locked")
         before = _snapshot(row, cents=True)
         conn.execute(
             """
@@ -135,13 +136,16 @@ def record_advance(
         after = conn.execute("SELECT * FROM advance_posts WHERE id=?", (int(advance_id),)).fetchone()
         _audit(conn, after, user_id=user_id, action="update", before=before, after=_snapshot(after, cents=True))
         return int(advance_id)
+    paid_flag = 1 if paid else 0
+    paid_at = payload["updated_at"][:10] if paid else ""
+    paid_by = user_id if paid else None
     cur = conn.execute(
         """
         INSERT INTO advance_posts(
             store_id, user_id, created_at, updated_at, biz_date, phone,
-            broadband, rebate, other, sesame, source, ext_id, note, paid, paid_at
+            broadband, rebate, other, sesame, source, ext_id, note, paid, paid_at, paid_by
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '')
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             store_id,
@@ -157,6 +161,9 @@ def record_advance(
             payload["source"],
             payload["ext_id"],
             payload["note"],
+            paid_flag,
+            paid_at,
+            paid_by,
         ),
     )
     created = conn.execute("SELECT * FROM advance_posts WHERE id=?", (int(cur.lastrowid),)).fetchone()
@@ -179,10 +186,13 @@ def delete_advance(
     conn: sqlite3.Connection, advance_id: int, store_id: int, *, user_id: int, allow_imported: bool = False
 ) -> bool:
     row = get_advance(conn, advance_id, store_id)
-    if row is None or int(row["paid"] or 0):
+    if row is None:
         return False
-    if (row["source"] or "") == "sesame" and not allow_imported:
+    is_sesame = (row["source"] or "") == "sesame"
+    if is_sesame and not allow_imported:
         raise ValueError("imported_locked")
+    if int(row["paid"] or 0) and not (is_sesame and allow_imported):
+        return False
     before = _snapshot(row)  # get_advance() 已按元返回
     conn.execute("DELETE FROM advance_posts WHERE id=? AND store_id=?", (advance_id, store_id))
     _audit(conn, row, user_id=user_id, action="delete", before=before, after={})

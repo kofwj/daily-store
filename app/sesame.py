@@ -216,6 +216,7 @@ def import_sesame_rows(conn, rows: Sequence[Dict[str, Any]], *, user_id: int) ->
             note=note[:500],
             source="sesame",
             ext_id=row["ext_id"],
+            paid=True,
         )
         n += 1
     return n

@@ -46,7 +46,7 @@ def test_render_matches_wechat_log():
     assert text.startswith("8月13日\n示例戊店\n")
     assert "当天手机销量：日1，累13" in text
     assert "查询身份证数：日1，累4" in text
-    assert "\n重点业务\n比算新增：日0，累5\n比算新增[高]：日3，累3\n" in text
+    assert "\n重点业务\n比算新增：日0.0，累0.5\n比算新增[高]：日0.3，累0.3\n" in text
     assert "\n新增类\n安心/副卡：日0，累0\n其他卡类：日0，累5\n" in text
     assert "\n家庭类\n宽带：日3，累10\n" in text
     assert "电视会员：日0，累0" in text

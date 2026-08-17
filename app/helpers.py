@@ -381,7 +381,9 @@ def build_diff(before: Dict[str, int], after: Dict[str, int], names=None) -> str
         if b == a:
             continue
         name = names.get(k, k)
-        parts.append(f"{name} {b}→{a}")
+        from .metrics_seed import format_stored
+
+        parts.append(f"{name} {format_stored(k, b)}→{format_stored(k, a)}")
     return "；".join(parts) or "（无变化）"
 
 

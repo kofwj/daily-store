@@ -37,6 +37,12 @@ def scale_color(value: int, max_value: int, kind: str) -> str:
     return _hex(rgb)
 
 
+def fmt_metric(code: str, stored: Any) -> str:
+    from .metrics_seed import format_stored
+
+    return format_stored(code, stored)
+
+
 def fmt_count(value: Any) -> str:
     """整数原样；小数留一位，贴近原表的 1.0 / 10.0。0 也显示（通报表不留空白）。"""
     if value is None or value == "":
@@ -97,12 +103,12 @@ def build_row(
         "day_coin": day_coin,
         "day_ai": day_ai,
         "day_bisuan": day_bisuan,
-        "month_coin_text": fmt_count(month_coin),
-        "month_ai_text": fmt_count(month_ai),
-        "month_bisuan_text": fmt_count(month_bisuan),
-        "day_coin_text": fmt_count(day_coin),
-        "day_ai_text": fmt_count(day_ai),
-        "day_bisuan_text": fmt_count(day_bisuan),
+        "month_coin_text": fmt_metric("coin_cut_old", month_coin),
+        "month_ai_text": fmt_metric("ai_contract", month_ai),
+        "month_bisuan_text": fmt_metric("bisuan", month_bisuan),
+        "day_coin_text": fmt_metric("coin_cut_old", day_coin),
+        "day_ai_text": fmt_metric("ai_contract", day_ai),
+        "day_bisuan_text": fmt_metric("bisuan", day_bisuan),
         "ai_zero": month_ai <= 0,
         "bisuan_zero": month_bisuan <= 0,
         "day_ai_zero": day_ai <= 0,
@@ -174,12 +180,12 @@ def totals_row(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "day_coin": day_coin,
         "day_ai": day_ai,
         "day_bisuan": day_bisuan,
-        "month_coin_text": fmt_count(month_coin),
-        "month_ai_text": fmt_count(month_ai),
-        "month_bisuan_text": fmt_count(month_bisuan),
-        "day_coin_text": fmt_count(day_coin),
-        "day_ai_text": fmt_count(day_ai),
-        "day_bisuan_text": fmt_count(day_bisuan),
+        "month_coin_text": fmt_metric("coin_cut_old", month_coin),
+        "month_ai_text": fmt_metric("ai_contract", month_ai),
+        "month_bisuan_text": fmt_metric("bisuan", month_bisuan),
+        "day_coin_text": fmt_metric("coin_cut_old", day_coin),
+        "day_ai_text": fmt_metric("ai_contract", day_ai),
+        "day_bisuan_text": fmt_metric("bisuan", day_bisuan),
         "month_coin_color": scale_color(month_coin, month_coin or 1, "month"),
         "month_ai_color": scale_color(month_ai, month_ai or 1, "month"),
         "month_bisuan_color": scale_color(month_bisuan, month_bisuan or 1, "month"),

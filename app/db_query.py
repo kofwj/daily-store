@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Sequence
 
 from .db_core import _now, get_report, list_metrics, month_bounds, record_edit
+from .metrics_seed import to_stored
 
 
 def prev_month_cum(
@@ -88,9 +89,7 @@ def save_daily(
     for code, raw in values.items():
         if code not in codes:
             continue
-        value = int(raw or 0)
-        if value < 0:
-            value = 0
+        value = max(0, to_stored(code, raw) if not isinstance(raw, int) else max(0, raw))
         conn.execute(
             """
             INSERT INTO daily_facts(biz_date, store_id, metric_code, day_value)
@@ -113,6 +112,24 @@ def save_daily(
                 (day, store_id, code),
             )
 
+def week_metric_total(
+    conn: sqlite3.Connection, store_id: int, start: date, end: date, metric_codes: Sequence[str]
+) -> int:
+    codes = [c for c in metric_codes if c]
+    if not codes:
+        return 0
+    placeholders = ",".join("?" * len(codes))
+    row = conn.execute(
+        f"""
+        SELECT COALESCE(SUM(day_value), 0) AS total
+        FROM daily_facts
+        WHERE store_id=? AND biz_date>=? AND biz_date<=? AND metric_code IN ({placeholders})
+        """,
+        (store_id, start.isoformat(), end.isoformat(), *codes),
+    ).fetchone()
+    return int(row["total"] or 0)
+
+
 def set_day_value(
     conn: sqlite3.Connection,
     *,
@@ -121,12 +138,13 @@ def set_day_value(
     metric_code: str,
     value: int,
     user_id: int,
+    note: str = "校准单元格",
 ) -> None:
     """只改某一天某一个指标，不动其它格子。"""
     codes = {row["code"] for row in list_metrics(conn)}
     if metric_code not in codes:
         raise ValueError("没有这个指标")
-    value = max(0, int(value or 0))
+    value = max(0, to_stored(metric_code, value) if not isinstance(value, int) else int(value or 0))
     day = biz_date.isoformat()
     before = {metric_code: int(day_values(conn, store_id, biz_date).get(metric_code, 0) or 0)}
     if before[metric_code] == value:
@@ -156,7 +174,7 @@ def set_day_value(
         user_id=user_id,
         before=before,
         after={metric_code: value},
-        note="校准单元格",
+        note=note or "校准单元格",
     )
 
 def facts_in_range(

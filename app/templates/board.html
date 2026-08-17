@@ -107,7 +107,7 @@
             </td>
             {% for k in r.kpis %}
             <td class="kpi-cell {{ 'lag' if view=='month' and k.target and k.month < k.target else '' }} {{ 'best' if (k.top_day if view=='today' else k.top_month) else '' }}">
-              <div class="kpi-val">{{ k.day if view=='today' else k.month }}</div>
+              <div class="kpi-val">{{ k.day_text if view=='today' else k.month_text }}</div>
               {% if view == 'month' and k.target %}
               <div class="progress thin"><span style="width: {{ [k.progress or 0, 100]|min }}%"></span></div>
               <div class="muted tiny">{{ '%.0f'|format(k.progress) }}% / {{ k.target }}</div>

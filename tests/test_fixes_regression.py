@@ -260,6 +260,8 @@ def test_edits_page_paginates(tmp_db, monkeypatch):
             )
             _ = day
     page1 = app_client.get("/edits").get_data(as_text=True)
+    assert "settings-nav" in page1
+    assert "备份恢复" in page1
     assert "共 55 条" in page1
     assert "下一页" in page1
     assert "上一页" in page1  # 不到最后一页时上一页也应可用
@@ -272,6 +274,43 @@ def test_edits_page_paginates(tmp_db, monkeypatch):
     assert "第 2/2" in last  # 越界被夹回最大页
     assert "第 10" not in last
     assert "disabled" in last  # 最后一页的下一页禁用
+
+
+def test_bisuan_accepts_one_decimal_and_week_calibrates(app_client):
+    from datetime import date as _date
+    from datetime import timedelta
+
+    app_client.post("/login", data={"username": "admin", "pin": "1234"})
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+    monday = _date.today() - timedelta(days=_date.today().weekday())
+    saved = app_client.post(
+        "/today",
+        data={"store_id": str(sid), "date": monday.isoformat(), "m_bisuan": "1.5", "m_phone_sales": "1"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "已保存" in saved
+    today_page = app_client.get(f"/today?store_id={sid}&date={monday.isoformat()}").get_data(as_text=True)
+    assert 'value="1.5"' in today_page or "1.5" in today_page
+    with db.get_db() as conn:
+        stored = conn.execute(
+            "SELECT day_value FROM daily_facts WHERE store_id=? AND biz_date=? AND metric_code='bisuan'",
+            (sid, monday.isoformat()),
+        ).fetchone()["day_value"]
+        assert stored == 15
+    sunday = monday + timedelta(days=6)
+    calibrated = app_client.post(
+        "/report/bisuan-week",
+        data={"store_id": str(sid), "start": monday.isoformat(), "end": sunday.isoformat(), "official": "2.0"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "官方数" in calibrated
+    with db.get_db() as conn:
+        week = conn.execute(
+            "SELECT COALESCE(SUM(day_value),0) AS n FROM daily_facts WHERE store_id=? AND biz_date>=? AND biz_date<=? AND metric_code IN ('bisuan','bisuan_high')",
+            (sid, monday.isoformat(), sunday.isoformat()),
+        ).fetchone()["n"]
+        assert week == 20
 
 
 def test_4_net_includes_advisor_penalty():
