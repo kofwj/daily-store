@@ -433,39 +433,48 @@ table.bulletin td.scale {
   color: #111827 !important; font-variant-numeric: tabular-nums; font-weight: 800; font-size: 14px;
 }
 table.bulletin .bisuan-official {
-  display: inline-block; margin-left: 4px; padding: 1px 5px;
-  font-size: 11px; font-weight: 800; border-radius: 4px; line-height: 16px;
+  position: relative;
+  display: inline-block; margin-left: 4px; padding: 1px 5px 1px 7px;
+  font-size: 11px; font-weight: 700; border-radius: 4px; line-height: 16px;
   border: 1px solid transparent;
 }
-/* 移 − 上报：对齐 / 小差 / 中差 / 大差；up=上报偏少 down=上报偏多 */
+/* 移 − 上报：对齐 / 小差 / 中差 / 大差；up=上报偏少 down=上报偏多
+   统一保留深色文字方便读，大差距只在左侧加一条彩条并用更饱和的底色 */
 table.bulletin .bisuan-gap-ok {
-  background: #dcfce7; color: #14532d; border-color: #86efac;
+  background: #ecfdf5; color: #14532d; border-color: #a7f3d0;
 }
 table.bulletin .bisuan-gap-soft-up {
-  background: #ffedd5; color: #9a3412; border-color: #fdba74;
+  background: #fff7ed; color: #7c2d12; border-color: #fed7aa;
 }
 table.bulletin .bisuan-gap-soft-down {
-  background: #fef3c7; color: #92400e; border-color: #fcd34d;
+  background: #fffbeb; color: #78350f; border-color: #fde68a;
 }
 table.bulletin .bisuan-gap-mid-up {
-  background: #fed7aa; color: #7c2d12; border-color: #fb923c;
+  background: #ffedd5; color: #7c2d12; border-color: #fdba74;
 }
 table.bulletin .bisuan-gap-mid-down {
-  background: #fde68a; color: #78350f; border-color: #fbbf24;
+  background: #fef3c7; color: #78350f; border-color: #fbbf24;
 }
+/* 大差距：底色略微加深，左侧加 3px 彩条；不再整格刷红底白字，也不描格 */
 table.bulletin .bisuan-gap-big-up {
-  background: #ef4444; color: #fff; border-color: #b91c1c;
-  box-shadow: 0 0 0 1px #991b1b;
+  background: #ffe4e6; color: #9f1239; border-color: #fda4af;
+  font-weight: 800;
+}
+table.bulletin .bisuan-gap-big-up::before {
+  content: ""; position: absolute; left: 0; top: 1px; bottom: 1px; width: 3px;
+  border-radius: 2px 0 0 2px; background: #ef4444;
 }
 table.bulletin .bisuan-gap-big-down {
-  background: #f59e0b; color: #1c1917; border-color: #b45309;
-  box-shadow: 0 0 0 1px #92400e;
+  background: #ffedd5; color: #9a3412; border-color: #fdba74;
+  font-weight: 800;
 }
-table.bulletin td.bisuan-gap-big-up-cell {
-  outline: 2px solid #ef4444; outline-offset: -2px;
+table.bulletin .bisuan-gap-big-down::before {
+  content: ""; position: absolute; left: 0; top: 1px; bottom: 1px; width: 3px;
+  border-radius: 2px 0 0 2px; background: #f97316;
 }
+table.bulletin td.bisuan-gap-big-up-cell,
 table.bulletin td.bisuan-gap-big-down-cell {
-  outline: 2px solid #f59e0b; outline-offset: -2px;
+  box-shadow: none; outline: none;
 }
 table.bulletin th .bisuan-asof-head {
   display: block; margin-top: 2px;
