@@ -80,6 +80,7 @@ def build_row(
     day_coin: int = 0,
     month_coin: int = 0,
     submitted: bool,
+    month_bisuan_official: Any = None,
 ) -> Dict[str, Any]:
     follow_ai = month_ai > 0
     follow_bisuan = month_bisuan > 0
@@ -117,6 +118,11 @@ def build_row(
         "month_coin_color": "",
         "month_ai_color": "",
         "month_bisuan_color": "",
+        "month_bisuan_official": "" if month_bisuan_official in (None, "") else fmt_metric("bisuan", month_bisuan_official),
+        "_month_bisuan_official_stored": month_bisuan_official if month_bisuan_official is not None else None,
+        "month_bisuan_diff": "",
+        "month_bisuan_diff_signed": "",
+        "month_bisuan_diff_color": "",
         "day_coin_color": "",
         "day_ai_color": "",
         "day_bisuan_color": "",
@@ -139,6 +145,16 @@ def apply_scales(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         ]
     )
     for row in rows:
+        official = row.get("_month_bisuan_official_stored")
+        if official is not None and official != "":
+            try:
+                diff = int(official) - int(row["month_bisuan"])
+            except (TypeError, ValueError):
+                diff = 0
+            row["month_bisuan_diff"] = fmt_metric("bisuan", diff)
+            sign = "+" if diff > 0 else ""
+            row["month_bisuan_diff_signed"] = f"{sign}{fmt_metric('bisuan', diff)}"
+            row["month_bisuan_diff_color"] = "#ecfdf3" if diff >= 0 else "#fef3f2"
         if not row.get("submitted"):
             # 未交行不套热力，避免和已交的浅色格子撞在一起
             wait = ""
@@ -442,10 +458,13 @@ def summary(
     if month_coin_best:
         month_bits.append(f"直降 {month_coin_best}")
 
+    day_bisuan_text = fmt_metric("bisuan", day_bisuan)
+    month_bisuan_text = fmt_metric("bisuan", month_bisuan)
+    top_bisuan_text = fmt_metric("bisuan", _metric(top, "month_bisuan"))
     lines = [
         head,
         "【今日】",
-        f"销量：AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin}",
+        f"销量：AI {day_ai} · 笔算 {day_bisuan_text} · 直降 {day_coin}",
         f"触客：{day_count} 笔（成交 {day_closed}）",
     ]
     if praise:
@@ -456,11 +475,31 @@ def summary(
     lines.extend(
         [
             "【本月】",
-            f"累计：AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin}",
+            f"累计：AI {month_ai} · 笔算 {month_bisuan_text} · 直降 {month_coin}",
             f"触客：{month_count} 笔（成交 {month_closed}）",
-            f"综合标杆：{top_name}（AI {top['month_ai']}，笔算 {top['month_bisuan']}，直降 {top.get('month_coin') or 0}）",
+            f"综合标杆：{top_name}（AI {top['month_ai']}，笔算 {top_bisuan_text}，直降 {top.get('month_coin') or 0}）",
         ]
     )
     if month_bits:
         lines.append("单项第一：" + " · ".join(month_bits))
+    # 有移动官方笔算时，列出系统 vs 官方对比，方便贴群
+    calibrate_lines = []
+    for r in rows:
+        official = r.get("_month_bisuan_official_stored")
+        if official is None or official == "":
+            continue
+        try:
+            off_i = int(official)
+            sys_i = _metric(r, "month_bisuan")
+            diff = off_i - sys_i
+        except (TypeError, ValueError):
+            continue
+        sign = "+" if diff > 0 else ""
+        calibrate_lines.append(
+            f"{_row_name(r)} 系统{fmt_metric('bisuan', sys_i)} "
+            f"官方{fmt_metric('bisuan', off_i)} 差{sign}{fmt_metric('bisuan', diff)}"
+        )
+    if calibrate_lines:
+        lines.append("笔算校准：")
+        lines.extend(calibrate_lines)
     return "\n".join(lines)

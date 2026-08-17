@@ -239,16 +239,16 @@ def test_summary_review_text():
     lines = text.split("\n")
     assert lines[0] == "2026-08-13 南通vivo零售运营中心"
     assert "【今日】" in lines
-    assert "销量：AI 5 · 笔算 5 · 直降 1" in lines
+    assert "销量：AI 5 · 笔算 0.5 · 直降 1" in lines
     assert "触客：7 笔（成交 5）" in lines
     assert "AI有量：示例甲店、示例丙店" in lines
     assert "笔算有量：示例甲店、示例丙店" in lines
     assert "直降有量：示例甲店" in lines
     assert "今日三项都有：示例甲店" in lines
     assert "示例乙店" not in text  # 今日三项都是 0，不进表扬
-    assert "累计：AI 17 · 笔算 14 · 直降 8" in lines
+    assert "累计：AI 17 · 笔算 1.4 · 直降 8" in lines
     assert "触客：60 笔（成交 42）" in lines
-    assert "综合标杆：示例丙店（AI 12，笔算 6，直降 5）" in lines
+    assert "综合标杆：示例丙店（AI 12，笔算 0.6，直降 5）" in lines
     assert "单项第一：AI 示例丙店 · 笔算 示例甲店 · 直降 示例丙店" in lines
     empty = summary(
         [{"name": "空店", "short_name": "空店", "month_ai": 0, "month_bisuan": 0, "month_coin": 0,

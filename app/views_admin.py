@@ -7,7 +7,7 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List
 
-from flask import g, render_template, request
+from flask import Response, flash, g, redirect, render_template, request, url_for
 
 from . import bulletin, db, settlement
 from .helpers import (
@@ -29,10 +29,11 @@ from .helpers import (
     xlsx_bytes,
     xlsx_response,
 )
-from .metrics_seed import KPI_TARGETS, format_stored, from_stored, rollup_pair
+from .metrics_seed import KPI_TARGETS, format_stored, from_stored, rollup_pair, to_stored
 
 
 def _bulletin_rows(conn, stores, biz_date: date):
+    month_key = biz_date.strftime("%Y-%m")
     rows = []
     for store in stores:
         if not (store["mobile_code"] or "").strip():
@@ -48,6 +49,12 @@ def _bulletin_rows(conn, stores, biz_date: date):
         )
         day_coin, month_coin = rollup_pair(pairs, "coin_cut")
         report = db.get_report(conn, store["id"], biz_date)
+        official_raw = db.get_setting(conn, f"bisuan_official_{store['id']}_{month_key}", "")
+        official = None
+        try:
+            official = int(round(float(official_raw) * 10)) if official_raw else None
+        except (TypeError, ValueError):
+            official = None
         rows.append(
             bulletin.build_row(
                 store,
@@ -58,6 +65,7 @@ def _bulletin_rows(conn, stores, biz_date: date):
                 day_coin=day_coin,
                 month_coin=month_coin,
                 submitted=report is not None,
+                month_bisuan_official=official,
             )
         )
     return bulletin.apply_scales(rows)
@@ -290,8 +298,80 @@ def register_admin(app) -> None:
                 copy_text=copy_text,
                 city=city,
                 cities=cities,
+                is_admin=g.user["role"] == "admin",
                 bulletin_title=f"{title_city}vivo零售运营中心移动业务通报表" if title_city else "移动业务通报表",
             )
+
+    @app.route("/bulletin/bisuan-official", methods=["POST"])
+    @admin_required
+    def bulletin_bisuan_official():
+        """通报表里录移动当月官方笔算（新增+高），差额补到当天「比算新增」。"""
+        store_id = request.form.get("store_id") or ""
+        biz_raw = request.form.get("date") or ""
+        official_raw = request.form.get("official") or ""
+        city = (request.form.get("city") or "").strip()
+        try:
+            sid = int(store_id)
+            biz_date = date.fromisoformat(biz_raw)
+            official = max(0, to_stored("bisuan", official_raw))
+        except (ValueError, TypeError):
+            flash("官方笔算参数不对", "error")
+            return redirect(url_for("bulletin_page", date=biz_raw or None))
+        if official_raw.strip() == "":
+            flash("请填移动官方笔算数", "error")
+            return redirect(url_for("bulletin_page", date=biz_raw or None))
+        with db.get_db() as conn:
+            if not db.user_can_access_store(conn, g.user, sid):
+                return Response("forbidden", status=403)
+            month_start = biz_date.replace(day=1)
+            # 移动官方 = 笔算新增 + 笔算新增[高] 的本月累计
+            current = db.week_metric_total(conn, sid, month_start, biz_date, ("bisuan", "bisuan_high"))
+            delta = official - current
+            month_key = biz_date.strftime("%Y-%m")
+            db.set_setting(conn, f"bisuan_official_{sid}_{month_key}", f"{official / 10:.1f}")
+            note = f"月校准笔算 官方{format_stored('bisuan', official)}"
+            if delta > 0:
+                today_val = int(db.day_values(conn, sid, biz_date).get("bisuan", 0) or 0)
+                db.set_day_value(
+                    conn,
+                    store_id=sid,
+                    biz_date=biz_date,
+                    metric_code="bisuan",
+                    value=today_val + delta,
+                    user_id=g.user["id"],
+                    note=note,
+                )
+            elif delta < 0:
+                # 官方更小：从当日起往月头扣，差额落到「比算新增」
+                need = -delta
+                days = [
+                    month_start + timedelta(days=i)
+                    for i in range((biz_date - month_start).days + 1)
+                ]
+                for day in reversed(days):
+                    cur = int(db.day_values(conn, sid, day).get("bisuan", 0) or 0)
+                    if cur <= 0:
+                        continue
+                    take = min(cur, need)
+                    db.set_day_value(
+                        conn,
+                        store_id=sid,
+                        biz_date=day,
+                        metric_code="bisuan",
+                        value=cur - take,
+                        user_id=g.user["id"],
+                        note=note,
+                    )
+                    need -= take
+                    if need <= 0:
+                        break
+            sign = "+" if delta > 0 else ""
+            flash(
+                f"已录官方 {format_stored('bisuan', official)}，系统 {format_stored('bisuan', current)}，"
+                f"差额 {sign}{format_stored('bisuan', delta)}",
+                "ok",
+            )
+        return redirect(url_for("bulletin_page", date=biz_date.isoformat(), city=city))
 
     @app.route("/incentive")
     @admin_required

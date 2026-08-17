@@ -276,41 +276,49 @@ def test_edits_page_paginates(tmp_db, monkeypatch):
     assert "disabled" in last  # 最后一页的下一页禁用
 
 
-def test_bisuan_accepts_one_decimal_and_week_calibrates(app_client):
+def test_bisuan_accepts_one_decimal_and_month_calibrates(app_client):
     from datetime import date as _date
-    from datetime import timedelta
 
     app_client.post("/login", data={"username": "admin", "pin": "1234"})
     with db.get_db() as conn:
         sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
-    monday = _date.today() - timedelta(days=_date.today().weekday())
+    day = _date.today()
     saved = app_client.post(
         "/today",
-        data={"store_id": str(sid), "date": monday.isoformat(), "m_bisuan": "1.5", "m_phone_sales": "1"},
+        data={"store_id": str(sid), "date": day.isoformat(), "m_bisuan": "1.5", "m_phone_sales": "1"},
         follow_redirects=True,
     ).get_data(as_text=True)
     assert "已保存" in saved
-    today_page = app_client.get(f"/today?store_id={sid}&date={monday.isoformat()}").get_data(as_text=True)
+    today_page = app_client.get(f"/today?store_id={sid}&date={day.isoformat()}").get_data(as_text=True)
     assert 'value="1.5"' in today_page or "1.5" in today_page
     with db.get_db() as conn:
         stored = conn.execute(
             "SELECT day_value FROM daily_facts WHERE store_id=? AND biz_date=? AND metric_code='bisuan'",
-            (sid, monday.isoformat()),
+            (sid, day.isoformat()),
         ).fetchone()["day_value"]
         assert stored == 15
-    sunday = monday + timedelta(days=6)
+    # 移动官方是本月累计（笔算新增+高），差额补到当天
     calibrated = app_client.post(
-        "/report/bisuan-week",
-        data={"store_id": str(sid), "start": monday.isoformat(), "end": sunday.isoformat(), "official": "2.0"},
+        "/bulletin/bisuan-official",
+        data={"store_id": str(sid), "date": day.isoformat(), "official": "2.0", "city": ""},
         follow_redirects=True,
     ).get_data(as_text=True)
-    assert "官方数" in calibrated
+    assert "已录官方" in calibrated or "官方" in calibrated
     with db.get_db() as conn:
-        week = conn.execute(
-            "SELECT COALESCE(SUM(day_value),0) AS n FROM daily_facts WHERE store_id=? AND biz_date>=? AND biz_date<=? AND metric_code IN ('bisuan','bisuan_high')",
-            (sid, monday.isoformat(), sunday.isoformat()),
+        month_start = day.replace(day=1).isoformat()
+        month_total = conn.execute(
+            "SELECT COALESCE(SUM(day_value),0) AS n FROM daily_facts "
+            "WHERE store_id=? AND biz_date>=? AND biz_date<=? AND metric_code IN ('bisuan','bisuan_high')",
+            (sid, month_start, day.isoformat()),
         ).fetchone()["n"]
-        assert week == 20
+        assert month_total == 20
+        official = conn.execute(
+            "SELECT value FROM app_meta WHERE key=?",
+            (f"bisuan_official_{sid}_{day.strftime('%Y-%m')}",),
+        ).fetchone()
+        assert official and official["value"] == "2.0"
+    page = app_client.get(f"/bulletin?date={day.isoformat()}").get_data(as_text=True)
+    assert "官2.0" in page or "官方" in page
 
 
 def test_4_net_includes_advisor_penalty():

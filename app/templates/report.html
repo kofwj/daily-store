@@ -41,18 +41,6 @@
         <a class="btn ghost" href="{{ url_for('report_xlsx', store_id=store.id, start=start.isoformat(), end=end.isoformat()) }}">导出 Excel</a>
       </div>
     </form>
-    {% if view == 'week' and g.user['role'] == 'admin' %}
-    <form method="post" action="{{ url_for('report_bisuan_week') }}" class="page-filters" style="margin-top:10px">
-      <input type="hidden" name="store_id" value="{{ store.id }}">
-      <input type="hidden" name="start" value="{{ start.isoformat() }}">
-      <input type="hidden" name="end" value="{{ end.isoformat() }}">
-      <label class="filter">
-        <span>本周移动官方笔算</span>
-        <input type="number" min="0" step="0.1" name="official" placeholder="例如 12.5" required>
-      </label>
-      <button type="submit">按官方数校准</button>
-    </form>
-    {% endif %}
   </div>
 
   <div class="kpi-row report-kpis">
@@ -166,7 +154,7 @@
     </div>
     <p class="muted report-note">
       {% if g.user['role'] == 'admin' %}
-      管理员点某个格子改数，回车只保存这一格。周报可填移动官方笔算，差额补到本周最后一天。日均 = 区间合计 ÷ 已提交天数。
+      管理员点某个格子改数，回车只保存这一格。日均 = 区间合计 ÷ 已提交天数。
       {% else %}
       「·」表示当日为 0。日均 = 区间合计 ÷ 已提交天数。
       {% endif %}

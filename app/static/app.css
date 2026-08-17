@@ -365,6 +365,20 @@ table.data th:first-child, table.data td:first-child { text-align: left; }
 .status.miss { background: var(--accent-soft); color: var(--muted); }
 
 .bulletin-wrap { overflow: auto; padding: 8px; }
+.bulletin-official {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+}
+.bulletin-official .official-row {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+}
+.bulletin-official .official-row strong { font-size: 14px; }
+.bulletin-official .official-row .muted { font-size: 12px; }
+.bulletin-official select,
+.bulletin-official input[type="number"] {
+  min-height: 34px; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 8px;
+}
+.bulletin-official input[type="number"] { width: 110px; }
 .bulletin-review {
   margin: 0 0 14px; padding: 14px 16px;
   background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
@@ -417,6 +431,10 @@ table.bulletin td.flag-yes { color: #14532d; font-weight: 800; background: #dcfc
 table.bulletin td.flag-no { color: #b91c1c; font-weight: 800; background: #fee2e2; font-size: 15px; }
 table.bulletin td.scale {
   color: #111827 !important; font-variant-numeric: tabular-nums; font-weight: 800; font-size: 14px;
+}
+table.bulletin .bisuan-official {
+  display: inline-block; margin-left: 4px; padding: 0 4px;
+  font-size: 11px; font-weight: 700; border-radius: 4px; line-height: 16px;
 }
 table.bulletin tfoot td { font-weight: 800; font-size: 14px; }
 table.bulletin tr.total td {
