@@ -203,7 +203,10 @@ def register_daily(app) -> None:
                         )
                         editable = deal.is_today_deal(row, today_d)
                 if not values["opener"]:
-                    values["opener"] = (g.user["display_name"] or "").strip()
+                    advisor = ""
+                    if store is not None and "advisor_name" in store.keys():
+                        advisor = (store["advisor_name"] or "").strip()
+                    values["opener"] = advisor or (g.user["display_name"] or "").strip()
             if request.method == "POST":
                 if g.user["role"] == "readonly":
                     flash("只读账号不能填触客播报", "error")

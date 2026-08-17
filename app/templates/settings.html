@@ -30,6 +30,8 @@
     </div>
     <div class="settings-nav-group">
       <span class="settings-nav-label">系统</span>
+      <a href="{{ url_for('edits_page') }}">修改审计</a>
+      <a href="{{ url_for('logins_page') }}">登录日志</a>
       <a href="{{ url_for('settings', tab='backup') }}" class="{{ 'active' if tab=='backup' else '' }}">备份恢复</a>
     </div>
     {% endif %}

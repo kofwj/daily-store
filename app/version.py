@@ -52,9 +52,11 @@ def _from_git() -> str:
 def _display(raw: str) -> str:
     text = _clean(raw)
     if not text or text in {"dev", "unknown"}:
-        return "V0.0.0"
-    if text[0] in "Vv" and "." in text:
-        return text if text.startswith("V") else f"V{text[1:]}"
+        return "V 0.0.0"
+    if text[0] in "Vv":
+        rest = text[1:].lstrip()
+        if rest[:1].isdigit() and "." in rest:
+            return f"V {rest}"
     return text
 
 

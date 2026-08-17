@@ -387,6 +387,16 @@ def test_past_deal_is_readonly(client):
         assert db.delete_deal_post(conn, past_id, sid, user_id=uid) is False
 
 
+def test_new_deal_defaults_opener_to_store_advisor(client):
+    client.post("/login", data={"username": "admin", "pin": "1234"})
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE short_name='通州金沙'").fetchone()["id"]
+        conn.execute("UPDATE stores SET advisor_name='奚其梅' WHERE id=?", (sid,))
+    page = client.get(f"/deal?store_id={sid}").get_data(as_text=True)
+    assert 'name="opener"' in page
+    assert 'value="奚其梅"' in page
+
+
 def test_deal_diff_formats_bool_fields():
     text = deal_diff(
         {"closed": False, "hall_query": True, "student": False, "model": "S60"},
