@@ -15,7 +15,7 @@ def test_close_rate_text():
 
 def test_closed_deal_uses_short_layout():
     text = render_deal(
-        "通州金沙",
+        "示例乙店",
         model="S60元气版",
         phone="15514408478",
         spend="99",
@@ -23,14 +23,14 @@ def test_closed_deal_uses_short_layout():
         recommend="89",
         closed="1",
         student="0",
-        opener="奚其梅",
+        opener="王店长",
         note="用户因价格问题来回拉扯，推荐芝麻直降1600，剩余额度办了分期免息，旧手机抵325元",
     )
-    assert text.startswith("通州金沙 · 成交\n")
+    assert text.startswith("示例乙店 · 成交\n")
     assert "S60元气版｜1551440****｜消费99" in text
     assert "15514408478" not in text
     assert "掌厅已查 · 荐89 · 非中高考" in text
-    assert "开口 奚其梅" in text
+    assert "开口 王店长" in text
     assert "🌸" not in text
     assert "是否成交" not in text
 
@@ -55,18 +55,18 @@ def test_closed_defaults_off():
     values = form_values()
     assert values["closed"] == "0"
     assert values["hall_query"] == "1"
-    assert render_deal("通州金沙").startswith("通州金沙 · 未成交\n")
+    assert render_deal("示例乙店").startswith("示例乙店 · 未成交\n")
 
 
 def test_show_phone_keeps_full_number():
-    text = render_deal("通州金沙", phone="15514408478", show_phone="1")
+    text = render_deal("示例乙店", phone="15514408478", show_phone="1")
     assert "15514408478" in text
 
 
 def test_deal_post_counts_by_store(client):
     client.post("/login", data={"username": "admin", "pin": "1234"})
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE short_name='通州金沙'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE short_name='示例乙店'").fetchone()["id"]
     client.post(
         "/deal",
         data={"store_id": str(sid), "model": "S60", "phone": "15514408478", "closed": "1", "note": "首发"},
@@ -92,7 +92,7 @@ def test_deal_post_counts_by_store(client):
         assert len(rows) == 2
         assert rows[0]["phone"] == "15514408478"
         assert rows[0]["note"] == "改过"
-        assert "通州金沙" in rows[0]["text"]
+        assert "示例乙店" in rows[0]["text"]
     assert "查看触客记录" in page  # 填报页不再内嵌记录表，只留跳转入口
     rec = client.get(f"/deal/records?store_id={sid}").get_data(as_text=True)
     assert "触客记录" in rec
@@ -115,7 +115,7 @@ def test_deal_post_counts_by_store(client):
         left = conn.execute("SELECT COUNT(*) AS n FROM deal_posts WHERE store_id=?", (sid,)).fetchone()["n"]
         assert left == 1
     client.get("/logout")
-    client.post("/login", data={"username": "jinsha", "pin": "123456"})
+    client.post("/login", data={"username": "beta", "pin": "123456"})
     blocked = client.post(
         "/deal/delete",
         data={"store_id": str(sid), "deal_id": "1"},
@@ -128,8 +128,8 @@ def test_deal_post_counts_by_store(client):
 def test_admin_records_page_shows_all_stores_today(client):
     client.post("/login", data={"username": "admin", "pin": "1234"})
     with db.get_db() as conn:
-        sid_a = conn.execute("SELECT id, short_name FROM stores WHERE short_name='通州金沙'").fetchone()
-        sid_b = conn.execute("SELECT id, short_name FROM stores WHERE short_name='海门金花'").fetchone()
+        sid_a = conn.execute("SELECT id, short_name FROM stores WHERE short_name='示例乙店'").fetchone()
+        sid_b = conn.execute("SELECT id, short_name FROM stores WHERE short_name='示例甲店'").fetchone()
         uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
         db.record_deal_post(
             conn, store_id=sid_a["id"], user_id=uid, model="S60全店", phone="13811110001", closed=True
@@ -141,13 +141,13 @@ def test_admin_records_page_shows_all_stores_today(client):
     assert "今天全店触客" in page
     assert "S60全店" in page
     assert "X300全店" in page
-    assert "通州金沙" in page
-    assert "海门金花" in page
+    assert "示例乙店" in page
+    assert "示例甲店" in page
     one = client.get(f"/deal/records?store_id={sid_a['id']}").get_data(as_text=True)
     assert "S60全店" in one
     assert "X300全店" not in one
     client.get("/logout")
-    client.post("/login", data={"username": "jinsha", "pin": "123456"})
+    client.post("/login", data={"username": "beta", "pin": "123456"})
     filler = client.get("/deal/records").get_data(as_text=True)
     assert "今天全店触客" not in filler
     assert "全部" not in filler
@@ -156,8 +156,8 @@ def test_admin_records_page_shows_all_stores_today(client):
 def test_admin_records_filter_by_city_and_manager(client):
     client.post("/login", data={"username": "admin", "pin": "1234"})
     with db.get_db() as conn:
-        nt = conn.execute("SELECT id FROM stores WHERE short_name='通州金沙'").fetchone()["id"]
-        tz = conn.execute("SELECT id FROM stores WHERE short_name='靖江吾悦'").fetchone()["id"]
+        nt = conn.execute("SELECT id FROM stores WHERE short_name='示例乙店'").fetchone()["id"]
+        tz = conn.execute("SELECT id FROM stores WHERE short_name='示例丁店'").fetchone()["id"]
         uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
         db.record_deal_post(conn, store_id=nt, user_id=uid, model="南通机", phone="13800001111", closed=True)
         db.record_deal_post(conn, store_id=tz, user_id=uid, model="泰州机", phone="13800002222", closed=True)
@@ -167,7 +167,7 @@ def test_admin_records_filter_by_city_and_manager(client):
     assert "全部经理" in page
     assert "南通机" in page
     assert "泰州机" in page
-    city = client.get("/deal/records?city=泰州市").get_data(as_text=True)
+    city = client.get("/deal/records?city=邻市").get_data(as_text=True)
     assert "泰州机" in city
     assert "南通机" not in city
     one = client.get(f"/deal/records?area_manager={mgr}").get_data(as_text=True)
@@ -191,7 +191,7 @@ def test_admin_exports_all_stores_deal_csv(client):
         )
     # 非管理员不能导出
     client.get("/logout")
-    client.post("/login", data={"username": "jinsha", "pin": "123456"})
+    client.post("/login", data={"username": "beta", "pin": "123456"})
     r = client.get("/deal/export")
     assert r.status_code == 302
     assert "/today" in r.headers.get("Location", "")
@@ -227,7 +227,7 @@ def test_record_deal_post_logs_create_and_update(tmp_db):
     from app import db
 
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
         uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
         # 新增
         did = db.record_deal_post(
@@ -294,7 +294,7 @@ def test_edits_page_filters_by_kind(tmp_db):
     c = app.test_client()
     c.post("/login", data={"username": "admin", "pin": "1234"})
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
         uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
         db.record_deal_post(
             conn,
@@ -327,7 +327,7 @@ def test_past_deal_is_readonly(client):
 
     client.post("/login", data={"username": "admin", "pin": "1234"})
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE short_name='通州金沙'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE short_name='示例乙店'").fetchone()["id"]
         uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
         today = db.today_local()
         yesterday = today - timedelta(days=1)
@@ -390,11 +390,11 @@ def test_past_deal_is_readonly(client):
 def test_new_deal_defaults_opener_to_store_advisor(client):
     client.post("/login", data={"username": "admin", "pin": "1234"})
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE short_name='通州金沙'").fetchone()["id"]
-        conn.execute("UPDATE stores SET advisor_name='奚其梅' WHERE id=?", (sid,))
+        sid = conn.execute("SELECT id FROM stores WHERE short_name='示例乙店'").fetchone()["id"]
+        conn.execute("UPDATE stores SET advisor_name='王店长' WHERE id=?", (sid,))
     page = client.get(f"/deal?store_id={sid}").get_data(as_text=True)
     assert 'name="opener"' in page
-    assert 'value="奚其梅"' in page
+    assert 'value="王店长"' in page
 
 
 def test_deal_diff_formats_bool_fields():

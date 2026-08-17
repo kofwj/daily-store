@@ -10,7 +10,7 @@ def _login(client, username, pin):
     return client.post("/login", data={"username": username, "pin": pin}, follow_redirects=True)
 
 
-def _store_id(conn, code="haimen-jinhua"):
+def _store_id(conn, code="store-alpha"):
     return conn.execute("SELECT id FROM stores WHERE code=?", (code,)).fetchone()["id"]
 
 
@@ -51,7 +51,7 @@ def test_filler_month_switch_still_rejects_future_date(tmp_db):
     client = _client_auth(username="admin", pin="1234")
     client.post("/settings", data={"action": "save_permissions", "tab": "permissions", "filler_edit_month": "1"})
     client.post("/logout")
-    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
     with db.get_db() as conn:
         sid = _store_id(conn)
     future = date.today() + __import__("datetime").timedelta(days=1)
@@ -72,7 +72,7 @@ def test_filler_month_switch_on_allows_this_month(tmp_db, monkeypatch):
         assert db.get_setting(conn, "filler_edit_month") == "1"
     # 店员登出、登录
     client.post("/logout")
-    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
     with db.get_db() as conn:
         sid = _store_id(conn)
     past = date.today().replace(day=1)
@@ -207,7 +207,7 @@ def test_month_switch_does_not_unlock_today(tmp_db, monkeypatch):
     with db.get_db() as conn:
         assert db.get_setting(conn, "filler_edit_month") == "1"
     client.post("/logout")
-    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
     today_d = date.today()
     # 锁定今天
     monkeypatch.setattr(db, "is_locked", lambda biz_date, now=None: biz_date == today_d)
@@ -292,7 +292,7 @@ def test_now_is_beijing_time():
     assert abs((db.today_local() - utc.date()).days) <= 1
 
 
-def _client_auth(username="jinhua", pin="123456"):
+def _client_auth(username="alpha", pin="123456"):
     app = create_app()
     app.config["TESTING"] = True
     client = app.test_client()

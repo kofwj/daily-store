@@ -157,7 +157,7 @@ def build_settlement_xlsx(conn, stores: Sequence[Any], as_of: date) -> bytes:
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "移动接入"
-    title = f"{as_of.month}月通泰零售运营中心运营商绩效"
+    title = f"{as_of.month}月门店运营中心运营商绩效"
     ws.merge_cells("A1:S1")
     ws["A1"] = title
     ws["A1"].font = Font(bold=True, size=16, color="FFFFFF")

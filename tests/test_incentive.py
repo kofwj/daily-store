@@ -92,7 +92,7 @@ def test_incentive_xlsx_exports_draft(tmp_db):
     # 第一家店：实际酬金公式统一为 开票+房补-垫资
     assert ws["I5"].value == "=F5+G5-H5"
     # 导出门店用官方全称，不用短名
-    assert ws["B5"].value == "TZ南通市海门金花vivo体验店"
+    assert ws["B5"].value == "示例市甲街vivo体验店"
     # 黄色手填格
     assert ws["F5"].fill.fgColor.rgb[-6:] == "FFF2CC"
     # 口径页
@@ -112,7 +112,7 @@ def test_unreported_store_is_not_penalized(tmp_db):
     c = app.test_client()
     c.post("/login", data={"username": "admin", "pin": "1234"})
     with _db.get_db() as conn:
-        store = conn.execute("SELECT * FROM stores WHERE code='xinghua-wuyue'").fetchone()
+        store = conn.execute("SELECT * FROM stores WHERE code='store-epsilon'").fetchone()
         judged = store_forecast(conn, store, date.today())
         assert judged["reported"] is False
         assert judged["label"] == "本月未交"
@@ -120,4 +120,4 @@ def test_unreported_store_is_not_penalized(tmp_db):
         assert judged["store_penalty"] == 0
     page = c.get("/incentive").get_data(as_text=True)
     assert "本月未交" in page
-    assert "TZ泰州兴化吾悦vivo体验店" in page
+    assert "邻市戊路vivo体验店" in page

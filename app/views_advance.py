@@ -409,7 +409,7 @@ def _build_advance_xlsx(stores, rows, month: date) -> bytes:
     wb = openpyxl.Workbook()
     summary = wb.active
     summary.title = "汇总表"
-    summary["A1"] = _xlsx_safe(f"{month.month}月通泰零售运营中心移动垫资费用报销汇总")
+    summary["A1"] = _xlsx_safe(f"{month.month}月门店运营中心移动垫资费用报销汇总")
     summary["A1"].font = Font(bold=True, size=14)
     summary.merge_cells("A1:F1")
     for col, text in enumerate(["门店", "宽带调测费", "购机让利", "其他业务垫资", "芝麻服务费", "合计"], start=1):
@@ -441,7 +441,7 @@ def _build_advance_xlsx(stores, rows, month: date) -> bytes:
         excel_row += 1
         _write_store_sheet(wb, store, items, header_fill, header_font, total_fill)
     if nt_rows:
-        summary.cell(excel_row, 1, _xlsx_safe("南通财顺电子有限公司"))
+        summary.cell(excel_row, 1, _xlsx_safe("示例公司甲"))
         for col, letter in enumerate(["B", "C", "D", "E", "F"], start=2):
             joined = "+".join(f"{letter}{r}" for r in nt_rows)
             cell = summary.cell(excel_row, col, "=" + joined)
@@ -449,7 +449,7 @@ def _build_advance_xlsx(stores, rows, month: date) -> bytes:
             cell.font = Font(bold=True)
         excel_row += 1
     if tz_rows:
-        summary.cell(excel_row, 1, _xlsx_safe("泰州市财汇电子有限公司"))
+        summary.cell(excel_row, 1, _xlsx_safe("示例公司乙"))
         for col, letter in enumerate(["B", "C", "D", "E", "F"], start=2):
             joined = "+".join(f"{letter}{r}" for r in tz_rows)
             cell = summary.cell(excel_row, col, "=" + joined)
@@ -459,7 +459,7 @@ def _build_advance_xlsx(stores, rows, month: date) -> bytes:
     if nt_rows or tz_rows:
         last = excel_row - 1
         first_company = last - (1 if nt_rows and tz_rows else 0)
-        summary.cell(excel_row, 1, _xlsx_safe("通泰零售运营中心"))
+        summary.cell(excel_row, 1, _xlsx_safe("门店运营中心"))
         for col, letter in enumerate(["B", "C", "D", "E", "F"], start=2):
             cell = summary.cell(excel_row, col, f"={letter}{first_company}+{letter}{last}" if nt_rows and tz_rows else f"={letter}{last}")
             cell.fill = total_fill

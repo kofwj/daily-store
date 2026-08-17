@@ -29,13 +29,13 @@ def test_bisuan_adds_high():
 def test_bulletin_row_and_tsv_match_sheet():
     store = {
         "id": 1,
-        "code": "rg-ninghai",
-        "name": "TZ南通市如皋市如城镇宁海路体验店",
+        "code": "store-epsilon",
+        "name": "邻市戊路vivo体验店",
         "region_group": "通泰",
         "city": "南通市",
         "mobile_code": "20001744",
-        "area_manager": "鞠一凡",
-        "store_manager": "冒国云",
+        "area_manager": "张管理",
+        "store_manager": "陈店长",
         "follow_ai": 0,
         "follow_bisuan": 1,
     }
@@ -59,9 +59,9 @@ def test_bulletin_row_and_tsv_match_sheet():
 
     text = tsv([row], date(2026, 8, 13))
     assert "8月\t\t8月13日" in text or "8月" in text
-    assert "TZ南通市如皋市如城镇宁海路体验店" in text
+    assert "邻市戊路vivo体验店" in text
     assert "20001744" in text
-    assert "冒国云" in text
+    assert "陈店长" in text
     headers = csv_rows([row], date(2026, 8, 13))[0]
     assert headers[8] == "8月AI手机合约"
     assert headers[9] == "8月笔算业务"
@@ -205,8 +205,8 @@ def test_bulletin_export_xlsx(client):
 def test_summary_review_text():
     rows = [
         {
-            "name": "TZ南通市海门金花vivo体验店",
-            "short_name": "海门金花",
+            "name": "示例市甲街vivo体验店",
+            "short_name": "示例甲店",
             "month_ai": 5,
             "month_bisuan": 8,
             "month_coin": 3,
@@ -215,8 +215,8 @@ def test_summary_review_text():
             "day_coin": 1,
         },
         {
-            "name": "TZ南通市启东汇龙镇人民中路专卖店",
-            "short_name": "启东人民",
+            "name": "示例市丙路vivo专卖店",
+            "short_name": "示例丙店",
             "month_ai": 12,
             "month_bisuan": 6,
             "month_coin": 5,
@@ -225,8 +225,8 @@ def test_summary_review_text():
             "day_coin": 0,
         },
         {
-            "name": "TZ南通市通州区金沙专卖店",
-            "short_name": "通州金沙",
+            "name": "示例市乙街vivo专卖店",
+            "short_name": "示例乙店",
             "month_ai": 0,
             "month_bisuan": 0,
             "month_coin": 0,
@@ -241,15 +241,15 @@ def test_summary_review_text():
     assert "【今日】" in lines
     assert "销量：AI 5 · 笔算 5 · 直降 1" in lines
     assert "触客：7 笔（成交 5）" in lines
-    assert "AI有量：海门金花、启东人民" in lines
-    assert "笔算有量：海门金花、启东人民" in lines
-    assert "直降有量：海门金花" in lines
-    assert "今日三项都有：海门金花" in lines
-    assert "通州金沙" not in text  # 今日三项都是 0，不进表扬
+    assert "AI有量：示例甲店、示例丙店" in lines
+    assert "笔算有量：示例甲店、示例丙店" in lines
+    assert "直降有量：示例甲店" in lines
+    assert "今日三项都有：示例甲店" in lines
+    assert "示例乙店" not in text  # 今日三项都是 0，不进表扬
     assert "累计：AI 17 · 笔算 14 · 直降 8" in lines
     assert "触客：60 笔（成交 42）" in lines
-    assert "综合标杆：启东人民（AI 12，笔算 6，直降 5）" in lines
-    assert "单项第一：AI 启东人民 · 笔算 海门金花 · 直降 启东人民" in lines
+    assert "综合标杆：示例丙店（AI 12，笔算 6，直降 5）" in lines
+    assert "单项第一：AI 示例丙店 · 笔算 示例甲店 · 直降 示例丙店" in lines
     empty = summary(
         [{"name": "空店", "short_name": "空店", "month_ai": 0, "month_bisuan": 0, "month_coin": 0,
           "day_ai": 0, "day_bisuan": 0, "day_coin": 0}],
@@ -263,7 +263,7 @@ def test_build_row_short_name_from_row(tmp_db):
     # sqlite3.Row 不支持 .get，_store_short 要用下标取简称，避免标杆退全称
     with db.get_db() as conn:
         row = conn.execute(
-            "SELECT * FROM stores WHERE code='haimen-jinhua'"
+            "SELECT * FROM stores WHERE code='store-alpha'"
         ).fetchone()
     out = build_row(
         row,
@@ -273,4 +273,4 @@ def test_build_row_short_name_from_row(tmp_db):
         month_bisuan=0,
         submitted=False,
     )
-    assert out["short_name"] == "海门金花"
+    assert out["short_name"] == "示例甲店"

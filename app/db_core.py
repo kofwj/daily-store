@@ -17,7 +17,42 @@ from typing import Dict, Iterable, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from .metrics_seed import KPI_TARGETS, all_metrics
-from .stores_seed import STORES, filler_accounts
+from .stores_seed import NINGHAI_CODE as SAMPLE_NINGHAI_CODE
+from .stores_seed import STORES as SAMPLE_STORES
+
+
+def _catalog():
+    """生产用 stores_seed_local（不进 git）；测试设 STORE_DAILY_SAMPLE_SEED=1 强制示例店。"""
+    if os.environ.get("STORE_DAILY_SAMPLE_SEED") == "1":
+        from . import stores_seed as seed
+    else:
+        try:
+            from . import stores_seed_local as seed
+        except ImportError:
+            from . import stores_seed as seed
+    return seed.STORES, seed.filler_accounts, seed.NINGHAI_CODE
+
+
+def _catalog_stores():
+    return _catalog()[0]
+
+
+def _catalog_fillers():
+    return _catalog()[1]()
+
+
+def _catalog_ninghai_code() -> str:
+    return _catalog()[2]
+
+
+# 兼容旧引用：模块加载时默认示例目录；真正建库走 _catalog()
+STORES = SAMPLE_STORES
+NINGHAI_CODE = SAMPLE_NINGHAI_CODE
+
+
+def filler_accounts():
+    return _catalog_fillers()
+
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -1064,7 +1099,7 @@ def _seed_catalog_stores(conn: sqlite3.Connection) -> None:
     """
     by_code = {row["code"]: row for row in conn.execute("SELECT * FROM stores")}
     by_name = {row["name"]: row for row in conn.execute("SELECT * FROM stores")}
-    for sort, item in enumerate(STORES, start=1):
+    for sort, item in enumerate(_catalog_stores(), start=1):
         code, name = item["code"], item["name"]
         profile = _profile_values(item)
         row = by_code.get(code)

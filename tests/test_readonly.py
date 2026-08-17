@@ -26,37 +26,37 @@ def _mk_readonly(client, *, username, scope="", store_code=""):
 
 
 def test_store_manager_sees_only_own_store(client):
-    # 店长绑 haimen-jinhua（配移动编码，进通报）
-    _mk_readonly(client, username="yuanyj_dz", store_code="haimen-jinhua")
+    # 店长绑 store-alpha（配移动编码，进通报）
+    _mk_readonly(client, username="yuanyj_dz", store_code="store-alpha")
     report = client.get("/report").get_data(as_text=True)
-    assert "海门金花" in report
+    assert "示例甲店" in report
     bulletin = client.get("/bulletin").get_data(as_text=True)
-    assert "海门金花" in bulletin
+    assert "示例甲店" in bulletin
     # 另一家店（地区经理下同级但不绑）不该出现
-    assert "启东人民" not in bulletin
+    assert "示例丙店" not in bulletin
     # 垫资页可看
     adv = client.get("/advance").get_data(as_text=True)
     assert "本月记录" in adv
 
 
 def test_area_manager_sees_all_region_stores(client):
-    # 区域经理 黄雍青：南通北片（海门/启东/通州），这些店都配了移动编码、进通报
-    _mk_readonly(client, username="huangyq", scope="黄雍青")
-    bulletin = client.get("/bulletin", follow_redirects=True).get_data(as_text=True)
-    for name in ("海门金花", "人民中路", "金沙专卖店", "通州区万达"):
+    # 区域经理 张管理：南通北片（海门/启东/通州），这些店都配了移动编码、进通报
+    _mk_readonly(client, username="huangyq", scope="张管理")
+    bulletin = client.get("/bulletin?city=示例市", follow_redirects=True).get_data(as_text=True)
+    for name in ("示例市甲街", "示例市乙街"):
         assert name in bulletin
-    # 鞠一凡辖区（海安/如皋）不该出现
-    assert "海安人民" not in bulletin
+    # 刘经理辖区（邻市）不该出现
+    assert "示例戊店" not in bulletin
     # 报表页（含未配编码店）也可切店
     report = client.get("/report").get_data(as_text=True)
-    assert "海门金花" in report
-    assert "启东人民" in report
+    assert "示例甲店" in report
+    assert "示例丙店" in report
 
 
 def test_readonly_cannot_write(client):
-    _mk_readonly(client, username="rdo", store_code="haimen-jinhua")
+    _mk_readonly(client, username="rdo", store_code="store-alpha")
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
     today = db.today_local().isoformat()
     # 不能填日报
     resp = client.post(
@@ -90,7 +90,7 @@ def test_readonly_cannot_write(client):
 
 
 def test_readonly_cannot_admin(client):
-    _mk_readonly(client, username="rd_admin_block", store_code="haimen-jinhua")
+    _mk_readonly(client, username="rd_admin_block", store_code="store-alpha")
     for path, flag in (
         ("/board", "多店看板"),
         ("/incentive", "月度考核"),
@@ -107,7 +107,7 @@ def test_readonly_cannot_admin(client):
 
 
 def test_readonly_login_lands_on_report(client):
-    _mk_readonly(client, username="rd_home", store_code="haimen-jinhua")
+    _mk_readonly(client, username="rd_home", store_code="store-alpha")
     client.get("/logout")
     landed = client.post(
         "/login", data={"username": "rd_home", "pin": "123456"}, follow_redirects=True
@@ -118,8 +118,8 @@ def test_readonly_login_lands_on_report(client):
 
 
 def test_admin_still_sees_all(client):
-    _mk_readonly(client, username="rd_admin", store_code="haimen-jinhua")
+    _mk_readonly(client, username="rd_admin", store_code="store-alpha")
     client.get("/logout")
     client.post("/login", data={"username": "admin", "pin": "1234"})
     bulletin = client.get("/bulletin").get_data(as_text=True)
-    assert "海门金花" in bulletin
+    assert "示例甲店" in bulletin

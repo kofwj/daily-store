@@ -115,7 +115,7 @@ def test_successful_login_and_logout_are_logged(client):
     with db.get_db() as conn:
         actions = [r["action"] for r in conn.execute("SELECT action FROM auth_events ORDER BY id")]
     assert actions == ["login", "logout"]
-    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
     blocked = client.get("/logins", follow_redirects=True)
     assert "需要管理员权限" in blocked.get_data(as_text=True)
 

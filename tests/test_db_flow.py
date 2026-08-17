@@ -15,16 +15,16 @@ def test_catalog_has_eleven_official_stores(tmp_db):
         assert [r["name"] for r in rows] == [item["name"] for item in STORES]
         assert [r["code"] for r in rows] == [item["code"] for item in STORES]
         ninghai = conn.execute("SELECT * FROM stores WHERE code=?", (NINGHAI_CODE,)).fetchone()
-        assert ninghai["name"] == "TZ南通市如皋市如城镇宁海路体验店"
-        assert ninghai["mobile_code"] == "20001744"
-        assert ninghai["area_manager"] == "鞠一凡"
-        assert ninghai["store_manager"] == "冒国云"
-        assert ninghai["short_name"] == "如皋宁海路"
+        assert ninghai["name"] == "邻市戊路vivo体验店"
+        assert ninghai["mobile_code"] == "10000004"
+        assert ninghai["area_manager"] == "刘经理"
+        assert ninghai["store_manager"] == "赵店长"
+        assert ninghai["short_name"] == "示例戊店"
         accounts = filler_accounts()
         logins = [item["login"] for item in accounts]
         assert len(logins) == len(set(logins))
         assert all(len(item["login"]) <= 8 for item in accounts)
-        assert "qdwy" in logins and "yinhe" in logins and "rgwd" in logins
+        assert "alpha" in logins and "gamma" in logins and "zeta" in logins
         fillers = list(conn.execute("SELECT username, display_name, role FROM users WHERE role='filler' ORDER BY id"))
         assert [row["username"] for row in fillers] == [item["login"] for item in accounts]
         assert conn.execute("SELECT id FROM users WHERE username='ninghai'").fetchone() is None
@@ -32,6 +32,7 @@ def test_catalog_has_eleven_official_stores(tmp_db):
 
 def test_legacy_ninghai_name_is_renamed_not_duplicated(tmp_path, monkeypatch):
     path = tmp_path / "legacy.db"
+    monkeypatch.setenv("STORE_DAILY_SAMPLE_SEED", "1")
     # 真正读路径的是 db_core.connect()（模块级全局），必须 patch 属主；db 只是 re-export。
     monkeypatch.setattr(db_core, "DB_PATH", path)
     monkeypatch.setattr(db_core, "DATA_DIR", tmp_path)
@@ -90,7 +91,7 @@ def test_legacy_ninghai_name_is_renamed_not_duplicated(tmp_path, monkeypatch):
     )
     conn.execute(
         "INSERT INTO stores(name, code, active, created_at) VALUES (?, ?, 1, ?)",
-        ("如皋宁海路路店", "rg-ninghai", "2026-08-13 00:00:00"),
+        ("示例戊店路店", "store-epsilon", "2026-08-13 00:00:00"),
     )
     conn.execute(
         "INSERT INTO daily_reports(biz_date, store_id, submitted_by, submitted_at) VALUES (?, 1, NULL, ?)",
@@ -102,9 +103,9 @@ def test_legacy_ninghai_name_is_renamed_not_duplicated(tmp_path, monkeypatch):
     with db.get_db() as conn:
         rows = list(conn.execute("SELECT code, name FROM stores ORDER BY sort_order"))
         assert len(rows) == len(STORES)
-        ninghai = conn.execute("SELECT * FROM stores WHERE code='rg-ninghai'").fetchone()
+        ninghai = conn.execute("SELECT * FROM stores WHERE code='store-epsilon'").fetchone()
         assert ninghai["id"] == 1
-        assert ninghai["name"] == "TZ南通市如皋市如城镇宁海路体验店"
+        assert ninghai["name"] == "邻市戊路vivo体验店"
         kept = conn.execute("SELECT COUNT(*) AS n FROM daily_reports WHERE store_id=1").fetchone()
         assert kept["n"] == 1
 
@@ -196,9 +197,9 @@ def test_login_and_save_roundtrip(tmp_db):
     app.config["TESTING"] = True
     client = app.test_client()
     assert client.get("/today").status_code == 302
-    page = client.post("/login", data={"username": "rgning", "pin": "123456"}, follow_redirects=True)
+    page = client.post("/login", data={"username": "epsilon", "pin": "123456"}, follow_redirects=True)
     assert page.status_code == 200
-    assert "TZ南通市如皋市如城镇宁海路体验店".encode("utf-8") in page.data
+    assert "邻市戊路vivo体验店".encode("utf-8") in page.data
     store_id = None
     with db.get_db() as conn:
         store_id = conn.execute("SELECT id FROM stores WHERE code=?", (NINGHAI_CODE,)).fetchone()["id"]

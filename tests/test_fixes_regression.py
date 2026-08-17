@@ -16,7 +16,7 @@ def test_broadcast_compact_is_admin_setting(app_client):
     settings = app_client.get("/settings?tab=broadcast").get_data(as_text=True)
     assert "数字化里日=0 且累=0 的行不进群消息" in settings
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
     day = _date.today().isoformat()
     saved = app_client.post(
         "/today",
@@ -47,8 +47,8 @@ def test_add_store_uses_city_and_hides_internal_code(app_client):
             "tab": "stores",
             "store_name": "TZ测试新店vivo体验店",
             "short_name": "测试新店",
-            "region_group": "通泰",
-            "city": "泰州市",
+            "region_group": "示例",
+            "city": "邻市",
             "mobile_code": "20999999",
         },
         follow_redirects=True,
@@ -57,23 +57,21 @@ def test_add_store_uses_city_and_hides_internal_code(app_client):
     with db.get_db() as conn:
         row = conn.execute("SELECT * FROM stores WHERE short_name='测试新店'").fetchone()
         assert row is not None
-        assert row["city"] == "泰州市"
-        assert row["region_group"] == "通泰"
+        assert row["city"] == "邻市"
+        assert row["region_group"] == "示例"
         assert row["code"].startswith("s")
-    bulletin = app_client.get("/bulletin").get_data(as_text=True)
+    bulletin = app_client.get("/bulletin?city=示例市").get_data(as_text=True)
     assert "测试新店" not in bulletin
-    assert "南通vivo" in bulletin or "南通vivo零售运营中心" in bulletin
-    tz = app_client.get("/bulletin?city=泰州市").get_data(as_text=True)
+    tz = app_client.get("/bulletin?city=邻市").get_data(as_text=True)
     assert "测试新店" in tz
-    assert "海门金花" not in tz
-    assert "泰州vivo" in tz
+    assert "示例甲店" not in tz
 
 
 def test_1_set_stores_persists(app_client):
     app_client.post("/login", data={"username": "admin", "pin": "1234"})
     with db.get_db() as conn:
         stores = db.list_all_stores(conn)
-        uid = conn.execute("SELECT id FROM users WHERE username='jinhua'").fetchone()["id"]
+        uid = conn.execute("SELECT id FROM users WHERE username='alpha'").fetchone()["id"]
         other = stores[-1]["id"]
     resp = app_client.post(
         "/settings",
@@ -105,7 +103,7 @@ def test_2_seed_does_not_overwrite_admin_edits(tmp_db):
             "UPDATE stores SET active=0, store_manager='管理员手改', area_manager='手改A' WHERE id=?",
             (store["id"],),
         )
-        uid = conn.execute("SELECT id FROM users WHERE username='jinhua'").fetchone()["id"]
+        uid = conn.execute("SELECT id FROM users WHERE username='alpha'").fetchone()["id"]
         db.set_user_active(conn, uid, False)
         other = conn.execute("SELECT id FROM stores ORDER BY id DESC LIMIT 1").fetchone()["id"]
         db.set_user_stores(conn, uid, [other])
@@ -116,9 +114,9 @@ def test_2_seed_does_not_overwrite_admin_edits(tmp_db):
         assert s["active"] == 0
         assert s["store_manager"] == "管理员手改"
         assert s["area_manager"] == "手改A"
-        u = conn.execute("SELECT active FROM users WHERE username='jinhua'").fetchone()
+        u = conn.execute("SELECT active FROM users WHERE username='alpha'").fetchone()
         assert u["active"] == 0
-        uid2 = conn.execute("SELECT id FROM users WHERE username='jinhua'").fetchone()["id"]
+        uid2 = conn.execute("SELECT id FROM users WHERE username='alpha'").fetchone()["id"]
         assert db.user_store_ids(conn, uid2) == [other]
     # 管理员把店清空后重启，也不该被种子偷偷补回目录默认店
     with db.get_db() as conn:
@@ -143,7 +141,7 @@ def test_report_ignores_inactive_metric_facts(tmp_db, monkeypatch):
 
     app_client = _admin_client(tmp_db)
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
         at = _date.today().isoformat()
         # 停用一个指标并故意留下它的历史 day 值
         conn.execute("UPDATE metrics SET active=0 WHERE code='watch_pack'")
@@ -179,7 +177,7 @@ def test_csrf_blocks_unsigned_post(tmp_db, monkeypatch):
     app.config["TESTING"] = False
     client = app.test_client()
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
         today = date.today().isoformat()
     # 1) 登录（带 pre-login token）
     with client.session_transaction() as sess:
@@ -217,7 +215,7 @@ def test_edits_page_paginates(tmp_db, monkeypatch):
 
     app_client = _admin_client(tmp_db)
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
         uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
         day = _date.today().isoformat()
         # 造 55 条审计记录
@@ -269,7 +267,7 @@ def test_board_shows_deals_and_exports_xlsx(tmp_db):
     c = app.test_client()
     c.post("/login", data={"username": "admin", "pin": "1234"})
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
         uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
         db.save_daily(
             conn,
@@ -290,7 +288,7 @@ def test_board_shows_deals_and_exports_xlsx(tmp_db):
     page = c.get("/board").get_data(as_text=True)
     assert "触客" in page
     assert "成交/触客" in page
-    assert "海门金花" in page
+    assert "示例甲店" in page
     assert "/report?" in page
     r = c.get("/board.xlsx?view=today")
     assert r.status_code == 200
@@ -333,7 +331,7 @@ def test_bulletin_skips_stores_without_mobile_code(app_client):
     assert 'value="泰州市"' not in page
     empty = app_client.get("/bulletin?city=泰州市").get_data(as_text=True).replace("\ufeff", "")
     assert "测试有编码店" in empty  # 非法地市回退到南通
-    assert "兴化吾悦" not in empty
+    assert "示例戊店" not in empty
 
 
 def test_store_picker_has_city_and_manager_groupby(app_client):
@@ -341,7 +339,7 @@ def test_store_picker_has_city_and_manager_groupby(app_client):
     rec = app_client.get("/deal/records").get_data(as_text=True)
     assert 'data-group="city"' in rec
     assert 'data-group="manager"' in rec
-    assert "黄雍青" in rec
+    assert "张管理" in rec
     settings = app_client.get("/settings?tab=stores").get_data(as_text=True)
     assert 'id="storeGroupBy"' in settings
     assert 'data-group="manager"' in settings

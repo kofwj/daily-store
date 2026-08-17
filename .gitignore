@@ -8,6 +8,7 @@ data/*.db-*
 data/*.db-journal
 data/backups/
 data/tmp/
+app/stores_seed_local.py
 .DS_Store
 .env
 scripts/backup.env

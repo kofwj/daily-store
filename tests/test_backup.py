@@ -18,7 +18,7 @@ def test_admin_can_backup_download_and_restore(tmp_db, client):
     assert down.status_code == 200
     assert down.data[:16] == b"SQLite format 3\x00"
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
         uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
         db.record_advance(
             conn,
@@ -57,7 +57,7 @@ def test_restore_failure_does_not_change_live_db(tmp_db):
 
 
 def test_filler_cannot_open_backup(client):
-    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
     page = client.get("/settings?tab=backup").get_data(as_text=True)
     assert "备份恢复" not in page
     r = client.get("/settings/backup/store_daily_manual_x.db")

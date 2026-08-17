@@ -19,6 +19,8 @@ def tmp_db(tmp_path, monkeypatch):
     monkeypatch.setenv("STORE_DAILY_DATA", str(tmp_path))
     # create_app deliberately has no deployment fallback; tests explicitly provide a key.
     monkeypatch.setenv("STORE_DAILY_SECRET", "test-" + "a" * 48)
+    # 测试一律用示例店，避免加载 stores_seed_local 里的真实门店
+    monkeypatch.setenv("STORE_DAILY_SAMPLE_SEED", "1")
     # DB_PATH/DATA_DIR 真正被读的地方是 db_core.connect()（模块级全局），
     # 而 db 只是 re-export 副本——必须 patch 属主模块，否则测试会写进真 dev 库。
     monkeypatch.setattr(db_core, "DB_PATH", Path(path))
@@ -47,8 +49,8 @@ def app_client(tmp_db):
     return app.test_client()
 
 
-def login(client, username="jinhua", pin="123456"):
-    """登录 helper：默认用店员 jinhua，可传 admin/1234 等。"""
+def login(client, username="alpha", pin="123456"):
+    """登录 helper：默认用店员 alpha，可传 admin/1234 等。"""
     return client.post(
         "/login", data={"username": username, "pin": pin}, follow_redirects=True
     )

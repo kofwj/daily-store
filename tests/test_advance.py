@@ -8,21 +8,19 @@ from app.stores_seed import STORES
 
 def test_catalog_includes_advance_workbook_stores(tmp_db):
     names = {item["name"] for item in STORES}
-    assert "TZ南通启东吾悦vivo体验店" in names
-    assert "TZ南通市崇川区银河大厦专卖店" in names
-    assert "TZ南通如皋万达vivo体验店" in names
-    assert "TZ南通如皋吾悦vivo体验店" in names
-    assert "TZ南通海安喜润城vivo体验店" in names
+    assert "示例市甲街vivo体验店" in names
+    assert "邻市戊路vivo体验店" in names
+    assert "邻市巳街vivo专卖店" in names
     with db.get_db() as conn:
-        row = conn.execute("SELECT * FROM stores WHERE code='qidong-wuyue'").fetchone()
+        row = conn.execute("SELECT * FROM stores WHERE code='store-gamma'").fetchone()
         assert row is not None
-        assert row["area_manager"] == "黄雍青"
+        assert row["area_manager"] == "张管理"
 
 
 def test_filler_must_provide_phone(client):
-    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
     page = client.post(
         "/advance",
         data={"store_id": str(sid), "biz_date": db.today_local().isoformat(), "rebate": "100", "note": "购机让利"},
@@ -35,9 +33,9 @@ def test_filler_must_provide_phone(client):
 
 
 def test_filler_saves_and_admin_pays(client):
-    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
     today = db.today_local().isoformat()
     saved = client.post(
         "/advance",
@@ -97,7 +95,7 @@ def test_admin_can_save_without_phone_and_fills_settlement(tmp_db):
     c = app.test_client()
     c.post("/login", data={"username": "admin", "pin": "1234"})
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
     today = db.today_local()
     page = c.post(
         "/advance",
@@ -117,7 +115,7 @@ def test_admin_can_save_without_phone_and_fills_settlement(tmp_db):
     ws = wb["移动接入"]
     found = False
     for row in ws.iter_rows(min_row=5, max_col=8, values_only=True):
-        if row[1] == "TZ南通市海门金花vivo体验店":
+        if row[1] == "示例市甲街vivo体验店":
             assert row[7] == 39.99
             found = True
             break
@@ -126,16 +124,16 @@ def test_admin_can_save_without_phone_and_fills_settlement(tmp_db):
     assert export.status_code == 200
     book = openpyxl.load_workbook(BytesIO(export.get_data()))
     assert "汇总表" in book.sheetnames
-    assert "海门金花" in book.sheetnames
-    assert book["海门金花"]["H3"].value == "芝麻服务费"
+    assert "示例甲店" in book.sheetnames
+    assert book["示例甲店"]["H3"].value == "芝麻服务费"
 
 
 def test_filler_rejects_future_and_nonfinite_amounts(client):
     from datetime import timedelta
 
-    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
     future = client.post("/advance", data={"store_id": sid, "biz_date": (db.today_local() + timedelta(days=1)).isoformat(), "phone": "13900000000", "rebate": "10"}, follow_redirects=True)
     assert "未来日期" in future.get_data(as_text=True)
     invalid = client.post("/advance", data={"store_id": sid, "biz_date": db.today_local().isoformat(), "phone": "13900000000", "rebate": "nan"}, follow_redirects=True)
@@ -143,9 +141,9 @@ def test_filler_rejects_future_and_nonfinite_amounts(client):
 
 
 def test_filler_can_save_negative_amount(client):
-    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
     page = client.post(
         "/advance",
         data={
@@ -168,9 +166,9 @@ def test_filler_can_save_negative_amount(client):
 
 
 def test_advance_actions_are_audited(client):
-    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
     today = db.today_local().isoformat()
     client.post("/advance", data={"store_id": sid, "biz_date": today, "phone": "13900007777", "rebate": "10"})
     with db.get_db() as conn:
@@ -187,9 +185,9 @@ def test_advance_actions_are_audited(client):
 
 
 def test_anonymous_cannot_delete_advance(client):
-    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
     today = db.today_local().isoformat()
     client.post(
         "/advance",
@@ -221,23 +219,23 @@ def test_anonymous_cannot_delete_advance(client):
 
 
 def test_filler_cannot_open_pay_page(client):
-    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
     r = client.get("/advance/pay", follow_redirects=True)
     assert "需要管理员权限" in r.get_data(as_text=True)
 
 
 def test_admin_advance_defaults_to_all_stores(client):
-    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
     with db.get_db() as conn:
-        sid_a = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
-        sid_b = conn.execute("SELECT id FROM stores WHERE code='tongzhou-jinsha'").fetchone()["id"]
+        sid_a = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        sid_b = conn.execute("SELECT id FROM stores WHERE code='store-beta'").fetchone()["id"]
     today = db.today_local().isoformat()
     client.post(
         "/advance",
         data={"store_id": str(sid_a), "biz_date": today, "phone": "13900009111", "rebate": "10"},
     )
     client.get("/logout")
-    client.post("/login", data={"username": "jinsha", "pin": "123456"})
+    client.post("/login", data={"username": "beta", "pin": "123456"})
     client.post(
         "/advance",
         data={"store_id": str(sid_b), "biz_date": today, "phone": "13900009222", "rebate": "20"},
@@ -248,8 +246,8 @@ def test_admin_advance_defaults_to_all_stores(client):
     assert "本月全店垫资" in page
     assert "13900009111" in page
     assert "13900009222" in page
-    assert "海门金花" in page
-    assert "通州金沙" in page
+    assert "示例甲店" in page
+    assert "示例乙店" in page
     assert "记一笔垫资" not in page
     one = client.get(f"/advance?store_id={sid_a}").get_data(as_text=True)
     assert "记一笔垫资" in one
@@ -260,23 +258,23 @@ def test_admin_advance_defaults_to_all_stores(client):
 def test_admin_advance_filter_by_city(client):
     client.post("/login", data={"username": "admin", "pin": "1234"})
     with db.get_db() as conn:
-        nt = conn.execute("SELECT id FROM stores WHERE short_name='通州金沙'").fetchone()["id"]
-        tz = conn.execute("SELECT id FROM stores WHERE short_name='靖江吾悦'").fetchone()["id"]
+        nt = conn.execute("SELECT id FROM stores WHERE short_name='示例乙店'").fetchone()["id"]
+        tz = conn.execute("SELECT id FROM stores WHERE short_name='示例丁店'").fetchone()["id"]
     today = db.today_local().isoformat()
     client.post("/advance", data={"store_id": str(nt), "biz_date": today, "phone": "13900009333", "rebate": "11"})
     client.post("/advance", data={"store_id": str(tz), "biz_date": today, "phone": "13900009444", "rebate": "22"})
     all_page = client.get("/advance").get_data(as_text=True)
     assert "13900009333" in all_page
     assert "13900009444" in all_page
-    city = client.get("/advance?city=泰州市").get_data(as_text=True)
+    city = client.get("/advance?city=邻市").get_data(as_text=True)
     assert "13900009444" in city
     assert "13900009333" not in city
 
 
 def test_store_sees_month_list_and_admin_sees_today_inbox(client):
-    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
     today = db.today_local().isoformat()
     client.post(
         "/advance",
@@ -297,14 +295,14 @@ def test_store_sees_month_list_and_admin_sees_today_inbox(client):
     client.post("/login", data={"username": "admin", "pin": "1234"})
     inbox = client.get("/advance/pay?scope=today&paid=0").get_data(as_text=True)
     assert "今天待兑" in inbox
-    assert "海门金花" in inbox
+    assert "示例甲店" in inbox
     assert "1笔" in inbox
 
 
 def test_advance_stores_cents_and_reads_yuan(client):
-    client.post("/login", data={"username": "jinhua", "pin": "123456"})
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
     with db.get_db() as conn:
-        sid = conn.execute("SELECT id FROM stores WHERE code='haimen-jinhua'").fetchone()["id"]
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
     client.post(
         "/advance",
         data={

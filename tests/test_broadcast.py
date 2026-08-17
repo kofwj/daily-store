@@ -42,8 +42,8 @@ def test_render_matches_wechat_log():
         "pet": (0, 0),
         "new_call": (0, 0),
     }
-    text = render_broadcast("如皋宁海路", biz, values, compact=False)
-    assert text.startswith("8月13日\n如皋宁海路\n")
+    text = render_broadcast("示例戊店", biz, values, compact=False)
+    assert text.startswith("8月13日\n示例戊店\n")
     assert "当天手机销量：日1，累13" in text
     assert "查询身份证数：日1，累4" in text
     assert "\n重点业务\n比算新增：日0，累5\n比算新增[高]：日3，累3\n" in text
@@ -65,7 +65,7 @@ def test_compact_hides_zero_digital_rows():
         "cloud_disk": (0, 0),
         "migu": (0, 0),
     }
-    text = render_broadcast("如皋宁海路", biz, values, compact=True)
+    text = render_broadcast("示例戊店", biz, values, compact=True)
     assert "定向包：日1，累1" in text
     assert "防诈宝：日0，累3" in text
     assert "云盘" not in text
@@ -83,7 +83,7 @@ def test_compact_hides_zero_family_rows():
         "fttr": (0, 0),
     }
     text = render_broadcast(
-        "兴化吾悦",
+        "示例戊店",
         biz,
         values,
         compact=True,
@@ -122,7 +122,7 @@ def test_metric_codes_cover_all_seed_items():
 
 def test_broadcast_rolls_coin_cut_parts_into_one_line():
     text = render_broadcast(
-        "如皋宁海路",
+        "示例戊店",
         date(2026, 8, 14),
         {
             "coin_cut_old": (1, 4),
