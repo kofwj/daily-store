@@ -81,7 +81,7 @@ def _bulletin_rows(conn, stores, biz_date: date):
             mobile = None
         sys_asof = None
         if mobile is not None:
-            # 对照用截止日同期系统数，不是通报表选中日的整月
+            # 对照用截止日同期上报数，不是通报表选中日的整月
             sys_asof = db.week_metric_total(
                 conn, store["id"], month_start, asof, ("bisuan", "bisuan_high")
             )
@@ -100,7 +100,20 @@ def _bulletin_rows(conn, stores, biz_date: date):
                 month_bisuan_sys_asof=sys_asof,
             )
         )
-    return bulletin.apply_scales(rows)
+    rows = bulletin.apply_scales(rows)
+    # 通报表日期晚于取数截止日：移取未更新到今日
+    for row in rows:
+        if row.get("_month_bisuan_mobile_stored") is None:
+            continue
+        asof_raw = (row.get("month_bisuan_asof") or "").strip()
+        if not asof_raw:
+            continue
+        try:
+            if date.fromisoformat(asof_raw[:10]) < biz_date:
+                row["month_bisuan_mobile_stale"] = True
+        except ValueError:
+            pass
+    return rows
 
 
 def _board_payload(conn, biz_date: date, view: str, city: str = ""):
@@ -365,7 +378,7 @@ def register_admin(app) -> None:
         with db.get_db() as conn:
             if not db.user_can_access_store(conn, g.user, sid):
                 return Response("forbidden", status=403)
-            # 对照截止日同期系统数（笔算新增 + 高）
+            # 对照截止日同期上报数（笔算新增 + 高）
             current = db.week_metric_total(conn, sid, month_start, asof, ("bisuan", "bisuan_high"))
             delta = mobile - current
             month_key = biz_date.strftime("%Y-%m")
@@ -409,7 +422,7 @@ def register_admin(app) -> None:
             sign = "+" if delta > 0 else ""
             flash(
                 f"已录移 {format_stored('bisuan', mobile)}（至{asof.month}/{asof.day}），"
-                f"系统同期 {format_stored('bisuan', current)}，差额 {sign}{format_stored('bisuan', delta)}",
+                f"上报同期 {format_stored('bisuan', current)}，差额 {sign}{format_stored('bisuan', delta)}",
                 "ok",
             )
         return redirect(url_for("bulletin_page", date=biz_date.isoformat(), city=city))
