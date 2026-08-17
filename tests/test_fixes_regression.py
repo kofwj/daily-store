@@ -297,13 +297,24 @@ def test_bisuan_accepts_one_decimal_and_month_calibrates(app_client):
             (sid, day.isoformat()),
         ).fetchone()["day_value"]
         assert stored == 15
-    # 移动取数 = 本月累计（笔算新增+高），带截止日；差额补到截止日
+    # 移动取数默认截止前一天；差额补到截止日
+    from datetime import timedelta as _td
+
+    asof = day - _td(days=1)
+    if asof.month != day.month:
+        asof = day  # 月初只能落到当天
+    # 截止日那天先有 1.5，校准到移 2.0
+    app_client.post(
+        "/today",
+        data={"store_id": str(sid), "date": asof.isoformat(), "m_bisuan": "1.5", "m_phone_sales": "1"},
+        follow_redirects=True,
+    )
     calibrated = app_client.post(
         "/bulletin/bisuan-mobile",
         data={
             "store_id": str(sid),
             "date": day.isoformat(),
-            "asof": day.isoformat(),
+            "asof": asof.isoformat(),
             "mobile": "2.0",
             "city": "",
         },
@@ -312,25 +323,28 @@ def test_bisuan_accepts_one_decimal_and_month_calibrates(app_client):
     assert "已录移" in calibrated or "移" in calibrated
     with db.get_db() as conn:
         month_start = day.replace(day=1).isoformat()
-        month_total = conn.execute(
+        asof_total = conn.execute(
             "SELECT COALESCE(SUM(day_value),0) AS n FROM daily_facts "
             "WHERE store_id=? AND biz_date>=? AND biz_date<=? AND metric_code IN ('bisuan','bisuan_high')",
-            (sid, month_start, day.isoformat()),
+            (sid, month_start, asof.isoformat()),
         ).fetchone()["n"]
-        assert month_total == 20
+        assert asof_total == 20
         mobile = conn.execute(
             "SELECT value FROM app_meta WHERE key=?",
             (f"bisuan_mobile_{sid}_{day.strftime('%Y-%m')}",),
         ).fetchone()
         assert mobile and mobile["value"] == "2.0"
-        asof = conn.execute(
+        asof_row = conn.execute(
             "SELECT value FROM app_meta WHERE key=?",
             (f"bisuan_mobile_asof_{day.strftime('%Y-%m')}",),
         ).fetchone()
-        assert asof and asof["value"] == day.isoformat()
+        assert asof_row and asof_row["value"] == asof.isoformat()
     page = app_client.get(f"/bulletin?date={day.isoformat()}").get_data(as_text=True)
     assert "移2.0" in page
     assert "笔算移取" in page or "分店对照" in page
+    # 表单默认截止日前一天
+    if day.day > 1:
+        assert f'name="asof" value="{asof.isoformat()}"' in page or asof.isoformat() in page
 
 
 def test_4_net_includes_advisor_penalty():

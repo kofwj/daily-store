@@ -40,24 +40,36 @@ def _bisuan_mobile_raw(conn, store_id: int, month_key: str) -> str:
     return db.get_setting(conn, f"bisuan_official_{store_id}_{month_key}", "")
 
 
-def _bisuan_mobile_asof(conn, month_key: str, default: date) -> date:
+def _default_bisuan_mobile_asof(biz_date: date) -> date:
+    """移动取数默认截止到通报表日前一天（当天通常还没数）。"""
+    month_start = biz_date.replace(day=1)
+    prev = biz_date - timedelta(days=1)
+    return prev if prev >= month_start else month_start
+
+
+def _clamp_bisuan_mobile_asof(asof: date, biz_date: date) -> date:
+    month_start = biz_date.replace(day=1)
+    if asof < month_start:
+        return month_start
+    if asof > biz_date:
+        return biz_date
+    return asof
+
+
+def _bisuan_mobile_asof(conn, month_key: str, biz_date: date) -> date:
     raw = db.get_setting(conn, f"bisuan_mobile_asof_{month_key}", "")
     if raw:
         try:
-            return date.fromisoformat(raw[:10])
+            return _clamp_bisuan_mobile_asof(date.fromisoformat(raw[:10]), biz_date)
         except ValueError:
             pass
-    return default
+    return _default_bisuan_mobile_asof(biz_date)
 
 
 def _bulletin_rows(conn, stores, biz_date: date):
     month_key = biz_date.strftime("%Y-%m")
     month_start = biz_date.replace(day=1)
     asof = _bisuan_mobile_asof(conn, month_key, biz_date)
-    if asof < month_start:
-        asof = month_start
-    if asof > biz_date:
-        asof = biz_date
     rows = []
     for store in stores:
         if not (store["mobile_code"] or "").strip():
@@ -333,6 +345,7 @@ def register_admin(app) -> None:
                 else ""
             )
             month_key = biz_date.strftime("%Y-%m")
+            # 表单默认：已存截止日，否则前一天
             mobile_asof = _bisuan_mobile_asof(conn, month_key, biz_date)
             return render_template(
                 "bulletin.html",
@@ -362,7 +375,11 @@ def register_admin(app) -> None:
         try:
             sid = int(store_id)
             biz_date = date.fromisoformat(biz_raw)
-            asof = date.fromisoformat(asof_raw) if asof_raw else biz_date
+            asof = (
+                date.fromisoformat(asof_raw)
+                if asof_raw
+                else _default_bisuan_mobile_asof(biz_date)
+            )
             mobile = max(0, to_stored("bisuan", mobile_raw))
         except (ValueError, TypeError):
             flash("移动取数参数不对", "error")
@@ -371,10 +388,7 @@ def register_admin(app) -> None:
             flash("请填移动取数", "error")
             return redirect(url_for("bulletin_page", date=biz_date.isoformat(), city=city or None))
         month_start = biz_date.replace(day=1)
-        if asof < month_start:
-            asof = month_start
-        if asof > biz_date:
-            asof = biz_date
+        asof = _clamp_bisuan_mobile_asof(asof, biz_date)
         with db.get_db() as conn:
             if not db.user_can_access_store(conn, g.user, sid):
                 return Response("forbidden", status=403)
