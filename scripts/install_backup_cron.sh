@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# 在生产机安装「每小时机外备份」cron，并确保本机有推送到 pve/109 的 SSH 钥匙。
-# 用法：在 192.168.100.5 上
+# 在生产机安装「每小时机外备份」cron，并确保本机有推送到备份机的 SSH 钥匙。
+# 用法：在生产机上
 #   /opt/store-daily/scripts/install_backup_cron.sh
-# 从 Mac：
-#   ssh root@192.168.100.5 /opt/store-daily/scripts/install_backup_cron.sh
+# 从开发机：
+#   ssh user@your-primary-host /opt/store-daily/scripts/install_backup_cron.sh
 set -euo pipefail
 
 DIR="${STORE_DAILY_DIR:-/opt/store-daily}"

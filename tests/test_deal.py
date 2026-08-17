@@ -36,8 +36,8 @@ def test_closed_deal_uses_short_layout():
 
 
 def test_open_deal_marks_not_closed():
-    text = render_deal("海门龙信", model="X300", closed="0", hall_query="0", student="1")
-    assert text.startswith("海门龙信 · 未成交\n")
+    text = render_deal("示例甲店", model="X300", closed="0", hall_query="0", student="1")
+    assert text.startswith("示例甲店 · 未成交\n")
     assert "未查掌厅" in text
     assert "中高考" in text
     assert "非中高考" not in text
@@ -159,20 +159,20 @@ def test_admin_records_filter_by_city_and_manager(client):
         nt = conn.execute("SELECT id FROM stores WHERE short_name='示例乙店'").fetchone()["id"]
         tz = conn.execute("SELECT id FROM stores WHERE short_name='示例丁店'").fetchone()["id"]
         uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
-        db.record_deal_post(conn, store_id=nt, user_id=uid, model="南通机", phone="13800001111", closed=True)
-        db.record_deal_post(conn, store_id=tz, user_id=uid, model="泰州机", phone="13800002222", closed=True)
+        db.record_deal_post(conn, store_id=nt, user_id=uid, model="甲店机", phone="13800001111", closed=True)
+        db.record_deal_post(conn, store_id=tz, user_id=uid, model="丁店机", phone="13800002222", closed=True)
         mgr = conn.execute("SELECT area_manager FROM stores WHERE id=?", (nt,)).fetchone()["area_manager"]
     page = client.get("/deal/records").get_data(as_text=True)
     assert "全部地市" in page
     assert "全部经理" in page
-    assert "南通机" in page
-    assert "泰州机" in page
+    assert "甲店机" in page
+    assert "丁店机" in page
     city = client.get("/deal/records?city=邻市").get_data(as_text=True)
-    assert "泰州机" in city
-    assert "南通机" not in city
+    assert "丁店机" in city
+    assert "甲店机" not in city
     one = client.get(f"/deal/records?area_manager={mgr}").get_data(as_text=True)
-    assert "南通机" in one
-    assert "泰州机" not in one
+    assert "甲店机" in one
+    assert "丁店机" not in one
 
 
 def test_admin_exports_all_stores_deal_csv(client):

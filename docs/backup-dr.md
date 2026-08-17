@@ -1,26 +1,28 @@
-# 备份与容错（局域网 + 远端 VPS）
+# 备份与容错（局域网 + 远端）
+
+主机名写在 `scripts/backup.env`（不进 git）。下面用占位符。
 
 ## 角色怎么分
 
 | 角色 | 建议机器 | 干什么 |
 |---|---|---|
-| **生产** | 局域网 `192.168.100.5`（现网） | 店员每天写的那台，Docker 跑着 |
-| **局域网备份** | `192.168.100.109`（或 NAS） | 每天收一份库，断网/坏盘时最快救 |
-| **远端备份** | 公网 VPS | 机房断电、整网挂了时的底牌 |
-| **开发机** | 你的 Mac | 改代码；**不要**拿开发库盖生产 |
+| **生产** | `PRIMARY_HOST` | 店员每天写的那台，Docker 跑着 |
+| **局域网备份** | `LAN_BACKUP_HOST`（NAS / 安卓等） | 每天收一份库，断网/坏盘时最快救 |
+| **远端备份** | `REMOTE_BACKUP` | 机房断电、整网挂了时的底牌 |
+| **开发机** | 本机 | 改代码；**不要**拿开发库盖生产 |
 
 原则：
 
-1. **只在一处写库**（生产）。备份机、远端 VPS 默认只收文件，不接店员流量。  
-2. **拷库必须用 SQLite backup API**，不要 `cp store_daily.db`（有 WAL 会拷残）。  
+1. **只在一处写库**（生产）。备份机、远端默认只收文件，不接店员流量。
+2. **拷库必须用 SQLite backup API**，不要 `cp store_daily.db`（有 WAL 会拷残）。
 3. **代码** 在 git；**数据 + `.env`** 靠备份脚本，不进 git。
 
 ```text
-店员手机 ──HTTP──► 192.168.100.5:8099   ← 唯一生产
+店员手机 ──HTTP──► PRIMARY_HOST:8099   ← 唯一生产
                       │
                       │ 每小时 backup_offsite.sh（生产机 cron）
-                      ├──────► 192.168.100.109  ~/store-daily-backups/
-                      └──────► 公网 VPS         ~/store-daily-backups/
+                      ├──────► LAN_BACKUP_HOST  ~/store-daily-backups/
+                      └──────► REMOTE_BACKUP    ~/store-daily-backups/
 ```
 
 ---
@@ -29,8 +31,8 @@
 
 设置 → 备份恢复：
 
-- **立即备份**：`data/backups/store_daily_*.db`，最多留 20 份  
-- **下载 / 上传恢复**：恢复前会再拍一份 `before_restore`  
+- **立即备份**：`data/backups/store_daily_*.db`，最多留 20 份
+- **下载 / 上传恢复**：恢复前会再拍一份 `before_restore`
 - 校验：文件头 + 必要表（stores/users/…）
 
 这只防「人手误删、想回滚」。**防不了整机挂掉**，所以还要机外备份。
@@ -43,32 +45,22 @@
 
 ### 1. 准备 SSH 免密
 
-在跑备份的机器上（Mac 或 109）：
+在跑备份的机器上：
 
 ```bash
-ssh-copy-id root@192.168.100.5          # 生产
-ssh-copy-id 你的用户@192.168.100.109    # 局域网备份
-ssh-copy-id ubuntu@你的公网VPS          # 远端
+ssh-copy-id user@your-primary-host
+ssh-copy-id user@your-lan-backup-host
+ssh-copy-id user@your-standby-host
 ```
 
 ### 2. 手动跑一次
 
 ```bash
 cd /path/to/store-daily
+cp scripts/backup.env.example scripts/backup.env
+# 改成真实主机后：
 
-# 先看命令、不写盘
-PRIMARY_HOST=192.168.100.5 \
-LAN_BACKUP_HOST=192.168.100.109 \
-LAN_BACKUP_USER=你的用户 \
-REMOTE_BACKUP=ubuntu@公网IP \
 ./scripts/backup_offsite.sh --dry-run
-
-# 真备份
-PRIMARY_HOST=192.168.100.5 \
-LAN_BACKUP_HOST=192.168.100.109 \
-LAN_BACKUP_USER=你的用户 \
-REMOTE_BACKUP=ubuntu@公网IP \
-KEEP_DAYS=30 \
 ./scripts/backup_offsite.sh
 ```
 
@@ -82,11 +74,10 @@ KEEP_DAYS=30 \
 
 ### 3. 定时（cron，推荐生产机每小时）
 
-Mac 睡觉会漏备份，所以 **cron 装在 5 上**，每小时推 109 + pve。
+开发机睡觉会漏备份，所以 **cron 装在生产机上**。
 
 ```bash
-# 从 Mac 同步脚本后：
-ssh root@192.168.100.5 /opt/store-daily/scripts/install_backup_cron.sh
+ssh user@your-primary-host /opt/store-daily/scripts/install_backup_cron.sh
 ```
 
 会写入：
@@ -95,17 +86,14 @@ ssh root@192.168.100.5 /opt/store-daily/scripts/install_backup_cron.sh
 5 * * * * /opt/store-daily/scripts/backup_offsite.sh >>/var/log/store-daily-offsite.log 2>&1
 ```
 
-并生成本机 SSH 钥匙。把打印出的公钥加到：
+并生成本机 SSH 钥匙。把打印出的公钥加到局域网备份机和远端灾备机。
 
-- `root@pve.anemy.org`（`~/.ssh/authorized_keys`）
-- `jian@192.168.100.109:8022`（Termux，手机要开着）
-
-109 暂时连不上时脚本会告警，**仍会推 pve**。
+局域网备份暂时连不上时脚本会告警，**仍会推远端**。
 
 看日志：
 
 ```bash
-ssh root@192.168.100.5 'tail -50 /var/log/store-daily-offsite.log'
+ssh user@your-primary-host 'tail -50 /var/log/store-daily-offsite.log'
 ```
 
 生产机自己也还有应用内备份（设置页「立即备份」）。
@@ -116,36 +104,33 @@ ssh root@192.168.100.5 'tail -50 /var/log/store-daily-offsite.log'
 
 ### 级别 A：只备份，不双活（够用，推荐先做）
 
-- 生产挂了 → 从 109 或远端把最新 `.db` 拷回，重启 Docker  
-- RPO：最多丢「上次备份到故障」之间的数据（cron 每天 = 最多约 24h；改成每小时则更短）  
+- 生产挂了 → 从局域网或远端把最新 `.db` 拷回，重启 Docker
+- RPO：最多丢「上次备份到故障」之间的数据
 - RTO：半小时内能恢复（有文档 + SSH）
 
-### 级别 B：局域网热备（109 当替补）
+### 级别 B：局域网热备
 
-109 上同样部署一份代码 + compose，**平时不写库或停掉 app**：
+备份机上同样部署一份代码 + compose，**平时不写库或停掉 app**：
 
 ```bash
-# 109 首次
-rsync -az root@192.168.100.5:/opt/store-daily/ /opt/store-daily/
-# 改 109 的 .env：CADDY_PORT 可仍 8099，SECRET 与生产相同才能续会话（可选）
+rsync -az user@your-primary-host:/opt/store-daily/ /opt/store-daily/
 cd /opt/store-daily && docker compose up -d --build
 ```
 
 故障切换：
 
-1. 确认 5 号机已停写（关容器或拔网）  
-2. 把最新备份库放到 109 的 `data/store_daily.db`  
-3. `docker compose up -d`  
-4. 路由器/内网 DNS 把「日报地址」指到 `192.168.100.109:8099`  
-   （或让店员临时改收藏夹）
+1. 确认生产机已停写（关容器或拔网）
+2. 把最新备份库放到备份机的 `data/store_daily.db`
+3. `docker compose up -d`
+4. 路由器/内网 DNS 把「日报地址」指到备份机
 
 不要两台同时写同一个业务库。
 
 ### 级别 C：公网入口 + 远端灾备
 
-- 日常仍写局域网生产（延迟低）  
-- 公网 VPS 只做：备份落点，或 Cloudflare Tunnel 反代到家里  
-- 整网挂了：在远端 VPS 起 docker，导入最近备份，改 Tunnel/DNS 指向远端  
+- 日常仍写局域网生产（延迟低）
+- 公网机只做：备份落点，或 Cloudflare Tunnel 反代到家里
+- 整网挂了：在远端起 docker，导入最近备份，改 Tunnel/DNS 指向远端
 
 TLS：生产若走公网，用 `STORE_DAILY_SECURE=1` + tunnel/Caddy HTTPS（见 `docs/deploy-vps.md`）。
 
@@ -156,13 +141,11 @@ TLS：生产若走公网，用 `STORE_DAILY_SECURE=1` + tunnel/Caddy HTTPS（见
 ### 1）只恢复数据库（生产机还在）
 
 ```bash
-# 任选一份备份
-scp 用户@192.168.100.109:~/store-daily-backups/db/store_daily_offsite_XXXX.db /tmp/restore.db
+scp user@your-lan-backup-host:~/store-daily-backups/db/store_daily_offsite_XXXX.db /tmp/restore.db
 
-ssh root@192.168.100.5
+ssh user@your-primary-host
 cd /opt/store-daily
 docker compose stop app
-# 先留现场
 cp -a data/store_daily.db data/backups/store_daily_before_manual_restore_$(date +%Y%m%d_%H%M%S).db
 cp /tmp/restore.db data/store_daily.db
 rm -f data/store_daily.db-wal data/store_daily.db-shm
@@ -175,15 +158,12 @@ curl -s http://127.0.0.1:8099/health
 ### 2）整机重装 / 换机
 
 ```bash
-# 新机器
 mkdir -p /opt/store-daily && cd /opt/store-daily
-# 同步代码（从 Mac）
 ./scripts/sync_to_vps.sh --no-db   # 或 git clone + 拷 .env
 
-# 放入备份库
 mkdir -p data
-scp 用户@192.168.100.109:~/store-daily-backups/db/最新.db data/store_daily.db
-scp 用户@192.168.100.109:~/store-daily-backups/env/最新.env .env
+scp user@your-lan-backup-host:~/store-daily-backups/db/最新.db data/store_daily.db
+scp user@your-lan-backup-host:~/store-daily-backups/env/最新.env .env
 chmod 600 .env data/store_daily.db
 
 ./scripts/deploy_vps.sh
@@ -195,7 +175,7 @@ chmod 600 .env data/store_daily.db
 sqlite3 data/store_daily.db "SELECT COUNT(*) FROM stores; SELECT COUNT(*) FROM daily_reports; SELECT COUNT(*) FROM advance_posts;"
 ```
 
-登录管理员，看：报表、成交记录、垫资、设置→组织 是否都在。
+登录管理员，看：报表、触客记录、垫资、设置→组织 是否都在。
 
 ---
 
@@ -211,13 +191,10 @@ sqlite3 data/store_daily.db "SELECT COUNT(*) FROM stores; SELECT COUNT(*) FROM d
 
 ---
 
-## 六、建议你今天做的最小集
+## 六、建议先做的最小集
 
-1. 109 上建目录：`mkdir -p ~/store-daily-backups/{db,env}`  
-2. 配好到 `192.168.100.5` 和公网 VPS 的 SSH 免密  
-3. 跑通一次：  
-   `REMOTE_BACKUP=ubuntu@公网IP ./scripts/backup_offsite.sh`  
-4. 写上 cron（每天一次；重要档期可改每小时）  
-5. 故意在测试目录恢复一份，确认能登录、店数对  
-
-做到这五步，局域网挂了有 109，整网挂了有远端 VPS。
+1. 备份机上建目录：`mkdir -p ~/store-daily-backups/{db,env}`
+2. 配好到生产和远端的 SSH 免密
+3. 跑通一次：`./scripts/backup_offsite.sh`
+4. 写上 cron（每天一次；重要档期可改每小时）
+5. 故意在测试目录恢复一份，确认能登录、店数对

@@ -12,3 +12,8 @@ app/stores_seed_local.py
 .DS_Store
 .env
 scripts/backup.env
+.pi/
+*.xlsx
+*.pdf
+docs/*preview*.png
+docs/*-2x.png

@@ -4,8 +4,6 @@
 
 个人微信没有官方机器人，所以现在是 **保存 → 复制 → 贴群**。数据按多店、多角色建好，加店换人不用推倒。
 
-和投资账本 `invest-tracker` 分开，互不影响。
-
 ## 谁用
 
 | 角色 | 典型人 | 能做什么 |
@@ -43,7 +41,7 @@
 ## 本地开发
 
 ```bash
-cd /Users/jian/Downloads/store-daily
+cd /path/to/store-daily
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 export STORE_DAILY_SECRET='换成一段随机字符串'
@@ -61,22 +59,16 @@ export STORE_DAILY_SECRET='换成一段随机字符串'
 
 ## 生产
 
-店员入口走 **Cloudflare 域名**（Tunnel）。家里生产机：
+店员入口走 **Cloudflare 域名**（Tunnel）。只在一处写库。
 
-| 项 | 值 |
-|---|---|
-| 写库 | `192.168.100.5:/opt/store-daily` |
-| 内网自检 | http://192.168.100.5:8099 |
-| 灾备机 | `pve.anemy.org`（平时只收备份，不接店员） |
-| 局域网盘 | `192.168.100.109` Termux（手机要开着） |
+复制 `.env.example` 为 `.env`，填入主机和密钥后再同步：
 
 ```bash
-# 同步代码到 5，不覆盖库
+# 同步代码到生产机，不覆盖库
 ./scripts/sync_to_vps.sh --no-db
-
-# 每小时机外备份（已装在 5 的 cron）
-# 5 → 109 + pve，SQLite backup API，禁止直接 cp *.db
 ```
+
+机外备份读 `scripts/backup.env`（不进 git）。拷库必须用 SQLite backup API，禁止直接 `cp *.db`。
 
 文档：
 
@@ -85,7 +77,7 @@ export STORE_DAILY_SECRET='换成一段随机字符串'
 - [Cloudflare Tunnel 切换](docs/failover-cloudflare-tunnel.md)
 - [每日更新](docs/changelog.md)
 
-原则：**只在一处写库**。5 和 pve 不要同时接店员。切灾备按 Tunnel 清单改 hostname，域名不变。
+原则：**只在一处写库**。生产和灾备不要同时接店员。切灾备按 Tunnel 清单改 hostname，域名不变。
 
 ## 数据
 

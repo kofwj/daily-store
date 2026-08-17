@@ -1,25 +1,22 @@
 #!/usr/bin/env bash
 # 门店日报：从生产机拉一致性 SQLite 快照，推到局域网备份机 + 远端 VPS。
 #
-# 典型拓扑：
-#   生产（写）：192.168.100.5:/opt/store-daily
-#   局域网备份：192.168.100.109 Termux（SSH 8022）
-#   远端 VPS：  user@x.x.x.x:~/store-daily-backups
+# 主机写在 scripts/backup.env（不进 git）。
 #
 # 用法：
 #   ./scripts/backup_offsite.sh
-#   LAN_BACKUP_SSH_PORT=8022 LAN_BACKUP_USER=jian \
-#     REMOTE_BACKUP=ubuntu@x.x.x.x ./scripts/backup_offsite.sh
+#   LAN_BACKUP_SSH_PORT=22 LAN_BACKUP_USER=backup \
+#     REMOTE_BACKUP=ubuntu@standby-host ./scripts/backup_offsite.sh
 #   ./scripts/backup_offsite.sh --dry-run
 #
 # Termux 注意：
-#   - 端口默认 8022（LAN_BACKUP_SSH_PORT）
-#   - 目录用相对家目录：store-daily-backups（不要写 Mac 的 $HOME）
+#   - 端口用 LAN_BACKUP_SSH_PORT
+#   - 目录用相对家目录：store-daily-backups（不要写开发机的 $HOME）
 #
-# cron 示例（生产机 5，每小时；推荐，Mac 睡觉也不漏）：
+# cron 示例（生产机每小时；推荐，开发机睡觉也不漏）：
 #   5 * * * * /opt/store-daily/scripts/backup_offsite.sh \
 #     >>/var/log/store-daily-offsite.log 2>&1
-# 安装：ssh root@192.168.100.5 /opt/store-daily/scripts/install_backup_cron.sh
+# 安装：ssh user@your-primary-host /opt/store-daily/scripts/install_backup_cron.sh
 
 set -euo pipefail
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -58,25 +55,27 @@ for arg in "$@"; do
   esac
 done
 
-PRIMARY_HOST="${PRIMARY_HOST:-192.168.100.5}"
+PRIMARY_HOST="${PRIMARY_HOST:-}"
 PRIMARY_USER="${PRIMARY_USER:-root}"
 PRIMARY_DIR="${PRIMARY_DIR:-/opt/store-daily}"
 PRIMARY_SSH_PORT="${PRIMARY_SSH_PORT:-22}"
 
-# 老安卓 Termux 默认
-LAN_BACKUP_HOST="${LAN_BACKUP_HOST:-192.168.100.109}"
-LAN_BACKUP_USER="${LAN_BACKUP_USER:-jian}"
+LAN_BACKUP_HOST="${LAN_BACKUP_HOST:-}"
+LAN_BACKUP_USER="${LAN_BACKUP_USER:-backup}"
 LAN_BACKUP_DIR="${LAN_BACKUP_DIR:-store-daily-backups}"
-LAN_BACKUP_SSH_PORT="${LAN_BACKUP_SSH_PORT:-8022}"
+LAN_BACKUP_SSH_PORT="${LAN_BACKUP_SSH_PORT:-22}"
 
 # 公网灾备（可用 user@host，或只写 host + REMOTE_BACKUP_USER）
-# 例：pve.anemy.org 端口 8022
-REMOTE_BACKUP="${REMOTE_BACKUP:-pve.anemy.org}"
+REMOTE_BACKUP="${REMOTE_BACKUP:-}"
 REMOTE_BACKUP_USER="${REMOTE_BACKUP_USER:-root}"
 REMOTE_BACKUP_DIR="${REMOTE_BACKUP_DIR:-store-daily-backups}"
-REMOTE_BACKUP_SSH_PORT="${REMOTE_BACKUP_SSH_PORT:-8022}"
+REMOTE_BACKUP_SSH_PORT="${REMOTE_BACKUP_SSH_PORT:-22}"
 
 KEEP_DAYS="${KEEP_DAYS:-30}"
+if [[ -z "${PRIMARY_HOST}" && ! -f "${PRIMARY_DIR}/data/store_daily.db" ]]; then
+  echo "请在 scripts/backup.env 或环境变量里设置 PRIMARY_HOST" >&2
+  exit 1
+fi
 STAMP="$(TZ=Asia/Shanghai date +%Y%m%d_%H%M%S)"
 TAG="offsite_${STAMP}"
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/store-daily-backup.XXXXXX")"

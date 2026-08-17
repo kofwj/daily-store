@@ -28,4 +28,4 @@ echo
 echo "容器内健康检查："
 curl -fsS "http://127.0.0.1:${PORT}/health"
 echo
-echo "局域网打开：http://${APP_DOMAIN:-192.168.100.5}:${PORT}"
+echo "局域网打开：http://${APP_DOMAIN:-127.0.0.1}:${PORT}"

@@ -1,37 +1,37 @@
-# 部署到局域网 VPS `192.168.100.5`
+# 部署到局域网生产机
 
-这台机器是内网地址，**不要绑 127.0.0.1**。绑 127.0.0.1 只有 VPS 自己打得开，手机和你的 Mac 都进不去。
+生产机是内网地址，**不要绑 127.0.0.1**。绑 127.0.0.1 只有机器自己打得开，手机和电脑都进不去。
 
-8088 已有其他服务，日报默认用 **8099**。改端口只动 `.env` 里的 `CADDY_PORT`。
+默认端口 **8099**。改端口只动 `.env` 里的 `CADDY_PORT`。
 
 ```text
-店员手机 / 你的电脑
-        --HTTP-->  192.168.100.5:8099
+店员手机 / 电脑
+        --HTTP-->  your-primary-host:8099
                         └─ Caddy (0.0.0.0:8099)
                               └─ store-daily 容器
 ```
 
-和投资账本分开：独立目录、独立 Compose、独立库、独立口令。
+独立目录、独立 Compose、独立库、独立口令。
 
 ## 从本机同步（推荐）
 
-在 Mac 上，项目目录里执行：
+在项目目录里执行：
 
 ```bash
-cd /Users/jian/Downloads/store-daily
+cd /path/to/store-daily
 chmod +x scripts/sync_to_vps.sh scripts/deploy_vps.sh
 ./scripts/sync_to_vps.sh
 ```
 
-默认：
+`.env` 里填：
 
-| 项 | 值 |
+| 项 | 示例 |
 |---|---|
-| 地址 | `192.168.100.5` |
-| 账号 | `root` |
-| 远端目录 | `/opt/store-daily` |
-| 端口 | `8099`（不抢 8088） |
-| 绑定 | `0.0.0.0`（局域网可访问） |
+| `VPS_HOST` | 生产机地址 |
+| `VPS_USER` | SSH 用户 |
+| `VPS_DIR` | `/opt/store-daily` |
+| `CADDY_PORT` | `8099` |
+| `CADDY_BIND` | `0.0.0.0`（局域网可访问） |
 | Cookie | TLS/Cloudflare 推荐 `STORE_DAILY_SECURE=1`；LAN HTTP 的 `0` 仅为显式 opt-in |
 
 账号不是 root 时：
@@ -44,14 +44,14 @@ VPS_USER=ubuntu ./scripts/sync_to_vps.sh
 
 ```bash
 ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
-ssh-copy-id root@192.168.100.5
+ssh-copy-id user@your-primary-host
 ```
 
 脚本会：
 
 1. 本机没有 `.env` 时自动生成，并写入随机 `STORE_DAILY_SECRET`
-2. `rsync` 代码、`.env`、以及本机 `data/store_daily.db`（含 8/13 回填）
-3. SSH 到 VPS 跑 `docker compose up -d --build`
+2. `rsync` 代码、`.env`；加 `--no-db` 则不覆盖远端库
+3. SSH 到生产机跑 `docker compose up -d --build`
 
 之后改代码再跑同一条命令即可。远端已经有人填过数、不想被本机空库盖掉时：
 
@@ -86,23 +86,23 @@ CADDY_BIND=127.0.0.1
 CADDYFILE=./caddy/Caddyfile.tunnel
 ```
 
-预置账号：`admin / 1234`，`ninghai / 0000`。进去立刻改口令；生产必须使用随机 `STORE_DAILY_SECRET`，且不能使用示例值。
+预置账号：`admin / 1234`，示例店员见 `app/stores_seed.py`。进去立刻改口令；生产必须使用随机 `STORE_DAILY_SECRET`，且不能使用示例值。
 
-VPS 上自检：
+生产机上自检：
 
 ```bash
 curl -s http://127.0.0.1:8099/health
 # {"ok":true,"service":"store-daily"}
 ```
 
-这里的 `127.0.0.1` 只用于 **VPS 自己查自己**。Caddy 对外绑的是 `0.0.0.0`。
+这里的 `127.0.0.1` 只用于 **机器自己查自己**。Caddy 对外绑的是 `0.0.0.0`。
 
 ## 远端没有 Docker 时
 
 先 SSH 上去装：
 
 ```bash
-ssh root@192.168.100.5
+ssh user@your-primary-host
 curl -fsSL https://get.docker.com | sh
 ```
 
@@ -116,15 +116,13 @@ curl -fsSL https://get.docker.com | sh
 STORE_DAILY_SECURE=1
 CADDY_BIND=127.0.0.1
 CADDYFILE=./caddy/Caddyfile.tunnel
-APP_DOMAIN=daily.xxx.com
+APP_DOMAIN=daily.example.com
 ```
 
-隧道 Public Hostname 回源 `http://127.0.0.1:8099`（这是 **VPS 本机回环**，和局域网直连不是一回事）。然后 `./scripts/sync_to_vps.sh --no-db`。
+隧道 Public Hostname 回源 `http://127.0.0.1:8099`（这是 **生产机本机回环**，和局域网直连不是一回事）。然后 `./scripts/sync_to_vps.sh --no-db`。
 
 ## 不要做的事
 
 - 不要把 `CADDY_BIND` 设回 `127.0.0.1` 还想用手机打开
 - 不要在纯 HTTP 下把 `STORE_DAILY_SECURE` 设成 1（登录会失败）
-- 不要挂到投资账本的 GitHub 登录后面
-- 不要把 8099 映射到公网网卡（这台如果只有 192.168.100.5，一般没这个问题）
-- 不要再占用 8088
+- 不要把 8099 映射到公网网卡

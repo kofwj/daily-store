@@ -40,7 +40,7 @@ def test_store_manager_sees_only_own_store(client):
 
 
 def test_area_manager_sees_all_region_stores(client):
-    # 区域经理 张管理：南通北片（海门/启东/通州），这些店都配了移动编码、进通报
+    # 区域经理 张管理：示例市有编码的店进通报
     _mk_readonly(client, username="huangyq", scope="张管理")
     bulletin = client.get("/bulletin?city=示例市", follow_redirects=True).get_data(as_text=True)
     for name in ("示例市甲街", "示例市乙街"):

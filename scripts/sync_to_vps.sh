@@ -55,11 +55,15 @@ set -a
 . ./.env
 set +a
 
-VPS_HOST="${_OVERR_VPS_HOST:-${VPS_HOST:-192.168.100.5}}"
+VPS_HOST="${_OVERR_VPS_HOST:-${VPS_HOST:-}}"
 VPS_USER="${_OVERR_VPS_USER:-${VPS_USER:-root}}"
 VPS_DIR="${_OVERR_VPS_DIR:-${VPS_DIR:-/opt/store-daily}}"
 VPS_SSH_PORT="${_OVERR_VPS_SSH_PORT:-${VPS_SSH_PORT:-22}}"
 CADDY_PORT="${_OVERR_CADDY_PORT:-${CADDY_PORT:-8099}}"
+if [[ -z "${VPS_HOST}" ]]; then
+  echo "请在 .env 或环境变量里设置 VPS_HOST" >&2
+  exit 1
+fi
 
 REMOTE="${VPS_USER}@${VPS_HOST}"
 SSH=(ssh -o ConnectTimeout=12 -o BatchMode=yes -p "${VPS_SSH_PORT}")
