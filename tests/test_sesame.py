@@ -60,6 +60,18 @@ def _sample_rows():
     ]
 
 
+def test_parse_official_sesame_workbook():
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "芝麻服务费明细20260817082042.xlsx"
+    if not path.is_file():
+        return
+    rows = db.parse_sesame_xlsx(path.read_bytes())
+    assert len(rows) >= 40
+    assert rows[0]["mobile_code"] == "20389153"
+    assert rows[0]["amount"] == 9.58
+
+
 def test_parse_sesame_xlsx(tmp_db):
     data = _make_sesame_xlsx(_sample_rows())
     rows = db.parse_sesame_xlsx(data)

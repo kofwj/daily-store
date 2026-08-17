@@ -22,6 +22,7 @@ def register_auth(app) -> None:
             "ok": True,
             "service": "store-daily",
             "version": info["version"],
+            "git": info.get("git") or "",
             "built_at": info["built_at"],
         }
 

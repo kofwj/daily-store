@@ -70,18 +70,19 @@ def parse_sesame_xlsx(data: bytes) -> List[Dict[str, Any]]:
     if len(data) > MAX_IMPORT_BYTES:
         raise ValueError("文件不能超过 4 MiB")
     try:
-        wb = load_workbook(BytesIO(data), data_only=True, read_only=True)
+        # 官方表标题行合并 A1:Q1，read_only 会把维度看成 1x1，只读到标题。
+        wb = load_workbook(BytesIO(data), data_only=True, read_only=False)
     except Exception as exc:
         raise ValueError("打不开这份 Excel") from exc
     try:
         ws = wb.active
-        rows = list(ws.iter_rows(max_col=17, values_only=True))
+        rows = list(ws.iter_rows(min_row=1, max_row=max(ws.max_row or 1, 20), max_col=20, values_only=True))
     finally:
         wb.close()
     header_idx = None
-    for i, row in enumerate(rows[:8]):
+    for i, row in enumerate(rows[:20]):
         labels = [str(v or "").strip() for v in row]
-        if labels[:2] == ["流水号", "订单号"] and "门店编码" in labels and "服务费金额" in labels:
+        if "流水号" in labels and "门店编码" in labels and "服务费金额" in labels:
             header_idx = i
             break
     if header_idx is None:

@@ -49,11 +49,21 @@ def _from_git() -> str:
         return ""
 
 
+def _display(raw: str) -> str:
+    text = _clean(raw)
+    if not text or text in {"dev", "unknown"}:
+        return "V0.0.0"
+    if text[0] in "Vv" and "." in text:
+        return text if text.startswith("V") else f"V{text[1:]}"
+    return text
+
+
 def current() -> dict:
     file_ver, built, summary = _from_file()
-    version = _from_env() or file_ver or _from_git() or "dev"
+    version = _display(_from_env() or file_ver or "V0.0.0")
     return {
         "version": version,
+        "git": _from_git(),
         "built_at": built,
         "summary": summary,
     }
