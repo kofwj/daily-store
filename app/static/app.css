@@ -433,8 +433,39 @@ table.bulletin td.scale {
   color: #111827 !important; font-variant-numeric: tabular-nums; font-weight: 800; font-size: 14px;
 }
 table.bulletin .bisuan-official {
-  display: inline-block; margin-left: 4px; padding: 0 4px;
-  font-size: 11px; font-weight: 700; border-radius: 4px; line-height: 16px;
+  display: inline-block; margin-left: 4px; padding: 1px 5px;
+  font-size: 11px; font-weight: 800; border-radius: 4px; line-height: 16px;
+  border: 1px solid transparent;
+}
+/* 移 − 上报：对齐 / 小差 / 中差 / 大差；up=上报偏少 down=上报偏多 */
+table.bulletin .bisuan-gap-ok {
+  background: #dcfce7; color: #14532d; border-color: #86efac;
+}
+table.bulletin .bisuan-gap-soft-up {
+  background: #ffedd5; color: #9a3412; border-color: #fdba74;
+}
+table.bulletin .bisuan-gap-soft-down {
+  background: #fef3c7; color: #92400e; border-color: #fcd34d;
+}
+table.bulletin .bisuan-gap-mid-up {
+  background: #fed7aa; color: #7c2d12; border-color: #fb923c;
+}
+table.bulletin .bisuan-gap-mid-down {
+  background: #fde68a; color: #78350f; border-color: #fbbf24;
+}
+table.bulletin .bisuan-gap-big-up {
+  background: #ef4444; color: #fff; border-color: #b91c1c;
+  box-shadow: 0 0 0 1px #991b1b;
+}
+table.bulletin .bisuan-gap-big-down {
+  background: #f59e0b; color: #1c1917; border-color: #b45309;
+  box-shadow: 0 0 0 1px #92400e;
+}
+table.bulletin td.bisuan-gap-big-up-cell {
+  outline: 2px solid #ef4444; outline-offset: -2px;
+}
+table.bulletin td.bisuan-gap-big-down-cell {
+  outline: 2px solid #f59e0b; outline-offset: -2px;
 }
 table.bulletin th .bisuan-asof-head {
   display: block; margin-top: 2px;

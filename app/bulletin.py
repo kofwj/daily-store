@@ -131,6 +131,7 @@ def build_row(
         "month_bisuan_diff": "",
         "month_bisuan_diff_signed": "",
         "month_bisuan_diff_color": "",
+        "month_bisuan_gap_class": "",
         "day_coin_color": "",
         "day_ai_color": "",
         "day_bisuan_color": "",
@@ -171,7 +172,18 @@ def apply_scales(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             row["month_bisuan_diff"] = fmt_metric("bisuan", diff)
             sign = "+" if diff > 0 else ""
             row["month_bisuan_diff_signed"] = f"{sign}{fmt_metric('bisuan', diff)}"
-            row["month_bisuan_diff_color"] = "#ecfdf3" if diff >= 0 else "#fef3f2"
+            # diff = 移 − 上报；分级着色，大差距更醒目（十分位整数）
+            abs_d = abs(int(diff))
+            if diff == 0:
+                gap_cls = "bisuan-gap-ok"
+            elif abs_d <= 5:  # ≤0.5
+                gap_cls = "bisuan-gap-soft-up" if diff > 0 else "bisuan-gap-soft-down"
+            elif abs_d <= 15:  # ≤1.5
+                gap_cls = "bisuan-gap-mid-up" if diff > 0 else "bisuan-gap-mid-down"
+            else:
+                gap_cls = "bisuan-gap-big-up" if diff > 0 else "bisuan-gap-big-down"
+            row["month_bisuan_gap_class"] = gap_cls
+            row["month_bisuan_diff_color"] = ""
         if not row.get("submitted"):
             # 未交行不套热力，避免和已交的浅色格子撞在一起
             wait = ""

@@ -103,7 +103,7 @@
         <td class="{{ 'flag-yes' if row.follow_ai else 'flag-no' }}">{{ '✓' if row.follow_ai else '❌' }}</td>
         <td class="{{ 'flag-yes' if row.follow_bisuan else 'flag-no' }}">{{ '✓' if row.follow_bisuan else '❌' }}</td>
         <td class="scale" style="background:{{ row.month_ai_color }}">{{ row.month_ai_text }}</td>
-        <td class="scale" style="background:{{ row.month_bisuan_color }}">{{ row.month_bisuan_text }}{% if row.month_bisuan_mobile %}<span class="bisuan-official" style="background:{{ row.month_bisuan_diff_color }}" title="上报同期{{ row.month_bisuan_sys_asof or row.month_bisuan_text }} / 移{{ row.month_bisuan_mobile }}">移{{ row.month_bisuan_mobile }}{% if row.month_bisuan_diff_signed and row.month_bisuan_diff_signed != '0' and row.month_bisuan_diff_signed != '0.0' %} {{ row.month_bisuan_diff_signed }}{% endif %}</span>{% endif %}</td>
+        <td class="scale{% if row.month_bisuan_gap_class %} {{ row.month_bisuan_gap_class }}-cell{% endif %}" style="background:{{ row.month_bisuan_color }}">{{ row.month_bisuan_text }}{% if row.month_bisuan_mobile %}<span class="bisuan-official {{ row.month_bisuan_gap_class }}" title="上报同期{{ row.month_bisuan_sys_asof or row.month_bisuan_text }} / 移{{ row.month_bisuan_mobile }}">移{{ row.month_bisuan_mobile }}{% if row.month_bisuan_diff_signed and row.month_bisuan_diff_signed != '0' and row.month_bisuan_diff_signed != '0.0' %} {{ row.month_bisuan_diff_signed }}{% endif %}</span>{% endif %}</td>
         <td class="scale" style="background:{{ row.month_coin_color }}">{{ row.month_coin_text }}</td>
         <td class="scale" style="background:{{ row.day_ai_color }}">{{ row.day_ai_text }}</td>
         <td class="scale" style="background:{{ row.day_bisuan_color }}">{{ row.day_bisuan_text }}</td>
