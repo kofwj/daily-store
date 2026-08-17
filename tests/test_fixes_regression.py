@@ -341,7 +341,12 @@ def test_bisuan_accepts_one_decimal_and_month_calibrates(app_client):
         assert asof_row and asof_row["value"] == asof.isoformat()
     page = app_client.get(f"/bulletin?date={day.isoformat()}").get_data(as_text=True)
     assert "移2.0" in page
-    assert "笔算移取" in page or "分店对照" in page
+    # 今天没更新移数（截止日早于通报表日）=> 复盘不带分店对照
+    if asof < day:
+        assert "分店对照" not in page
+        assert "移动数据更新至" in page  # 表头仍标截止日
+    else:
+        assert "笔算移取" in page or "分店对照" in page
     # 表单默认截止日前一天
     if day.day > 1:
         assert f'name="asof" value="{asof.isoformat()}"' in page or asof.isoformat() in page
