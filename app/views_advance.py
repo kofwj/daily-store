@@ -68,18 +68,24 @@ def _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d, *, 
     month = today_d.replace(day=1)
     month_end = _month_end(month)
     scope = request_scope(stores)
-    sid = None if all_stores else store["id"]
     scoped_ids = None if (not all_stores or not scope["active"]) else scope["ids"]
-    rows = db.list_advances(
-        conn, store_id=sid, start=month, end=month_end, limit=200, offset=0, store_ids=scoped_ids
-    )
-    if all_stores:
-        kpi_ids = scope["ids"] if scope["active"] else [s["id"] for s in stores]
-        totals = _sum_totals(db.advance_month_totals(conn, kpi_ids, today_d).values())
-    else:
+    # 本月列表要全量：单店看本月全部（日期倒序，新的在前）；全店看全部再按门店/地市筛。
+    # 不能用固定 200 上限，否则超 200 笔时列表和“未兑”数字都不对。
+    if not all_stores:
+        rows = db.list_advances(
+            conn, store_id=store["id"], start=month, end=month_end,
+            limit=100000, offset=0,
+        )
         totals = db.advance_month_totals(conn, [store["id"]], today_d).get(
             store["id"], {"broadband": 0, "rebate": 0, "other": 0, "sesame": 0, "total": 0}
         )
+    else:
+        rows = db.list_all_advances(conn, month, month_end)
+        if scoped_ids is not None:
+            allow = set(scoped_ids)
+            rows = [r for r in rows if int(r["store_id"]) in allow]
+        kpi_ids = scope["ids"] if scope["active"] else [s["id"] for s in stores]
+        totals = _sum_totals(db.advance_month_totals(conn, kpi_ids, today_d).values())
     totals["unpaid"] = sum(1 for r in rows if not int(r["paid"] or 0))
     return render_template(
         "advance.html",

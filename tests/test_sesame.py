@@ -251,3 +251,32 @@ def test_import_more_than_200_rows_imports_all(tmp_db):
         ).fetchone()
     assert imported["COUNT(*)"] == 230
     assert imported["SUM(sesame)"] == 230 * 500  # 服务费 -5.00 元→入账 +5.00，存 +500 分/笔
+
+
+def test_all_store_advance_page_shows_all_rows(tmp_db):
+    """回归：垫资全店页不能因 200 条上限截断列表/未兑计数。"""
+    app = create_app(testing=True)
+    c = app.test_client()
+    c.post("/login", data={"username": "admin", "pin": "1234"})
+    rows = []
+    for i in range(230):
+        rows.append(
+            [
+                f"ALLXX{i:06d}", f"ALLORD{i:06d}", "江苏省", "示例市", "甲区",
+                "JSCM_20250116110103117937984", "91320602MA7E6JC70A", "示例公司甲",
+                "JSCM_10000001", "示例甲店vivo专营店", "加盟店", "202608",
+                1000.00, -5.00, "处理成功",
+                f"行业芝麻订单(ALLXX{i:06d})服务费", "2026-08-15 14:19:38.0",
+            ]
+        )
+    c.post(
+        "/advance/sesame/preview",
+        data={"sesame_file": (BytesIO(_make_sesame_xlsx(rows)), "s.xlsx")},
+    )
+    c.post("/advance/sesame/confirm", follow_redirects=True)
+    # 全店视图：应显示全部 230 笔，而不是被截断到 200
+    page = c.get("/advance?store_id=all").get_data(as_text=True)
+    assert "230 笔" in page  # 列表计数用全量
+    # 每行备注（芝麻服务费 + 订单号）渲染约 2 处；230 行远超市旧 200 条上限，
+    # 故多过 200*2=400 即证明未被截断。全部导入日志确认 230 笔都进库。
+    assert page.count("ALLORD") > 400
