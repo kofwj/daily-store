@@ -214,3 +214,40 @@ def test_sesame_export_has_column(tmp_db):
     store_sheet = wb["示例甲店"]
     store_headers = [store_sheet.cell(2, col).value for col in range(1, 11)]
     assert "芝麻服务费" in store_headers
+
+
+def test_import_more_than_200_rows_imports_all(tmp_db):
+    """回归：预览只展示前 200 笔，但确认时必须导入全部，不能静默丢后段。"""
+    app = create_app(testing=True)
+    c = app.test_client()
+    c.post("/login", data={"username": "admin", "pin": "1234"})
+    rows = []
+    for i in range(230):
+        rows.append(
+            [
+                f"TESTEXT{i:08d}", f"TESTORD{i:08d}", "江苏省", "示例市", "甲区",
+                "JSCM_20250116110103117937984", "91320602MA7E6JC70A", "示例公司甲",
+                "JSCM_10000001", "示例甲店vivo专营店", "加盟店", "202608",
+                1000.00, -5.00, "处理成功",
+                f"行业芝麻订单(TESTEXT{i:08d})服务费", "2026-08-15 14:19:38.0",
+            ]
+        )
+    # 预览：ready_count 显示全量 230，预览表只展示 200
+    resp = c.post(
+        "/advance/sesame/preview",
+        data={"sesame_file": (BytesIO(_make_sesame_xlsx(rows)), "s.xlsx")},
+        follow_redirects=True,
+    )
+    page = resp.get_data(as_text=True)
+    assert "可导入 <strong>230</strong>" in page
+    assert "仅展示前 200 笔" in page
+    with db.get_db() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM advance_posts WHERE source='sesame'").fetchone()["COUNT(*)"] == 0
+    # 确认：全部 230 笔都要进库
+    c.post("/advance/sesame/confirm", follow_redirects=True)
+    with db.get_db() as conn:
+        imported = conn.execute(
+            "SELECT COUNT(*), SUM(sesame) FROM advance_posts WHERE source='sesame'"
+        ).fetchone()
+    assert imported["COUNT(*)"] == 230
+    assert imported["SUM(sesame)"] == 230 * 500  # 服务费 -5.00 元→入账 +5.00，存 +500 分/笔

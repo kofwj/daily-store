@@ -44,7 +44,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for r in preview.ready %}
+        {% for r in preview.ready_shown %}
         <tr>
           <td>{{ r.biz_date }}</td>
           <td class="left">{{ r.store_name }}</td>
@@ -56,6 +56,9 @@
           <td class="left"><code>{{ r.ext_id }}</code></td>
         </tr>
         {% endfor %}
+        {% if preview.ready_shown|length < preview.ready_count %}
+        <tr><td colspan="8" class="muted">仅展示前 200 笔，确认将导入全部 {{ preview.ready_count }} 笔。</td></tr>
+        {% endif %}
       </tbody>
     </table>
   </div>

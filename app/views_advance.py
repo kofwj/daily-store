@@ -352,8 +352,11 @@ def register_advance(app) -> None:
             stores = accessible_stores(conn)
             groups = sesame.classify_sesame_rows(conn, rows, stores)
         total_in = round(sum(r["amount"] for r in groups["ready"]), 2)
+        # ready 必须存全量，否则确认时只导入截断的前 200 条，超出部分被静默丢弃。
+        # 表格展示单独截前 200，计数/合计/按钮始终用全量。
         preview = {
-            "ready": groups["ready"][:200],
+            "ready": groups["ready"],
+            "ready_shown": groups["ready"][:200],
             "ready_total": total_in,
             "ready_count": len(groups["ready"]),
             "skipped": groups["skipped"][:50],
