@@ -84,7 +84,7 @@
         <th class="g-follow">AI破0</th>
         <th class="g-follow">笔算破0</th>
         <th class="g-month">AI手机合约</th>
-        <th class="g-month">笔算业务{% if totals and totals.month_bisuan_mobile %}<div class="bisuan-asof-head">移{{ totals.month_bisuan_asof_label }}{% if totals.month_bisuan_mobile_stale %}·未更新{% endif %}</div>{% elif mobile_asof_label %}<div class="bisuan-asof-head">移{{ mobile_asof_label }}{% if mobile_asof_stale %}·未更新{% endif %}</div>{% endif %}</th>
+        <th class="g-month">笔算业务{% if mobile_asof_head %}<div class="bisuan-asof-head">{{ mobile_asof_head }}</div>{% endif %}</th>
         <th class="g-month">金币直降</th>
         <th class="g-day">AI手机合约</th>
         <th class="g-day">笔算业务</th>

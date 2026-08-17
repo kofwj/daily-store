@@ -348,8 +348,9 @@ def register_admin(app) -> None:
             # 表单默认：已存截止日，否则前一天
             mobile_asof = _bisuan_mobile_asof(conn, month_key, biz_date)
             has_mobile = any(r.get("_month_bisuan_mobile_stored") is not None for r in rows)
-            mobile_asof_label = f"至{mobile_asof.month}/{mobile_asof.day}" if has_mobile else ""
-            mobile_asof_stale = bool(has_mobile and mobile_asof < biz_date)
+            mobile_asof_head = (
+                f"移动数据更新至{mobile_asof.month}/{mobile_asof.day}" if has_mobile else ""
+            )
             return render_template(
                 "bulletin.html",
                 biz_date=biz_date,
@@ -363,8 +364,7 @@ def register_admin(app) -> None:
                 cities=cities,
                 is_admin=g.user["role"] == "admin",
                 mobile_asof=mobile_asof,
-                mobile_asof_label=mobile_asof_label,
-                mobile_asof_stale=mobile_asof_stale,
+                mobile_asof_head=mobile_asof_head,
                 bulletin_title=f"{title_city}vivo零售运营中心移动业务通报表" if title_city else "移动业务通报表",
             )
 

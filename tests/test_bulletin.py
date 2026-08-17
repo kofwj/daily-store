@@ -287,20 +287,16 @@ def test_summary_review_text():
     rows[1]["month_bisuan_asof"] = "2026-08-16"
     rows[1]["month_bisuan_asof_label"] = "至8/16"
     text2 = summary(rows, date(2026, 8, 17), "南通")
-    assert "笔算移取（至8/16，今日未更新）：移 1.6 · 上报同期 1.4 · 差+0.2" in text2
+    assert "笔算移取（移动数据更新至8/16）：移 1.6 · 上报同期 1.4 · 差+0.2" in text2
     assert "分店对照：" in text2
     assert "示例甲店 上报0.8 移1.0 差+0.2" in text2
     assert "示例丙店 上报0.6 移0.6 已对齐" in text2
-    # 截止日=通报表日：不加「未更新」
     rows[0]["month_bisuan_asof"] = "2026-08-17"
     rows[0]["month_bisuan_asof_label"] = "至8/17"
-    rows[0]["month_bisuan_mobile_stale"] = False
     rows[1]["month_bisuan_asof"] = "2026-08-17"
     rows[1]["month_bisuan_asof_label"] = "至8/17"
-    rows[1]["month_bisuan_mobile_stale"] = False
     text3 = summary(rows, date(2026, 8, 17), "南通")
-    assert "笔算移取（至8/17）：移 1.6 · 上报同期 1.4 · 差+0.2" in text3
-    assert "今日未更新" not in text3
+    assert "笔算移取（移动数据更新至8/17）：移 1.6 · 上报同期 1.4 · 差+0.2" in text3
     empty = summary(
         [{"name": "空店", "short_name": "空店", "month_ai": 0, "month_bisuan": 0, "month_coin": 0,
           "day_ai": 0, "day_bisuan": 0, "day_coin": 0}],

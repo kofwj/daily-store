@@ -550,12 +550,10 @@ def summary(
     if month_bits:
         lines.append("单项第一：" + " · ".join(month_bits))
     # 有移动取数时：合计 + 分店对照（上报同期 vs 移）
-    # 移取截止日早于通报表日期时，标明「未更新」，避免当成今日新数
     mobile_lines = []
     mobile_sum = 0
     report_asof_sum = 0
     asof_label = ""
-    stale = False
     for r in rows:
         mobile = r.get("_month_bisuan_mobile_stored")
         if mobile is None or mobile == "":
@@ -571,16 +569,6 @@ def summary(
         report_asof_sum += rep_i
         if not asof_label:
             asof_label = (r.get("month_bisuan_asof_label") or "").strip()
-        if r.get("month_bisuan_mobile_stale"):
-            stale = True
-        else:
-            asof_raw = (r.get("month_bisuan_asof") or "").strip()
-            if asof_raw:
-                try:
-                    if date.fromisoformat(asof_raw[:10]) < biz_date:
-                        stale = True
-                except ValueError:
-                    pass
         sign = "+" if diff > 0 else ""
         gap = f"差{sign}{fmt_metric('bisuan', diff)}" if diff != 0 else "已对齐"
         mobile_lines.append(
@@ -588,10 +576,10 @@ def summary(
             f"移{fmt_metric('bisuan', mob_i)} {gap}"
         )
     if mobile_lines:
-        if asof_label and stale:
-            asof_bit = f"（{asof_label}，今日未更新）"
-        elif asof_label:
-            asof_bit = f"（{asof_label}）"
+        if asof_label:
+            # asof_label 形如 至8/16 → 移动数据更新至8/16
+            day_bit = asof_label[1:] if asof_label.startswith("至") else asof_label
+            asof_bit = f"（移动数据更新至{day_bit}）"
         else:
             asof_bit = ""
         tot_diff = mobile_sum - report_asof_sum
