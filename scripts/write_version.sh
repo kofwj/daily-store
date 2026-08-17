@@ -11,12 +11,10 @@ if [[ -f VERSION ]]; then
   fi
 fi
 DATE="$(date '+%Y-%m-%d %H:%M')"
+HASH=""
 if git rev-parse --short HEAD >/dev/null 2>&1; then
   HASH="$(git rev-parse --short HEAD)"
-  SUBJ="$(git log -1 --format='%s' | tr '\n' ' ' | cut -c1-48)"
-else
-  HASH=""
-  SUBJ=""
 fi
-printf '%s\n%s\n%s\n%s\n' "${VER}" "${DATE}" "${SUBJ}" "${HASH}" > VERSION
+# 不写中文摘要：cut 会截断 UTF-8，生产读 VERSION 会炸
+printf '%s\n%s\n%s\n' "${VER}" "${DATE}" "${HASH}" > VERSION
 echo "VERSION ${VER} ${DATE} ${HASH}"

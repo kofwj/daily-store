@@ -26,7 +26,7 @@ def _from_file() -> tuple[str, str, str]:
     if not path.is_file():
         return "", "", ""
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return "", "", ""
     version = _clean(lines[0]) if lines else ""
