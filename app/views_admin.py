@@ -32,8 +32,32 @@ from .helpers import (
 from .metrics_seed import KPI_TARGETS, format_stored, from_stored, rollup_pair, to_stored
 
 
+def _bisuan_mobile_raw(conn, store_id: int, month_key: str) -> str:
+    """读移动取数；兼容旧 key bisuan_official_*。"""
+    raw = db.get_setting(conn, f"bisuan_mobile_{store_id}_{month_key}", "")
+    if raw:
+        return raw
+    return db.get_setting(conn, f"bisuan_official_{store_id}_{month_key}", "")
+
+
+def _bisuan_mobile_asof(conn, month_key: str, default: date) -> date:
+    raw = db.get_setting(conn, f"bisuan_mobile_asof_{month_key}", "")
+    if raw:
+        try:
+            return date.fromisoformat(raw[:10])
+        except ValueError:
+            pass
+    return default
+
+
 def _bulletin_rows(conn, stores, biz_date: date):
     month_key = biz_date.strftime("%Y-%m")
+    month_start = biz_date.replace(day=1)
+    asof = _bisuan_mobile_asof(conn, month_key, biz_date)
+    if asof < month_start:
+        asof = month_start
+    if asof > biz_date:
+        asof = biz_date
     rows = []
     for store in stores:
         if not (store["mobile_code"] or "").strip():
@@ -49,12 +73,18 @@ def _bulletin_rows(conn, stores, biz_date: date):
         )
         day_coin, month_coin = rollup_pair(pairs, "coin_cut")
         report = db.get_report(conn, store["id"], biz_date)
-        official_raw = db.get_setting(conn, f"bisuan_official_{store['id']}_{month_key}", "")
-        official = None
+        mobile_raw = _bisuan_mobile_raw(conn, store["id"], month_key)
+        mobile = None
         try:
-            official = int(round(float(official_raw) * 10)) if official_raw else None
+            mobile = int(round(float(mobile_raw) * 10)) if mobile_raw else None
         except (TypeError, ValueError):
-            official = None
+            mobile = None
+        sys_asof = None
+        if mobile is not None:
+            # 对照用截止日同期系统数，不是通报表选中日的整月
+            sys_asof = db.week_metric_total(
+                conn, store["id"], month_start, asof, ("bisuan", "bisuan_high")
+            )
         rows.append(
             bulletin.build_row(
                 store,
@@ -65,7 +95,9 @@ def _bulletin_rows(conn, stores, biz_date: date):
                 day_coin=day_coin,
                 month_coin=month_coin,
                 submitted=report is not None,
-                month_bisuan_official=official,
+                month_bisuan_mobile=mobile,
+                month_bisuan_asof=asof.isoformat() if mobile is not None else "",
+                month_bisuan_sys_asof=sys_asof,
             )
         )
     return bulletin.apply_scales(rows)
@@ -287,6 +319,8 @@ def register_admin(app) -> None:
                 if rows
                 else ""
             )
+            month_key = biz_date.strftime("%Y-%m")
+            mobile_asof = _bisuan_mobile_asof(conn, month_key, biz_date)
             return render_template(
                 "bulletin.html",
                 biz_date=biz_date,
@@ -299,54 +333,61 @@ def register_admin(app) -> None:
                 city=city,
                 cities=cities,
                 is_admin=g.user["role"] == "admin",
+                mobile_asof=mobile_asof,
                 bulletin_title=f"{title_city}vivo零售运营中心移动业务通报表" if title_city else "移动业务通报表",
             )
 
-    @app.route("/bulletin/bisuan-official", methods=["POST"])
+    @app.route("/bulletin/bisuan-mobile", methods=["POST"])
     @admin_required
-    def bulletin_bisuan_official():
-        """通报表里录移动当月官方笔算（新增+高），差额补到当天「比算新增」。"""
+    def bulletin_bisuan_mobile():
+        """通报表录移动取数（笔算新增+高，截止某日累计），差额落到截止日「比算新增」。"""
         store_id = request.form.get("store_id") or ""
         biz_raw = request.form.get("date") or ""
-        official_raw = request.form.get("official") or ""
+        asof_raw = request.form.get("asof") or ""
+        mobile_raw = request.form.get("mobile") or request.form.get("official") or ""
         city = (request.form.get("city") or "").strip()
         try:
             sid = int(store_id)
             biz_date = date.fromisoformat(biz_raw)
-            official = max(0, to_stored("bisuan", official_raw))
+            asof = date.fromisoformat(asof_raw) if asof_raw else biz_date
+            mobile = max(0, to_stored("bisuan", mobile_raw))
         except (ValueError, TypeError):
-            flash("官方笔算参数不对", "error")
-            return redirect(url_for("bulletin_page", date=biz_raw or None))
-        if official_raw.strip() == "":
-            flash("请填移动官方笔算数", "error")
-            return redirect(url_for("bulletin_page", date=biz_raw or None))
+            flash("移动取数参数不对", "error")
+            return redirect(url_for("bulletin_page", date=biz_raw or None, city=city or None))
+        if mobile_raw.strip() == "":
+            flash("请填移动取数", "error")
+            return redirect(url_for("bulletin_page", date=biz_date.isoformat(), city=city or None))
+        month_start = biz_date.replace(day=1)
+        if asof < month_start:
+            asof = month_start
+        if asof > biz_date:
+            asof = biz_date
         with db.get_db() as conn:
             if not db.user_can_access_store(conn, g.user, sid):
                 return Response("forbidden", status=403)
-            month_start = biz_date.replace(day=1)
-            # 移动官方 = 笔算新增 + 笔算新增[高] 的本月累计
-            current = db.week_metric_total(conn, sid, month_start, biz_date, ("bisuan", "bisuan_high"))
-            delta = official - current
+            # 对照截止日同期系统数（笔算新增 + 高）
+            current = db.week_metric_total(conn, sid, month_start, asof, ("bisuan", "bisuan_high"))
+            delta = mobile - current
             month_key = biz_date.strftime("%Y-%m")
-            db.set_setting(conn, f"bisuan_official_{sid}_{month_key}", f"{official / 10:.1f}")
-            note = f"月校准笔算 官方{format_stored('bisuan', official)}"
+            db.set_setting(conn, f"bisuan_mobile_{sid}_{month_key}", f"{mobile / 10:.1f}")
+            db.set_setting(conn, f"bisuan_mobile_asof_{month_key}", asof.isoformat())
+            note = f"月校准笔算 移{format_stored('bisuan', mobile)} 至{asof.isoformat()}"
             if delta > 0:
-                today_val = int(db.day_values(conn, sid, biz_date).get("bisuan", 0) or 0)
+                day_val = int(db.day_values(conn, sid, asof).get("bisuan", 0) or 0)
                 db.set_day_value(
                     conn,
                     store_id=sid,
-                    biz_date=biz_date,
+                    biz_date=asof,
                     metric_code="bisuan",
-                    value=today_val + delta,
+                    value=day_val + delta,
                     user_id=g.user["id"],
                     note=note,
                 )
             elif delta < 0:
-                # 官方更小：从当日起往月头扣，差额落到「比算新增」
                 need = -delta
                 days = [
                     month_start + timedelta(days=i)
-                    for i in range((biz_date - month_start).days + 1)
+                    for i in range((asof - month_start).days + 1)
                 ]
                 for day in reversed(days):
                     cur = int(db.day_values(conn, sid, day).get("bisuan", 0) or 0)
@@ -367,8 +408,8 @@ def register_admin(app) -> None:
                         break
             sign = "+" if delta > 0 else ""
             flash(
-                f"已录官方 {format_stored('bisuan', official)}，系统 {format_stored('bisuan', current)}，"
-                f"差额 {sign}{format_stored('bisuan', delta)}",
+                f"已录移 {format_stored('bisuan', mobile)}（至{asof.month}/{asof.day}），"
+                f"系统同期 {format_stored('bisuan', current)}，差额 {sign}{format_stored('bisuan', delta)}",
                 "ok",
             )
         return redirect(url_for("bulletin_page", date=biz_date.isoformat(), city=city))

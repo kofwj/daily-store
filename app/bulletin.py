@@ -80,7 +80,9 @@ def build_row(
     day_coin: int = 0,
     month_coin: int = 0,
     submitted: bool,
-    month_bisuan_official: Any = None,
+    month_bisuan_mobile: Any = None,
+    month_bisuan_asof: Any = None,
+    month_bisuan_sys_asof: Any = None,
 ) -> Dict[str, Any]:
     follow_ai = month_ai > 0
     follow_bisuan = month_bisuan > 0
@@ -118,8 +120,13 @@ def build_row(
         "month_coin_color": "",
         "month_ai_color": "",
         "month_bisuan_color": "",
-        "month_bisuan_official": "" if month_bisuan_official in (None, "") else fmt_metric("bisuan", month_bisuan_official),
-        "_month_bisuan_official_stored": month_bisuan_official if month_bisuan_official is not None else None,
+        # 移 = 移动取数；asof = 取数截止日；sys_asof = 系统同期（1号~截止日）
+        "month_bisuan_mobile": "" if month_bisuan_mobile in (None, "") else fmt_metric("bisuan", month_bisuan_mobile),
+        "_month_bisuan_mobile_stored": month_bisuan_mobile if month_bisuan_mobile is not None else None,
+        "month_bisuan_asof": month_bisuan_asof or "",
+        "month_bisuan_asof_label": "",
+        "_month_bisuan_sys_asof_stored": month_bisuan_sys_asof if month_bisuan_sys_asof is not None else None,
+        "month_bisuan_sys_asof": "" if month_bisuan_sys_asof in (None, "") else fmt_metric("bisuan", month_bisuan_sys_asof),
         "month_bisuan_diff": "",
         "month_bisuan_diff_signed": "",
         "month_bisuan_diff_color": "",
@@ -145,10 +152,19 @@ def apply_scales(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         ]
     )
     for row in rows:
-        official = row.get("_month_bisuan_official_stored")
-        if official is not None and official != "":
+        mobile = row.get("_month_bisuan_mobile_stored")
+        asof = row.get("month_bisuan_asof") or ""
+        if asof:
             try:
-                diff = int(official) - int(row["month_bisuan"])
+                ad = date.fromisoformat(str(asof)[:10])
+                row["month_bisuan_asof_label"] = f"至{ad.month}/{ad.day}"
+            except ValueError:
+                row["month_bisuan_asof_label"] = f"至{asof}"
+        if mobile is not None and mobile != "":
+            try:
+                sys_asof = row.get("_month_bisuan_sys_asof_stored")
+                base = int(sys_asof) if sys_asof is not None and sys_asof != "" else int(row["month_bisuan"])
+                diff = int(mobile) - base
             except (TypeError, ValueError):
                 diff = 0
             row["month_bisuan_diff"] = fmt_metric("bisuan", diff)
@@ -184,6 +200,52 @@ def totals_row(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     day_bisuan = sum(int(r["day_bisuan"] or 0) for r in rows)
     ai_ok = sum(1 for r in rows if r.get("follow_ai"))
     bisuan_ok = sum(1 for r in rows if r.get("follow_bisuan"))
+    mobile_vals = []
+    sys_asof_vals = []
+    asof_label = ""
+    for r in rows:
+        m = r.get("_month_bisuan_mobile_stored")
+        if m is None or m == "":
+            continue
+        try:
+            mobile_vals.append(int(m))
+        except (TypeError, ValueError):
+            continue
+        s = r.get("_month_bisuan_sys_asof_stored")
+        if s is None or s == "":
+            try:
+                sys_asof_vals.append(int(r.get("month_bisuan") or 0))
+            except (TypeError, ValueError):
+                pass
+        else:
+            try:
+                sys_asof_vals.append(int(s))
+            except (TypeError, ValueError):
+                pass
+        if not asof_label:
+            asof_label = (r.get("month_bisuan_asof_label") or "").strip()
+    mobile_sum = sum(mobile_vals) if mobile_vals else None
+    sys_asof_sum = sum(sys_asof_vals) if sys_asof_vals else None
+    mobile_text = "" if mobile_sum is None else fmt_metric("bisuan", mobile_sum)
+    sys_asof_text = "" if sys_asof_sum is None else fmt_metric("bisuan", sys_asof_sum)
+    mobile_diff = None if mobile_sum is None or sys_asof_sum is None else mobile_sum - sys_asof_sum
+    if mobile_diff is None:
+        mobile_diff_signed = ""
+    else:
+        sign = "+" if mobile_diff > 0 else ""
+        mobile_diff_signed = f"{sign}{fmt_metric('bisuan', mobile_diff)}"
+    month_bisuan_text = fmt_metric("bisuan", month_bisuan)
+    if mobile_text:
+        # 合计格：系统本月 / 移(至x日)
+        tag = f"移{mobile_text}"
+        if asof_label:
+            tag = f"{tag}{asof_label}"
+        if mobile_diff_signed and mobile_diff != 0:
+            month_bisuan_cell = f"{month_bisuan_text} / {tag} {mobile_diff_signed}"
+        else:
+            month_bisuan_cell = f"{month_bisuan_text} / {tag}"
+    else:
+        month_bisuan_cell = month_bisuan_text
     return {
         "name": f"合计（{n} 店）",
         "follow_ai": ai_ok == n and n > 0,
@@ -198,7 +260,11 @@ def totals_row(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "day_bisuan": day_bisuan,
         "month_coin_text": fmt_metric("coin_cut_old", month_coin),
         "month_ai_text": fmt_metric("ai_contract", month_ai),
-        "month_bisuan_text": fmt_metric("bisuan", month_bisuan),
+        "month_bisuan_text": month_bisuan_cell,
+        "month_bisuan_mobile": mobile_text,
+        "month_bisuan_sys_asof": sys_asof_text,
+        "month_bisuan_asof_label": asof_label,
+        "month_bisuan_diff_signed": mobile_diff_signed,
         "day_coin_text": fmt_metric("coin_cut_old", day_coin),
         "day_ai_text": fmt_metric("ai_contract", day_ai),
         "day_bisuan_text": fmt_metric("bisuan", day_bisuan),
@@ -482,24 +548,42 @@ def summary(
     )
     if month_bits:
         lines.append("单项第一：" + " · ".join(month_bits))
-    # 有移动官方笔算时，列出系统 vs 官方对比，方便贴群
-    calibrate_lines = []
+    # 有移动取数时：合计 + 分店对照（系统同期 vs 移）
+    mobile_lines = []
+    mobile_sum = 0
+    sys_asof_sum = 0
+    mobile_n = 0
+    asof_label = ""
     for r in rows:
-        official = r.get("_month_bisuan_official_stored")
-        if official is None or official == "":
+        mobile = r.get("_month_bisuan_mobile_stored")
+        if mobile is None or mobile == "":
             continue
         try:
-            off_i = int(official)
-            sys_i = _metric(r, "month_bisuan")
-            diff = off_i - sys_i
+            mob_i = int(mobile)
+            sys_raw = r.get("_month_bisuan_sys_asof_stored")
+            sys_i = int(sys_raw) if sys_raw is not None and sys_raw != "" else _metric(r, "month_bisuan")
+            diff = mob_i - sys_i
         except (TypeError, ValueError):
             continue
+        mobile_n += 1
+        mobile_sum += mob_i
+        sys_asof_sum += sys_i
+        if not asof_label:
+            asof_label = (r.get("month_bisuan_asof_label") or "").strip()
         sign = "+" if diff > 0 else ""
-        calibrate_lines.append(
+        gap = f"差{sign}{fmt_metric('bisuan', diff)}" if diff != 0 else "已对齐"
+        mobile_lines.append(
             f"{_row_name(r)} 系统{fmt_metric('bisuan', sys_i)} "
-            f"官方{fmt_metric('bisuan', off_i)} 差{sign}{fmt_metric('bisuan', diff)}"
+            f"移{fmt_metric('bisuan', mob_i)} {gap}"
         )
-    if calibrate_lines:
-        lines.append("笔算校准：")
-        lines.extend(calibrate_lines)
+    if mobile_lines:
+        asof_bit = f"（{asof_label}）" if asof_label else ""
+        tot_diff = mobile_sum - sys_asof_sum
+        tot_sign = "+" if tot_diff > 0 else ""
+        tot_gap = (
+            f"差{tot_sign}{fmt_metric('bisuan', tot_diff)}" if tot_diff != 0 else "已对齐"
+        )
+        lines.append(f"笔算移取{asof_bit}：移 {fmt_metric('bisuan', mobile_sum)} · 系统同期 {fmt_metric('bisuan', sys_asof_sum)} · {tot_gap}")
+        lines.append("分店对照：")
+        lines.extend(mobile_lines)
     return "\n".join(lines)

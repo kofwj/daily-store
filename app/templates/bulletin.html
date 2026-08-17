@@ -29,18 +29,22 @@
 {% if review %}
 {% if is_admin %}
 <div class="card bulletin-official">
-  <form method="post" action="{{ url_for('bulletin_bisuan_official') }}">
+  <form method="post" action="{{ url_for('bulletin_bisuan_mobile') }}">
     <input type="hidden" name="date" value="{{ biz_date.isoformat() }}">
     <input type="hidden" name="city" value="{{ city }}">
     <div class="official-row">
-      <strong>录移动官方笔算</strong>
-      <span class="muted">本月累计（笔算新增+高），录入后差额补到当天。</span>
+      <strong>录移动取数</strong>
+      <span class="muted">笔算新增+高的本月累计；对照截止日系统同期，差额补到截止日。</span>
+      <label class="filter">
+        <span>取数截止</span>
+        <input type="date" name="asof" value="{{ mobile_asof.isoformat() if mobile_asof else biz_date.isoformat() }}" required>
+      </label>
       <select name="store_id">
         {% for row in rows %}
         <option value="{{ row.store_id }}">{{ row.name }}</option>
         {% endfor %}
       </select>
-      <input type="number" min="0" step="0.1" name="official" placeholder="如 12.5" required>
+      <input type="number" min="0" step="0.1" name="mobile" placeholder="移 如 12.5" required>
       <button type="submit">保存校准</button>
     </div>
   </form>
@@ -99,7 +103,7 @@
         <td class="{{ 'flag-yes' if row.follow_ai else 'flag-no' }}">{{ '✓' if row.follow_ai else '❌' }}</td>
         <td class="{{ 'flag-yes' if row.follow_bisuan else 'flag-no' }}">{{ '✓' if row.follow_bisuan else '❌' }}</td>
         <td class="scale" style="background:{{ row.month_ai_color }}">{{ row.month_ai_text }}</td>
-        <td class="scale" style="background:{{ row.month_bisuan_color }}">{{ row.month_bisuan_text }}{% if row.month_bisuan_official %}<span class="bisuan-official" style="background:{{ row.month_bisuan_diff_color }}" title="系统{{ row.month_bisuan_text }} / 官方{{ row.month_bisuan_official }}">官{{ row.month_bisuan_official }} {{ row.month_bisuan_diff_signed }}</span>{% endif %}</td>
+        <td class="scale" style="background:{{ row.month_bisuan_color }}">{{ row.month_bisuan_text }}{% if row.month_bisuan_mobile %}<span class="bisuan-official" style="background:{{ row.month_bisuan_diff_color }}" title="系统同期{{ row.month_bisuan_sys_asof or row.month_bisuan_text }} / 移{{ row.month_bisuan_mobile }}{{ row.month_bisuan_asof_label }}">移{{ row.month_bisuan_mobile }}{{ row.month_bisuan_asof_label }}{% if row.month_bisuan_diff_signed and row.month_bisuan_diff_signed != '0' and row.month_bisuan_diff_signed != '0.0' %} {{ row.month_bisuan_diff_signed }}{% endif %}</span>{% endif %}</td>
         <td class="scale" style="background:{{ row.month_coin_color }}">{{ row.month_coin_text }}</td>
         <td class="scale" style="background:{{ row.day_ai_color }}">{{ row.day_ai_text }}</td>
         <td class="scale" style="background:{{ row.day_bisuan_color }}">{{ row.day_bisuan_text }}</td>

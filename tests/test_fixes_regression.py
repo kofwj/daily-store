@@ -297,13 +297,19 @@ def test_bisuan_accepts_one_decimal_and_month_calibrates(app_client):
             (sid, day.isoformat()),
         ).fetchone()["day_value"]
         assert stored == 15
-    # 移动官方是本月累计（笔算新增+高），差额补到当天
+    # 移动取数 = 本月累计（笔算新增+高），带截止日；差额补到截止日
     calibrated = app_client.post(
-        "/bulletin/bisuan-official",
-        data={"store_id": str(sid), "date": day.isoformat(), "official": "2.0", "city": ""},
+        "/bulletin/bisuan-mobile",
+        data={
+            "store_id": str(sid),
+            "date": day.isoformat(),
+            "asof": day.isoformat(),
+            "mobile": "2.0",
+            "city": "",
+        },
         follow_redirects=True,
     ).get_data(as_text=True)
-    assert "已录官方" in calibrated or "官方" in calibrated
+    assert "已录移" in calibrated or "移" in calibrated
     with db.get_db() as conn:
         month_start = day.replace(day=1).isoformat()
         month_total = conn.execute(
@@ -312,13 +318,19 @@ def test_bisuan_accepts_one_decimal_and_month_calibrates(app_client):
             (sid, month_start, day.isoformat()),
         ).fetchone()["n"]
         assert month_total == 20
-        official = conn.execute(
+        mobile = conn.execute(
             "SELECT value FROM app_meta WHERE key=?",
-            (f"bisuan_official_{sid}_{day.strftime('%Y-%m')}",),
+            (f"bisuan_mobile_{sid}_{day.strftime('%Y-%m')}",),
         ).fetchone()
-        assert official and official["value"] == "2.0"
+        assert mobile and mobile["value"] == "2.0"
+        asof = conn.execute(
+            "SELECT value FROM app_meta WHERE key=?",
+            (f"bisuan_mobile_asof_{day.strftime('%Y-%m')}",),
+        ).fetchone()
+        assert asof and asof["value"] == day.isoformat()
     page = app_client.get(f"/bulletin?date={day.isoformat()}").get_data(as_text=True)
-    assert "官2.0" in page or "官方" in page
+    assert "移2.0" in page
+    assert "笔算移取" in page or "分店对照" in page
 
 
 def test_4_net_includes_advisor_penalty():

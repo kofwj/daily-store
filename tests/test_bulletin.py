@@ -156,6 +156,33 @@ def test_totals_row_sums_and_break_zero_count():
     assert total["follow_bisuan_text"] == "2/2"
     assert total["month_ai"] == 2
     assert total["month_bisuan"] == 10
+    # 合计格带移取数
+    rows_m = [
+        build_row(
+            {
+                "id": 1, "code": "a", "name": "A", "region_group": "通泰", "city": "南通市",
+                "mobile_code": "1", "area_manager": "", "store_manager": "",
+                "follow_ai": 0, "follow_bisuan": 0,
+            },
+            day_ai=0, month_ai=0, day_bisuan=0, month_bisuan=10,
+            submitted=True, month_bisuan_mobile=12, month_bisuan_asof="2026-08-16",
+            month_bisuan_sys_asof=10,
+        ),
+        build_row(
+            {
+                "id": 2, "code": "b", "name": "B", "region_group": "通泰", "city": "南通市",
+                "mobile_code": "2", "area_manager": "", "store_manager": "",
+                "follow_ai": 0, "follow_bisuan": 0,
+            },
+            day_ai=0, month_ai=0, day_bisuan=0, month_bisuan=8,
+            submitted=True, month_bisuan_mobile=8, month_bisuan_asof="2026-08-16",
+            month_bisuan_sys_asof=8,
+        ),
+    ]
+    rows_m = apply_scales(rows_m)
+    total_m = totals_row(rows_m)
+    assert "移2.0" in total_m["month_bisuan_text"]
+    assert "至8/16" in total_m["month_bisuan_text"]
     assert total["day_ai"] == 1
     assert total["day_bisuan"] == 4
     text = tsv([a, b], date(2026, 8, 14))
@@ -250,6 +277,18 @@ def test_summary_review_text():
     assert "触客：60 笔（成交 42）" in lines
     assert "综合标杆：示例丙店（AI 12，笔算 0.6，直降 5）" in lines
     assert "单项第一：AI 示例丙店 · 笔算 示例甲店 · 直降 示例丙店" in lines
+    # 带移动取数时复盘加对照段
+    rows[0]["_month_bisuan_mobile_stored"] = 10
+    rows[0]["_month_bisuan_sys_asof_stored"] = 8
+    rows[0]["month_bisuan_asof_label"] = "至8/16"
+    rows[1]["_month_bisuan_mobile_stored"] = 6
+    rows[1]["_month_bisuan_sys_asof_stored"] = 6
+    rows[1]["month_bisuan_asof_label"] = "至8/16"
+    text2 = summary(rows, date(2026, 8, 17), "南通")
+    assert "笔算移取（至8/16）：移 1.6 · 系统同期 1.4 · 差+0.2" in text2
+    assert "分店对照：" in text2
+    assert "示例甲店 系统0.8 移1.0 差+0.2" in text2
+    assert "示例丙店 系统0.6 移0.6 已对齐" in text2
     empty = summary(
         [{"name": "空店", "short_name": "空店", "month_ai": 0, "month_bisuan": 0, "month_coin": 0,
           "day_ai": 0, "day_bisuan": 0, "day_coin": 0}],
