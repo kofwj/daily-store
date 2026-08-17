@@ -57,7 +57,7 @@
     {% for k in kpi_cards %}
     <div class="kpi">
       <div class="muted">{{ k.name }}</div>
-      <div class="kpi-num">{{ k.total }}{% if k.target %} / {{ k.target }}{% endif %}</div>
+      <div class="kpi-num">{{ k.total_text }}{% if k.target %} / {{ k.target_text }}{% endif %}</div>
       <div class="muted">{% if k.progress is not none %}{{ '%.0f'|format(k.progress) }}%{% else %}区间合计{% endif %}</div>
     </div>
     {% endfor %}

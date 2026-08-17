@@ -25,6 +25,7 @@ from .helpers import (
 from .metrics_seed import (
     KPI_TARGETS,
     SECTIONS,
+    format_display,
     format_stored,
     from_stored,
     is_decimal_metric,
@@ -170,7 +171,10 @@ def register_daily(app) -> None:
                         "note": note,
                         "day": day_disp,
                         "cum": cum_disp,
+                        "day_text": format_display(scale, day_disp),
+                        "cum_text": format_display(scale, cum_disp),
                         "target": target,
+                        "target_text": format_display(scale, target) if target else "",
                         "progress": (cum_disp / target * 100) if target else None,
                     }
                 )

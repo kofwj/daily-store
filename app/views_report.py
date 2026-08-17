@@ -19,6 +19,7 @@ from .helpers import (
 from .metrics_seed import (
     KPI_TARGETS,
     SECTIONS,
+    format_display,
     format_stored,
     from_stored,
     is_decimal_metric,
@@ -109,6 +110,7 @@ def register_report(app) -> None:
                         "total": total_disp,
                         "total_text": format_stored(scale_code, total),
                         "target": target,
+                        "target_text": format_display(scale_code, target) if target else "",
                         "progress": (total_disp / target * 100) if target else None,
                         "left": max(0, target - total_disp) if target else None,
                     }

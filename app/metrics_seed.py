@@ -185,11 +185,21 @@ def from_stored(code: str, stored) -> float:
 
 def format_stored(code: str, stored) -> str:
     value = from_stored(code, stored)
-    if is_decimal_metric(code):
-        return f"{value:.1f}"
-    if abs(value - round(value)) < 1e-9:
-        return str(int(round(value)))
-    return str(value)
+    return format_display(code, value)
+
+
+def format_display(code: str, value) -> str:
+    """已经换算过的展示值再格式化。笔算一位小数，其它指标整数不带 .0。"""
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        return "0"
+    # bisuan_total 是 rollup 名，按笔算小数展示
+    if is_decimal_metric(code) or code in {"bisuan_total", "bisuan"}:
+        return f"{number:.1f}"
+    if abs(number - round(number)) < 1e-9:
+        return str(int(round(number)))
+    return str(number)
 
 
 def metric_step(code: str) -> str:

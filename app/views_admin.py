@@ -29,7 +29,14 @@ from .helpers import (
     xlsx_bytes,
     xlsx_response,
 )
-from .metrics_seed import KPI_TARGETS, format_stored, from_stored, rollup_pair, to_stored
+from .metrics_seed import (
+    KPI_TARGETS,
+    format_display,
+    format_stored,
+    from_stored,
+    rollup_pair,
+    to_stored,
+)
 
 
 def _bisuan_mobile_raw(conn, store_id: int, month_key: str) -> str:
@@ -224,22 +231,25 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
         for k in r["kpis"]:
             sum_day[k["code"]] += k["day"]
             sum_month[k["code"]] += k["month"]
-    grand = [
-        {
-            "code": code,
-            "name": name,
-            "note": note,
-            "day": sum_day[code],
-            "month": sum_month[code],
-            "target": kpi_targets.get(code, 0) * n,
-            "progress": (
-                sum_month[code] / (kpi_targets.get(code, 0) * n) * 100
-            )
-            if kpi_targets.get(code, 0) and n
-            else None,
-        }
-        for code, name, note in KPI_TARGETS
-    ]
+    grand = []
+    for code, name, note in KPI_TARGETS:
+        scale = "bisuan" if code == "bisuan_total" else code
+        day_v = sum_day[code]
+        month_v = sum_month[code]
+        target_v = kpi_targets.get(code, 0) * n
+        grand.append(
+            {
+                "code": code,
+                "name": name,
+                "note": note,
+                "day": day_v,
+                "month": month_v,
+                "day_text": format_display(scale, day_v),
+                "month_text": format_display(scale, month_v),
+                "target": target_v,
+                "progress": (month_v / target_v * 100) if target_v and n else None,
+            }
+        )
     deal_grand = {
         "day_total": sum(int(r["deal_today"]["total"]) for r in rows),
         "day_closed": sum(int(r["deal_today"]["closed"]) for r in rows),

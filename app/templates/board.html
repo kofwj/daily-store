@@ -47,7 +47,7 @@
     {% for g in grand %}
     <div class="kpi {{ 'kpi-ok' if view=='month' and g.progress is not none and g.progress >= 100 else '' }}">
       <div class="muted">{{ g.name }}</div>
-      <div class="kpi-num">{{ g.day if view=='today' else g.month }}</div>
+      <div class="kpi-num">{{ g.day_text if view=='today' else g.month_text }}</div>
       {% if view == 'month' and g.progress is not none %}
       <div class="muted">全区 {{ '%.0f'|format(g.progress) }}% · 目标 {{ g.target }}</div>
       <div class="progress thin"><span style="width: {{ [g.progress, 100]|min }}%"></span></div>
