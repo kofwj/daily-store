@@ -7,13 +7,21 @@ import json
 from flask import Response, flash, g, redirect, render_template, request, url_for
 
 from . import backup, db, incentive
-from .helpers import admin_required, ascii_filename, incentive_rules, login_required, store_label
+from .helpers import (
+    admin_required,
+    ascii_filename,
+    brand_settings,
+    incentive_rules,
+    login_required,
+    parse_brand_form,
+    store_label,
+)
 from .metrics_seed import KPI_TARGETS
 
 
 def _settings_tab() -> str:
     tab = request.values.get("tab") or "account"
-    allowed = {"account", "people", "stores", "targets", "permissions", "broadcast", "rules", "backup"}
+    allowed = {"account", "people", "stores", "targets", "permissions", "broadcast", "rules", "brand", "backup"}
     if tab not in allowed:
         return "account"
     if g.user["role"] != "admin" and tab != "account":
@@ -228,6 +236,11 @@ def register_settings(app) -> None:
                         filler_month = "1" if request.form.get("filler_edit_month") == "1" else "0"
                         db.set_setting(conn, "filler_edit_month", filler_month)
                         flash("权限设置已保存", "ok")
+                    elif action == "save_brand":
+                        brand = parse_brand_form(request.form)
+                        for key, value in brand.items():
+                            db.set_setting(conn, f"brand_{key}", value)
+                        flash("登录页标题已保存", "ok")
                     elif action == "save_broadcast":
                         compact = "1" if request.form.get("broadcast_compact") == "1" else "0"
                         family = "1" if request.form.get("broadcast_compact_family") == "1" else "0"
@@ -361,5 +374,6 @@ def register_settings(app) -> None:
                     "泰州市": db.get_setting(conn, "wecom_city_泰州市", ""),
                 },
                 incentive_rules=incentive_rules(conn),
+                brand_form=brand_settings(conn),
                 backups=backup.list_backups() if g.user["role"] == "admin" else [],
             )

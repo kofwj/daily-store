@@ -20,6 +20,43 @@ from .metrics_seed import rollup_amount
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+DEFAULT_BRAND = {
+    "mark": "vivo",
+    "kicker": "零售运营中心",
+    "title": "门店日报",
+}
+BRAND_LIMITS = {"mark": 16, "kicker": 40, "title": 20}
+
+
+def _clean_brand(value: str, *, default: str, limit: int) -> str:
+    text = " ".join((value or "").split())
+    if not text:
+        return default
+    return text[:limit]
+
+
+def brand_settings(conn=None) -> Dict[str, str]:
+    """登录页 / 页头用的标志、副标题、系统名。"""
+    if conn is None:
+        with db.get_db() as owned:
+            return brand_settings(owned)
+    return {
+        key: _clean_brand(db.get_setting(conn, f"brand_{key}", ""), default=default, limit=BRAND_LIMITS[key])
+        for key, default in DEFAULT_BRAND.items()
+    }
+
+
+def parse_brand_form(form) -> Dict[str, str]:
+    brand = {
+        key: _clean_brand(form.get(f"brand_{key}") or "", default="", limit=BRAND_LIMITS[key])
+        for key in DEFAULT_BRAND
+    }
+    if not brand["title"]:
+        raise ValueError("系统名称不能空")
+    if not brand["mark"]:
+        brand["mark"] = DEFAULT_BRAND["mark"]
+    return brand
+
 
 def load_user() -> None:
     g.user = None

@@ -25,7 +25,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from . import db
 from . import version as app_version
 from .errors import register_errors
-from .helpers import csrf_protect, load_user, pin_change_required
+from .helpers import brand_settings, csrf_protect, load_user, pin_change_required
 from .views_admin import register_admin
 from .views_advance import register_advance
 from .views_auth import register_auth
@@ -76,6 +76,7 @@ def create_app(*, testing: bool = False) -> Flask:
         if "_csrf_token" not in session:
             session["_csrf_token"] = secrets.token_hex(16)
         info = app_version.current()
+        brand = brand_settings()
         return {
             "today_iso": db.today_local().isoformat(),
             "now": datetime.now(db.TZ),
@@ -83,6 +84,7 @@ def create_app(*, testing: bool = False) -> Flask:
             "app_version": info["version"],
             "app_built_at": info["built_at"],
             "app_summary": info["summary"],
+            "brand": brand,
         }
 
     register_auth(app)

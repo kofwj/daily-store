@@ -124,6 +124,20 @@ if [[ "${ON_PRIMARY}" == "1" ]]; then
 else
   echo "生产: ${PRIMARY}:${PRIMARY_DIR} (ssh ${PRIMARY_SSH_PORT})"
 fi
+
+FP_PY="${ROOT}/scripts/offsite_fingerprint.py"
+if [[ "${DRY_RUN}" != "1" ]]; then
+  if [[ "${ON_PRIMARY}" == "1" ]]; then
+    STATE="$(python3 "${FP_PY}" check --dir "${PRIMARY_DIR}")"
+  else
+    STATE="$(ssh_p "${PRIMARY_SSH_PORT}" "${PRIMARY}" \
+      "python3 '${PRIMARY_DIR}/scripts/offsite_fingerprint.py' check --dir '${PRIMARY_DIR}'")"
+  fi
+  if [[ "${STATE}" == "SKIP" ]]; then
+    echo "库未变化，跳过拷贝"
+    exit 0
+  fi
+fi
 echo "局域网: ${LAN}:${LAN_BACKUP_DIR} (ssh ${LAN_BACKUP_SSH_PORT})"
 if [[ -n "${REMOTE_TARGET}" ]]; then
   echo "远端: ${REMOTE_TARGET}:${REMOTE_BACKUP_DIR} (ssh ${REMOTE_BACKUP_SSH_PORT})"
@@ -297,6 +311,15 @@ if [[ "${DRY_RUN}" != "1" ]]; then
   else
     ssh_p "${PRIMARY_SSH_PORT}" "${PRIMARY}" \
       "find $(printf %q "${PRIMARY_DIR}/data/backups") -type f \\( -name 'store_daily_offsite_*.db' -o -name 'env_offsite_*.env' \\) -mtime +${KEEP_DAYS} -delete 2>/dev/null || true"
+  fi
+fi
+
+if [[ "${DRY_RUN}" != "1" && ( "${PUSH_OK}" == "1" || ( -z "${LAN_BACKUP_HOST}" && -z "${REMOTE_TARGET}" ) ) ]]; then
+  if [[ "${ON_PRIMARY}" == "1" ]]; then
+    python3 "${FP_PY}" save --dir "${PRIMARY_DIR}" >/dev/null
+  else
+    ssh_p "${PRIMARY_SSH_PORT}" "${PRIMARY}" \
+      "python3 '${PRIMARY_DIR}/scripts/offsite_fingerprint.py' save --dir '${PRIMARY_DIR}'" >/dev/null || true
   fi
 fi
 

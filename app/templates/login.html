@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% block title %}登录 · 门店日报{% endblock %}
+{% block title %}登录 · {{ brand.title }}{% endblock %}
 {% block body_class %}login-page{% endblock %}
 {% block body %}
 <div class="login-shell">
   <div class="login-mark">
-    <span class="login-logo">vivo</span>
+    <span class="login-logo">{{ brand.mark }}</span>
     <div>
-      <div class="login-kicker">南通零售运营中心</div>
-      <h1>门店日报</h1>
+      {% if brand.kicker %}<div class="login-kicker">{{ brand.kicker }}</div>{% endif %}
+      <h1>{{ brand.title }}</h1>
     </div>
   </div>
   <div class="card login">

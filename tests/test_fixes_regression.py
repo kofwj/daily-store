@@ -7,6 +7,35 @@ from app.incentive import judge
 from app.web import create_app
 
 
+def test_login_brand_is_admin_setting(app_client):
+    page = app_client.get("/login").get_data(as_text=True)
+    assert "零售运营中心" in page
+    assert "南通零售运营中心" not in page
+    assert ">vivo</span>" in page
+    app_client.post("/login", data={"username": "admin", "pin": "1234"})
+    settings = app_client.get("/settings?tab=brand").get_data(as_text=True)
+    assert "登录页" in settings
+    saved = app_client.post(
+        "/settings",
+        data={
+            "action": "save_brand",
+            "tab": "brand",
+            "brand_mark": "品牌",
+            "brand_kicker": "示例运营中心",
+            "brand_title": "示例日报",
+        },
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "登录页标题已保存" in saved
+    app_client.get("/logout")
+    login = app_client.get("/login").get_data(as_text=True)
+    assert "示例运营中心" in login
+    assert "示例日报" in login
+    assert ">品牌</span>" in login
+    home = app_client.post("/login", data={"username": "admin", "pin": "1234"}, follow_redirects=True)
+    assert "示例日报" in home.get_data(as_text=True)
+
+
 def test_broadcast_compact_is_admin_setting(app_client):
     from datetime import date as _date
 

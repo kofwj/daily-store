@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>{% block title %}门店日报{% endblock %}</title>
+  <title>{% block title %}{{ brand.title }}{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v={{ app_version }}">
 </head>
 <body class="{% block body_class %}{% endblock %}">
   {% if g.user %}
   <header class="top">
-    <div class="brand" title="{{ app_summary or '' }} {{ app_built_at or '' }}">门店日报 <span class="app-ver">{{ app_version }}</span></div>
+    <div class="brand" title="{{ app_summary or '' }} {{ app_built_at or '' }}">{{ brand.title }} <span class="app-ver">{{ app_version }}</span></div>
     <nav class="nav">
       {% if not g.user['must_change_pin'] %}
       {% if g.user['role'] != 'readonly' %}

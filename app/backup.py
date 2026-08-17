@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 from secrets import token_hex
-from typing import List
+from typing import List, Optional
 
 from . import db_core
 
@@ -15,12 +15,62 @@ BACKUP_PREFIX = "store_daily_"
 MAX_KEEP = 20
 REQUIRED_TABLES = ("stores", "users", "metrics", "daily_reports", "daily_facts", "advance_posts")
 MAX_RESTORE_BYTES = 32 * 1024 * 1024
+FINGERPRINT_NAME = ".last_offsite_fp"
 
 
 def backup_dir() -> Path:
     path = Path(db_core.DATA_DIR) / BACKUP_DIR_NAME
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _stat_part(path: Path) -> str:
+    if not path.is_file():
+        return f"{path.name}:0:0"
+    st = path.stat()
+    return f"{path.name}:{st.st_size}:{int(getattr(st, 'st_mtime_ns', int(st.st_mtime * 1_000_000_000)))}"
+
+
+def live_fingerprint(db_path: Optional[Path] = None, env_path: Optional[Path] = None) -> str:
+    """库 + WAL + .env 的轻量指纹。有写入就会变，用来跳过重复机外拷贝。"""
+    path = Path(db_path or db_core.DB_PATH)
+    parts = [_stat_part(path), _stat_part(Path(str(path) + "-wal")), _stat_part(Path(str(path) + "-shm"))]
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            data_ver = con.execute("PRAGMA data_version").fetchone()[0]
+            page_count = con.execute("PRAGMA page_count").fetchone()[0]
+            parts.append(f"dv:{data_ver}:pc:{page_count}")
+        finally:
+            con.close()
+    except sqlite3.Error:
+        parts.append("dv:0:pc:0")
+    env = Path(env_path) if env_path is not None else path.parent.parent / ".env"
+    if env_path is None and not env.is_file():
+        env = path.parent / ".env"
+    parts.append(_stat_part(env))
+    return "|".join(parts)
+
+
+def fingerprint_path() -> Path:
+    return backup_dir() / FINGERPRINT_NAME
+
+
+def last_offsite_fingerprint() -> str:
+    dest = fingerprint_path()
+    if not dest.is_file():
+        return ""
+    return dest.read_text(encoding="utf-8").strip()
+
+
+def save_offsite_fingerprint(value: str) -> None:
+    dest = fingerprint_path()
+    dest.write_text(value.strip() + "\n", encoding="utf-8")
+
+
+def is_offsite_clean(db_path: Optional[Path] = None, env_path: Optional[Path] = None) -> bool:
+    last = last_offsite_fingerprint()
+    return bool(last) and last == live_fingerprint(db_path, env_path)
 
 
 def _stamp() -> str:

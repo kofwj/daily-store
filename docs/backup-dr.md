@@ -41,7 +41,7 @@
 
 ## 二、机外备份（推荐）
 
-脚本：`scripts/backup_offsite.sh`
+脚本：`scripts/backup_offsite.sh`。库和 `.env` 没变会跳过拷贝，只打日志「库未变化，跳过拷贝」。
 
 ### 1. 准备 SSH 免密
 
