@@ -182,7 +182,7 @@ def test_totals_row_sums_and_break_zero_count():
     rows_m = apply_scales(rows_m)
     total_m = totals_row(rows_m)
     assert "移2.0" in total_m["month_bisuan_text"]
-    assert "至8/16" in total_m["month_bisuan_text"]
+    assert total_m["month_bisuan_asof_label"] == "至8/16"
     assert total["day_ai"] == 1
     assert total["day_bisuan"] == 4
     text = tsv([a, b], date(2026, 8, 14))

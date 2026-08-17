@@ -436,6 +436,11 @@ table.bulletin .bisuan-official {
   display: inline-block; margin-left: 4px; padding: 0 4px;
   font-size: 11px; font-weight: 700; border-radius: 4px; line-height: 16px;
 }
+table.bulletin th .bisuan-asof-head {
+  display: block; margin-top: 2px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0; line-height: 1.2;
+  color: #1d4ed8;
+}
 table.bulletin tfoot td { font-weight: 800; font-size: 14px; }
 table.bulletin tr.total td {
   background: #e5e7eb; color: #111827;

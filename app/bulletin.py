@@ -238,12 +238,8 @@ def totals_row(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     month_bisuan_text = fmt_metric("bisuan", month_bisuan)
     stale = any(bool(r.get("month_bisuan_mobile_stale")) for r in rows)
     if mobile_text:
-        # 合计格：上报本月 / 移(至x日)[未更新]
+        # 截止日在表头；合计格只写 上报 / 移数 [差]
         tag = f"移{mobile_text}"
-        if asof_label:
-            tag = f"{tag}{asof_label}"
-        if stale:
-            tag = f"{tag}未更新"
         if mobile_diff_signed and mobile_diff != 0:
             month_bisuan_cell = f"{month_bisuan_text} / {tag} {mobile_diff_signed}"
         else:
