@@ -59,6 +59,8 @@ def test_insights_pace_week_compare_and_laggards():
     assert "乙店" in lag_names
     by_name = {r["name"]: r for r in payload["store_rows"]}
     assert by_name["乙店"]["flags"] == ["今日未交", "本月未交", "进度落后"]
+    assert by_name["乙店"]["month_ok"] is False
+    assert payload["idle_n"] == 1
     assert by_name["甲店"]["week"][1]["now"] == 1  # ai_contract
     assert by_name["甲店"]["week"][1]["delta"] == -1
     assert "今日未交：乙店" in payload["copy_text"]
@@ -79,3 +81,4 @@ def test_insights_page_admin_only(app_client):
     assert "本周 vs 上周" in page
     assert "分店明细" in page
     assert "区域经理" in page
+    assert 'colspan="3"' in page

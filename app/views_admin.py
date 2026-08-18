@@ -329,7 +329,10 @@ def register_admin(app) -> None:
                 reported_today=reported_today,
                 reported_month=reported_month,
             )
-            payload.update({"scope": scope})
+            payload.update({
+                "scope": scope,
+                "show_idle": (request.args.get("idle") or "").strip() == "1",
+            })
             return render_template("insights.html", **payload)
 
     @app.route("/board.xlsx")

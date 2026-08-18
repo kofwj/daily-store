@@ -66,22 +66,41 @@
 
 <div class="card">
   <h2>分店明细</h2>
-  <p class="muted">每家本周 vs 上周同一星期几。未交、落后写在状态列，不再单独开三块。</p>
+  <p class="muted">
+    每家本周 vs 上周同一星期几。
+    {% if idle_n %}
+      {% if show_idle %}
+      已显示本月未交 {{ idle_n }} 店。
+      <a href="{{ url_for('insights_page', date=as_of.isoformat(), city=scope.city, area_manager=scope.manager) }}">藏起来</a>
+      {% else %}
+      已藏本月未交 {{ idle_n }} 店（没数不对比）。
+      <a href="{{ url_for('insights_page', date=as_of.isoformat(), city=scope.city, area_manager=scope.manager, idle=1) }}">显示</a>
+      {% endif %}
+    {% endif %}
+  </p>
   <table class="data insight-stores">
     <thead>
       <tr>
-        <th class="left">门店</th>
-        <th class="left">区域经理</th>
-        <th class="left">状态</th>
+        <th class="left" rowspan="2">门店</th>
+        <th class="left" rowspan="2">区域经理</th>
+        <th class="left" rowspan="2">状态</th>
         {% for k in week_kpis %}
-        <th>{{ k.name }} 本周</th>
+        <th colspan="3">{{ k.name }}</th>
+        {% endfor %}
+      </tr>
+      <tr>
+        {% for k in week_kpis %}
+        <th>本周</th>
         <th>上周</th>
         <th>差额</th>
         {% endfor %}
       </tr>
     </thead>
     <tbody>
+      {% set shown = namespace(n=0) %}
       {% for r in store_rows %}
+      {% if r.month_ok or show_idle %}
+      {% set shown.n = shown.n + 1 %}
       <tr class="{% if not r.today_ok %}row-miss{% elif r.lag_bits %}row-lag{% endif %}">
         <td class="left">{{ r.name }}</td>
         <td class="left">{{ r.manager }}</td>
@@ -92,9 +111,11 @@
         <td class="{{ 'up' if w.delta > 0 else 'down' if w.delta < 0 else '' }}">{% if w.delta > 0 %}+{% endif %}{{ w.delta_text }}</td>
         {% endfor %}
       </tr>
-      {% else %}
-      <tr><td class="left muted" colspan="{{ 3 + week_kpis|length * 3 }}">没有门店</td></tr>
+      {% endif %}
       {% endfor %}
+      {% if shown.n == 0 %}
+      <tr><td class="left muted" colspan="{{ 3 + week_kpis|length * 3 }}">没有可显示的门店</td></tr>
+      {% endif %}
     </tbody>
   </table>
 </div>

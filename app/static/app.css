@@ -231,6 +231,7 @@ button.ghost:hover, .btn.ghost:hover { background: var(--accent-soft); }
 .kpi-ok { background: #ecfdf5; border-color: #a7f3d0; }
 .kpi-warn { background: #fff7ed; border-color: #fed7aa; }
 .insight-stores { min-width: 720px; }
+.insight-stores thead th[colspan] { border-bottom: 0; }
 .row-miss td { background: #fff7ed; }
 .row-lag td { background: #f8fafc; }
 table.data td.up { color: #166534; }

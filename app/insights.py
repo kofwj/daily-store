@@ -236,6 +236,7 @@ def build_insights(
         "n": n,
         "done_today": sum(1 for s in stores if int(s["id"]) in reported_today),
         "done_month": sum(1 for s in stores if int(s["id"]) in reported_month),
+        "idle_n": sum(1 for r in store_rows if not r["month_ok"]),
         "copy_text": copy_text,
     }
 
