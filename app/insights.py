@@ -208,19 +208,6 @@ def build_insights(
 
     this_start, this_end = week_span(as_of)
     prev_start, prev_end = prev_week_span(as_of)
-    copy_text = _copy_text(
-        as_of=as_of,
-        pace=pace,
-        kpis=kpis,
-        week_kpis=week_kpis,
-        missing_today=missing_today,
-        missing_month=missing_month,
-        laggards=laggards,
-        this_start=this_start,
-        this_end=this_end,
-        prev_start=prev_start,
-        prev_end=prev_end,
-    )
     return {
         "as_of": as_of,
         "pace": pace,
@@ -238,50 +225,4 @@ def build_insights(
         "done_today": sum(1 for s in stores if int(s["id"]) in reported_today),
         "done_month": sum(1 for s in stores if int(s["id"]) in reported_month),
         "idle_n": sum(1 for r in store_rows if not r["month_ok"]),
-        "copy_text": copy_text,
     }
-
-
-def _copy_text(
-    *,
-    as_of: date,
-    pace: float,
-    kpis: Sequence[Mapping[str, Any]],
-    week_kpis: Sequence[Mapping[str, Any]],
-    missing_today: Sequence[str],
-    missing_month: Sequence[str],
-    laggards: Sequence[Mapping[str, Any]],
-    this_start: date,
-    this_end: date,
-    prev_start: date,
-    prev_end: date,
-) -> str:
-    lines = [
-        f"{as_of.isoformat()} 洞察",
-        f"本月已过 {pace:.0f}%（{as_of.day}/{calendar.monthrange(as_of.year, as_of.month)[1]} 天）",
-    ]
-    month_bits = []
-    for k in kpis:
-        if k["target"]:
-            month_bits.append(f"{k['name']} {k['value_text']}/{k['target_text']}（{k['progress']:.0f}%）")
-        else:
-            month_bits.append(f"{k['name']} {k['value_text']}")
-    lines.append("本月：" + " · ".join(month_bits))
-    week_bits = []
-    for k in week_kpis:
-        sign = "+" if k["delta"] > 0 else ""
-        week_bits.append(f"{k['name']} {k['now_text']}（{sign}{k['delta_text']}）")
-    lines.append(
-        f"本周 {this_start.month}/{this_start.day}–{this_end.month}/{this_end.day} "
-        f"vs 上周 {prev_start.month}/{prev_start.day}–{prev_end.month}/{prev_end.day}："
-        + " · ".join(week_bits)
-    )
-    if missing_today:
-        lines.append("今日未交：" + "、".join(missing_today))
-    if missing_month:
-        lines.append("本月未交：" + "、".join(missing_month))
-    if laggards:
-        lines.append("进度落后：")
-        for item in laggards:
-            lines.append(f"{item['name']} {' · '.join(item['bits'])}")
-    return "\n".join(lines)

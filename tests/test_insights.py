@@ -65,8 +65,6 @@ def test_insights_pace_week_compare_and_laggards():
     assert by_name["甲店"]["advisor"] == "李顾问"
     assert by_name["甲店"]["week"][1]["now"] == 1  # ai_contract
     assert by_name["甲店"]["week"][1]["delta"] == -1
-    assert "今日未交：乙店" in payload["copy_text"]
-    assert "本月未交：乙店" in payload["copy_text"]
 
 
 def test_insights_page_admin_only(app_client):
@@ -85,3 +83,4 @@ def test_insights_page_admin_only(app_client):
     assert "区域经理" in page
     assert "运营商顾问" in page
     assert "insight-metric-h" in page
+    assert "复制文案" not in page

@@ -231,27 +231,32 @@ button.ghost:hover, .btn.ghost:hover { background: var(--accent-soft); }
 .kpi-ok { background: #ecfdf5; border-color: #a7f3d0; }
 .kpi-warn { background: #fff7ed; border-color: #fed7aa; }
 .insight-stores { min-width: 640px; }
+.insight-store { font-weight: 600; }
 .insight-stores th.insight-metric-h,
 .insight-stores td.insight-metric {
   text-align: right;
-  min-width: 108px;
+  white-space: nowrap;
+}
+.insight-metric {
+  font-variant-numeric: tabular-nums;
 }
 .insight-now {
-  font-size: 18px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
+  font-weight: 650;
+  margin-right: 8px;
 }
-.insight-sub {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 2px;
+.delta {
+  display: inline-block;
+  min-width: 2.4em;
+  padding: 1px 6px;
+  border-radius: 999px;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+  text-align: center;
 }
-.insight-flags { white-space: nowrap; }
+.delta.up { background: #ecfdf3; color: #067647; }
+.delta.down { background: #fef3f2; color: #b42318; }
+.delta.flat { background: #f3f4f6; color: #6b7280; }
+.insight-flags { margin-top: 3px; white-space: nowrap; }
 .insight-flags .flag {
   display: inline-block;
   margin-right: 4px;
