@@ -230,20 +230,20 @@ button.ghost:hover, .btn.ghost:hover { background: var(--accent-soft); }
 .review-switch { margin: 8px 0 10px; }
 .kpi-ok { background: #ecfdf5; border-color: #a7f3d0; }
 .kpi-warn { background: #fff7ed; border-color: #fed7aa; }
-.insight-stores { min-width: 640px; }
 .insight-store { font-weight: 600; }
-.insight-stores th.insight-metric-h,
-.insight-stores td.insight-metric {
-  text-align: right;
+.insight-stores .insight-metric,
+.insight-stores .insight-metric-h {
   white-space: nowrap;
+  min-width: 112px;
 }
 .insight-metric {
   font-variant-numeric: tabular-nums;
 }
 .insight-now {
   font-weight: 650;
-  margin-right: 8px;
+  margin-right: 6px;
 }
+.insight-table-wrap { overflow-x: auto; }
 .delta {
   display: inline-block;
   min-width: 2.4em;
@@ -287,6 +287,25 @@ table.data th, table.data td {
 }
 table.data th { color: var(--muted); font-weight: 550; font-size: 12px; }
 table.data th:first-child, table.data td:first-child { text-align: left; }
+table.data.insight-week,
+table.data.insight-stores {
+  width: auto;
+  margin: 0 auto;
+}
+table.data.insight-week th,
+table.data.insight-week td,
+table.data.insight-stores th,
+table.data.insight-stores td {
+  text-align: center;
+  vertical-align: middle;
+  padding: 10px 16px;
+}
+table.data.insight-week th:first-child,
+table.data.insight-week td:first-child,
+table.data.insight-stores th:first-child,
+table.data.insight-stores td:first-child {
+  text-align: center;
+}
 .progress { height: 4px; background: #eef0f3; border-radius: 99px; overflow: hidden; margin-top: 4px; }
 .progress > span { display: block; height: 100%; background: var(--ink); }
 

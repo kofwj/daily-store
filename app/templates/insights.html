@@ -48,10 +48,11 @@
 <div class="card">
   <h2>本周 vs 上周 · 合计</h2>
   <p class="muted">{{ scope.label }} · 本周 {{ this_week[0].month }}/{{ this_week[0].day }}–{{ this_week[1].month }}/{{ this_week[1].day }}，对比上周同一星期几 {{ prev_week[0].month }}/{{ prev_week[0].day }}–{{ prev_week[1].month }}/{{ prev_week[1].day }}。</p>
-  <table class="data">
+  <div class="insight-table-wrap">
+  <table class="data insight-week">
     <thead>
       <tr>
-        <th class="left">指标</th>
+        <th>指标</th>
         <th>本周</th>
         <th>上周同期</th>
         <th>差额</th>
@@ -61,7 +62,7 @@
     <tbody>
       {% for k in week_kpis %}
       <tr>
-        <td class="left">{{ k.name }}</td>
+        <td>{{ k.name }}</td>
         <td>{{ k.now_text }}</td>
         <td>{{ k.prev_text }}</td>
         <td><span class="delta {{ 'up' if k.delta > 0 else 'down' if k.delta < 0 else 'flat' }}">{% if k.delta > 0 %}+{% endif %}{{ k.delta_text }}</span></td>
@@ -70,6 +71,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 
 <div class="card">
@@ -86,12 +88,13 @@
       {% endif %}
     {% endif %}
   </p>
+  <div class="insight-table-wrap">
   <table class="data insight-stores">
     <thead>
       <tr>
-        <th class="left">门店</th>
-        <th class="left">区域经理</th>
-        <th class="left">运营商顾问</th>
+        <th>门店</th>
+        <th>区域经理</th>
+        <th>运营商顾问</th>
         {% for k in week_kpis %}
         <th class="insight-metric-h">{{ k.name }}</th>
         {% endfor %}
@@ -103,12 +106,12 @@
       {% if r.month_ok or show_idle %}
       {% set shown.n = shown.n + 1 %}
       <tr class="{% if not r.today_ok %}row-miss{% elif r.lag_bits %}row-lag{% endif %}">
-        <td class="left">
+        <td>
           <div class="insight-store">{{ r.name }}</div>
           {% if r.flags %}<div class="insight-flags">{% for f in r.flags %}<span class="flag {{ 'flag-miss' if '未交' in f else 'flag-lag' }}">{{ f }}</span>{% endfor %}</div>{% endif %}
         </td>
-        <td class="left">{{ r.manager }}</td>
-        <td class="left">{{ r.advisor }}</td>
+        <td>{{ r.manager }}</td>
+        <td>{{ r.advisor }}</td>
         {% for w in r.week %}
         <td class="insight-metric">
           <span class="insight-now">{{ w.now_text }}</span>
@@ -119,9 +122,10 @@
       {% endif %}
       {% endfor %}
       {% if shown.n == 0 %}
-      <tr><td class="left muted" colspan="{{ 3 + week_kpis|length }}">没有可显示的门店</td></tr>
+      <tr><td class="muted" colspan="{{ 3 + week_kpis|length }}">没有可显示的门店</td></tr>
       {% endif %}
     </tbody>
   </table>
+  </div>
 </div>
 {% endblock %}
