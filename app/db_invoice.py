@@ -146,18 +146,6 @@ def list_invoice_months(
     return {int(row["store_id"]): _row_to_invoice(row) for row in rows}
 
 
-def _details_from_form(form) -> Dict[str, float]:
-    out: Dict[str, float] = {}
-    for key, _row, _name in DETAIL_ITEMS:
-        raw = form.get(f"d_{key}")
-        if raw is None or str(raw).strip() == "":
-            continue
-        amount = parse_money(raw)
-        if abs(amount) >= 0.01:
-            out[key] = amount
-    return out
-
-
 def save_invoice_month(
     conn: sqlite3.Connection,
     store_id: int,
@@ -229,10 +217,12 @@ def save_invoice_from_form(conn: sqlite3.Connection, store_id: int, month: str, 
         service=form.get("service"),
         fee=form.get("fee"),
         housing=form.get("housing"),
-        details=_details_from_form(form),
-        lease_area=form.get("lease_area") or "",
-        lease=form.get("lease"),
-        lease_address=form.get("lease_address") or "",
-        lease_period=form.get("lease_period") or "",
         apply_date=form.get("apply_date") or "",
+    )
+
+
+def delete_invoice_month(conn: sqlite3.Connection, store_id: int, month: str) -> None:
+    conn.execute(
+        "DELETE FROM invoice_months WHERE store_id=? AND month=?",
+        (int(store_id), month),
     )

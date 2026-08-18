@@ -4,7 +4,7 @@
 <div class="page-head">
   <div class="page-title">
     <h1>开票申请</h1>
-    <p class="muted">{{ month.strftime('%Y-%m') }} · {{ store.short_name or store.name }}。导出三张表和税务样表同一版式：租赁、酬金、明细。</p>
+    <p class="muted">结算月 {{ month.strftime('%Y-%m') }} · {{ store.short_name or store.name }}。申请开票日可以晚于结算月。服务费进明细「套餐变更」，手续费进「其他业务」。</p>
   </div>
   <form method="get" class="page-filters">
     <input type="hidden" name="month" value="{{ month.strftime('%Y-%m') }}">
@@ -17,7 +17,9 @@
       </select>
     </label>
     <a class="btn ghost" href="{{ url_for('incentive_page', month=month.strftime('%Y-%m')) }}">回考核</a>
+    {% if rec.id %}
     <a class="btn" href="{{ url_for('invoice_xlsx', month=month.strftime('%Y-%m'), store_id=store.id) }}">导出这份</a>
+    {% endif %}
   </form>
 </div>
 
@@ -43,30 +45,18 @@
   <input type="hidden" name="month" value="{{ month.strftime('%Y-%m') }}">
   <input type="hidden" name="store_id" value="{{ store.id }}">
   <h2>酬金开票</h2>
-  <p class="muted">服务费、手续费合计写进结算底稿「开票」。明细按移动账单拆，空着也导出。</p>
+  <p class="muted">改完点保存即覆盖。填错了改数字再保存；整笔不要了点删除。</p>
   <div class="store-editor-grid">
     <p><label>服务费</label><input name="service" type="number" min="0" step="0.01" value="{{ rec.service or '' }}"></p>
     <p><label>手续费</label><input name="fee" type="number" min="0" step="0.01" value="{{ rec.fee or '' }}"></p>
     <p><label>到账房补</label><input name="housing" type="number" step="0.01" value="{{ rec.housing or '' }}"></p>
     <p><label>申请开票日期</label><input name="apply_date" type="date" value="{{ rec.apply_date }}"></p>
   </div>
-  <h3 class="settings-section">明细科目</h3>
-  {% for title, items in detail_groups %}
-  <h4>{{ title }}</h4>
-  <div class="store-editor-grid">
-    {% for key, _row, name in items %}
-    <p><label>{{ name }}</label><input name="d_{{ key }}" type="number" step="0.01" value="{{ rec.details.get(key, '') }}"></p>
-    {% endfor %}
+  <div class="toolbar">
+    <button type="submit" name="action" value="save">保存</button>
+    {% if rec.id %}
+    <button type="submit" name="action" value="delete" class="ghost" onclick="return confirm('删除这家店 {{ month.strftime('%Y-%m') }} 的开票？结算底稿开票格也会空。')">删除</button>
+    {% endif %}
   </div>
-  {% endfor %}
-  <h2>租赁开票</h2>
-  <p class="muted">面积、地址、期限默认用门店档案，这里改只影响本月申请。</p>
-  <div class="store-editor-grid">
-    <p><label>面积（平方米）</label><input name="lease_area" value="{{ rec.lease_area or store.lease_area }}"></p>
-    <p><label>金额</label><input name="lease" type="number" min="0" step="0.01" value="{{ rec.lease or '' }}"></p>
-    <p class="span-2"><label>租赁期限</label><input name="lease_period" value="{{ rec.lease_period or store.lease_period }}"></p>
-    <p class="span-2"><label>备注地址</label><input name="lease_address" value="{{ rec.lease_address or store.lease_address }}"></p>
-  </div>
-  <div class="toolbar"><button type="submit">保存</button></div>
 </form>
 {% endblock %}

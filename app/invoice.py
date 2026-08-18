@@ -12,7 +12,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from openpyxl import load_workbook
 
 from . import db
-from .db_invoice import DETAIL_ITEMS, get_invoice_month, month_key
+from .db_invoice import get_invoice_month, month_key
 from .helpers import company_names
 
 TEMPLATE = Path(__file__).resolve().parent / "invoice_templates" / "invoice_apply.xlsx"
@@ -176,18 +176,13 @@ def build_invoice_xlsx(
     handler = invoice_handler(conn)
     apply_on = _as_date(rec.get("apply_date") or "", as_of)
     store_title = invoice_store_name(store)
-    lease_area = rec.get("lease_area") or (store["lease_area"] if "lease_area" in store.keys() else "") or ""
-    lease_address = rec.get("lease_address") or (
-        store["lease_address"] if "lease_address" in store.keys() else ""
-    ) or ""
-    lease_period = rec.get("lease_period") or (
-        store["lease_period"] if "lease_period" in store.keys() else ""
-    ) or ""
+    service = float(rec.get("service") or 0)
+    fee = float(rec.get("fee") or 0)
     wb = load_workbook(TEMPLATE)
     comm = wb["酬金开票申请"]
     _fill_party_block(comm, party)
-    comm["E9"] = rec.get("service") or None
-    comm["E10"] = rec.get("fee") or None
+    comm["E9"] = service or None
+    comm["E10"] = fee or None
     comm["E9"].number_format = "0.00"
     comm["E10"].number_format = "0.00"
     comm["E11"].number_format = "0.00"
@@ -198,37 +193,17 @@ def build_invoice_xlsx(
     email = party.get("email") or ""
     comm["A25"] = f"接收数电发票的邮箱号：{email}" if email else "接收数电发票的邮箱号："
 
-    lease = wb["租赁发票开票申请"]
-    _fill_party_block(lease, party)
-    area_text = str(lease_area or "").strip()
-    if area_text:
-        try:
-            lease["C9"] = float(area_text)
-        except ValueError:
-            lease["C9"] = area_text
-    lease["D9"] = rec.get("lease") or None
-    lease["D9"].number_format = "0.00"
-    lease["D11"].number_format = "0.00"
-    _set(lease, "B12", store_title)
-    if str(lease_address).strip():
-        lease["B13"] = str(lease_address).strip()
-    _set(lease, "B14", lease_period)
-    _set(lease, "D16", handler)
-    lease["D17"] = datetime(apply_on.year, apply_on.month, apply_on.day)
-    lease["D17"].number_format = "YYYY/M/D"
-    lease["A28"] = f"接收数电发票的邮箱号：{email}" if email else "接收数电发票的邮箱号："
-
     detail = wb["明细"]
     detail["B1"] = int(as_of.strftime("%Y%m"))
-    amounts = rec.get("details") or {}
-    for key, row, _name in DETAIL_ITEMS:
-        value = amounts.get(key)
-        if value in (None, "", 0, 0.0):
-            continue
-        cell = detail[f"C{row}"]
-        cell.value = float(value)
-        cell.number_format = "0.00"
+    detail["C17"] = "=酬金开票申请!E9"
+    detail["C17"].number_format = "0.00"
+    detail["C28"] = "=酬金开票申请!E10"
+    detail["C28"].number_format = "0.00"
     detail["C29"].number_format = "0.00"
+    if service:
+        detail["A31"] = f"*生产生活服务*服务费{service:.2f}  元"
+    if fee:
+        detail["A32"] = f"*生产生活服务*手续费 {fee:.2f}  元"
 
     buf = BytesIO()
     wb.save(buf)
@@ -250,6 +225,9 @@ def build_invoice_zip(conn, stores, as_of: date) -> bytes:
             if name in used:
                 name = f"invoice_{as_of.strftime('%Y%m')}_{store['id']}.xlsx"
             used.add(name)
-            data = build_invoice_xlsx(conn, store, as_of, get_invoice_month(conn, int(store["id"]), month))
+            rec = get_invoice_month(conn, int(store["id"]), month)
+            if not rec.get("id"):
+                continue
+            data = build_invoice_xlsx(conn, store, as_of, rec)
             zf.writestr(name, data)
     return buf.getvalue()

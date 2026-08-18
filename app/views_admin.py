@@ -651,8 +651,12 @@ def register_admin(app) -> None:
                 flash("没有可开票的门店", "error")
                 return redirect(url_for("incentive_page", month=month_text))
             if request.method == "POST":
-                db.save_invoice_from_form(conn, int(store["id"]), month_text, request.form)
-                flash("开票申请已保存", "ok")
+                if (request.form.get("action") or "save") == "delete":
+                    db.delete_invoice_month(conn, int(store["id"]), month_text)
+                    flash("开票申请已删除", "ok")
+                else:
+                    db.save_invoice_from_form(conn, int(store["id"]), month_text, request.form)
+                    flash("开票申请已保存", "ok")
                 return redirect(
                     url_for("invoice_page", month=month_text, store_id=store["id"])
                 )
@@ -664,7 +668,6 @@ def register_admin(app) -> None:
                 store=store,
                 stores=stores,
                 rec=rec,
-                detail_groups=db.DETAIL_GROUPS,
                 party=invoice.invoice_parties(conn)[invoice.party_key_for_store(store)],
                 handler=invoice.invoice_handler(conn),
                 invoice_name=invoice.invoice_store_name(store),

@@ -41,6 +41,7 @@ from .db_deals import (  # noqa: F401
 from .db_invoice import (  # noqa: F401
     DETAIL_GROUPS,
     DETAIL_ITEMS,
+    delete_invoice_month,
     get_invoice_month,
     list_invoice_months,
     save_invoice_from_form,
