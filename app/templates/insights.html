@@ -67,7 +67,7 @@
 <div class="card">
   <h2>分店明细</h2>
   <p class="muted">
-    每家本周 vs 上周同一星期几。
+    大字是本周，下面左上周、右差额。
     {% if idle_n %}
       {% if show_idle %}
       已显示本月未交 {{ idle_n }} 店。
@@ -83,6 +83,7 @@
       <tr>
         <th class="left">门店</th>
         <th class="left">区域经理</th>
+        <th class="left">运营商顾问</th>
         <th class="left">状态</th>
         {% for k in week_kpis %}
         <th class="insight-metric-h">{{ k.name }}</th>
@@ -97,12 +98,13 @@
       <tr class="{% if not r.today_ok %}row-miss{% elif r.lag_bits %}row-lag{% endif %}">
         <td class="left">{{ r.name }}</td>
         <td class="left">{{ r.manager }}</td>
-        <td class="left insight-flags">{% if r.flags %}{% for f in r.flags %}<span class="flag {{ 'flag-miss' if '未交' in f else 'flag-lag' }}">{{ f }}</span>{% endfor %}{% else %}<span class="muted">正常</span>{% endif %}</td>
+        <td class="left">{{ r.advisor }}</td>
+        <td class="left insight-flags">{% for f in r.flags %}<span class="flag {{ 'flag-miss' if '未交' in f else 'flag-lag' }}">{{ f }}</span>{% endfor %}</td>
         {% for w in r.week %}
         <td class="insight-metric">
           <div class="insight-now">{{ w.now_text }}</div>
           <div class="insight-sub">
-            <span class="muted">上周 {{ w.prev_text }}</span>
+            <span class="muted">{{ w.prev_text }}</span>
             <span class="{{ 'up' if w.delta > 0 else 'down' if w.delta < 0 else 'muted' }}">{% if w.delta > 0 %}+{% endif %}{{ w.delta_text }}</span>
           </div>
         </td>
@@ -111,7 +113,7 @@
       {% endif %}
       {% endfor %}
       {% if shown.n == 0 %}
-      <tr><td class="left muted" colspan="{{ 3 + week_kpis|length }}">没有可显示的门店</td></tr>
+      <tr><td class="left muted" colspan="{{ 4 + week_kpis|length }}">没有可显示的门店</td></tr>
       {% endif %}
     </tbody>
   </table>

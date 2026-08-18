@@ -187,6 +187,7 @@ def build_insights(
                 "name": _store_name(store),
                 "city": (store["city"] or "").strip() or "未分地市",
                 "manager": (store["area_manager"] or "").strip() or "—",
+                "advisor": (store["advisor_name"] or "").strip() or "—",
                 "today_ok": today_ok,
                 "month_ok": month_ok,
                 "lag_bits": bits,
