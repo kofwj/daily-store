@@ -44,6 +44,24 @@ def test_admin_can_backup_download_and_restore(tmp_db, client):
         assert n == 0
 
 
+def test_restore_old_backup_creates_invoice_tables(tmp_db):
+    with db.get_db() as conn:
+        conn.execute("DROP TABLE IF EXISTS invoice_edits")
+        conn.execute("DROP TABLE IF EXISTS invoice_months")
+        conn.commit()
+        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "invoice_months" not in names
+    from app.db_invoice import _ensure_invoice_tables
+
+    with db.get_db() as conn:
+        _ensure_invoice_tables(conn)
+        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(invoice_months)")}
+    assert "invoice_months" in names
+    assert "invoice_edits" in names
+    assert {"service_cents", "fee_cents", "details_json", "lease_cents"} <= cols
+
+
 def test_restore_failure_does_not_change_live_db(tmp_db):
     with db.get_db() as conn:
         conn.execute("INSERT INTO app_meta(key, value) VALUES ('live_marker', 'keep')")

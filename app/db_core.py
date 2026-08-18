@@ -324,6 +324,14 @@ def migrate() -> None:
                 "INSERT OR IGNORE INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
                 (version, name, _now()),
             )
+        # 旧库已经跑过 v11 但没有标记时补写，避免以后重跑再乘 10
+        if 11 in applied or 11 in {
+            int(row["version"]) for row in conn.execute("SELECT version FROM schema_migrations")
+        }:
+            _ensure_app_meta(conn)
+            conn.execute(
+                "INSERT OR IGNORE INTO app_meta(key, value) VALUES('bisuan_tenths_marker','1')"
+            )
 
 def _ensure_store_columns(conn: sqlite3.Connection) -> None:
     extra = {
@@ -594,9 +602,21 @@ def _mark_sesame_paid(conn: sqlite3.Connection) -> None:
 
 
 def _scale_bisuan_tenths(conn: sqlite3.Connection) -> None:
-    """旧笔算按整数存；改成 0.1 精度后，历史数乘 10。"""
+    """旧笔算按整数存；改成 0.1 精度后，历史数乘 10。
+
+    幂等保证：app_meta 里的 bisuan_tenths_marker 写入后绝不重跑。
+    """
+    _ensure_app_meta(conn)
+    marker = conn.execute(
+        "SELECT value FROM app_meta WHERE key='bisuan_tenths_marker'"
+    ).fetchone()
+    if marker is not None:
+        return
     conn.execute(
         "UPDATE daily_facts SET day_value = day_value * 10 WHERE metric_code IN ('bisuan', 'bisuan_high')"
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO app_meta(key, value) VALUES('bisuan_tenths_marker','1')"
     )
 
 

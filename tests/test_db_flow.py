@@ -375,3 +375,33 @@ def test_money_ok_tolerates_nonfinite():
     assert db.money_ok(float("nan"), 0, 0) is False
     assert db.money_ok(float("inf"), 0, 0) is False
     assert db.money_ok("abc", 1, 0) is True
+
+
+def test_bisuan_tenths_migration_is_idempotent(tmp_db):
+    """迁移 v11 重跑不会把笔算再乘 10。"""
+    from datetime import date
+
+    from app import db_core
+
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores ORDER BY id LIMIT 1").fetchone()["id"]
+        conn.execute(
+            "INSERT INTO daily_facts(biz_date, store_id, metric_code, day_value) VALUES (?, ?, 'bisuan', 15)",
+            (date(2026, 8, 1).isoformat(), sid),
+        )
+        conn.execute("DELETE FROM schema_migrations WHERE version=11")
+        conn.commit()
+        before = conn.execute(
+            "SELECT day_value FROM daily_facts WHERE metric_code='bisuan'"
+        ).fetchone()["day_value"]
+    db_core.migrate()
+    with db.get_db() as conn:
+        after = conn.execute(
+            "SELECT day_value FROM daily_facts WHERE metric_code='bisuan'"
+        ).fetchone()["day_value"]
+        marker = conn.execute(
+            "SELECT value FROM app_meta WHERE key='bisuan_tenths_marker'"
+        ).fetchone()
+    assert before == 15
+    assert after == 15
+    assert marker is not None
