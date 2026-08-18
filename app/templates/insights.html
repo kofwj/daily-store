@@ -13,6 +13,15 @@
       <input type="date" name="date" value="{{ as_of.isoformat() }}" onchange="this.form.submit()">
     </label>
     {{ scope_filters(scope.cities, scope.managers, city=scope.city, manager=scope.manager) }}
+    <label class="filter">
+      <span>顾问</span>
+      <select name="advisor" onchange="this.form.submit()">
+        <option value="" {% if not advisor %}selected{% endif %}>全部</option>
+        <option value="yes" {% if advisor == 'yes' %}selected{% endif %}>只看有顾问</option>
+        <option value="no" {% if advisor == 'no' %}selected{% endif %}>只看无顾问</option>
+      </select>
+    </label>
+    {% if show_idle %}<input type="hidden" name="idle" value="1">{% endif %}
   </form>
 </div>
 
@@ -70,10 +79,10 @@
     {% if idle_n %}
       {% if show_idle %}
       已显示本月未交 {{ idle_n }} 店。
-      <a href="{{ url_for('insights_page', date=as_of.isoformat(), city=scope.city, area_manager=scope.manager) }}">藏起来</a>
+      <a href="{{ url_for('insights_page', date=as_of.isoformat(), city=scope.city, area_manager=scope.manager, advisor=advisor) }}">藏起来</a>
       {% else %}
       已藏本月未交 {{ idle_n }} 店。
-      <a href="{{ url_for('insights_page', date=as_of.isoformat(), city=scope.city, area_manager=scope.manager, idle=1) }}">显示</a>
+      <a href="{{ url_for('insights_page', date=as_of.isoformat(), city=scope.city, area_manager=scope.manager, advisor=advisor, idle=1) }}">显示</a>
       {% endif %}
     {% endif %}
   </p>

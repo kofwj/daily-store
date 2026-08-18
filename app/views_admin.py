@@ -300,7 +300,14 @@ def register_admin(app) -> None:
             all_stores = accessible_stores(conn)
             scope = request_scope(all_stores)
             stores = scope["stores"]
-            store_ids = scope["ids"]
+            advisor = (request.args.get("advisor") or "").strip()
+            if advisor not in ("yes", "no"):
+                advisor = ""
+            if advisor == "yes":
+                stores = [s for s in stores if (s["advisor_name"] or "").strip()]
+            elif advisor == "no":
+                stores = [s for s in stores if not (s["advisor_name"] or "").strip()]
+            store_ids = [int(s["id"]) for s in stores]
             month_start = as_of.replace(day=1)
             this_start, this_end = insights.week_span(as_of)
             prev_start, prev_end = insights.prev_week_span(as_of)
@@ -329,8 +336,13 @@ def register_admin(app) -> None:
                 reported_today=reported_today,
                 reported_month=reported_month,
             )
+            if advisor == "yes":
+                scope["label"] = scope["label"] + " · 有顾问"
+            elif advisor == "no":
+                scope["label"] = scope["label"] + " · 无顾问"
             payload.update({
                 "scope": scope,
+                "advisor": advisor,
                 "show_idle": (request.args.get("idle") or "").strip() == "1",
             })
             return render_template("insights.html", **payload)

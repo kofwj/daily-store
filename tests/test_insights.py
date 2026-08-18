@@ -82,5 +82,8 @@ def test_insights_page_admin_only(app_client):
     assert "分店明细" in page
     assert "区域经理" in page
     assert "运营商顾问" in page
+    assert "只看有顾问" in page
     assert "insight-metric-h" in page
     assert "复制文案" not in page
+    filtered = app_client.get("/insights?advisor=yes").get_data(as_text=True)
+    assert 'value="yes"' in filtered
