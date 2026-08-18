@@ -73,8 +73,12 @@ def test_save_invoice_and_export_matches_template(app_client):
     assert detail["C17"].value == "=酬金开票申请!E9"
     assert detail["B28"].value == "其他业务"
     assert detail["C28"].value == "=酬金开票申请!E10"
-    assert "*生产生活服务*服务费4854.09" in (detail["A31"].value or "")
-    assert "*生产生活服务*手续费 1497.50" in (detail["A32"].value or "")
+    assert "D1:D29" in [str(r) for r in detail.merged_cells.ranges]
+    summary = detail["D1"].value or ""
+    assert "*生产生活服务*服务费4854.09  元" in summary
+    assert "*生产生活服务*手续费 1497.50  元" in summary
+    assert detail["D1"].alignment.horizontal == "center"
+    assert detail["D1"].alignment.vertical == "center"
     lease = wb["租赁发票开票申请"]
     assert lease["D9"].value in (None, "")
 

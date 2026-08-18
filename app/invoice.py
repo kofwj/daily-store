@@ -10,6 +10,7 @@ from typing import Any, Dict, Mapping, Optional
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from openpyxl import load_workbook
+from openpyxl.styles import Alignment, Font
 
 from . import db
 from .db_invoice import get_invoice_month, month_key
@@ -200,10 +201,20 @@ def build_invoice_xlsx(
     detail["C28"] = "=酬金开票申请!E10"
     detail["C28"].number_format = "0.00"
     detail["C29"].number_format = "0.00"
+    bits = []
     if service:
-        detail["A31"] = f"*生产生活服务*服务费{service:.2f}  元"
+        bits.append(f"*生产生活服务*服务费{service:.2f}  元")
     if fee:
-        detail["A32"] = f"*生产生活服务*手续费 {fee:.2f}  元"
+        bits.append(f"*生产生活服务*手续费 {fee:.2f}  元")
+    merged = "D1:D29"
+    if merged in [str(r) for r in detail.merged_cells.ranges]:
+        detail.unmerge_cells(merged)
+    for cell in detail["D1":"D29"]:
+        cell[0].value = None
+    detail.merge_cells(merged)
+    detail["D1"] = "\n".join(bits) if bits else None
+    detail["D1"].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    detail["D1"].font = Font(name="宋体", size=12)
 
     buf = BytesIO()
     wb.save(buf)
