@@ -480,8 +480,15 @@ def summary(
     *,
     day_deal: Tuple[int, int] = (0, 0),
     month_deal: Tuple[int, int] = (0, 0),
+    template: str = "",
 ) -> str:
-    """可贴群复盘：今日销量 + 单项表扬 + 本月累计 / 标杆。"""
+    """可贴群复盘：今日销量 + 单项表扬 + 本月累计 / 标杆。
+
+    template 非空时按自定义模板渲染，空则用内置默认格式。
+    占位符：{head},{day_ai},{day_bisuan},{day_coin},{day_count},{day_closed},
+    {praise},{month_ai},{month_bisuan},{month_coin},{month_count},{month_closed},
+    {top_name},{top_detail},{month_bits},{mobile_compare}
+    """
     if not rows:
         return f"{biz_date.isoformat()} 暂无门店通报数据。"
     total = totals_row(rows)
@@ -540,29 +547,53 @@ def summary(
     day_bisuan_text = fmt_metric("bisuan", day_bisuan)
     month_bisuan_text = fmt_metric("bisuan", month_bisuan)
     top_bisuan_text = fmt_metric("bisuan", _metric(top, "month_bisuan"))
+    praise_text = ("表扬\n" + "\n".join(praise)) if praise else "表扬：今日暂无单项破零，继续加油"
+    month_bits_text = ("单项第一：" + " · ".join(month_bits)) if month_bits else ""
+    top_detail = (
+        f"{top_name}（AI {top['month_ai']}，笔算 {top_bisuan_text}，直降 {top.get('month_coin') or 0}）"
+    )
+    mobile_compare = _mobile_compare_block(rows, biz_date)
+    tokens = {
+        "head": head,
+        "day_ai": str(day_ai),
+        "day_bisuan": day_bisuan_text,
+        "day_coin": str(day_coin),
+        "day_count": str(day_count),
+        "day_closed": str(day_closed),
+        "praise": praise_text,
+        "month_ai": str(month_ai),
+        "month_bisuan": month_bisuan_text,
+        "month_coin": str(month_coin),
+        "month_count": str(month_count),
+        "month_closed": str(month_closed),
+        "top_name": top_name,
+        "top_detail": top_detail,
+        "month_bits": month_bits_text,
+        "mobile_compare": mobile_compare,
+    }
+    custom = (template or "").strip()
+    if custom:
+        return _render_review_template(custom, tokens)
     lines = [
         head,
         "【今日】",
         f"销量：AI {day_ai} · 笔算 {day_bisuan_text} · 直降 {day_coin}",
         f"触客：{day_count} 笔（成交 {day_closed}）",
+        praise_text,
+        "【本月】",
+        f"累计：AI {month_ai} · 笔算 {month_bisuan_text} · 直降 {month_coin}",
+        f"触客：{month_count} 笔（成交 {month_closed}）",
+        f"综合标杆：{top_detail}",
     ]
-    if praise:
-        lines.append("表扬")
-        lines.extend(praise)
-    else:
-        lines.append("表扬：今日暂无单项破零，继续加油")
-    lines.extend(
-        [
-            "【本月】",
-            f"累计：AI {month_ai} · 笔算 {month_bisuan_text} · 直降 {month_coin}",
-            f"触客：{month_count} 笔（成交 {month_closed}）",
-            f"综合标杆：{top_name}（AI {top['month_ai']}，笔算 {top_bisuan_text}，直降 {top.get('month_coin') or 0}）",
-        ]
-    )
-    if month_bits:
-        lines.append("单项第一：" + " · ".join(month_bits))
-    # 今天的移动取数更新到今天时，复盘才带合计+分店对照；
-    # 今天没更新（截止日早于通报表日）就不放对照，避免拿旧数当今天的对比
+    if month_bits_text:
+        lines.append(month_bits_text)
+    if mobile_compare:
+        lines.append(mobile_compare)
+    return "\n".join(lines)
+
+
+def _mobile_compare_block(rows: Sequence[Mapping[str, Any]], biz_date: date) -> str:
+    """今天更新了移数才出对照段，否则空串。"""
     updated_today = any(
         (r.get("month_bisuan_asof") or "").strip()[:10] == biz_date.isoformat()
         for r in rows
@@ -593,22 +624,36 @@ def summary(
             f"{_row_name(r)} 上报{fmt_metric('bisuan', rep_i)} "
             f"移{fmt_metric('bisuan', mob_i)} {gap}"
         )
-    if mobile_lines:
-        if asof_label:
-            # asof_label 形如 至8/16 → 移动数据更新至8/16
-            day_bit = asof_label[1:] if asof_label.startswith("至") else asof_label
-            asof_bit = f"（移动数据更新至{day_bit}）"
-        else:
-            asof_bit = ""
-        tot_diff = mobile_sum - report_asof_sum
-        tot_sign = "+" if tot_diff > 0 else ""
-        tot_gap = (
-            f"差{tot_sign}{fmt_metric('bisuan', tot_diff)}" if tot_diff != 0 else "已对齐"
-        )
-        lines.append(
-            f"笔算移取{asof_bit}：移 {fmt_metric('bisuan', mobile_sum)} · "
-            f"上报同期 {fmt_metric('bisuan', report_asof_sum)} · {tot_gap}"
-        )
-        lines.append("分店对照：")
-        lines.extend(mobile_lines)
-    return "\n".join(lines)
+    if not mobile_lines:
+        return ""
+    if asof_label:
+        day_bit = asof_label[1:] if asof_label.startswith("至") else asof_label
+        asof_bit = f"（移动数据更新至{day_bit}）"
+    else:
+        asof_bit = ""
+    tot_diff = mobile_sum - report_asof_sum
+    tot_sign = "+" if tot_diff > 0 else ""
+    tot_gap = f"差{tot_sign}{fmt_metric('bisuan', tot_diff)}" if tot_diff != 0 else "已对齐"
+    head_line = (
+        f"笔算移取{asof_bit}：移 {fmt_metric('bisuan', mobile_sum)} · "
+        f"上报同期 {fmt_metric('bisuan', report_asof_sum)} · {tot_gap}"
+    )
+    return "\n".join([head_line, "分店对照：", *mobile_lines])
+
+
+def _render_review_template(template: str, tokens: Mapping[str, str]) -> str:
+    text = template
+    for key, value in tokens.items():
+        text = text.replace("{" + key + "}", value or "")
+    # 去掉空占位留下的连续空行
+    lines = [ln.rstrip() for ln in text.splitlines()]
+    out: List[str] = []
+    blank = False
+    for ln in lines:
+        if ln.strip():
+            out.append(ln)
+            blank = False
+        elif not blank:
+            out.append("")
+            blank = True
+    return "\n".join(out).strip()

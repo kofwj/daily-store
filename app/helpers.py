@@ -58,6 +58,43 @@ def parse_brand_form(form) -> Dict[str, str]:
     return brand
 
 
+DEFAULT_COMPANY_NAMES = {
+    "nt": "南通运营公司",
+    "tz": "泰州运营公司",
+}
+_COMPANY_LIMIT = 30
+
+
+def company_names(conn=None) -> Dict[str, str]:
+    """垫资汇总表按地市归类的两家公司名（南通/泰州）。"""
+    if conn is None:
+        with db.get_db() as owned:
+            return company_names(owned)
+    out = {}
+    for key, default in DEFAULT_COMPANY_NAMES.items():
+        raw = db.get_setting(conn, f"org_name_{key}", "")
+        text = " ".join((raw or "").split())[:_COMPANY_LIMIT]
+        out[key] = text or default
+    return out
+
+
+def parse_company_names(form) -> Dict[str, str]:
+    out = {}
+    for key in DEFAULT_COMPANY_NAMES:
+        raw = form.get(f"org_name_{key}") or ""
+        text = " ".join((raw or "").split())[:_COMPANY_LIMIT]
+        out[key] = text or DEFAULT_COMPANY_NAMES[key]
+    return out
+
+
+def review_template_setting(conn=None) -> str:
+    """自定义复盘模板；空串表示用内置默认。"""
+    if conn is None:
+        with db.get_db() as owned:
+            return review_template_setting(owned)
+    return (db.get_setting(conn, "review_template", "") or "").strip()
+
+
 def load_user() -> None:
     g.user = None
     uid = session.get("user_id")

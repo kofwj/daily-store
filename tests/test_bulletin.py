@@ -306,6 +306,16 @@ def test_summary_review_text():
     )
     assert "今日暂无单项破零" in empty
     assert summary([], date(2026, 8, 13)) == "2026-08-13 暂无门店通报数据。"
+    custom = summary(
+        rows,
+        date(2026, 8, 17),
+        "南通",
+        template="{head}\n今日AI {day_ai}\n{praise}\n标杆 {top_name}",
+    )
+    assert custom.startswith("2026-08-17 南通vivo零售运营中心")
+    assert "今日AI 5" in custom
+    assert "标杆 示例丙店" in custom
+    assert "【本月】" not in custom
 
 
 def test_build_row_short_name_from_row(tmp_db):

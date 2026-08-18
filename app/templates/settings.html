@@ -605,6 +605,25 @@
     </form>
     {% endif %}
 
+    {% if tab == 'review' and g.user['role'] == 'admin' %}
+    <div class="settings-page-head">
+      <h1>复盘 / 公司名</h1>
+      <p class="muted">通报表复盘文案可自定义；垫资导出按地市汇总用公司名。</p>
+    </div>
+    <form method="post" class="card settings-card">
+      <input type="hidden" name="action" value="save_review">
+      <input type="hidden" name="tab" value="review">
+      <h2>垫资导出公司名</h2>
+      <p class="muted">南通各店汇总一行、泰州各店汇总一行。以前写死「示例公司甲/乙」，现在这里改。</p>
+      <p><label>南通公司名</label><input name="org_name_nt" value="{{ company_form.nt }}" maxlength="30" required></p>
+      <p><label>泰州公司名</label><input name="org_name_tz" value="{{ company_form.tz }}" maxlength="30" required></p>
+      <h2>通报表复盘模板</h2>
+      <p class="muted">留空用内置默认。可用占位符：<code>{head}</code> <code>{day_ai}</code> <code>{day_bisuan}</code> <code>{day_coin}</code> <code>{day_count}</code> <code>{day_closed}</code> <code>{praise}</code> <code>{month_ai}</code> <code>{month_bisuan}</code> <code>{month_coin}</code> <code>{month_count}</code> <code>{month_closed}</code> <code>{top_name}</code> <code>{top_detail}</code> <code>{month_bits}</code> <code>{mobile_compare}</code></p>
+      <p><label>模板正文</label><textarea name="review_template" rows="16" placeholder="留空 = 用系统默认复盘">{{ review_template }}</textarea></p>
+      <div class="toolbar"><button type="submit">保存</button></div>
+    </form>
+    {% endif %}
+
     {% if tab == 'brand' and g.user['role'] == 'admin' %}
     <div class="settings-page-head">
       <h1>登录页</h1>

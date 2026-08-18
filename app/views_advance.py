@@ -16,6 +16,7 @@ from .helpers import (
     _xlsx_safe,
     accessible_stores,
     admin_required,
+    company_names,
     login_required,
     pagination,
     parse_date,
@@ -405,11 +406,12 @@ def register_advance(app) -> None:
         with db.get_db() as conn:
             stores = accessible_stores(conn)
             rows = db.list_all_advances(conn, month, month_end)
-        data = _build_advance_xlsx(stores, rows, month)
+            data = _build_advance_xlsx(stores, rows, month, conn)
         return xlsx_response(data, f"advance_{month.strftime('%Y_%m')}.xlsx")
 
 
-def _build_advance_xlsx(stores, rows, month: date) -> bytes:
+def _build_advance_xlsx(stores, rows, month: date, conn=None) -> bytes:
+    organ_names = company_names(conn)
     by_store: Dict[int, List[Any]] = defaultdict(list)
     for row in rows:
         by_store[int(row["store_id"])].append(row)
@@ -452,7 +454,7 @@ def _build_advance_xlsx(stores, rows, month: date) -> bytes:
         excel_row += 1
         _write_store_sheet(wb, store, items, header_fill, header_font, total_fill)
     if nt_rows:
-        summary.cell(excel_row, 1, _xlsx_safe("示例公司甲"))
+        summary.cell(excel_row, 1, _xlsx_safe(organ_names["nt"]))
         for col, letter in enumerate(["B", "C", "D", "E", "F"], start=2):
             joined = "+".join(f"{letter}{r}" for r in nt_rows)
             cell = summary.cell(excel_row, col, "=" + joined)
@@ -460,7 +462,7 @@ def _build_advance_xlsx(stores, rows, month: date) -> bytes:
             cell.font = Font(bold=True)
         excel_row += 1
     if tz_rows:
-        summary.cell(excel_row, 1, _xlsx_safe("示例公司乙"))
+        summary.cell(excel_row, 1, _xlsx_safe(organ_names["tz"]))
         for col, letter in enumerate(["B", "C", "D", "E", "F"], start=2):
             joined = "+".join(f"{letter}{r}" for r in tz_rows)
             cell = summary.cell(excel_row, col, "=" + joined)

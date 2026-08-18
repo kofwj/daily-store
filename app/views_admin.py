@@ -21,6 +21,7 @@ from .helpers import (
     parse_date,
     readonly_required,
     request_scope,
+    review_template_setting,
     sql_in,
     store_forecast,
     store_label,
@@ -350,7 +351,14 @@ def register_admin(app) -> None:
             day_deal_sum = (sum(d["total"] for d in day_deal.values()), sum(d["closed"] for d in day_deal.values()))
             month_deal_sum = (sum(d["total"] for d in month_deal.values()), sum(d["closed"] for d in month_deal.values()))
             review = (
-                bulletin.summary(rows, biz_date, title_city, day_deal=day_deal_sum, month_deal=month_deal_sum)
+                bulletin.summary(
+                    rows,
+                    biz_date,
+                    title_city,
+                    day_deal=day_deal_sum,
+                    month_deal=month_deal_sum,
+                    template=review_template_setting(conn),
+                )
                 if rows
                 else ""
             )

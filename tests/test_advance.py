@@ -126,6 +126,9 @@ def test_admin_can_save_without_phone_and_fills_settlement(tmp_db):
     assert "汇总表" in book.sheetnames
     assert "示例甲店" in book.sheetnames
     assert book["示例甲店"]["H3"].value == "芝麻服务费"
+    names = [row[0] for row in book["汇总表"].iter_rows(min_col=1, max_col=1, values_only=True)]
+    assert "示例公司甲" not in names
+    assert "南通运营公司" in names or any("南通" in str(n) for n in names if n)
 
 
 def test_filler_rejects_future_and_nonfinite_amounts(client):

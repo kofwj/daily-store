@@ -11,9 +11,12 @@ from .helpers import (
     admin_required,
     ascii_filename,
     brand_settings,
+    company_names,
     incentive_rules,
     login_required,
     parse_brand_form,
+    parse_company_names,
+    review_template_setting,
     store_label,
 )
 from .metrics_seed import KPI_TARGETS
@@ -21,7 +24,18 @@ from .metrics_seed import KPI_TARGETS
 
 def _settings_tab() -> str:
     tab = request.values.get("tab") or "account"
-    allowed = {"account", "people", "stores", "targets", "permissions", "broadcast", "rules", "brand", "backup"}
+    allowed = {
+        "account",
+        "people",
+        "stores",
+        "targets",
+        "permissions",
+        "broadcast",
+        "rules",
+        "review",
+        "brand",
+        "backup",
+    }
     if tab not in allowed:
         return "account"
     if g.user["role"] != "admin" and tab != "account":
@@ -241,6 +255,12 @@ def register_settings(app) -> None:
                         for key, value in brand.items():
                             db.set_setting(conn, f"brand_{key}", value)
                         flash("登录页标题已保存", "ok")
+                    elif action == "save_review":
+                        names = parse_company_names(request.form)
+                        for key, value in names.items():
+                            db.set_setting(conn, f"org_name_{key}", value)
+                        db.set_setting(conn, "review_template", (request.form.get("review_template") or "").rstrip())
+                        flash("复盘模板和公司名已保存", "ok")
                     elif action == "save_broadcast":
                         compact = "1" if request.form.get("broadcast_compact") == "1" else "0"
                         family = "1" if request.form.get("broadcast_compact_family") == "1" else "0"
@@ -375,5 +395,7 @@ def register_settings(app) -> None:
                 },
                 incentive_rules=incentive_rules(conn),
                 brand_form=brand_settings(conn),
+                company_form=company_names(conn),
+                review_template=review_template_setting(conn),
                 backups=backup.list_backups() if g.user["role"] == "admin" else [],
             )
