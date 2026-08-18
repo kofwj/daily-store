@@ -70,6 +70,27 @@ def _ensure_invoice_tables(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS invoice_edits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            store_id INTEGER NOT NULL REFERENCES stores(id),
+            user_id INTEGER REFERENCES users(id),
+            month TEXT NOT NULL,
+            edited_at TEXT NOT NULL,
+            action TEXT NOT NULL DEFAULT '',
+            before_json TEXT NOT NULL DEFAULT '',
+            after_json TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_invoice_edits_store_month ON invoice_edits(store_id, month)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_invoice_edits_edited_at ON invoice_edits(edited_at DESC, id DESC)"
+    )
 
 
 def month_key(as_of: date) -> str:
@@ -92,6 +113,42 @@ def empty_invoice(store_id: int, month: str) -> Dict[str, Any]:
         "lease_period": "",
         "apply_date": "",
     }
+
+
+def _snapshot(rec: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "service": rec.get("service") or 0,
+        "fee": rec.get("fee") or 0,
+        "housing": rec.get("housing") or 0,
+        "apply_date": rec.get("apply_date") or "",
+        "invoice_total": rec.get("invoice_total") or 0,
+    }
+
+
+def _audit(
+    conn,
+    *,
+    store_id: int,
+    user_id: int,
+    month: str,
+    action: str,
+    before: Dict[str, Any],
+    after: Dict[str, Any],
+) -> None:
+    conn.execute(
+        """INSERT INTO invoice_edits(
+            store_id, user_id, month, edited_at, action, before_json, after_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            int(store_id),
+            int(user_id) if user_id else None,
+            month,
+            _now(),
+            action,
+            json.dumps(before, ensure_ascii=False, default=str),
+            json.dumps(after, ensure_ascii=False, default=str),
+        ),
+    )
 
 
 def _row_to_invoice(row) -> Dict[str, Any]:
@@ -160,7 +217,9 @@ def save_invoice_month(
     lease_address: str = "",
     lease_period: str = "",
     apply_date: str = "",
+    user_id: int = 0,
 ) -> Dict[str, Any]:
+    before = get_invoice_month(conn, store_id, month)
     payload = {
         "service_cents": yuan_to_cents(parse_money(service)),
         "fee_cents": yuan_to_cents(parse_money(fee)),
@@ -206,10 +265,24 @@ def save_invoice_month(
             payload["updated_at"],
         ),
     )
-    return get_invoice_month(conn, store_id, month)
+    after = get_invoice_month(conn, store_id, month)
+    if user_id:
+        action = "create" if not before.get("id") else "update"
+        _audit(
+            conn,
+            store_id=store_id,
+            user_id=user_id,
+            month=month,
+            action=action,
+            before=_snapshot(before) if before.get("id") else {},
+            after=_snapshot(after),
+        )
+    return after
 
 
-def save_invoice_from_form(conn: sqlite3.Connection, store_id: int, month: str, form) -> Dict[str, Any]:
+def save_invoice_from_form(
+    conn: sqlite3.Connection, store_id: int, month: str, form, user_id: int = 0
+) -> Dict[str, Any]:
     return save_invoice_month(
         conn,
         store_id,
@@ -218,11 +291,45 @@ def save_invoice_from_form(conn: sqlite3.Connection, store_id: int, month: str, 
         fee=form.get("fee"),
         housing=form.get("housing"),
         apply_date=form.get("apply_date") or "",
+        user_id=user_id,
     )
 
 
-def delete_invoice_month(conn: sqlite3.Connection, store_id: int, month: str) -> None:
+def invoice_diff(before: Dict[str, Any], after: Dict[str, Any]) -> str:
+    labels = {
+        "service": "服务费",
+        "fee": "手续费",
+        "housing": "房补",
+        "apply_date": "申请日",
+    }
+    parts = []
+    for key, label in labels.items():
+        b = before.get(key) or (0 if key != "apply_date" else "")
+        a = after.get(key) or (0 if key != "apply_date" else "")
+        if b == a:
+            continue
+        if key == "apply_date":
+            parts.append(f"{label} {b or '空'}→{a or '空'}")
+        else:
+            parts.append(f"{label} {float(b):.2f}→{float(a):.2f}")
+    return "；".join(parts) or "（无变化）"
+
+
+def delete_invoice_month(
+    conn: sqlite3.Connection, store_id: int, month: str, user_id: int = 0
+) -> None:
+    before = get_invoice_month(conn, store_id, month)
     conn.execute(
         "DELETE FROM invoice_months WHERE store_id=? AND month=?",
         (int(store_id), month),
     )
+    if user_id and before.get("id"):
+        _audit(
+            conn,
+            store_id=store_id,
+            user_id=user_id,
+            month=month,
+            action="delete",
+            before=_snapshot(before),
+            after={},
+        )

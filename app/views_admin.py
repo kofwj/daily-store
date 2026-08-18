@@ -653,11 +653,14 @@ def register_admin(app) -> None:
                 flash("没有可开票的门店", "error")
                 return redirect(url_for("incentive_page", month=month_text))
             if request.method == "POST":
+                uid = int(g.user["id"])
                 if (request.form.get("action") or "save") == "delete":
-                    db.delete_invoice_month(conn, int(store["id"]), month_text)
+                    db.delete_invoice_month(conn, int(store["id"]), month_text, user_id=uid)
                     flash("开票申请已删除", "ok")
                 else:
-                    db.save_invoice_from_form(conn, int(store["id"]), month_text, request.form)
+                    db.save_invoice_from_form(
+                        conn, int(store["id"]), month_text, request.form, user_id=uid
+                    )
                     flash("开票申请已保存", "ok")
                 return redirect(
                     url_for("invoice_page", month=month_text, store_id=store["id"])
@@ -716,7 +719,7 @@ def register_admin(app) -> None:
         store_id = request.args.get("store_id", "")
         days = request.args.get("days", "7")
         kind = request.args.get("kind", "all")
-        if kind not in ("all", "daily", "deal", "advance"):
+        if kind not in ("all", "daily", "deal", "advance", "invoice"):
             kind = "all"
         try:
             days_int = max(1, min(int(days), 90))
@@ -788,6 +791,23 @@ def register_admin(app) -> None:
                 "LEFT JOIN users u ON u.id=an.user_id WHERE " + w
             )
             params += ps
+        if kind in ("invoice", "all"):
+            w = "inv.edited_at >= ?"
+            ps = [cutoff]
+            if sid:
+                w += " AND inv.store_id=?"
+                ps.append(sid)
+            elif scoped_ids:
+                clause, ids = sql_in("inv.store_id", scoped_ids)
+                w += f" AND {clause}"
+                ps.extend(ids)
+            parts.append(
+                "SELECT 'invoice' AS kind, inv.id, inv.month AS biz_date, inv.edited_at, inv.note, "
+                "inv.before_json, inv.after_json, inv.action, s.name AS store_name, u.username AS user_name "
+                "FROM invoice_edits inv LEFT JOIN stores s ON s.id=inv.store_id "
+                "LEFT JOIN users u ON u.id=inv.user_id WHERE " + w
+            )
+            params += ps
         union_sql = " UNION ALL ".join(parts) if parts else \
             "SELECT 'daily' AS kind, NULL AS id, '' AS biz_date, '' AS edited_at, '' AS note, " \
             "'{}' AS before_json, '{}' AS after_json, '' AS store_name, '' AS user_name " \
@@ -828,6 +848,11 @@ def register_admin(app) -> None:
             elif r["kind"] == "advance":
                 action = {"create": "新增垫资：", "update": "覆盖垫资：", "delete": "删除垫资：", "pay": "兑付：", "unpay": "取消兑付："}.get(r.get("action"), "垫资：")
                 r["diff"] = action + json.dumps({"before": before, "after": after}, ensure_ascii=False, default=str)
+            elif r["kind"] == "invoice":
+                action = {"create": "新增开票：", "update": "改开票：", "delete": "删除开票："}.get(
+                    r.get("action"), "开票："
+                )
+                r["diff"] = action + db.invoice_diff(before, after)
             else:
                 r["diff"] = build_diff(before, after, names)
             r["store_name"] = r["store_name"] or "?"

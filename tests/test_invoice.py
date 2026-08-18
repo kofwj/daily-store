@@ -127,5 +127,9 @@ def test_invoice_page_admin_only_save_and_delete(app_client):
     with db.get_db() as conn:
         rec = db.get_invoice_month(conn, sid, "2026-06")
     assert rec["id"] == 0
+    edits = app_client.get("/edits?kind=invoice&days=7").get_data(as_text=True)
+    assert "新增开票" in edits
+    assert "删除开票" in edits
+    assert "服务费" in edits
     settings = app_client.get("/settings?tab=invoice").get_data(as_text=True)
     assert "开票主体" in settings
