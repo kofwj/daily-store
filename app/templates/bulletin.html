@@ -58,6 +58,19 @@
     </div>
     <button type="button" class="ghost" onclick="copyReviewText()">复制文案</button>
   </div>
+  {% if is_admin %}
+  <form method="post" action="{{ url_for('bulletin_review_preset') }}" class="preset-row review-switch">
+    <input type="hidden" name="date" value="{{ biz_date.isoformat() }}">
+    <input type="hidden" name="city" value="{{ city }}">
+    {% for p in review_presets %}
+    <button type="submit" name="preset" value="{{ p.key }}" class="ghost {{ 'active' if review_preset == p.key else '' }}" title="{{ p.hint }}">{{ p.name }}</button>
+    {% endfor %}
+    {% if has_custom_review %}
+    <button type="submit" name="preset" value="custom" class="ghost {{ 'active' if review_preset == 'custom' else '' }}">我的模板</button>
+    {% endif %}
+    <a class="muted" href="{{ url_for('settings', tab='review') }}">去改模板</a>
+  </form>
+  {% endif %}
   <pre id="reviewText" class="bulletin-review-text">{{ review }}</pre>
 </div>
 {% endif %}

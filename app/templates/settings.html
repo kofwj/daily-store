@@ -618,7 +618,7 @@
       <p><label>南通公司名</label><input name="org_name_nt" value="{{ company_form.nt }}" maxlength="30" required></p>
       <p><label>泰州公司名</label><input name="org_name_tz" value="{{ company_form.tz }}" maxlength="30" required></p>
       <h2>通报表复盘模板</h2>
-      <p class="muted">留空用内置默认。点下方套用再改字，保存后通报表立刻按这套出。占位符：<code>{head}</code> <code>{day_ai}</code> <code>{day_bisuan}</code> <code>{day_coin}</code> <code>{day_count}</code> <code>{day_closed}</code> <code>{praise}</code> <code>{month_ai}</code> <code>{month_bisuan}</code> <code>{month_coin}</code> <code>{month_count}</code> <code>{month_closed}</code> <code>{top_name}</code> <code>{top_detail}</code> <code>{month_bits}</code> <code>{mobile_compare}</code></p>
+      <p class="muted">留空用内置默认。点套用再改字。通报表复盘区也可快速切换。占位符：<code>{head}</code> <code>{day_ai}</code> <code>{day_bisuan}</code> <code>{day_coin}</code> <code>{day_count}</code> <code>{day_closed}</code> <code>{day_rate}</code> <code>{praise}</code> <code>{month_ai}</code> <code>{month_bisuan}</code> <code>{month_coin}</code> <code>{month_count}</code> <code>{month_closed}</code> <code>{month_rate}</code> <code>{top_name}</code> <code>{top_detail}</code> <code>{month_bits}</code> <code>{mobile_compare}</code> <code>{missing}</code> <code>{zero_day}</code> <code>{zero_ai}</code> <code>{zero_bisuan}</code> <code>{zero_coin}</code> <code>{follow_ai_miss}</code> <code>{follow_bisuan_miss}</code> <code>{store_n}</code> <code>{submit_n}</code></p>
       <div class="preset-row">
         {% for p in review_presets %}
         <button type="button" class="ghost" title="{{ p.hint }}" onclick="applyReviewPreset('{{ p.key }}')">套用{{ p.name }}</button>

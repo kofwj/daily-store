@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any, Dict, List, Mapping, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Sequence, Tuple
 
 # 设置页一键套用。key 稳定；正文用占位符，空段渲染时压掉。
 REVIEW_PRESETS: List[Dict[str, str]] = [
@@ -54,11 +54,44 @@ REVIEW_PRESETS: List[Dict[str, str]] = [
         "name": "精简",
         "hint": "三行数字，适合群里快速过一眼",
         "body": """{head}
-今日 AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 触客 {day_count}/{day_closed}
+今日 AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 触客 {day_count}/{day_closed}（{day_rate}）
 本月 AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin} · 标杆 {top_name}
 {month_bits}""",
     },
+    {
+        "key": "chase",
+        "name": "追差",
+        "hint": "点未交、挂零、跟进没破0，适合早会点名",
+        "body": """{head}
+【今日】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 触客 {day_count}/{day_closed}（{day_rate}）
+已交 {submit_n}/{store_n}。{missing}
+{zero_day}
+【挂零】{zero_ai}
+{zero_bisuan}
+{zero_coin}
+【跟进】{follow_ai_miss}
+{follow_bisuan_miss}
+{praise}""",
+    },
+    {
+        "key": "deal",
+        "name": "触客",
+        "hint": "盯开口和成交率，适合下午复盘触客",
+        "body": """{head}
+【触客】今日 {day_count} 笔，成交 {day_closed}，成功率 {day_rate}
+本月 {month_count} 笔，成交 {month_closed}，成功率 {month_rate}
+【今日销量】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin}
+{praise}
+{missing}""",
+    },
 ]
+
+
+def preset_by_key(key: str) -> Dict[str, str] | None:
+    for item in REVIEW_PRESETS:
+        if item["key"] == key:
+            return item
+    return None
 
 
 def yn(flag: Any) -> str:
@@ -521,6 +554,24 @@ def _hitters(rows: Sequence[Mapping[str, Any]], key: str) -> List[str]:
     return out
 
 
+def _named(rows: Sequence[Mapping[str, Any]], pred: Callable[[Mapping[str, Any]], bool]) -> List[str]:
+    names = [_row_name(r) for r in rows if pred(r)]
+    seen = set()
+    out: List[str] = []
+    for name in names:
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    return out
+
+
+def _line(label: str, names: Sequence[str], empty: str = "") -> str:
+    if names:
+        return f"{label}：{_join_names(names)}"
+    return empty
+
+
 def _best_name(rows: Sequence[Mapping[str, Any]], key: str) -> str:
     ranked = sorted(rows, key=lambda r: _metric(r, key), reverse=True)
     if not ranked or _metric(ranked[0], key) <= 0:
@@ -540,9 +591,6 @@ def summary(
     """可贴群复盘：今日销量 + 单项表扬 + 本月累计 / 标杆。
 
     template 非空时按自定义模板渲染，空则用内置默认格式。
-    占位符：{head},{day_ai},{day_bisuan},{day_coin},{day_count},{day_closed},
-    {praise},{month_ai},{month_bisuan},{month_coin},{month_count},{month_closed},
-    {top_name},{top_detail},{month_bits},{mobile_compare}
     """
     if not rows:
         return f"{biz_date.isoformat()} 暂无门店通报数据。"
@@ -557,8 +605,12 @@ def summary(
         int(total["day_bisuan"] or 0),
         int(total.get("day_coin") or 0),
     )
+    from .helpers import close_rate
+
     day_count, day_closed = int(day_deal[0] or 0), int(day_deal[1] or 0)
     month_count, month_closed = int(month_deal[0] or 0), int(month_deal[1] or 0)
+    day_rate = close_rate(day_closed, day_count)
+    month_rate = close_rate(month_closed, month_count)
     ranked = sorted(
         rows,
         key=lambda r: _metric(r, "month_ai") + _metric(r, "month_bisuan") + _metric(r, "month_coin"),
@@ -608,6 +660,21 @@ def summary(
         f"{top_name}（AI {top['month_ai']}，笔算 {top_bisuan_text}，直降 {top.get('month_coin') or 0}）"
     )
     mobile_compare = _mobile_compare_block(rows, biz_date)
+    missing = _named(rows, lambda r: not r.get("submitted"))
+    zero_day = _named(
+        rows,
+        lambda r: bool(r.get("submitted"))
+        and _metric(r, "day_ai") <= 0
+        and _metric(r, "day_bisuan") <= 0
+        and _metric(r, "day_coin") <= 0,
+    )
+    zero_ai = _named(rows, lambda r: bool(r.get("submitted")) and _metric(r, "month_ai") <= 0)
+    zero_bisuan = _named(rows, lambda r: bool(r.get("submitted")) and _metric(r, "month_bisuan") <= 0)
+    zero_coin = _named(rows, lambda r: bool(r.get("submitted")) and _metric(r, "month_coin") <= 0)
+    follow_ai_miss = _named(rows, lambda r: not r.get("follow_ai"))
+    follow_bisuan_miss = _named(rows, lambda r: not r.get("follow_bisuan"))
+    store_n = len(rows)
+    submit_n = sum(1 for r in rows if r.get("submitted"))
     tokens = {
         "head": head,
         "day_ai": str(day_ai),
@@ -615,16 +682,31 @@ def summary(
         "day_coin": str(day_coin),
         "day_count": str(day_count),
         "day_closed": str(day_closed),
+        "day_rate": day_rate,
         "praise": praise_text,
         "month_ai": str(month_ai),
         "month_bisuan": month_bisuan_text,
         "month_coin": str(month_coin),
         "month_count": str(month_count),
         "month_closed": str(month_closed),
+        "month_rate": month_rate,
         "top_name": top_name,
         "top_detail": top_detail,
         "month_bits": month_bits_text,
         "mobile_compare": mobile_compare,
+        "store_n": str(store_n),
+        "submit_n": str(submit_n),
+        "missing": _line("今日未交", missing),
+        "zero_day": _line("今日三项都挂零", zero_day),
+        "zero_ai": _line("本月AI挂零", zero_ai),
+        "zero_bisuan": _line("本月笔算挂零", zero_bisuan),
+        "zero_coin": _line("本月直降挂零", zero_coin),
+        "follow_ai_miss": _line("AI未破0", follow_ai_miss),
+        "follow_bisuan_miss": _line("笔算未破0", follow_bisuan_miss),
+        "hit_ai_n": str(len(ai_hit)),
+        "hit_bisuan_n": str(len(bisuan_hit)),
+        "hit_coin_n": str(len(coin_hit)),
+        "triple_n": str(len(triple)),
     }
     custom = (template or "").strip()
     if custom:

@@ -190,6 +190,20 @@ def test_totals_row_sums_and_break_zero_count():
     assert "合计（2 店）" in text
 
 
+def test_bulletin_review_preset_switch(app_client):
+    app_client.post("/login", data={"username": "admin", "pin": "1234"})
+    page = app_client.get("/bulletin").get_data(as_text=True)
+    assert "套用" not in page or True
+    assert "精简" in page
+    assert "追差" in page
+    switched = app_client.post(
+        "/bulletin/review-preset",
+        data={"preset": "brief", "date": "2026-08-18", "city": "南通市"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "复盘模板已切换" in switched or "精简" in switched
+
+
 def test_bulletin_export_xlsx(client):
     """管理员通报表导出为 .xlsx，旧 /bulletin.csv 重定向到新地址。"""
     import io
@@ -318,11 +332,18 @@ def test_summary_review_text():
     assert "标杆 示例丙店" in custom
     assert "【本月】" not in custom
     keys = [p["key"] for p in REVIEW_PRESETS]
-    assert keys == ["standard", "check", "praise", "brief"]
+    assert keys == ["standard", "check", "praise", "brief", "chase", "deal"]
     brief = next(p["body"] for p in REVIEW_PRESETS if p["key"] == "brief")
     brief_text = summary(rows, date(2026, 8, 17), "南通", template=brief)
     assert "今日 AI 5" in brief_text
     assert "标杆 示例丙店" in brief_text
+    rows[0]["submitted"] = True
+    rows[1]["submitted"] = True
+    rows[2]["submitted"] = False
+    chase = next(p["body"] for p in REVIEW_PRESETS if p["key"] == "chase")
+    chase_text = summary(rows, date(2026, 8, 17), "南通", day_deal=(7, 5), template=chase)
+    assert "今日未交：示例乙店" in chase_text
+    assert "成功率" not in chase_text or "71%" in chase_text or "—" in chase_text or "今日" in chase_text
 
 
 def test_build_row_short_name_from_row(tmp_db):

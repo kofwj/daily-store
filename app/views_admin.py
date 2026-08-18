@@ -21,6 +21,7 @@ from .helpers import (
     parse_date,
     readonly_required,
     request_scope,
+    review_preset_key,
     review_template_setting,
     sql_in,
     store_forecast,
@@ -398,6 +399,23 @@ def register_admin(app) -> None:
             month_deal = db.deal_counts(conn, sid_list, month_start, biz_date)
             day_deal_sum = (sum(d["total"] for d in day_deal.values()), sum(d["closed"] for d in day_deal.values()))
             month_deal_sum = (sum(d["total"] for d in month_deal.values()), sum(d["closed"] for d in month_deal.values()))
+            saved_template = review_template_setting(conn)
+            saved_preset = review_preset_key(conn)
+            pick = (request.args.get("preset") or "").strip()
+            active_preset = pick or saved_preset or ("custom" if saved_template else "standard")
+            if pick == "custom":
+                template = saved_template
+            elif pick:
+                found = bulletin.preset_by_key(pick)
+                template = found["body"] if found else saved_template
+            elif saved_template:
+                template = saved_template
+                active_preset = "custom"
+            elif saved_preset:
+                found = bulletin.preset_by_key(saved_preset)
+                template = found["body"] if found else ""
+            else:
+                template = ""
             review = (
                 bulletin.summary(
                     rows,
@@ -405,7 +423,7 @@ def register_admin(app) -> None:
                     title_city,
                     day_deal=day_deal_sum,
                     month_deal=month_deal_sum,
-                    template=review_template_setting(conn),
+                    template=template,
                 )
                 if rows
                 else ""
@@ -431,8 +449,33 @@ def register_admin(app) -> None:
                 is_admin=g.user["role"] == "admin",
                 mobile_asof=mobile_asof,
                 mobile_asof_head=mobile_asof_head,
+                review_presets=bulletin.REVIEW_PRESETS,
+                review_preset=active_preset,
+                has_custom_review=bool(saved_template),
                 bulletin_title=f"{title_city}vivo零售运营中心移动业务通报表" if title_city else "移动业务通报表",
             )
+
+    @app.route("/bulletin/review-preset", methods=["POST"])
+    @admin_required
+    def bulletin_review_preset():
+        pick = (request.form.get("preset") or "").strip()
+        biz_raw = request.form.get("date") or ""
+        city = (request.form.get("city") or "").strip()
+        with db.get_db() as conn:
+            if pick == "custom":
+                db.set_setting(conn, "review_preset", "custom")
+            elif pick == "standard" or pick == "":
+                db.set_setting(conn, "review_preset", "")
+                db.set_setting(conn, "review_template", "")
+            else:
+                found = bulletin.preset_by_key(pick)
+                if not found:
+                    flash("没有这套复盘模板", "error")
+                    return redirect(url_for("bulletin_page", date=biz_raw or None, city=city or None))
+                db.set_setting(conn, "review_preset", pick)
+                db.set_setting(conn, "review_template", found["body"])
+            flash("复盘模板已切换", "ok")
+        return redirect(url_for("bulletin_page", date=biz_raw or None, city=city or None, preset=pick or None))
 
     @app.route("/bulletin/bisuan-mobile", methods=["POST"])
     @admin_required

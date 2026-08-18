@@ -259,7 +259,9 @@ def register_settings(app) -> None:
                         names = parse_company_names(request.form)
                         for key, value in names.items():
                             db.set_setting(conn, f"org_name_{key}", value)
-                        db.set_setting(conn, "review_template", (request.form.get("review_template") or "").rstrip())
+                        body = (request.form.get("review_template") or "").rstrip()
+                        db.set_setting(conn, "review_template", body)
+                        db.set_setting(conn, "review_preset", "custom" if body.strip() else "")
                         flash("复盘模板和公司名已保存", "ok")
                     elif action == "save_broadcast":
                         compact = "1" if request.form.get("broadcast_compact") == "1" else "0"

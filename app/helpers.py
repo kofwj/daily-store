@@ -95,6 +95,13 @@ def review_template_setting(conn=None) -> str:
     return (db.get_setting(conn, "review_template", "") or "").strip()
 
 
+def review_preset_key(conn=None) -> str:
+    if conn is None:
+        with db.get_db() as owned:
+            return review_preset_key(owned)
+    return (db.get_setting(conn, "review_preset", "") or "").strip()
+
+
 def load_user() -> None:
     g.user = None
     uid = session.get("user_id")
