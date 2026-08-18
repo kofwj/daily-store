@@ -112,6 +112,7 @@ def build_settlement_rows(conn, stores: Iterable[Any], as_of: date) -> List[Dict
     store_ids = [s["id"] for s in stores]
     reported_ids = db.stores_reported_in_month(conn, store_ids, as_of)
     advances = db.advance_month_totals(conn, store_ids, as_of)
+    invoices = db.list_invoice_months(conn, store_ids, as_of.strftime("%Y-%m"))
     out = []
     for store in stores:
         judged = store_forecast(
@@ -119,6 +120,7 @@ def build_settlement_rows(conn, stores: Iterable[Any], as_of: date) -> List[Dict
         )
         grade = grade_of(store)
         adv = advances.get(store["id"], {"total": 0.0})
+        inv = invoices.get(int(store["id"])) or {}
         out.append(
             {
                 "store": store,
@@ -132,6 +134,8 @@ def build_settlement_rows(conn, stores: Iterable[Any], as_of: date) -> List[Dict
                 "money_text": judged["money_text"],
                 "reported": judged.get("reported", True),
                 "advance": float(adv.get("total") or 0),
+                "invoice_total": float(inv.get("invoice_total") or 0),
+                "housing": float(inv.get("housing") or 0),
             }
         )
     return out
@@ -266,7 +270,7 @@ def build_settlement_xlsx(conn, stores: Sequence[Any], as_of: date) -> bytes:
         ("重点业务得分", "按本月 AI 台数分档（A：10/8/5/3/1；B：4/2/1）"),
         ("考核奖惩", "用系统月度考核规则（有顾问看合计，无顾问看双破 0），正数奖、负数罚"),
         ("垫资", "来自垫资台账本月合计；没有流水则留空，仍可手改"),
-        ("黄色格子", "下月初手填：开票金额、到账房补、实际搭载率；垫资有流水则系统回填"),
+        ("黄色格子", "开票/房补来自开票申请；没填仍可手改。实际搭载率另填；垫资有流水则系统回填"),
         ("搭载率", "目标默认 15%，实际搭载率由你另填"),
     ]
     note["A3"] = "项"
@@ -289,8 +293,12 @@ def _write_store_row(ws, row: int, manager: str, data: Dict[str, Any]) -> None:
     ws[f"B{row}"] = store["name"]
     ws[f"C{row}"] = grade
     ws[f"E{row}"] = data["commission_target"]
+    invoice_total = float(data.get("invoice_total") or 0)
+    housing = float(data.get("housing") or 0)
+    ws[f"F{row}"] = invoice_total or None
+    ws[f"G{row}"] = housing or None
+    ws[f"P{row}"] = None
     for col in ("F", "G", "P"):
-        ws[f"{col}{row}"] = None
         ws[f"{col}{row}"].fill = INPUT_FILL
     advance = float(data.get("advance") or 0)
     if advance:

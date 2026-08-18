@@ -342,6 +342,13 @@
               <input name="ai_target" type="number" min="0" value="{{ current_store.ai_target or 10 }}" inputmode="numeric">
             </p>
           </div>
+          <h3 class="settings-section">开票 / 租赁</h3>
+          <div class="store-editor-grid">
+            <p class="span-2"><label>发票上门店全称</label><input name="invoice_name" value="{{ current_store.invoice_name }}" placeholder="如 TZ南通市海安万达广场vivo体验店"></p>
+            <p><label>租赁面积</label><input name="lease_area" value="{{ current_store.lease_area }}" placeholder="平方米，与合同一致"></p>
+            <p><label>租赁期限</label><input name="lease_period" value="{{ current_store.lease_period }}" placeholder="如 2026-01-01至2026-12-31"></p>
+            <p class="span-2"><label>租赁地址</label><input name="lease_address" value="{{ current_store.lease_address }}" placeholder="市、区/县、街路村乡镇道巷号"></p>
+          </div>
           <div class="toolbar"><button type="submit">保存这家店</button></div>
         </form>
         {% else %}
@@ -381,6 +388,13 @@
               <label>AI 目标</label>
               <input name="ai_target" type="number" min="0" value="10" inputmode="numeric">
             </p>
+          </div>
+          <h3 class="settings-section">开票 / 租赁</h3>
+          <div class="store-editor-grid">
+            <p class="span-2"><label>发票上门店全称</label><input name="invoice_name" placeholder="空则用店名"></p>
+            <p><label>租赁面积</label><input name="lease_area" placeholder="平方米"></p>
+            <p><label>租赁期限</label><input name="lease_period"></p>
+            <p class="span-2"><label>租赁地址</label><input name="lease_address"></p>
           </div>
           <div class="toolbar"><button type="submit">添加</button></div>
         </form>
@@ -641,6 +655,32 @@
         }
       }
       </script>
+    </form>
+    {% endif %}
+
+    {% if tab == 'invoice' and g.user['role'] == 'admin' %}
+    <div class="settings-page-head">
+      <h1>开票主体</h1>
+      <p class="muted">导出酬金/租赁申请单时按地市带出销售方和购买方。购买方是移动地市公司，一般不用改。</p>
+    </div>
+    <form method="post" class="card settings-card">
+      <input type="hidden" name="action" value="save_invoice">
+      <input type="hidden" name="tab" value="invoice">
+      <p><label>经办人</label><input name="handler" value="{{ invoice_handler }}" maxlength="20" placeholder="申请单签名"></p>
+      {% for key, title in [('nt', '南通'), ('tz', '泰州')] %}
+      {% set p = invoice_parties[key] %}
+      <h2>{{ title }}</h2>
+      <p><label>销售方开票单位</label><input name="{{ key }}_seller_name" value="{{ p.seller_name }}" maxlength="40"></p>
+      <p><label>销售方税号</label><input name="{{ key }}_seller_tax" value="{{ p.seller_tax }}" maxlength="32"></p>
+      <p><label>销售方地址电话</label><input name="{{ key }}_seller_addr" value="{{ p.seller_addr }}" maxlength="80"></p>
+      <p><label>销售方开户行及账号</label><textarea name="{{ key }}_seller_bank" rows="2" maxlength="80">{{ p.seller_bank }}</textarea></p>
+      <p><label>购买方客户名称</label><input name="{{ key }}_buyer_name" value="{{ p.buyer_name }}" maxlength="40"></p>
+      <p><label>购买方税号</label><input name="{{ key }}_buyer_tax" value="{{ p.buyer_tax }}" maxlength="32"></p>
+      <p><label>购买方地址电话</label><input name="{{ key }}_buyer_addr" value="{{ p.buyer_addr }}" maxlength="80"></p>
+      <p><label>购买方开户行及账号</label><textarea name="{{ key }}_buyer_bank" rows="2" maxlength="80">{{ p.buyer_bank }}</textarea></p>
+      <p><label>收票邮箱</label><input name="{{ key }}_email" value="{{ p.email }}" maxlength="60"></p>
+      {% endfor %}
+      <div class="toolbar"><button type="submit">保存开票主体</button></div>
     </form>
     {% endif %}
 

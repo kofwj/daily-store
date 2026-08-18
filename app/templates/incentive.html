@@ -15,6 +15,7 @@
       <input type="month" name="month" value="{{ month.strftime('%Y-%m') }}" onchange="this.form.submit()">
     </label>
     <a class="btn ghost" href="{{ url_for('incentive_xlsx', month=month.strftime('%Y-%m')) }}">导出结算底稿</a>
+    <a class="btn ghost" href="{{ url_for('invoice_zip', month=month.strftime('%Y-%m')) }}">导出开票申请</a>
   </form>
 </div>
 <div class="kpi-row">
@@ -71,7 +72,7 @@
     <h2>结算底稿预览</h2>
     <a class="btn ghost" href="{{ url_for('incentive_xlsx', month=month.strftime('%Y-%m')) }}">导出 Excel</a>
   </div>
-  <p class="muted">系统已填：AI、新用户直降、考核奖惩、垫资（来自垫资台账本月合计）。黄色留空开票/房补/搭载率。本月还没交过日报的店不参与考核，奖惩记 0。</p>
+  <p class="muted">系统已填：AI、新用户直降、考核奖惩、垫资。开票/房补来自开票申请（服务费+手续费）。点「开票」填当月申请，可导出和样表同版式的 Excel。</p>
   <table class="data board-table">
     <thead>
       <tr>
@@ -87,6 +88,7 @@
         <th>房补</th>
         <th>垫资</th>
         <th>搭载率</th>
+        <th></th>
       </tr>
     </thead>
     <tbody>
@@ -103,10 +105,11 @@
         <td>{{ r.new_cut }}</td>
         <td>{{ r.ai }}</td>
         <td class="{{ 'pos' if r.reported and r.net > 0 else ('neg' if r.reported and r.net < 0 else '') }}">{% if r.reported %}{{ r.net }}{% else %}—{% endif %}</td>
-        <td class="fill"></td>
-        <td class="fill"></td>
+        <td class="fill">{% if r.invoice_total %}{{ '%.2f'|format(r.invoice_total) }}{% endif %}</td>
+        <td class="fill">{% if r.housing %}{{ '%.2f'|format(r.housing) }}{% endif %}</td>
         <td class="fill">{% if r.advance %}{{ '%.2f'|format(r.advance) }}{% endif %}</td>
         <td class="fill"></td>
+        <td><a href="{{ url_for('invoice_page', month=month.strftime('%Y-%m'), store_id=r.store.id) }}">开票</a></td>
       </tr>
       {% endfor %}
       {% endfor %}

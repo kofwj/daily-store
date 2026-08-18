@@ -14,6 +14,7 @@ app/stores_seed_local.py
 scripts/backup.env
 .pi/
 *.xlsx
+!app/invoice_templates/*.xlsx
 *.pdf
 docs/*preview*.png
 docs/*-2x.png

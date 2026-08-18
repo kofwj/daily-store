@@ -6,7 +6,7 @@ import json
 
 from flask import Response, flash, g, redirect, render_template, request, url_for
 
-from . import backup, bulletin, db, incentive
+from . import backup, bulletin, db, incentive, invoice
 from .helpers import (
     admin_required,
     ascii_filename,
@@ -33,6 +33,7 @@ def _settings_tab() -> str:
         "broadcast",
         "rules",
         "review",
+        "invoice",
         "brand",
         "backup",
     }
@@ -123,6 +124,10 @@ def register_settings(app) -> None:
                             city=request.form.get("city") or "南通市",
                             store_grade=request.form.get("store_grade") or "A",
                             ai_target=int(request.form.get("ai_target") or 10),
+                            invoice_name=request.form.get("invoice_name") or "",
+                            lease_area=request.form.get("lease_area") or "",
+                            lease_address=request.form.get("lease_address") or "",
+                            lease_period=request.form.get("lease_period") or "",
                         )
                         flash("门店已加", "ok")
                         return redirect(url_for("settings", tab="stores", store_id=new_store_id))
@@ -141,6 +146,10 @@ def register_settings(app) -> None:
                             city=request.form.get("city") or "",
                             store_grade=request.form.get("store_grade") or "A",
                             ai_target=int(request.form.get("ai_target") or 10),
+                            invoice_name=request.form.get("invoice_name") or "",
+                            lease_area=request.form.get("lease_area") or "",
+                            lease_address=request.form.get("lease_address") or "",
+                            lease_period=request.form.get("lease_period") or "",
                         )
                         flash("门店档案已改", "ok")
                         return redirect(url_for("settings", tab="stores", store_id=sid))
@@ -263,6 +272,9 @@ def register_settings(app) -> None:
                         db.set_setting(conn, "review_template", body)
                         db.set_setting(conn, "review_preset", "custom" if body.strip() else "")
                         flash("复盘模板和公司名已保存", "ok")
+                    elif action == "save_invoice":
+                        invoice.save_invoice_settings(conn, request.form)
+                        flash("开票主体已保存", "ok")
                     elif action == "save_broadcast":
                         compact = "1" if request.form.get("broadcast_compact") == "1" else "0"
                         family = "1" if request.form.get("broadcast_compact_family") == "1" else "0"
@@ -400,5 +412,7 @@ def register_settings(app) -> None:
                 company_form=company_names(conn),
                 review_template=review_template_setting(conn),
                 review_presets=bulletin.REVIEW_PRESETS,
+                invoice_parties=invoice.invoice_parties(conn),
+                invoice_handler=invoice.invoice_handler(conn),
                 backups=backup.list_backups() if g.user["role"] == "admin" else [],
             )

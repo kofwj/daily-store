@@ -9,7 +9,7 @@ from typing import Any, Dict, List
 
 from flask import Response, flash, g, redirect, render_template, request, url_for
 
-from . import bulletin, db, insights, settlement
+from . import bulletin, db, insights, invoice, settlement
 from .helpers import (
     accessible_stores,
     admin_required,
@@ -624,6 +624,85 @@ def register_admin(app) -> None:
             data = settlement.build_settlement_xlsx(conn, stores, as_of)
         filename = f"settlement_{month.strftime('%Y_%m')}.xlsx"
         return xlsx_response(data, filename)
+
+    def _incentive_month():
+        today_d = db.today_local()
+        month = parse_date(request.values.get("month"), today_d.replace(day=1)).replace(day=1)
+        if month.month == 12:
+            month_end = date(month.year + 1, 1, 1) - timedelta(days=1)
+        else:
+            month_end = date(month.year, month.month + 1, 1) - timedelta(days=1)
+        return month, min(month_end, today_d)
+
+    @app.route("/incentive/invoice", methods=["GET", "POST"])
+    @admin_required
+    def invoice_page():
+        month, as_of = _incentive_month()
+        month_text = month.strftime("%Y-%m")
+        with db.get_db() as conn:
+            stores = accessible_stores(conn)
+            by_id = {int(s["id"]): s for s in stores}
+            try:
+                sid = int(request.values.get("store_id") or 0)
+            except ValueError:
+                sid = 0
+            store = by_id.get(sid) or (stores[0] if stores else None)
+            if store is None:
+                flash("没有可开票的门店", "error")
+                return redirect(url_for("incentive_page", month=month_text))
+            if request.method == "POST":
+                db.save_invoice_from_form(conn, int(store["id"]), month_text, request.form)
+                flash("开票申请已保存", "ok")
+                return redirect(
+                    url_for("invoice_page", month=month_text, store_id=store["id"])
+                )
+            rec = db.get_invoice_month(conn, int(store["id"]), month_text)
+            return render_template(
+                "invoice.html",
+                month=month,
+                as_of=as_of,
+                store=store,
+                stores=stores,
+                rec=rec,
+                detail_groups=db.DETAIL_GROUPS,
+                party=invoice.invoice_parties(conn)[invoice.party_key_for_store(store)],
+                handler=invoice.invoice_handler(conn),
+                invoice_name=invoice.invoice_store_name(store),
+            )
+
+    @app.route("/incentive/invoice.xlsx")
+    @admin_required
+    def invoice_xlsx():
+        month, as_of = _incentive_month()
+        with db.get_db() as conn:
+            stores = accessible_stores(conn)
+            by_id = {int(s["id"]): s for s in stores}
+            try:
+                sid = int(request.args.get("store_id") or 0)
+            except ValueError:
+                sid = 0
+            store = by_id.get(sid)
+            if store is None:
+                flash("没有这家店", "error")
+                return redirect(url_for("incentive_page", month=month.strftime("%Y-%m")))
+            data = invoice.build_invoice_xlsx(conn, store, as_of)
+        return xlsx_response(data, invoice.invoice_filename(store, as_of))
+
+    @app.route("/incentive/invoices.zip")
+    @admin_required
+    def invoice_zip():
+        month, as_of = _incentive_month()
+        with db.get_db() as conn:
+            stores = accessible_stores(conn)
+            data = invoice.build_invoice_zip(conn, stores, as_of)
+        filename = f"invoices_{month.strftime('%Y_%m')}.zip"
+        from .helpers import ascii_filename
+
+        return Response(
+            data,
+            mimetype="application/zip",
+            headers={"Content-Disposition": f"attachment; filename={ascii_filename(filename)}"},
+        )
 
     @app.route("/edits")
     @admin_required

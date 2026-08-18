@@ -271,6 +271,9 @@ def init_db() -> None:
         _ensure_app_meta(conn)
         _ensure_login_attempts(conn)
         _ensure_auth_events(conn)
+        from .db_invoice import _ensure_invoice_tables
+
+        _ensure_invoice_tables(conn)
         # 种子（建表/加列/回填默认）每次幂等执行即可；真正“动数据”的迁移走 migrate() 一次
         _seed_metrics(conn)
         _seed_kpi_targets(conn)
@@ -337,6 +340,10 @@ def _ensure_store_columns(conn: sqlite3.Connection) -> None:
         "short_name": "TEXT NOT NULL DEFAULT ''",
         "store_grade": "TEXT NOT NULL DEFAULT ''",
         "ai_target": "INTEGER NOT NULL DEFAULT 0",
+        "invoice_name": "TEXT NOT NULL DEFAULT ''",
+        "lease_area": "TEXT NOT NULL DEFAULT ''",
+        "lease_address": "TEXT NOT NULL DEFAULT ''",
+        "lease_period": "TEXT NOT NULL DEFAULT ''",
     }
     for name, ddl in extra.items():
         cols = {row[1] for row in conn.execute("PRAGMA table_info(stores)")}
@@ -1337,6 +1344,10 @@ def create_store(
     short_name: str = "",
     store_grade: str = "A",
     ai_target: int = 10,
+    invoice_name: str = "",
+    lease_area: str = "",
+    lease_address: str = "",
+    lease_period: str = "",
 ) -> int:
     nxt = conn.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 AS n FROM stores").fetchone()["n"]
     store_code = (code or "").strip() or alloc_store_code(conn)
@@ -1345,8 +1356,8 @@ def create_store(
         INSERT INTO stores(
             name, code, sort_order, region_group, city, mobile_code,
             area_manager, store_manager, follow_ai, follow_bisuan, has_advisor, advisor_name, short_name,
-            store_grade, ai_target, active, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+            store_grade, ai_target, invoice_name, lease_area, lease_address, lease_period, active, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
         """,
         (
             name.strip(),
@@ -1364,6 +1375,10 @@ def create_store(
             (short_name or "").strip(),
             (store_grade or "A").strip().upper()[:1] or "A",
             max(0, int(ai_target or 10)),
+            (invoice_name or "").strip(),
+            (lease_area or "").strip(),
+            (lease_address or "").strip(),
+            (lease_period or "").strip(),
             _now(),
         ),
     )
@@ -1381,10 +1396,14 @@ def update_store_profile(
     city: Optional[str] = None,
     store_grade: Optional[str] = None,
     ai_target: Optional[int] = None,
+    invoice_name: Optional[str] = None,
+    lease_area: Optional[str] = None,
+    lease_address: Optional[str] = None,
+    lease_period: Optional[str] = None,
 ) -> None:
     name = (advisor_name or "").strip()
     row = conn.execute(
-        "SELECT region_group, city, store_grade, ai_target FROM stores WHERE id=?",
+        "SELECT region_group, city, store_grade, ai_target, invoice_name, lease_area, lease_address, lease_period FROM stores WHERE id=?",
         (store_id,),
     ).fetchone()
     if row is None:
@@ -1403,12 +1422,16 @@ def update_store_profile(
         next_ai = int(row["ai_target"] or 10)
     else:
         next_ai = max(0, int(ai_target))
+    next_invoice = invoice_name if invoice_name is not None else (row["invoice_name"] or "")
+    next_area = lease_area if lease_area is not None else (row["lease_area"] or "")
+    next_addr = lease_address if lease_address is not None else (row["lease_address"] or "")
+    next_period = lease_period if lease_period is not None else (row["lease_period"] or "")
     conn.execute(
         """
         UPDATE stores SET
             mobile_code=?, area_manager=?, store_manager=?,
             advisor_name=?, has_advisor=?, region_group=?, city=?,
-            store_grade=?, ai_target=?
+            store_grade=?, ai_target=?, invoice_name=?, lease_area=?, lease_address=?, lease_period=?
         WHERE id=?
         """,
         (
@@ -1421,6 +1444,10 @@ def update_store_profile(
             next_city,
             next_grade,
             next_ai,
+            (next_invoice or "").strip(),
+            (next_area or "").strip(),
+            (next_addr or "").strip(),
+            (next_period or "").strip(),
             store_id,
         ),
     )
