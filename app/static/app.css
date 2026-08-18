@@ -230,8 +230,37 @@ button.ghost:hover, .btn.ghost:hover { background: var(--accent-soft); }
 .review-switch { margin: 8px 0 10px; }
 .kpi-ok { background: #ecfdf5; border-color: #a7f3d0; }
 .kpi-warn { background: #fff7ed; border-color: #fed7aa; }
-.insight-stores { min-width: 720px; }
-.insight-stores thead th[colspan] { border-bottom: 0; }
+.insight-stores { min-width: 640px; }
+.insight-stores th.insight-metric-h,
+.insight-stores td.insight-metric {
+  text-align: right;
+  min-width: 108px;
+}
+.insight-now {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+.insight-sub {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.insight-flags { white-space: nowrap; }
+.insight-flags .flag {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+.insight-flags .flag-miss { background: #ffedd5; color: #9a3412; }
+.insight-flags .flag-lag { background: #f3f4f6; color: #4b5563; }
 .row-miss td { background: #fff7ed; }
 .row-lag td { background: #f8fafc; }
 table.data td.up { color: #166534; }

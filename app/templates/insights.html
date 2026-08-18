@@ -81,18 +81,11 @@
   <table class="data insight-stores">
     <thead>
       <tr>
-        <th class="left" rowspan="2">门店</th>
-        <th class="left" rowspan="2">区域经理</th>
-        <th class="left" rowspan="2">状态</th>
+        <th class="left">门店</th>
+        <th class="left">区域经理</th>
+        <th class="left">状态</th>
         {% for k in week_kpis %}
-        <th colspan="3">{{ k.name }}</th>
-        {% endfor %}
-      </tr>
-      <tr>
-        {% for k in week_kpis %}
-        <th>本周</th>
-        <th>上周</th>
-        <th>差额</th>
+        <th class="insight-metric-h">{{ k.name }}</th>
         {% endfor %}
       </tr>
     </thead>
@@ -104,17 +97,21 @@
       <tr class="{% if not r.today_ok %}row-miss{% elif r.lag_bits %}row-lag{% endif %}">
         <td class="left">{{ r.name }}</td>
         <td class="left">{{ r.manager }}</td>
-        <td class="left">{% if r.flags %}{{ r.flags|join(' · ') }}{% else %}<span class="muted">正常</span>{% endif %}</td>
+        <td class="left insight-flags">{% if r.flags %}{% for f in r.flags %}<span class="flag {{ 'flag-miss' if '未交' in f else 'flag-lag' }}">{{ f }}</span>{% endfor %}{% else %}<span class="muted">正常</span>{% endif %}</td>
         {% for w in r.week %}
-        <td>{{ w.now_text }}</td>
-        <td>{{ w.prev_text }}</td>
-        <td class="{{ 'up' if w.delta > 0 else 'down' if w.delta < 0 else '' }}">{% if w.delta > 0 %}+{% endif %}{{ w.delta_text }}</td>
+        <td class="insight-metric">
+          <div class="insight-now">{{ w.now_text }}</div>
+          <div class="insight-sub">
+            <span class="muted">上周 {{ w.prev_text }}</span>
+            <span class="{{ 'up' if w.delta > 0 else 'down' if w.delta < 0 else 'muted' }}">{% if w.delta > 0 %}+{% endif %}{{ w.delta_text }}</span>
+          </div>
+        </td>
         {% endfor %}
       </tr>
       {% endif %}
       {% endfor %}
       {% if shown.n == 0 %}
-      <tr><td class="left muted" colspan="{{ 3 + week_kpis|length * 3 }}">没有可显示的门店</td></tr>
+      <tr><td class="left muted" colspan="{{ 3 + week_kpis|length }}">没有可显示的门店</td></tr>
       {% endif %}
     </tbody>
   </table>

@@ -81,4 +81,4 @@ def test_insights_page_admin_only(app_client):
     assert "本周 vs 上周" in page
     assert "分店明细" in page
     assert "区域经理" in page
-    assert 'colspan="3"' in page
+    assert "insight-metric-h" in page
