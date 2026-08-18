@@ -243,7 +243,7 @@ button.ghost:hover, .btn.ghost:hover { background: var(--accent-soft); }
 .insight-stores .insight-metric,
 .insight-stores .insight-metric-h {
   white-space: nowrap;
-  min-width: 112px;
+  min-width: 108px;
 }
 .insight-metric {
   font-variant-numeric: tabular-nums;
@@ -296,24 +296,40 @@ table.data th, table.data td {
 }
 table.data th { color: var(--muted); font-weight: 550; font-size: 12px; }
 table.data th:first-child, table.data td:first-child { text-align: left; }
-table.data.insight-week,
-table.data.insight-stores {
+table.data.insight-week {
   width: auto;
-  margin: 0 auto;
+  min-width: 420px;
 }
 table.data.insight-week th,
-table.data.insight-week td,
-table.data.insight-stores th,
-table.data.insight-stores td {
-  text-align: center;
+table.data.insight-week td {
+  text-align: right;
   vertical-align: middle;
-  padding: 10px 16px;
+  padding: 9px 12px;
 }
 table.data.insight-week th:first-child,
-table.data.insight-week td:first-child,
-table.data.insight-stores th:first-child,
-table.data.insight-stores td:first-child {
-  text-align: center;
+table.data.insight-week td:first-child {
+  text-align: left;
+}
+table.data.insight-stores {
+  width: 100%;
+}
+table.data.insight-stores th,
+table.data.insight-stores td {
+  text-align: left;
+  vertical-align: top;
+  padding: 9px 10px;
+}
+table.data.insight-stores th:nth-child(2),
+table.data.insight-stores td:nth-child(2),
+table.data.insight-stores th:nth-child(3),
+table.data.insight-stores td:nth-child(3) {
+  color: var(--muted);
+  white-space: nowrap;
+}
+table.data.insight-stores .insight-metric-h,
+table.data.insight-stores .insight-metric {
+  text-align: right;
+  vertical-align: middle;
 }
 .progress { height: 4px; background: #eef0f3; border-radius: 99px; overflow: hidden; margin-top: 4px; }
 .progress > span { display: block; height: 100%; background: var(--ink); }
