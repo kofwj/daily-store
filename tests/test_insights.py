@@ -1,6 +1,6 @@
 from datetime import date
 
-from app.insights import build_insights
+from app.insights import build_insights, prev_week_span, week_span
 
 
 def _store(sid, name, city="南通市"):
@@ -10,6 +10,15 @@ def _store(sid, name, city="南通市"):
         "short_name": name,
         "city": city,
     }
+
+
+def test_week_span_aligns_same_weekdays():
+    as_of = date(2026, 8, 18)  # 周二
+    assert week_span(as_of) == (date(2026, 8, 17), date(2026, 8, 18))
+    assert prev_week_span(as_of) == (date(2026, 8, 10), date(2026, 8, 11))
+    monday = date(2026, 8, 17)
+    assert week_span(monday) == (date(2026, 8, 17), date(2026, 8, 17))
+    assert prev_week_span(monday) == (date(2026, 8, 10), date(2026, 8, 10))
 
 
 def test_insights_pace_week_compare_and_laggards():

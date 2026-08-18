@@ -309,12 +309,10 @@ def register_admin(app) -> None:
                 stores = [s for s in stores if ((s["city"] or "").strip() or "未分地市") == city]
             store_ids = [int(s["id"]) for s in stores]
             month_start = as_of.replace(day=1)
-            this_start = as_of - timedelta(days=as_of.weekday())
-            this_days = (as_of - this_start).days
-            prev_end = this_start - timedelta(days=1)
-            prev_start = prev_end - timedelta(days=this_days)
+            this_start, this_end = insights.week_span(as_of)
+            prev_start, prev_end = insights.prev_week_span(as_of)
             month_facts = db.range_metric_totals(conn, store_ids, month_start, as_of, insights.FACT_CODES)
-            week_facts = db.range_metric_totals(conn, store_ids, this_start, as_of, insights.FACT_CODES)
+            week_facts = db.range_metric_totals(conn, store_ids, this_start, this_end, insights.FACT_CODES)
             prev_facts = db.range_metric_totals(conn, store_ids, prev_start, prev_end, insights.FACT_CODES)
             reported_month = db.stores_reported_in_month(conn, store_ids, as_of)
             if store_ids:

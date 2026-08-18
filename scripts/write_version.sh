@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 保留 VERSION 第一行的 V 0.x.x，只刷新构建时间和 git 短哈希。
+# 每次发布把补丁号 +1（V 0.2.3 → V 0.2.4），并刷新时间和 git 短哈希。
+# 只改时间和哈希时：BUMP=0 ./scripts/write_version.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -8,6 +9,14 @@ if [[ -f VERSION ]]; then
   FIRST="$(head -n 1 VERSION | tr -d '\r')"
   NUM="$(echo "${FIRST}" | sed -E 's/^[Vv][[:space:]]*//')"
   if [[ "${NUM}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    if [[ "${BUMP:-1}" != "0" ]]; then
+      MAJOR="${NUM%%.*}"
+      REST="${NUM#*.}"
+      MINOR="${REST%%.*}"
+      PATCH="${REST#*.}"
+      PATCH=$((PATCH + 1))
+      NUM="${MAJOR}.${MINOR}.${PATCH}"
+    fi
     VER="V ${NUM}"
   fi
 fi

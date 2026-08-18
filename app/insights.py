@@ -27,17 +27,16 @@ def _store_name(store: Mapping[str, Any]) -> str:
     return (store["short_name"] or store["name"] or "").strip() or "未命名"
 
 
-def _week_span(as_of: date) -> tuple[date, date]:
+def week_span(as_of: date) -> tuple[date, date]:
+    """本周一到 as_of（含）。"""
     start = as_of - timedelta(days=as_of.weekday())
     return start, as_of
 
 
-def _prev_week_span(as_of: date) -> tuple[date, date]:
-    this_start, this_end = _week_span(as_of)
-    days = (this_end - this_start).days
-    prev_end = this_start - timedelta(days=1)
-    prev_start = prev_end - timedelta(days=days)
-    return prev_start, prev_end
+def prev_week_span(as_of: date) -> tuple[date, date]:
+    """上周一到上周同一天，和本周一到今天对齐。"""
+    this_start, this_end = week_span(as_of)
+    return this_start - timedelta(days=7), this_end - timedelta(days=7)
 
 
 def _rollup_store(facts: Mapping[str, int]) -> Dict[str, int]:
@@ -147,8 +146,8 @@ def build_insights(
         if bits:
             laggards.append({"name": _store_name(store), "bits": bits})
 
-    this_start, this_end = _week_span(as_of)
-    prev_start, prev_end = _prev_week_span(as_of)
+    this_start, this_end = week_span(as_of)
+    prev_start, prev_end = prev_week_span(as_of)
     copy_text = _copy_text(
         as_of=as_of,
         pace=pace,
