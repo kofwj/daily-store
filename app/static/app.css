@@ -230,8 +230,9 @@ button.ghost:hover, .btn.ghost:hover { background: var(--accent-soft); }
 .review-switch { margin: 8px 0 10px; }
 .kpi-ok { background: #ecfdf5; border-color: #a7f3d0; }
 .kpi-warn { background: #fff7ed; border-color: #fed7aa; }
-.insight-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-@media (max-width: 800px) { .insight-grid { grid-template-columns: 1fr; } }
+.insight-stores { min-width: 720px; }
+.row-miss td { background: #fff7ed; }
+.row-lag td { background: #f8fafc; }
 table.data td.up { color: #166534; }
 table.data td.down { color: #9f1239; }
 @media (max-width: 800px) {

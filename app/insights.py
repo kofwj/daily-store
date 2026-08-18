@@ -131,20 +131,79 @@ def build_insights(
     missing_today = [_store_name(s) for s in stores if int(s["id"]) not in reported_today]
     missing_month = [_store_name(s) for s in stores if int(s["id"]) not in reported_month]
     laggards = []
+    store_rows = []
     for store in stores:
         sid = int(store["id"])
         bits = []
+        month_bits = []
+        week_bits = []
         for code, name, _note in KPI_TARGETS:
             scale = _scale(code)
             target = int(kpi_targets.get(code, 0) or 0)
-            if not target:
-                continue
-            value = from_stored(scale, month_by_store[sid].get(code, 0))
-            progress = value / target * 100
-            if progress + LAG_POINTS < pace:
-                bits.append(f"{name} {format_display(scale, value)}/{target}（{progress:.0f}%）")
+            month_v = from_stored(scale, month_by_store[sid].get(code, 0))
+            now_v = from_stored(scale, week_by_store[sid].get(code, 0))
+            prev_v = from_stored(scale, prev_by_store[sid].get(code, 0))
+            delta = now_v - prev_v
+            week_bits.append(
+                {
+                    "code": code,
+                    "name": name,
+                    "now": now_v,
+                    "now_text": format_display(scale, now_v),
+                    "prev": prev_v,
+                    "prev_text": format_display(scale, prev_v),
+                    "delta": delta,
+                    "delta_text": format_display(scale, delta),
+                }
+            )
+            month_progress = (month_v / target * 100) if target else None
+            month_bits.append(
+                {
+                    "code": code,
+                    "name": name,
+                    "value": month_v,
+                    "value_text": format_display(scale, month_v),
+                    "target": target,
+                    "progress": month_progress,
+                }
+            )
+            if target and month_progress is not None and month_progress + LAG_POINTS < pace:
+                bits.append(f"{name} {format_display(scale, month_v)}/{target}（{month_progress:.0f}%）")
         if bits:
             laggards.append({"name": _store_name(store), "bits": bits})
+        today_ok = sid in reported_today
+        month_ok = sid in reported_month
+        flags = []
+        if not today_ok:
+            flags.append("今日未交")
+        if not month_ok:
+            flags.append("本月未交")
+        if bits:
+            flags.append("进度落后")
+        week_delta_sum = sum(item["delta"] for item in week_bits)
+        store_rows.append(
+            {
+                "id": sid,
+                "name": _store_name(store),
+                "city": (store["city"] or "").strip() or "未分地市",
+                "manager": (store["area_manager"] or "").strip() or "—",
+                "today_ok": today_ok,
+                "month_ok": month_ok,
+                "lag_bits": bits,
+                "flags": flags,
+                "week": week_bits,
+                "month": month_bits,
+                "week_delta_sum": week_delta_sum,
+            }
+        )
+    store_rows.sort(
+        key=lambda r: (
+            0 if not r["today_ok"] else 1,
+            0 if r["lag_bits"] else 1,
+            r["week_delta_sum"],
+            r["name"],
+        )
+    )
 
     this_start, this_end = week_span(as_of)
     prev_start, prev_end = prev_week_span(as_of)
@@ -173,6 +232,7 @@ def build_insights(
         "missing_today": missing_today,
         "missing_month": missing_month,
         "laggards": laggards,
+        "store_rows": store_rows,
         "n": n,
         "done_today": sum(1 for s in stores if int(s["id"]) in reported_today),
         "done_month": sum(1 for s in stores if int(s["id"]) in reported_month),
@@ -222,6 +282,4 @@ def _copy_text(
         lines.append("进度落后：")
         for item in laggards:
             lines.append(f"{item['name']} {' · '.join(item['bits'])}")
-    if not missing_today and not missing_month and not laggards:
-        lines.append("异常：暂无")
     return "\n".join(lines)

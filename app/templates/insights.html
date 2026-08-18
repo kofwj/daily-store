@@ -1,25 +1,18 @@
 {% extends "base.html" %}
+{% from "_scope_filters.html" import scope_filters %}
 {% block title %}洞察{% endblock %}
 {% block body %}
 <div class="page-head">
   <div class="page-title">
     <h1>洞察</h1>
-    <p class="muted">本月进度对时间、本周对比上周、未交和落后。给开会用，不荐股不择时。</p>
+    <p class="muted">本月进度对时间、本周对比上周同一星期几。可按地市 / 区域经理筛，下面是分店明细。</p>
   </div>
   <form method="get" class="page-filters">
     <label class="filter">
       <span>日期</span>
       <input type="date" name="date" value="{{ as_of.isoformat() }}" onchange="this.form.submit()">
     </label>
-    <label class="filter">
-      <span>地市</span>
-      <select name="city" onchange="this.form.submit()">
-        <option value="">全部</option>
-        {% for c in cities %}
-        <option value="{{ c }}" {% if c == city %}selected{% endif %}>{{ c }}</option>
-        {% endfor %}
-      </select>
-    </label>
+    {{ scope_filters(scope.cities, scope.managers, city=scope.city, manager=scope.manager) }}
     <button type="button" class="ghost" onclick="copyInsights()">复制文案</button>
   </form>
 </div>
@@ -45,8 +38,8 @@
 </div>
 
 <div class="card">
-  <h2>本周 vs 上周</h2>
-  <p class="muted">本周 {{ this_week[0].month }}/{{ this_week[0].day }}–{{ this_week[1].month }}/{{ this_week[1].day }}，对比上周同一星期几 {{ prev_week[0].month }}/{{ prev_week[0].day }}–{{ prev_week[1].month }}/{{ prev_week[1].day }}。</p>
+  <h2>本周 vs 上周 · 合计</h2>
+  <p class="muted">{{ scope.label }} · 本周 {{ this_week[0].month }}/{{ this_week[0].day }}–{{ this_week[1].month }}/{{ this_week[1].day }}，对比上周同一星期几 {{ prev_week[0].month }}/{{ prev_week[0].day }}–{{ prev_week[1].month }}/{{ prev_week[1].day }}。</p>
   <table class="data">
     <thead>
       <tr>
@@ -71,45 +64,39 @@
   </table>
 </div>
 
-<div class="insight-grid">
-  <div class="card">
-    <h2>今日未交</h2>
-    {% if missing_today %}
-    <p>{{ missing_today|join('、') }}</p>
-    {% else %}
-    <p class="muted">全部交齐</p>
-    {% endif %}
-  </div>
-  <div class="card">
-    <h2>本月还没交过</h2>
-    {% if missing_month %}
-    <p>{{ missing_month|join('、') }}</p>
-    {% else %}
-    <p class="muted">本月每家都交过</p>
-    {% endif %}
-  </div>
-</div>
-
 <div class="card">
-  <h2>进度落后</h2>
-  <p class="muted">完成率比时间进度低 15 个百分点以上的店。</p>
-  {% if laggards %}
-  <table class="data">
+  <h2>分店明细</h2>
+  <p class="muted">每家本周 vs 上周同一星期几。未交、落后写在状态列，不再单独开三块。</p>
+  <table class="data insight-stores">
     <thead>
-      <tr><th class="left">门店</th><th class="left">落后项</th></tr>
+      <tr>
+        <th class="left">门店</th>
+        <th class="left">区域经理</th>
+        <th class="left">状态</th>
+        {% for k in week_kpis %}
+        <th>{{ k.name }} 本周</th>
+        <th>上周</th>
+        <th>差额</th>
+        {% endfor %}
+      </tr>
     </thead>
     <tbody>
-      {% for item in laggards %}
-      <tr>
-        <td class="left">{{ item.name }}</td>
-        <td class="left">{{ item.bits|join(' · ') }}</td>
+      {% for r in store_rows %}
+      <tr class="{% if not r.today_ok %}row-miss{% elif r.lag_bits %}row-lag{% endif %}">
+        <td class="left">{{ r.name }}</td>
+        <td class="left">{{ r.manager }}</td>
+        <td class="left">{% if r.flags %}{{ r.flags|join(' · ') }}{% else %}<span class="muted">正常</span>{% endif %}</td>
+        {% for w in r.week %}
+        <td>{{ w.now_text }}</td>
+        <td>{{ w.prev_text }}</td>
+        <td class="{{ 'up' if w.delta > 0 else 'down' if w.delta < 0 else '' }}">{% if w.delta > 0 %}+{% endif %}{{ w.delta_text }}</td>
+        {% endfor %}
       </tr>
+      {% else %}
+      <tr><td class="left muted" colspan="{{ 3 + week_kpis|length * 3 }}">没有门店</td></tr>
       {% endfor %}
     </tbody>
   </table>
-  {% else %}
-  <p class="muted">暂无落后店</p>
-  {% endif %}
 </div>
 
 <pre id="insightText" hidden>{{ copy_text }}</pre>

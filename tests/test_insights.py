@@ -3,12 +3,13 @@ from datetime import date
 from app.insights import build_insights, prev_week_span, week_span
 
 
-def _store(sid, name, city="南通市"):
+def _store(sid, name, city="南通市", manager="张经理"):
     return {
         "id": sid,
         "name": name,
         "short_name": name,
         "city": city,
+        "area_manager": manager,
     }
 
 
@@ -56,6 +57,10 @@ def test_insights_pace_week_compare_and_laggards():
     assert week["ai_contract"]["delta"] == -1
     lag_names = [x["name"] for x in payload["laggards"]]
     assert "乙店" in lag_names
+    by_name = {r["name"]: r for r in payload["store_rows"]}
+    assert by_name["乙店"]["flags"] == ["今日未交", "本月未交", "进度落后"]
+    assert by_name["甲店"]["week"][1]["now"] == 1  # ai_contract
+    assert by_name["甲店"]["week"][1]["delta"] == -1
     assert "今日未交：乙店" in payload["copy_text"]
     assert "本月未交：乙店" in payload["copy_text"]
 
@@ -72,4 +77,5 @@ def test_insights_page_admin_only(app_client):
     assert "洞察" in page
     assert "本月时间进度" in page
     assert "本周 vs 上周" in page
-    assert "进度落后" in page
+    assert "分店明细" in page
+    assert "区域经理" in page

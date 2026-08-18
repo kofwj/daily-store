@@ -296,19 +296,11 @@ def register_admin(app) -> None:
     @admin_required
     def insights_page():
         as_of = parse_date(request.args.get("date"))
-        city = (request.args.get("city") or "").strip()
         with db.get_db() as conn:
-            stores = accessible_stores(conn)
-            cities = []
-            for s in stores:
-                city_name = (s["city"] or "").strip() or "未分地市"
-                if city_name not in cities:
-                    cities.append(city_name)
-            if city and city not in cities:
-                city = ""
-            if city:
-                stores = [s for s in stores if ((s["city"] or "").strip() or "未分地市") == city]
-            store_ids = [int(s["id"]) for s in stores]
+            all_stores = accessible_stores(conn)
+            scope = request_scope(all_stores)
+            stores = scope["stores"]
+            store_ids = scope["ids"]
             month_start = as_of.replace(day=1)
             this_start, this_end = insights.week_span(as_of)
             prev_start, prev_end = insights.prev_week_span(as_of)
@@ -337,7 +329,7 @@ def register_admin(app) -> None:
                 reported_today=reported_today,
                 reported_month=reported_month,
             )
-            payload.update({"city": city, "cities": cities})
+            payload.update({"scope": scope})
             return render_template("insights.html", **payload)
 
     @app.route("/board.xlsx")
