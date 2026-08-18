@@ -5,8 +5,8 @@
   <div class="page-title">
     <h1>月度考核</h1>
     <p class="muted">
-      截至 {{ as_of }}。考核的是 AI + 新用户直降。有顾问店看合计是否达标；无顾问店看两项都破 0。
-      新用户直降 = 充值 + 芝麻免充 + 储蓄卡冻结 + 全品类。顾问姓名在「设置 → 门店」填写，留空即无顾问。
+      截至 {{ as_of }}。考核、垫资按本月；酬金开票按上月（{{ invoice_month.strftime('%Y-%m') }}）。
+      考核看 AI + 新用户直降。有顾问店看合计是否达标；无顾问店看两项都破 0。
     </p>
   </div>
   <form method="get" class="page-filters">
@@ -15,7 +15,7 @@
       <input type="month" name="month" value="{{ month.strftime('%Y-%m') }}" onchange="this.form.submit()">
     </label>
     <a class="btn ghost" href="{{ url_for('incentive_xlsx', month=month.strftime('%Y-%m')) }}">导出结算底稿</a>
-    <a class="btn ghost" href="{{ url_for('invoice_zip', month=month.strftime('%Y-%m')) }}">导出开票申请</a>
+    <a class="btn ghost" href="{{ url_for('invoice_zip', month=invoice_month.strftime('%Y-%m')) }}">导出上月开票</a>
   </form>
 </div>
 <div class="kpi-row">
@@ -72,7 +72,7 @@
     <h2>结算底稿预览</h2>
     <a class="btn ghost" href="{{ url_for('incentive_xlsx', month=month.strftime('%Y-%m')) }}">导出 Excel</a>
   </div>
-  <p class="muted">系统已填：AI、新用户直降、考核奖惩、垫资。开票/房补来自开票申请（服务费+手续费）。点「开票」填当月申请，可导出和样表同版式的 Excel。</p>
+  <p class="muted">AI、奖惩、垫资是 {{ month.strftime('%Y-%m') }}；开票/房补是 {{ invoice_month.strftime('%Y-%m') }} 酬金申请（服务费+手续费）。点「开票」填上月申请。</p>
   <table class="data board-table">
     <thead>
       <tr>
@@ -109,7 +109,7 @@
         <td class="fill">{% if r.housing %}{{ '%.2f'|format(r.housing) }}{% endif %}</td>
         <td class="fill">{% if r.advance %}{{ '%.2f'|format(r.advance) }}{% endif %}</td>
         <td class="fill"></td>
-        <td><a href="{{ url_for('invoice_page', month=month.strftime('%Y-%m'), store_id=r.store.id) }}">开票</a></td>
+        <td><a href="{{ url_for('invoice_page', month=invoice_month.strftime('%Y-%m'), store_id=r.store.id) }}">开票</a></td>
       </tr>
       {% endfor %}
       {% endfor %}

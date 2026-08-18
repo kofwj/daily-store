@@ -599,10 +599,12 @@ def register_admin(app) -> None:
             # 结算底稿预览数据（按区域经理分组）
             settle_rows = settlement.build_settlement_rows(conn, stores, as_of)
             settle_groups = settlement.group_rows(settle_rows)
+            invoice_month = settlement.prev_month_start(month)
             return render_template(
                 "incentive.html",
                 month=month,
                 as_of=as_of,
+                invoice_month=invoice_month,
                 rows=rows,
                 totals=totals,
                 settle_groups=settle_groups,

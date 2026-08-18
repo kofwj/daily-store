@@ -99,6 +99,10 @@ def test_invoice_page_admin_only_save_and_delete(app_client):
     assert "租赁开票" not in page
     with db.get_db() as conn:
         sid = conn.execute("SELECT id FROM stores WHERE active=1 ORDER BY id LIMIT 1").fetchone()["id"]
+        db.save_invoice_month(conn, sid, "2026-07", service=10, fee=2)
+    august = app_client.get("/incentive?month=2026-08").get_data(as_text=True)
+    assert "开票/房补是 2026-07" in august
+    assert "month=2026-07" in august
     saved = app_client.post(
         "/incentive/invoice",
         data={

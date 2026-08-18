@@ -1,5 +1,8 @@
+from datetime import date
+
 from app.incentive import DEFAULTS, judge, judge_with_advisor, judge_without_advisor, money_text
 from app.metrics_seed import rollup_amount
+from app.settlement import prev_month_start
 
 
 def test_with_advisor_table():
@@ -68,6 +71,11 @@ def test_settlement_formulas_follow_confirmed_rules():
     assert "1000" in bonus_formula("I6", "B") and "1200" in bonus_formula("I6", "B")
     assert "M5>=10" in focus_score_formula("M5", "A")
     assert "M6>=4" in focus_score_formula("M6", "B")
+
+
+def test_settlement_invoice_uses_previous_month():
+    assert prev_month_start(date(2026, 8, 18)) == date(2026, 7, 1)
+    assert prev_month_start(date(2026, 1, 5)) == date(2025, 12, 1)
 
 
 def test_incentive_xlsx_exports_draft(tmp_db):
