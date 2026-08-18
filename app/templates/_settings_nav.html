@@ -1,20 +1,24 @@
 <aside class="settings-nav">
+  <div class="settings-nav-brand">
+    <strong>设置</strong>
+    <span class="muted">{% if g.user['role'] == 'admin' %}账号 · 业务 · 系统{% else %}个人账号{% endif %}</span>
+  </div>
   <div class="settings-nav-group">
     <span class="settings-nav-label">个人</span>
-    <a href="{{ url_for('settings', tab='account') }}" class="{{ 'active' if tab=='account' else '' }}">账号</a>
+    <a href="{{ url_for('settings', tab='account') }}" class="{{ 'active' if tab=='account' else '' }}">我的账号</a>
   </div>
   {% if g.user['role'] == 'admin' and not g.user['must_change_pin'] %}
   <div class="settings-nav-group">
-    <span class="settings-nav-label">管理</span>
-    <a href="{{ url_for('settings', tab='people') }}" class="{{ 'active' if tab=='people' else '' }}">账户</a>
-    <a href="{{ url_for('settings', tab='stores') }}" class="{{ 'active' if tab=='stores' else '' }}">门店</a>
+    <span class="settings-nav-label">组织</span>
+    <a href="{{ url_for('settings', tab='people') }}" class="{{ 'active' if tab=='people' else '' }}">人员账号</a>
+    <a href="{{ url_for('settings', tab='stores') }}" class="{{ 'active' if tab=='stores' else '' }}">门店档案</a>
   </div>
   <div class="settings-nav-group">
     <span class="settings-nav-label">业务</span>
     <a href="{{ url_for('settings', tab='targets') }}" class="{{ 'active' if tab=='targets' else '' }}">月目标</a>
     <a href="{{ url_for('settings', tab='rules') }}" class="{{ 'active' if tab=='rules' else '' }}">考核规则</a>
     <a href="{{ url_for('settings', tab='broadcast') }}" class="{{ 'active' if tab=='broadcast' else '' }}">播报</a>
-    <a href="{{ url_for('settings', tab='review') }}" class="{{ 'active' if tab=='review' else '' }}">复盘/公司</a>
+    <a href="{{ url_for('settings', tab='review') }}" class="{{ 'active' if tab=='review' else '' }}">复盘模板</a>
     <a href="{{ url_for('settings', tab='invoice') }}" class="{{ 'active' if tab=='invoice' else '' }}">开票主体</a>
     <a href="{{ url_for('settings', tab='permissions') }}" class="{{ 'active' if tab=='permissions' else '' }}">权限</a>
   </div>

@@ -116,7 +116,7 @@ def test_1_set_stores_persists(app_client):
     with db.get_db() as conn:
         assert db.user_store_ids(conn, uid) == [other]
     people = app_client.get("/settings?tab=people").get_data(as_text=True)
-    assert "账户" in people
+    assert "人员账号" in people
     assert "添加账号" in people
     assert "本店账号" not in people
     stores_page = app_client.get("/settings?tab=stores").get_data(as_text=True)

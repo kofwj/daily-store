@@ -3,15 +3,8 @@
 {% block title %}设置{% endblock %}
 {% block body_class %}settings-body{% endblock %}
 {% block body %}
-<div class="page-head settings-head">
-  <div class="page-title">
-    <h1>设置</h1>
-    <p class="muted">{% if g.user['role'] == 'admin' %}账号、门店、业务规则和备份{% else %}改自己的登录口令{% endif %}</p>
-  </div>
-</div>
 <div class="settings">
   {% include "_settings_nav.html" %}
-
   <div class="settings-main">
     {% if tab == 'account' %}
     <div class="settings-page-head">
@@ -59,7 +52,7 @@
 
     {% if tab == 'people' and g.user['role'] == 'admin' %}
     <div class="settings-page-head">
-      <h1>账户</h1>
+      <h1>人员账号</h1>
       <p class="muted">谁能登录、看哪家店。门店档案去「门店」页改。</p>
     </div>
     <div class="card settings-card people-card">
@@ -242,7 +235,7 @@
     {% if tab == 'stores' and g.user['role'] == 'admin' %}
     <div class="settings-page-head">
       <h1>门店</h1>
-      <p class="muted">改店档、考核口径和顾问。账号去「账户」页管。</p>
+      <p class="muted">改店档、考核口径和顾问。账号去「人员账号」页管。</p>
     </div>
     <div class="stores-desk">
       <aside class="store-list card" id="storeList">
@@ -621,7 +614,7 @@
 
     {% if tab == 'review' and g.user['role'] == 'admin' %}
     <div class="settings-page-head">
-      <h1>复盘 / 公司名</h1>
+      <h1>复盘模板</h1>
       <p class="muted">通报表复盘文案可自定义；垫资导出按地市汇总用公司名。</p>
     </div>
     <form method="post" class="card settings-card">
