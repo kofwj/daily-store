@@ -243,7 +243,6 @@ button.ghost:hover, .btn.ghost:hover { background: var(--accent-soft); }
 .insight-stores .insight-metric,
 .insight-stores .insight-metric-h {
   white-space: nowrap;
-  min-width: 108px;
 }
 .insight-metric {
   font-variant-numeric: tabular-nums;
@@ -311,13 +310,19 @@ table.data.insight-week td:first-child {
   text-align: left;
 }
 table.data.insight-stores {
-  width: 100%;
+  width: auto;
+  max-width: 100%;
 }
 table.data.insight-stores th,
 table.data.insight-stores td {
   text-align: left;
   vertical-align: top;
-  padding: 9px 10px;
+  padding: 8px 14px 8px 0;
+}
+table.data.insight-stores th:first-child,
+table.data.insight-stores td:first-child {
+  min-width: 7.5em;
+  padding-right: 20px;
 }
 table.data.insight-stores th:nth-child(2),
 table.data.insight-stores td:nth-child(2),
@@ -325,11 +330,17 @@ table.data.insight-stores th:nth-child(3),
 table.data.insight-stores td:nth-child(3) {
   color: var(--muted);
   white-space: nowrap;
+  padding-right: 18px;
+}
+table.data.insight-stores th:nth-child(3),
+table.data.insight-stores td:nth-child(3) {
+  padding-right: 28px;
 }
 table.data.insight-stores .insight-metric-h,
 table.data.insight-stores .insight-metric {
   text-align: right;
   vertical-align: middle;
+  padding: 8px 0 8px 22px;
 }
 .progress { height: 4px; background: #eef0f3; border-radius: 99px; overflow: hidden; margin-top: 4px; }
 .progress > span { display: block; height: 100%; background: var(--ink); }
