@@ -6,7 +6,7 @@ import json
 
 from flask import Response, flash, g, redirect, render_template, request, url_for
 
-from . import backup, db, incentive
+from . import backup, bulletin, db, incentive
 from .helpers import (
     admin_required,
     ascii_filename,
@@ -397,5 +397,6 @@ def register_settings(app) -> None:
                 brand_form=brand_settings(conn),
                 company_form=company_names(conn),
                 review_template=review_template_setting(conn),
+                review_presets=bulletin.REVIEW_PRESETS,
                 backups=backup.list_backups() if g.user["role"] == "admin" else [],
             )

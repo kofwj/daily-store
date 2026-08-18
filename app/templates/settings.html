@@ -618,9 +618,29 @@
       <p><label>南通公司名</label><input name="org_name_nt" value="{{ company_form.nt }}" maxlength="30" required></p>
       <p><label>泰州公司名</label><input name="org_name_tz" value="{{ company_form.tz }}" maxlength="30" required></p>
       <h2>通报表复盘模板</h2>
-      <p class="muted">留空用内置默认。可用占位符：<code>{head}</code> <code>{day_ai}</code> <code>{day_bisuan}</code> <code>{day_coin}</code> <code>{day_count}</code> <code>{day_closed}</code> <code>{praise}</code> <code>{month_ai}</code> <code>{month_bisuan}</code> <code>{month_coin}</code> <code>{month_count}</code> <code>{month_closed}</code> <code>{top_name}</code> <code>{top_detail}</code> <code>{month_bits}</code> <code>{mobile_compare}</code></p>
-      <p><label>模板正文</label><textarea name="review_template" rows="16" placeholder="留空 = 用系统默认复盘">{{ review_template }}</textarea></p>
+      <p class="muted">留空用内置默认。点下方套用再改字，保存后通报表立刻按这套出。占位符：<code>{head}</code> <code>{day_ai}</code> <code>{day_bisuan}</code> <code>{day_coin}</code> <code>{day_count}</code> <code>{day_closed}</code> <code>{praise}</code> <code>{month_ai}</code> <code>{month_bisuan}</code> <code>{month_coin}</code> <code>{month_count}</code> <code>{month_closed}</code> <code>{top_name}</code> <code>{top_detail}</code> <code>{month_bits}</code> <code>{mobile_compare}</code></p>
+      <div class="preset-row">
+        {% for p in review_presets %}
+        <button type="button" class="ghost" title="{{ p.hint }}" onclick="applyReviewPreset('{{ p.key }}')">套用{{ p.name }}</button>
+        {% endfor %}
+        <button type="button" class="ghost" onclick="applyReviewPreset('')">清空用默认</button>
+      </div>
+      <p><label>模板正文</label><textarea id="reviewTemplate" name="review_template" rows="16" placeholder="留空 = 用系统默认复盘">{{ review_template }}</textarea></p>
       <div class="toolbar"><button type="submit">保存</button></div>
+      <script id="reviewPresetsJson" type="application/json">{{ review_presets|tojson }}</script>
+      <script>
+      function applyReviewPreset(key) {
+        var el = document.getElementById('reviewTemplate');
+        if (!el) return;
+        if (!key) { el.value = ''; return; }
+        var raw = document.getElementById('reviewPresetsJson');
+        var list = [];
+        try { list = JSON.parse(raw.textContent || '[]'); } catch (e) { list = []; }
+        for (var i = 0; i < list.length; i++) {
+          if (list[i].key === key) { el.value = list[i].body || ''; return; }
+        }
+      }
+      </script>
     </form>
     {% endif %}
 

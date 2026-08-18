@@ -222,6 +222,7 @@ button.ghost:hover, .btn.ghost:hover { background: var(--accent-soft); }
 .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 12px; margin-bottom: 16px; }
 .kpi { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fafafa; }
 .kpi-num { font-size: 20px; font-weight: 650; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.preset-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
 .kpi-ok { background: #ecfdf5; border-color: #a7f3d0; }
 .kpi-warn { background: #fff7ed; border-color: #fed7aa; }
 .insight-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }

@@ -5,6 +5,61 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
+# 设置页一键套用。key 稳定；正文用占位符，空段渲染时压掉。
+REVIEW_PRESETS: List[Dict[str, str]] = [
+    {
+        "key": "standard",
+        "name": "标准",
+        "hint": "跟现在默认一样，适合每天贴群",
+        "body": """{head}
+【今日】
+销量：AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin}
+触客：{day_count} 笔（成交 {day_closed}）
+{praise}
+【本月】
+累计：AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin}
+触客：{month_count} 笔（成交 {month_closed}）
+综合标杆：{top_detail}
+{month_bits}
+{mobile_compare}""",
+    },
+    {
+        "key": "check",
+        "name": "检查",
+        "hint": "盯销量和触客，标杆放后面，适合周中盯进度",
+        "body": """{head}
+【今日核销量】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin}
+触客 {day_count} 笔，成交 {day_closed}。没量的店对照通报表未交行。
+{praise}
+【本月进度】AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin}
+标杆 {top_detail}
+{month_bits}
+{mobile_compare}""",
+    },
+    {
+        "key": "praise",
+        "name": "表彰",
+        "hint": "先点名有量的店和标杆，适合周末/冲刺",
+        "body": """{head}
+【今日表扬】
+{praise}
+综合标杆：{top_detail}
+{month_bits}
+【今日销量】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin}；触客 {day_count}（成交 {day_closed}）
+【本月累计】AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin}
+{mobile_compare}""",
+    },
+    {
+        "key": "brief",
+        "name": "精简",
+        "hint": "三行数字，适合群里快速过一眼",
+        "body": """{head}
+今日 AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 触客 {day_count}/{day_closed}
+本月 AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin} · 标杆 {top_name}
+{month_bits}""",
+    },
+]
+
 
 def yn(flag: Any) -> str:
     return "是" if int(flag or 0) else "否"

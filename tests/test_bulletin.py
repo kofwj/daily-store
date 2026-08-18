@@ -2,6 +2,7 @@ from datetime import date
 
 from app import db
 from app.bulletin import (
+    REVIEW_PRESETS,
     apply_scales,
     bisuan_total,
     build_row,
@@ -316,6 +317,12 @@ def test_summary_review_text():
     assert "今日AI 5" in custom
     assert "标杆 示例丙店" in custom
     assert "【本月】" not in custom
+    keys = [p["key"] for p in REVIEW_PRESETS]
+    assert keys == ["standard", "check", "praise", "brief"]
+    brief = next(p["body"] for p in REVIEW_PRESETS if p["key"] == "brief")
+    brief_text = summary(rows, date(2026, 8, 17), "南通", template=brief)
+    assert "今日 AI 5" in brief_text
+    assert "标杆 示例丙店" in brief_text
 
 
 def test_build_row_short_name_from_row(tmp_db):
