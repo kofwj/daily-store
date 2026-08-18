@@ -57,15 +57,27 @@ def test_default_pin_must_change_before_using_app(client):
         },
         follow_redirects=True,
     )
-    assert "不能再用系统默认口令" in reuse.get_data(as_text=True)
+    assert "至少 6 位" in reuse.get_data(as_text=True)
+    still_default = client.post(
+        "/settings",
+        data={
+            "action": "change_pin",
+            "tab": "account",
+            "old_pin": "1234",
+            "new_pin": "123456",
+            "new_pin2": "123456",
+        },
+        follow_redirects=True,
+    )
+    assert "不能再用系统默认口令" in still_default.get_data(as_text=True)
     ok = client.post(
         "/settings",
         data={
             "action": "change_pin",
             "tab": "account",
             "old_pin": "1234",
-            "new_pin": "5678",
-            "new_pin2": "5678",
+            "new_pin": "567890",
+            "new_pin2": "567890",
         },
         follow_redirects=True,
     )

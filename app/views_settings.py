@@ -61,7 +61,7 @@ def _change_own_pin() -> None:
     old = request.form.get("old_pin") or ""
     new = request.form.get("new_pin") or ""
     again = request.form.get("new_pin2") or ""
-    min_len = db.FILLER_PIN_MIN if g.user["role"] == "filler" else db.ADMIN_PIN_MIN
+    min_len = db.FILLER_PIN_MIN
     if len(new) < min_len:
         raise ValueError(f"新口令至少 {min_len} 位")
     if new != again:
@@ -210,7 +210,7 @@ def register_settings(app) -> None:
                         uid = int(request.form.get("user_id") or 0)
                         pin = request.form.get("pin") or ""
                         target = conn.execute("SELECT role FROM users WHERE id=?", (uid,)).fetchone()
-                        min_len = db.FILLER_PIN_MIN if target and target["role"] == "filler" else db.ADMIN_PIN_MIN
+                        min_len = db.FILLER_PIN_MIN
                         if len(pin) < min_len:
                             raise ValueError(f"口令至少 {min_len} 位")
                         db.update_user_pin(conn, uid, pin)

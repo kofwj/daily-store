@@ -37,14 +37,14 @@
     <div class="card settings-card">
       <div class="settings-card-head">
         <h2>改口令</h2>
-        <p class="muted">{% if g.user['must_change_pin'] %}默认口令必须改掉，也不能改回 1234 / 123456。{% else %}填报员至少 6 位，管理员至少 4 位。{% endif %}</p>
+        <p class="muted">{% if g.user['must_change_pin'] %}默认口令必须改掉，也不能改回 1234 / 123456。{% else %}新口令至少 6 位。{% endif %}</p>
       </div>
       <form method="post" class="settings-form">
         <input type="hidden" name="action" value="change_pin">
         <input type="hidden" name="tab" value="account">
         <p><label>当前口令</label><input name="old_pin" type="password" inputmode="numeric" required autocomplete="current-password"></p>
-        <p><label>新口令（{% if g.user.role == 'filler' %}6 位{% else %}至少 4 位{% endif %}）</label><input name="new_pin" type="password" inputmode="numeric" minlength="{{ 6 if g.user.role == 'filler' else 4 }}" required autocomplete="new-password"></p>
-        <p><label>再输一遍</label><input name="new_pin2" type="password" inputmode="numeric" minlength="{{ 6 if g.user.role == 'filler' else 4 }}" required autocomplete="new-password"></p>
+        <p><label>新口令（至少 6 位）</label><input name="new_pin" type="password" inputmode="numeric" minlength="6" required autocomplete="new-password"></p>
+        <p><label>再输一遍</label><input name="new_pin2" type="password" inputmode="numeric" minlength="6" required autocomplete="new-password"></p>
         <div class="toolbar"><button type="submit">保存口令</button></div>
       </form>
     </div>
@@ -134,7 +134,7 @@
                     <input type="hidden" name="action" value="reset_pin">
                     <input type="hidden" name="tab" value="people">
                     <input type="hidden" name="user_id" value="{{ u.id }}">
-                    <input name="pin" type="password" inputmode="numeric" placeholder="{{ '6 位' if u.role == 'filler' else '至少 4 位' }}" minlength="{{ 6 if u.role == 'filler' else 4 }}" required>
+                    <input name="pin" type="password" inputmode="numeric" placeholder="至少 6 位" minlength="6" required>
                     <button class="ghost" type="submit">重置口令</button>
                   </form>
                   {% if u.id != g.user.id %}
