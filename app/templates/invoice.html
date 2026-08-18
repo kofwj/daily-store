@@ -7,7 +7,10 @@
     <p class="muted">结算月 {{ month.strftime('%Y-%m') }} · {{ store.short_name or store.name }}。申请开票日可以晚于结算月。服务费进明细「套餐变更」，手续费进「其他业务」。</p>
   </div>
   <form method="get" class="page-filters">
-    <input type="hidden" name="month" value="{{ month.strftime('%Y-%m') }}">
+    <label class="filter">
+      <span>结算月</span>
+      <input type="month" name="month" value="{{ month.strftime('%Y-%m') }}" onchange="this.form.submit()">
+    </label>
     <label class="filter">
       <span>门店</span>
       <select name="store_id" onchange="this.form.submit()">
