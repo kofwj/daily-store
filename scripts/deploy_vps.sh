@@ -21,6 +21,9 @@ fi
 
 mkdir -p data
 docker compose up -d --build
+# Caddyfile 是挂载进去的，改转发头后要重载，否则登录日志仍记容器 IP。
+docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile \
+  || docker compose up -d --force-recreate caddy
 docker compose ps
 
 PORT="${CADDY_PORT:-8099}"

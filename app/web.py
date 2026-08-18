@@ -60,9 +60,9 @@ def create_app(*, testing: bool = False) -> Flask:
     app.config["SESSION_REFRESH_EACH_REQUEST"] = True
     app.config["PREFERRED_URL_SCHEME"] = "https" if secure else "http"
     app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
-    # 只有反向代理网络已被部署方明确设为可信时才接受 X-Forwarded-*。
-    # Caddy / Cloudflare Tunnel 可设置 STORE_DAILY_TRUST_PROXY=1。
-    if os.environ.get("STORE_DAILY_TRUST_PROXY", "0") == "1":
+    # 容器只对 Caddy 暴露 5055，默认信一层反代，登录日志才能记下真实 IP。
+    # 若把 app 端口直接打到公网，必须设 STORE_DAILY_TRUST_PROXY=0，否则头可被伪造。
+    if os.environ.get("STORE_DAILY_TRUST_PROXY", "1") == "1":
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     db.init_db()
 

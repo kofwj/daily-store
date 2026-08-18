@@ -73,7 +73,7 @@ LAN HTTP 仅在确认内网可信、且接受明文凭据风险时使用：
 
 ```env
 STORE_DAILY_SECURE=0
-STORE_DAILY_TRUST_PROXY=0
+STORE_DAILY_TRUST_PROXY=1
 CADDYFILE=./caddy/Caddyfile.lan
 ```
 

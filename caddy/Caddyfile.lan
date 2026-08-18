@@ -10,6 +10,7 @@
 
 	handle {
 		reverse_proxy app:5055 {
+			header_up X-Forwarded-For {remote_host}
 			header_up X-Forwarded-Proto http
 			header_up X-Forwarded-Host {host}
 			header_up X-Real-IP {remote_host}

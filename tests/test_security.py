@@ -100,6 +100,40 @@ def test_restore_rejects_sqlite_without_core_tables(tmp_db):
         assert "缺表" in str(exc)
 
 
+def test_login_log_uses_forwarded_ip_when_proxy_trusted(tmp_db, monkeypatch):
+    monkeypatch.setenv("STORE_DAILY_TRUST_PROXY", "1")
+    app = create_app()
+    app.config["TESTING"] = True
+    client = app.test_client()
+    client.post(
+        "/login",
+        data={"username": "admin", "pin": "1234"},
+        headers={"X-Forwarded-For": "203.0.113.9"},
+    )
+    with db.get_db() as conn:
+        ip = conn.execute(
+            "SELECT ip FROM auth_events WHERE action='login' ORDER BY id DESC LIMIT 1"
+        ).fetchone()["ip"]
+    assert ip == "203.0.113.9"
+
+
+def test_untrusted_proxy_ignores_forwarded_ip(tmp_db, monkeypatch):
+    monkeypatch.setenv("STORE_DAILY_TRUST_PROXY", "0")
+    app = create_app()
+    app.config["TESTING"] = True
+    client = app.test_client()
+    client.post(
+        "/login",
+        data={"username": "admin", "pin": "1234"},
+        headers={"X-Forwarded-For": "203.0.113.9"},
+    )
+    with db.get_db() as conn:
+        ip = conn.execute(
+            "SELECT ip FROM auth_events WHERE action='login' ORDER BY id DESC LIMIT 1"
+        ).fetchone()["ip"]
+    assert ip != "203.0.113.9"
+
+
 def test_successful_login_and_logout_are_logged(client):
     client.post("/login", data={"username": "admin", "pin": "1234"})
     with db.get_db() as conn:
