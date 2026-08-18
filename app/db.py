@@ -44,6 +44,7 @@ from .db_query import (  # noqa: F401
     facts_in_range,
     month_cum_through,
     prev_month_cum,
+    range_metric_totals,
     save_daily,
     set_day_value,
     stores_reported_in_month,

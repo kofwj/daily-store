@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}洞察{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div class="page-title">
+    <h1>洞察</h1>
+    <p class="muted">本月进度对时间、本周对比上周、未交和落后。给开会用，不荐股不择时。</p>
+  </div>
+  <form method="get" class="page-filters">
+    <label class="filter">
+      <span>日期</span>
+      <input type="date" name="date" value="{{ as_of.isoformat() }}" onchange="this.form.submit()">
+    </label>
+    <label class="filter">
+      <span>地市</span>
+      <select name="city" onchange="this.form.submit()">
+        <option value="">全部</option>
+        {% for c in cities %}
+        <option value="{{ c }}" {% if c == city %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="button" class="ghost" onclick="copyInsights()">复制文案</button>
+  </form>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi">
+    <div class="muted">本月时间进度</div>
+    <div class="kpi-num">{{ '%.0f'|format(pace) }}%</div>
+    <div class="muted">{{ elapsed }}/{{ days_in_month }} 天 · {{ done_month }}/{{ n }} 店交过</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">今日已交</div>
+    <div class="kpi-num">{{ done_today }}/{{ n }}</div>
+    <div class="muted">{% if missing_today %}缺 {{ missing_today|length }} 店{% else %}全交{% endif %}</div>
+  </div>
+  {% for k in kpis %}
+  <div class="kpi {% if k.gap is not none and k.gap < -15 %}kpi-warn{% elif k.gap is not none and k.gap >= 0 %}kpi-ok{% endif %}">
+    <div class="muted">{{ k.name }}</div>
+    <div class="kpi-num">{{ k.value_text }}{% if k.target %} / {{ k.target_text }}{% endif %}</div>
+    <div class="muted">{% if k.progress is not none %}完成 {{ '%.0f'|format(k.progress) }}%{% if k.gap is not none %} · 相对时间 {{ '%+.0f'|format(k.gap) }}pt{% endif %}{% else %}无目标{% endif %}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <h2>本周 vs 上周</h2>
+  <p class="muted">本周 {{ this_week[0].month }}/{{ this_week[0].day }}–{{ this_week[1].month }}/{{ this_week[1].day }}，对比上周 {{ prev_week[0].month }}/{{ prev_week[0].day }}–{{ prev_week[1].month }}/{{ prev_week[1].day }}（对齐天数）。</p>
+  <table class="data">
+    <thead>
+      <tr>
+        <th class="left">指标</th>
+        <th>本周</th>
+        <th>上周同期</th>
+        <th>差额</th>
+        <th>同比</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for k in week_kpis %}
+      <tr>
+        <td class="left">{{ k.name }}</td>
+        <td>{{ k.now_text }}</td>
+        <td>{{ k.prev_text }}</td>
+        <td class="{{ 'up' if k.delta > 0 else 'down' if k.delta < 0 else '' }}">{% if k.delta > 0 %}+{% endif %}{{ k.delta_text }}</td>
+        <td class="{{ 'up' if k.delta > 0 else 'down' if k.delta < 0 else '' }}">{% if k.delta > 0 %}+{% endif %}{{ '%.0f'|format(k.pct) }}%</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="insight-grid">
+  <div class="card">
+    <h2>今日未交</h2>
+    {% if missing_today %}
+    <p>{{ missing_today|join('、') }}</p>
+    {% else %}
+    <p class="muted">全部交齐</p>
+    {% endif %}
+  </div>
+  <div class="card">
+    <h2>本月还没交过</h2>
+    {% if missing_month %}
+    <p>{{ missing_month|join('、') }}</p>
+    {% else %}
+    <p class="muted">本月每家都交过</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>进度落后</h2>
+  <p class="muted">完成率比时间进度低 15 个百分点以上的店。</p>
+  {% if laggards %}
+  <table class="data">
+    <thead>
+      <tr><th class="left">门店</th><th class="left">落后项</th></tr>
+    </thead>
+    <tbody>
+      {% for item in laggards %}
+      <tr>
+        <td class="left">{{ item.name }}</td>
+        <td class="left">{{ item.bits|join(' · ') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">暂无落后店</p>
+  {% endif %}
+</div>
+
+<pre id="insightText" hidden>{{ copy_text }}</pre>
+<script>
+function copyInsights() {
+  const el = document.getElementById('insightText');
+  if (!el) return;
+  const text = el.innerText || el.textContent || '';
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text);
+  } else {
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    const s = window.getSelection();
+    s.removeAllRanges();
+    s.addRange(r);
+    document.execCommand('copy');
+  }
+}
+</script>
+{% endblock %}

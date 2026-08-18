@@ -1,0 +1,228 @@
+"""运营洞察：本月进度对时间、周同比、未交/落后。只读聚合，不写库。"""
+
+from __future__ import annotations
+
+import calendar
+from datetime import date, timedelta
+from typing import Any, Dict, Mapping, Sequence
+
+from .metrics_seed import KPI_TARGETS, ROLLUPS, format_display, from_stored, rollup_amount
+
+KPI_CODES = [code for code, _name, _note in KPI_TARGETS]
+FACT_CODES = (
+    "bisuan",
+    "bisuan_high",
+    "ai_contract",
+    *ROLLUPS["coin_cut"]["parts"],
+    *ROLLUPS["coin_cut"]["legacy"],
+)
+LAG_POINTS = 15  # 实际进度比时间进度落后超过 15 个百分点算落后
+
+
+def _scale(code: str) -> str:
+    return "bisuan" if code == "bisuan_total" else code
+
+
+def _store_name(store: Mapping[str, Any]) -> str:
+    return (store["short_name"] or store["name"] or "").strip() or "未命名"
+
+
+def _week_span(as_of: date) -> tuple[date, date]:
+    start = as_of - timedelta(days=as_of.weekday())
+    return start, as_of
+
+
+def _prev_week_span(as_of: date) -> tuple[date, date]:
+    this_start, this_end = _week_span(as_of)
+    days = (this_end - this_start).days
+    prev_end = this_start - timedelta(days=1)
+    prev_start = prev_end - timedelta(days=days)
+    return prev_start, prev_end
+
+
+def _rollup_store(facts: Mapping[str, int]) -> Dict[str, int]:
+    out: Dict[str, int] = {}
+    for code, _name, _note in KPI_TARGETS:
+        if code == "ai_contract":
+            out[code] = int(facts.get("ai_contract") or 0)
+        else:
+            out[code] = rollup_amount(facts, code)
+    return out
+
+
+def _sum_maps(maps: Sequence[Mapping[str, int]]) -> Dict[str, int]:
+    out = {code: 0 for code in KPI_CODES}
+    for item in maps:
+        for code in KPI_CODES:
+            out[code] += int(item.get(code) or 0)
+    return out
+
+
+def build_insights(
+    *,
+    stores: Sequence[Mapping[str, Any]],
+    as_of: date,
+    kpi_targets: Mapping[str, int],
+    month_facts: Mapping[int, Mapping[str, int]],
+    week_facts: Mapping[int, Mapping[str, int]],
+    prev_week_facts: Mapping[int, Mapping[str, int]],
+    reported_today: set,
+    reported_month: set,
+) -> Dict[str, Any]:
+    days_in_month = calendar.monthrange(as_of.year, as_of.month)[1]
+    elapsed = max(1, min(as_of.day, days_in_month))
+    pace = elapsed / days_in_month * 100
+    n = len(stores)
+    month_by_store: Dict[int, Dict[str, int]] = {}
+    week_by_store: Dict[int, Dict[str, int]] = {}
+    prev_by_store: Dict[int, Dict[str, int]] = {}
+    for store in stores:
+        sid = int(store["id"])
+        month_by_store[sid] = _rollup_store(month_facts.get(sid) or {})
+        week_by_store[sid] = _rollup_store(week_facts.get(sid) or {})
+        prev_by_store[sid] = _rollup_store(prev_week_facts.get(sid) or {})
+
+    month_total = _sum_maps(list(month_by_store.values()))
+    week_total = _sum_maps(list(week_by_store.values()))
+    prev_total = _sum_maps(list(prev_by_store.values()))
+
+    kpis = []
+    for code, name, _note in KPI_TARGETS:
+        scale = _scale(code)
+        stored = month_total.get(code, 0)
+        value = from_stored(scale, stored)
+        target_one = int(kpi_targets.get(code, 0) or 0)
+        target = target_one * n
+        progress = (value / target * 100) if target else None
+        kpis.append(
+            {
+                "code": code,
+                "name": name,
+                "value": value,
+                "value_text": format_display(scale, value),
+                "target": target,
+                "target_text": format_display(scale, target) if target else "",
+                "progress": progress,
+                "pace": pace,
+                "gap": (progress - pace) if progress is not None else None,
+            }
+        )
+
+    week_kpis = []
+    for code, name, _note in KPI_TARGETS:
+        scale = _scale(code)
+        now_v = from_stored(scale, week_total.get(code, 0))
+        prev_v = from_stored(scale, prev_total.get(code, 0))
+        delta = now_v - prev_v
+        pct = (delta / prev_v * 100) if prev_v else (100.0 if now_v else 0.0)
+        week_kpis.append(
+            {
+                "code": code,
+                "name": name,
+                "now": now_v,
+                "now_text": format_display(scale, now_v),
+                "prev": prev_v,
+                "prev_text": format_display(scale, prev_v),
+                "delta": delta,
+                "delta_text": format_display(scale, delta),
+                "pct": pct,
+            }
+        )
+
+    missing_today = [_store_name(s) for s in stores if int(s["id"]) not in reported_today]
+    missing_month = [_store_name(s) for s in stores if int(s["id"]) not in reported_month]
+    laggards = []
+    for store in stores:
+        sid = int(store["id"])
+        bits = []
+        for code, name, _note in KPI_TARGETS:
+            scale = _scale(code)
+            target = int(kpi_targets.get(code, 0) or 0)
+            if not target:
+                continue
+            value = from_stored(scale, month_by_store[sid].get(code, 0))
+            progress = value / target * 100
+            if progress + LAG_POINTS < pace:
+                bits.append(f"{name} {format_display(scale, value)}/{target}（{progress:.0f}%）")
+        if bits:
+            laggards.append({"name": _store_name(store), "bits": bits})
+
+    this_start, this_end = _week_span(as_of)
+    prev_start, prev_end = _prev_week_span(as_of)
+    copy_text = _copy_text(
+        as_of=as_of,
+        pace=pace,
+        kpis=kpis,
+        week_kpis=week_kpis,
+        missing_today=missing_today,
+        missing_month=missing_month,
+        laggards=laggards,
+        this_start=this_start,
+        this_end=this_end,
+        prev_start=prev_start,
+        prev_end=prev_end,
+    )
+    return {
+        "as_of": as_of,
+        "pace": pace,
+        "days_in_month": days_in_month,
+        "elapsed": elapsed,
+        "kpis": kpis,
+        "week_kpis": week_kpis,
+        "this_week": (this_start, this_end),
+        "prev_week": (prev_start, prev_end),
+        "missing_today": missing_today,
+        "missing_month": missing_month,
+        "laggards": laggards,
+        "n": n,
+        "done_today": sum(1 for s in stores if int(s["id"]) in reported_today),
+        "done_month": sum(1 for s in stores if int(s["id"]) in reported_month),
+        "copy_text": copy_text,
+    }
+
+
+def _copy_text(
+    *,
+    as_of: date,
+    pace: float,
+    kpis: Sequence[Mapping[str, Any]],
+    week_kpis: Sequence[Mapping[str, Any]],
+    missing_today: Sequence[str],
+    missing_month: Sequence[str],
+    laggards: Sequence[Mapping[str, Any]],
+    this_start: date,
+    this_end: date,
+    prev_start: date,
+    prev_end: date,
+) -> str:
+    lines = [
+        f"{as_of.isoformat()} 洞察",
+        f"本月已过 {pace:.0f}%（{as_of.day}/{calendar.monthrange(as_of.year, as_of.month)[1]} 天）",
+    ]
+    month_bits = []
+    for k in kpis:
+        if k["target"]:
+            month_bits.append(f"{k['name']} {k['value_text']}/{k['target_text']}（{k['progress']:.0f}%）")
+        else:
+            month_bits.append(f"{k['name']} {k['value_text']}")
+    lines.append("本月：" + " · ".join(month_bits))
+    week_bits = []
+    for k in week_kpis:
+        sign = "+" if k["delta"] > 0 else ""
+        week_bits.append(f"{k['name']} {k['now_text']}（{sign}{k['delta_text']}）")
+    lines.append(
+        f"本周 {this_start.month}/{this_start.day}–{this_end.month}/{this_end.day} "
+        f"vs 上周 {prev_start.month}/{prev_start.day}–{prev_end.month}/{prev_end.day}："
+        + " · ".join(week_bits)
+    )
+    if missing_today:
+        lines.append("今日未交：" + "、".join(missing_today))
+    if missing_month:
+        lines.append("本月未交：" + "、".join(missing_month))
+    if laggards:
+        lines.append("进度落后：")
+        for item in laggards:
+            lines.append(f"{item['name']} {' · '.join(item['bits'])}")
+    if not missing_today and not missing_month and not laggards:
+        lines.append("异常：暂无")
+    return "\n".join(lines)

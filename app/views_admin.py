@@ -9,7 +9,7 @@ from typing import Any, Dict, List
 
 from flask import Response, flash, g, redirect, render_template, request, url_for
 
-from . import bulletin, db, settlement
+from . import bulletin, db, insights, settlement
 from .helpers import (
     accessible_stores,
     admin_required,
@@ -290,6 +290,56 @@ def register_admin(app) -> None:
             payload = _board_payload(conn, biz_date, view, city)
             payload["is_admin"] = g.user["role"] == "admin"
             return render_template("board.html", **payload)
+
+    @app.route("/insights")
+    @admin_required
+    def insights_page():
+        as_of = parse_date(request.args.get("date"))
+        city = (request.args.get("city") or "").strip()
+        with db.get_db() as conn:
+            stores = accessible_stores(conn)
+            cities = []
+            for s in stores:
+                city_name = (s["city"] or "").strip() or "未分地市"
+                if city_name not in cities:
+                    cities.append(city_name)
+            if city and city not in cities:
+                city = ""
+            if city:
+                stores = [s for s in stores if ((s["city"] or "").strip() or "未分地市") == city]
+            store_ids = [int(s["id"]) for s in stores]
+            month_start = as_of.replace(day=1)
+            this_start = as_of - timedelta(days=as_of.weekday())
+            this_days = (as_of - this_start).days
+            prev_end = this_start - timedelta(days=1)
+            prev_start = prev_end - timedelta(days=this_days)
+            month_facts = db.range_metric_totals(conn, store_ids, month_start, as_of, insights.FACT_CODES)
+            week_facts = db.range_metric_totals(conn, store_ids, this_start, as_of, insights.FACT_CODES)
+            prev_facts = db.range_metric_totals(conn, store_ids, prev_start, prev_end, insights.FACT_CODES)
+            reported_month = db.stores_reported_in_month(conn, store_ids, as_of)
+            if store_ids:
+                clause, params = sql_in("store_id", store_ids)
+                reported_today = {
+                    int(row["store_id"])
+                    for row in conn.execute(
+                        f"SELECT store_id FROM daily_reports WHERE biz_date=? AND {clause}",
+                        [as_of.isoformat(), *params],
+                    )
+                }
+            else:
+                reported_today = set()
+            payload = insights.build_insights(
+                stores=stores,
+                as_of=as_of,
+                kpi_targets=db.list_kpi_targets(conn),
+                month_facts=month_facts,
+                week_facts=week_facts,
+                prev_week_facts=prev_facts,
+                reported_today=reported_today,
+                reported_month=reported_month,
+            )
+            payload.update({"city": city, "cities": cities})
+            return render_template("insights.html", **payload)
 
     @app.route("/board.xlsx")
     @admin_required

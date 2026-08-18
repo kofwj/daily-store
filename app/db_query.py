@@ -250,3 +250,35 @@ def stores_reported_in_month(
         )
     }
 
+
+def range_metric_totals(
+    conn: sqlite3.Connection,
+    store_ids: Iterable[int],
+    start: date,
+    end: date,
+    metric_codes: Sequence[str],
+) -> Dict[int, Dict[str, int]]:
+    """区间内各店各指标合计。空店/空码返回空 dict。"""
+    ids = [int(sid) for sid in store_ids]
+    codes = [c for c in metric_codes if c]
+    if not ids or not codes:
+        return {}
+    id_ph = ",".join("?" * len(ids))
+    code_ph = ",".join("?" * len(codes))
+    out: Dict[int, Dict[str, int]] = {sid: {c: 0 for c in codes} for sid in ids}
+    for row in conn.execute(
+        f"""
+        SELECT store_id, metric_code, COALESCE(SUM(day_value), 0) AS total
+        FROM daily_facts
+        WHERE store_id IN ({id_ph}) AND biz_date>=? AND biz_date<=?
+          AND metric_code IN ({code_ph})
+        GROUP BY store_id, metric_code
+        """,
+        [*ids, start.isoformat(), end.isoformat(), *codes],
+    ):
+        sid = int(row["store_id"])
+        code = row["metric_code"]
+        if sid in out and code in out[sid]:
+            out[sid][code] = int(row["total"] or 0)
+    return out
+

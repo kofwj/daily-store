@@ -23,6 +23,7 @@
       {% endif %}
       {% if g.user['role'] == 'admin' %}
       <a href="{{ url_for('board') }}" class="{{ 'active' if request.endpoint == 'board' else '' }}">看板</a>
+      <a href="{{ url_for('insights_page') }}" class="{{ 'active' if request.endpoint == 'insights_page' else '' }}">洞察</a>
       <a href="{{ url_for('incentive_page') }}" class="{{ 'active' if request.endpoint == 'incentive_page' else '' }}">考核</a>
       {% endif %}
       {% endif %}
