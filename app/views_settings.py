@@ -208,13 +208,22 @@ def register_settings(app) -> None:
                         return _people_redirect()
                     elif action == "reset_pin":
                         uid = int(request.form.get("user_id") or 0)
-                        pin = request.form.get("pin") or ""
-                        target = conn.execute("SELECT role FROM users WHERE id=?", (uid,)).fetchone()
-                        min_len = db.FILLER_PIN_MIN
-                        if len(pin) < min_len:
-                            raise ValueError(f"口令至少 {min_len} 位")
+                        target = conn.execute(
+                            "SELECT id, role, display_name FROM users WHERE id=?", (uid,)
+                        ).fetchone()
+                        if target is None:
+                            raise ValueError("查无此人")
+                        pin = (
+                            db.DEFAULT_ADMIN_PIN
+                            if target["role"] == "admin"
+                            else db.DEFAULT_FILLER_PIN
+                        )
                         db.update_user_pin(conn, uid, pin)
-                        flash("口令已改", "ok")
+                        name = target["display_name"] or target["id"]
+                        flash(
+                            f"已把 {name} 的口令重置为默认 {pin}，下次登录必须改掉。",
+                            "ok",
+                        )
                         if (request.form.get("tab") or "") in ("people", "stores"):
                             return _people_redirect()
                     elif action == "set_stores":

@@ -86,6 +86,26 @@ def test_default_pin_must_change_before_using_app(client):
     assert today.request.path == "/today"
 
 
+def test_admin_reset_pin_uses_default_without_manual_input(client):
+    client.post("/login", data={"username": "admin", "pin": "1234"})
+    with db.get_db() as conn:
+        uid = conn.execute("SELECT id FROM users WHERE username='alpha'").fetchone()["id"]
+        db.update_user_pin(conn, uid, "654321")
+        conn.execute("UPDATE users SET must_change_pin=0 WHERE id=?", (uid,))
+    page = client.post(
+        "/settings",
+        data={"action": "reset_pin", "tab": "people", "user_id": str(uid)},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "重置为默认 123456" in page
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT pin_hash, must_change_pin FROM users WHERE id=?", (uid,)
+        ).fetchone()
+    assert db.verify_pin("123456", row["pin_hash"])
+    assert int(row["must_change_pin"]) == 1
+
+
 def test_xlsx_escapes_formula_like_strings():
     from io import BytesIO
 

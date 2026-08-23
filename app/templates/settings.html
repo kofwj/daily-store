@@ -130,11 +130,10 @@
               <td>{% if u.active %}使用中{% else %}已停用{% endif %}</td>
               <td>
                 <div class="org-person-actions">
-                  <form method="post" class="inline-reset">
+                  <form method="post" class="inline-reset" onsubmit="return confirm('把 {{ u.display_name }} 的口令重置为默认 {{ '1234' if u.role == 'admin' else '123456' }}？\n对方下次登录必须改掉。')">
                     <input type="hidden" name="action" value="reset_pin">
                     <input type="hidden" name="tab" value="people">
                     <input type="hidden" name="user_id" value="{{ u.id }}">
-                    <input name="pin" type="password" inputmode="numeric" placeholder="至少 6 位" minlength="6" required>
                     <button class="ghost" type="submit">重置口令</button>
                   </form>
                   {% if u.id != g.user.id %}
