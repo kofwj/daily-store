@@ -4,7 +4,7 @@
 <div class="page-head">
   <div class="page-title">
     <h1>通报表</h1>
-    <p class="muted">电脑 Chrome / Edge 点「复制图片」再回微信粘贴。手机或不支持复制时会下载图片，或长按下方预览发给微信。</p>
+    <p class="muted">电脑 Chrome / Edge 点「复制图片」再粘贴。微信里点后会生成下方预览，长按图片转发到聊天。</p>
   </div>
   <form method="get" class="page-filters">
     <label class="filter">
@@ -19,8 +19,8 @@
         {% endfor %}
       </select>
     </label>
-    <button type="button" onclick="copyBulletinImage()">复制图片</button>
-    <button type="button" class="ghost" onclick="downloadBulletinImage()">下载图片</button>
+    <button type="button" id="btnCopyShot" onclick="copyBulletinImage()">复制图片</button>
+    <button type="button" id="btnDownShot" class="ghost" onclick="downloadBulletinImage()">下载图片</button>
     <a class="btn ghost" href="{{ url_for('bulletin_xlsx', date=biz_date.isoformat(), city=city) }}">导出 Excel</a>
     <span class="chip" id="copyHint">可贴进微信</span>
   </form>
@@ -151,6 +151,9 @@
 <script src="{{ url_for('static', filename='html2canvas.min.js') }}"></script>
 <script>
 const SHOT_NAME = 'bulletin_{{ biz_date.isoformat() }}.png';
+const UA = navigator.userAgent || '';
+const IS_WECHAT = /MicroMessenger/i.test(UA);
+const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(UA);
 
 function setHint(text) {
   const hint = document.getElementById('copyHint');
@@ -161,7 +164,7 @@ function copyReviewText() {
   const el = document.getElementById('reviewText');
   if (!el) return;
   const text = el.innerText || el.textContent || '';
-  if (navigator.clipboard && window.ClipboardItem) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text).then(() => setHint('复盘文案已复制，去微信粘贴'))
       .catch(() => fallbackCopy(el));
   } else {
@@ -179,25 +182,47 @@ function fallbackCopy(el) {
   catch (e) { setHint('请手动长按选择复制复盘文字'); }
 }
 
-function showPreview(blob, url) {
+function showPreview(url) {
   const card = document.getElementById('shotPreviewCard');
   const img = document.getElementById('shotPreview');
+  if (!card || !img) return;
   img.src = url;
   card.hidden = false;
+  // 微信/手机端用户看不到页面底部时会以为没反应，滚到预览
+  try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  catch (e) { card.scrollIntoView(true); }
 }
 
 function renderBulletinCanvas() {
   const el = document.getElementById('bulletinShot');
+  if (!el) return Promise.reject(new Error('找不到通报表'));
+  if (typeof html2canvas !== 'function') return Promise.reject(new Error('截图组件未加载'));
+  // 手机微信内存紧，缩放别太高
+  const scale = Math.min(IS_MOBILE ? 1.5 : 2, window.devicePixelRatio || 2);
   return html2canvas(el, {
     backgroundColor: '#ffffff',
-    scale: Math.min(2, window.devicePixelRatio || 2),
+    scale: scale,
     useCORS: true,
     logging: false,
+    // 避免把页面滚动条裁进画布
+    scrollX: 0,
+    scrollY: -window.scrollY,
+    windowWidth: document.documentElement.clientWidth,
   });
 }
 
 function canvasToBlob(canvas) {
   return new Promise((resolve, reject) => {
+    if (!canvas || !canvas.toBlob) {
+      try {
+        const data = canvas.toDataURL('image/png');
+        const bin = atob(data.split(',')[1] || '');
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        resolve(new Blob([arr], { type: 'image/png' }));
+      } catch (e) { reject(e); }
+      return;
+    }
     canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('截图失败')), 'image/png');
   });
 }
@@ -207,10 +232,18 @@ function downloadBlob(blob) {
   const a = document.createElement('a');
   a.href = url;
   a.download = SHOT_NAME;
+  a.rel = 'noopener';
   document.body.appendChild(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  setTimeout(() => URL.revokeObjectURL(url), 8000);
+}
+
+function setBusy(busy) {
+  ['btnCopyShot', 'btnDownShot'].forEach(function (id) {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = !!busy;
+  });
 }
 
 async function makeShot() {
@@ -218,13 +251,21 @@ async function makeShot() {
   const canvas = await renderBulletinCanvas();
   const blob = await canvasToBlob(canvas);
   const url = URL.createObjectURL(blob);
-  showPreview(blob, url);
+  showPreview(url);
   return blob;
 }
 
 async function copyBulletinImage() {
+  if (window.__shotBusy) return;
+  window.__shotBusy = true;
+  setBusy(true);
   try {
     const blob = await makeShot();
+    // 微信/手机内置浏览器几乎不支持写图片到剪贴板，也不靠谱下载
+    if (IS_WECHAT || IS_MOBILE) {
+      setHint('图片已生成，请长按下方预览图转发到微信');
+      return;
+    }
     if (navigator.clipboard && window.ClipboardItem) {
       try {
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
@@ -233,19 +274,35 @@ async function copyBulletinImage() {
       } catch (err) {}
     }
     downloadBlob(blob);
-    setHint('当前网页不能复制图片，已下载，发给微信即可');
+    setHint('当前浏览器不能复制图片，已下载；也可长按下方预览');
   } catch (err) {
-    setHint('截图失败，请再试或点下载');
+    const msg = (err && err.message) ? err.message : '请再试';
+    setHint('截图失败：' + msg);
+  } finally {
+    window.__shotBusy = false;
+    setBusy(false);
   }
 }
 
 async function downloadBulletinImage() {
+  if (window.__shotBusy) return;
+  window.__shotBusy = true;
+  setBusy(true);
   try {
     const blob = await makeShot();
+    if (IS_WECHAT) {
+      // 微信里 download 常被拦，预览长按更稳
+      setHint('微信里请长按下方预览图保存或转发');
+      return;
+    }
     downloadBlob(blob);
     setHint('已下载，发给微信即可');
   } catch (err) {
-    setHint('下载失败，请再试');
+    const msg = (err && err.message) ? err.message : '请再试';
+    setHint('下载失败：' + msg);
+  } finally {
+    window.__shotBusy = false;
+    setBusy(false);
   }
 }
 </script>
