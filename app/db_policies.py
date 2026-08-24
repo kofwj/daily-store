@@ -334,6 +334,26 @@ def list_revisions(conn: sqlite3.Connection, policy_id: int) -> List[Dict[str, A
     ]
 
 
+def restore_policy_revision(
+    conn: sqlite3.Connection, policy_id: int, version: int, *, user_id: int = 0
+) -> None:
+    row = conn.execute(
+        "SELECT title, body FROM policy_revisions WHERE policy_id=? AND version=?",
+        (int(policy_id), int(version)),
+    ).fetchone()
+    if row is None:
+        raise ValueError("没有这个历史版本")
+    save_policy(
+        conn,
+        title=row["title"],
+        body=row["body"],
+        sort_order=(get_policy(conn, policy_id) or {}).get("sort_order", 0),
+        active=bool((get_policy(conn, policy_id) or {}).get("active", 1)),
+        user_id=user_id,
+        policy_id=int(policy_id),
+    )
+
+
 def ack_map(conn: sqlite3.Connection, user_id: int) -> Dict[int, int]:
     return {
         int(r["policy_id"]): int(r["version"])

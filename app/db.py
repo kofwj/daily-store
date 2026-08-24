@@ -56,6 +56,7 @@ from .db_policies import (  # noqa: F401
     list_revisions,
     mark_policy_read,
     policy_require_read,
+    restore_policy_revision,
     sanitize_policy_html,
     save_policy,
     set_policy_active,

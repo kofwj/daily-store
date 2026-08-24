@@ -97,12 +97,13 @@ a:hover { color: #374151; }
 .policy-body h2, .policy-body h3 { margin: 16px 0 8px; }
 .policy-body ul, .policy-body ol { padding-left: 1.3em; }
 .policy-body table {
-  width: max-content; max-width: none; border-collapse: collapse;
+  width: max-content; max-width: 100%; border-collapse: collapse;
   margin: 12px 0; font-size: 12px; table-layout: auto;
 }
 .policy-body th, .policy-body td {
-  border: 1px solid var(--line); padding: 4px 6px; text-align: left;
-  white-space: nowrap; vertical-align: middle;
+  border: 1px solid var(--line); padding: 6px 8px; text-align: center;
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+  vertical-align: middle; max-width: 9em;
 }
 .policy-body th { background: #f3f4f6; font-weight: 650; }
 .policy-mark-add { color: #067647; background: #ecfdf3; font-weight: 700; padding: 0 4px; border-radius: 4px; }

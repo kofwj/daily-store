@@ -790,7 +790,7 @@
     <div class="card settings-card">
       <div class="settings-card-head"><h2>版本历史</h2></div>
       <table class="data settings-table">
-        <thead><tr><th>版本</th><th class="left">标题</th><th>编辑人</th><th>时间</th></tr></thead>
+        <thead><tr><th>版本</th><th class="left">标题</th><th>编辑人</th><th>时间</th><th></th></tr></thead>
         <tbody>
           {% for r in policy_revisions %}
           <tr>
@@ -798,6 +798,17 @@
             <td class="left">{{ r.title }}</td>
             <td>{{ r.editor or '—' }}</td>
             <td>{{ r.edited_at }}</td>
+            <td class="right">
+              {% if policy_edit and r.version != policy_edit.version %}
+              <form method="post" class="inline-reset" onsubmit="return confirm('用第 {{ r.version }} 版覆盖当前正文？现内容会再存一版。')">
+                <input type="hidden" name="action" value="restore_policy">
+                <input type="hidden" name="tab" value="policies">
+                <input type="hidden" name="policy_id" value="{{ policy_edit.id }}">
+                <input type="hidden" name="version" value="{{ r.version }}">
+                <button class="ghost" type="submit">恢复这版</button>
+              </form>
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>

@@ -294,6 +294,12 @@ def register_settings(app) -> None:
                         db.delete_policy(conn, pid)
                         flash("政策已删除", "ok")
                         return redirect(url_for("settings", tab="policies"))
+                    elif action == "restore_policy":
+                        pid = int(request.form.get("policy_id") or 0)
+                        ver = int(request.form.get("version") or 0)
+                        db.restore_policy_revision(conn, pid, ver, user_id=g.user["id"])
+                        flash(f"已恢复为第 {ver} 版，现内容会再记一版", "ok")
+                        return redirect(url_for("settings", tab="policies", policy_id=pid))
                     elif action == "save_brand":
                         brand = parse_brand_form(request.form)
                         for key, value in brand.items():

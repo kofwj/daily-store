@@ -47,6 +47,17 @@ def test_save_policy_bumps_version(tmp_db):
     assert [r["version"] for r in revs] == [2, 1]
 
 
+def test_restore_policy_revision(tmp_db):
+    with db.get_db() as conn:
+        uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        pid = db.save_policy(conn, title="表", body="<p>有表格</p>", user_id=uid)
+        db.save_policy(conn, title="表", body="<p>删掉了</p>", user_id=uid, policy_id=pid)
+        db.restore_policy_revision(conn, pid, 1, user_id=uid)
+        now = db.get_policy(conn, pid)
+    assert "有表格" in now["body"]
+    assert now["version"] == 3
+
+
 def test_unread_gate_blocks_today_when_enabled(client):
     client.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
