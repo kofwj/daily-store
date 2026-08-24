@@ -37,7 +37,7 @@
     <div class="card settings-card">
       <div class="settings-card-head">
         <h2>改口令</h2>
-        <p class="muted">{% if g.user['must_change_pin'] %}默认口令必须改掉，也不能改回 1234 / 123456。{% else %}新口令至少 6 位。{% endif %}</p>
+        <p class="muted">{% if g.user['must_change_pin'] %}默认口令必须改掉，也不能改回 123456。{% else %}新口令至少 6 位。{% endif %}</p>
       </div>
       <form method="post" class="settings-form">
         <input type="hidden" name="action" value="change_pin">
@@ -130,7 +130,7 @@
               <td>{% if u.active %}使用中{% else %}已停用{% endif %}</td>
               <td>
                 <div class="org-person-actions">
-                  <form method="post" class="inline-reset" onsubmit="return confirm('把 {{ u.display_name }} 的口令重置为默认 {{ '1234' if u.role == 'admin' else '123456' }}？\n对方下次登录必须改掉。')">
+                  <form method="post" class="inline-reset" onsubmit="return confirm('把 {{ u.display_name }} 的口令重置为默认 123456？\n对方下次登录必须改掉。')">
                     <input type="hidden" name="action" value="reset_pin">
                     <input type="hidden" name="tab" value="people">
                     <input type="hidden" name="user_id" value="{{ u.id }}">

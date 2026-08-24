@@ -66,7 +66,7 @@ def test_test_send_rejects_invalid_url(tmp_db):
 
 def test_daily_save_triggers_wecom(client):
     """保存日报后尝试发群，webhook 没配也不会挡保存。"""
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
         sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
     today = db.today_local().isoformat()

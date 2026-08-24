@@ -55,7 +55,7 @@ def test_filler_saves_and_admin_pays(client):
     with db.get_db() as conn:
         aid = conn.execute("SELECT id FROM advance_posts WHERE store_id=?", (sid,)).fetchone()["id"]
     client.get("/logout")
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     paid = client.post(
         "/advance/pay",
         data={"action": "pay", "advance_id": [str(aid)], "month": today[:7], "paid": "0"},
@@ -93,7 +93,7 @@ def test_admin_can_save_without_phone_and_fills_settlement(tmp_db):
     app = create_app()
     app.config["TESTING"] = True
     c = app.test_client()
-    c.post("/login", data={"username": "admin", "pin": "1234"})
+    c.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
         sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
     today = db.today_local()
@@ -178,7 +178,7 @@ def test_advance_actions_are_audited(client):
         aid = conn.execute("SELECT id FROM advance_posts WHERE phone='13900007777'").fetchone()["id"]
     client.post("/advance", data={"store_id": sid, "advance_id": aid, "biz_date": today, "phone": "13900007777", "rebate": "20"})
     client.get("/logout")
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     client.post("/advance/pay", data={"action": "pay", "advance_id": [str(aid)]})
     client.post("/advance/pay", data={"action": "unpay", "advance_id": [str(aid)]})
     client.post("/advance/delete", data={"store_id": sid, "advance_id": aid})
@@ -244,7 +244,7 @@ def test_admin_advance_defaults_to_all_stores(client):
         data={"store_id": str(sid_b), "biz_date": today, "phone": "13900009222", "rebate": "20"},
     )
     client.get("/logout")
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     page = client.get("/advance").get_data(as_text=True)
     assert "本月全店垫资" in page
     assert "13900009111" in page
@@ -259,7 +259,7 @@ def test_admin_advance_defaults_to_all_stores(client):
 
 
 def test_admin_advance_filter_by_city(client):
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
         nt = conn.execute("SELECT id FROM stores WHERE short_name='示例乙店'").fetchone()["id"]
         tz = conn.execute("SELECT id FROM stores WHERE short_name='示例丁店'").fetchone()["id"]
@@ -295,7 +295,7 @@ def test_store_sees_month_list_and_admin_sees_today_inbox(client):
     assert "13900003333" in page
     assert "改" in page and "删" in page
     client.get("/logout")
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     inbox = client.get("/advance/pay?scope=today&paid=0").get_data(as_text=True)
     assert "今天待兑" in inbox
     assert "示例甲店" in inbox

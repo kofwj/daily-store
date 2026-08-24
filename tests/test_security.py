@@ -29,7 +29,7 @@ def test_login_locks_after_five_failures(client):
         body = resp.get_data(as_text=True)
     assert "连续输错太多" in body
     locked = client.post(
-        "/login", data={"username": "admin", "pin": "1234"}, follow_redirects=True
+        "/login", data={"username": "admin", "pin": "123456"}, follow_redirects=True
     )
     assert "连续输错太多" in locked.get_data(as_text=True)
     assert locked.request.path == "/login"
@@ -39,7 +39,7 @@ def test_default_pin_must_change_before_using_app(client):
     with db.get_db() as conn:
         conn.execute("UPDATE users SET must_change_pin=1 WHERE username='admin'")
     landed = client.post(
-        "/login", data={"username": "admin", "pin": "1234"}, follow_redirects=True
+        "/login", data={"username": "admin", "pin": "123456"}, follow_redirects=True
     )
     assert landed.request.path == "/settings"
     assert "默认口令" in landed.get_data(as_text=True)
@@ -51,7 +51,7 @@ def test_default_pin_must_change_before_using_app(client):
         data={
             "action": "change_pin",
             "tab": "account",
-            "old_pin": "1234",
+            "old_pin": "123456",
             "new_pin": "1234",
             "new_pin2": "1234",
         },
@@ -63,7 +63,7 @@ def test_default_pin_must_change_before_using_app(client):
         data={
             "action": "change_pin",
             "tab": "account",
-            "old_pin": "1234",
+            "old_pin": "123456",
             "new_pin": "123456",
             "new_pin2": "123456",
         },
@@ -75,7 +75,7 @@ def test_default_pin_must_change_before_using_app(client):
         data={
             "action": "change_pin",
             "tab": "account",
-            "old_pin": "1234",
+            "old_pin": "123456",
             "new_pin": "567890",
             "new_pin2": "567890",
         },
@@ -87,7 +87,7 @@ def test_default_pin_must_change_before_using_app(client):
 
 
 def test_admin_reset_pin_uses_default_without_manual_input(client):
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
         uid = conn.execute("SELECT id FROM users WHERE username='alpha'").fetchone()["id"]
         db.update_user_pin(conn, uid, "654321")
@@ -104,6 +104,26 @@ def test_admin_reset_pin_uses_default_without_manual_input(client):
         ).fetchone()
     assert db.verify_pin("123456", row["pin_hash"])
     assert int(row["must_change_pin"]) == 1
+
+
+def test_legacy_admin_pin_migrates_to_six_digits(tmp_db):
+    from app import db_core
+
+    with db.get_db() as conn:
+        uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        conn.execute(
+            "UPDATE users SET pin_hash=?, must_change_pin=0 WHERE id=?",
+            (db.hash_pin("1234"), uid),
+        )
+        conn.execute("DELETE FROM schema_migrations WHERE version=12")
+    db_core.migrate()
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT pin_hash, must_change_pin FROM users WHERE id=?", (uid,)
+        ).fetchone()
+    assert db.verify_pin("123456", row["pin_hash"])
+    assert int(row["must_change_pin"]) == 1
+    assert not db.verify_pin("1234", row["pin_hash"])
 
 
 def test_xlsx_escapes_formula_like_strings():
@@ -139,7 +159,7 @@ def test_login_log_uses_forwarded_ip_when_proxy_trusted(tmp_db, monkeypatch):
     client = app.test_client()
     client.post(
         "/login",
-        data={"username": "admin", "pin": "1234"},
+        data={"username": "admin", "pin": "123456"},
         headers={"X-Forwarded-For": "203.0.113.9"},
     )
     with db.get_db() as conn:
@@ -156,7 +176,7 @@ def test_untrusted_proxy_ignores_forwarded_ip(tmp_db, monkeypatch):
     client = app.test_client()
     client.post(
         "/login",
-        data={"username": "admin", "pin": "1234"},
+        data={"username": "admin", "pin": "123456"},
         headers={"X-Forwarded-For": "203.0.113.9"},
     )
     with db.get_db() as conn:
@@ -167,7 +187,7 @@ def test_untrusted_proxy_ignores_forwarded_ip(tmp_db, monkeypatch):
 
 
 def test_successful_login_and_logout_are_logged(client):
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
         rows = conn.execute(
             "SELECT action, username, role FROM auth_events ORDER BY id"
@@ -193,7 +213,7 @@ def test_session_lasts_24_hours(tmp_db):
     app.config["TESTING"] = True
     assert app.config["PERMANENT_SESSION_LIFETIME"] == timedelta(hours=24)
     client = app.test_client()
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     with client.session_transaction() as sess:
         assert sess.permanent is True
         assert sess.get("user_id")

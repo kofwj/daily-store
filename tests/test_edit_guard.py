@@ -48,7 +48,7 @@ def test_filler_month_switch_off_blocks_this_month_past(tmp_db, monkeypatch):
 
 
 def test_filler_month_switch_still_rejects_future_date(tmp_db):
-    client = _client_auth(username="admin", pin="1234")
+    client = _client_auth(username="admin", pin="123456")
     client.post("/settings", data={"action": "save_permissions", "tab": "permissions", "filler_edit_month": "1"})
     client.post("/logout")
     client.post("/login", data={"username": "alpha", "pin": "123456"})
@@ -60,7 +60,7 @@ def test_filler_month_switch_still_rejects_future_date(tmp_db):
 
 
 def test_filler_month_switch_on_allows_this_month(tmp_db, monkeypatch):
-    client = _client_auth(username="admin", pin="1234")
+    client = _client_auth(username="admin", pin="123456")
     # 管理员开开关
     resp = client.post(
         "/settings",
@@ -87,7 +87,7 @@ def test_filler_month_switch_on_allows_this_month(tmp_db, monkeypatch):
 
 
 def test_admin_can_save_past_date(tmp_db, monkeypatch):
-    client = _client_auth(username="admin", pin="1234")
+    client = _client_auth(username="admin", pin="123456")
     today_d = date.today()
     past = today_d - __import__("datetime").timedelta(days=1)
     with db.get_db() as conn:
@@ -122,7 +122,7 @@ def test_locked_today_blocked_but_admin_ok(tmp_db, monkeypatch):
 
 
 def test_admin_override_lock(tmp_db, monkeypatch):
-    client = _client_auth(username="admin", pin="1234")
+    client = _client_auth(username="admin", pin="123456")
     today_d = date.today()
     monkeypatch.setattr(db, "is_locked", lambda biz_date, now=None: biz_date == today_d)
     with db.get_db() as conn:
@@ -162,7 +162,7 @@ def test_overwrite_records_audit(tmp_db, monkeypatch):
 
 
 def test_delete_report_records_audit(tmp_db, monkeypatch):
-    client = _client_auth(username="admin", pin="1234")
+    client = _client_auth(username="admin", pin="123456")
     today_d = date.today()
     with db.get_db() as conn:
         sid = _store_id(conn)
@@ -197,7 +197,7 @@ def test_locked_helper():
 
 def test_month_switch_does_not_unlock_today(tmp_db, monkeypatch):
     """开启「本月可改」后，店员也不能改『今天』锁定后的数据——本月可改只放开本月过去日。"""
-    client = _client_auth(username="admin", pin="1234")
+    client = _client_auth(username="admin", pin="123456")
     resp = client.post(
         "/settings",
         data={"action": "save_permissions", "tab": "permissions", "filler_edit_month": "1"},
@@ -224,7 +224,7 @@ def test_month_switch_does_not_unlock_today(tmp_db, monkeypatch):
 
 
 def test_admin_can_fix_one_cell(tmp_db, monkeypatch):
-    client = _client_auth(username="admin", pin="1234")
+    client = _client_auth(username="admin", pin="123456")
     today_d = date.today()
     with db.get_db() as conn:
         sid = _store_id(conn)

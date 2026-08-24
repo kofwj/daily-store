@@ -50,7 +50,7 @@ def app_client(tmp_db):
 
 
 def login(client, username="alpha", pin="123456"):
-    """登录 helper：默认用店员 alpha，可传 admin/1234 等。"""
+    """登录 helper：默认用店员 alpha，可传 admin/123456 等。"""
     return client.post(
         "/login", data={"username": username, "pin": pin}, follow_redirects=True
     )

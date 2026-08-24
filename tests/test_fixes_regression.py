@@ -12,7 +12,7 @@ def test_login_brand_is_admin_setting(app_client):
     assert "零售运营中心" in page
     assert "南通零售运营中心" not in page
     assert ">vivo</span>" in page
-    app_client.post("/login", data={"username": "admin", "pin": "1234"})
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
     settings = app_client.get("/settings?tab=brand").get_data(as_text=True)
     assert "登录页" in settings
     saved = app_client.post(
@@ -32,14 +32,14 @@ def test_login_brand_is_admin_setting(app_client):
     assert "示例运营中心" in login
     assert "示例日报" in login
     assert ">品牌</span>" in login
-    home = app_client.post("/login", data={"username": "admin", "pin": "1234"}, follow_redirects=True)
+    home = app_client.post("/login", data={"username": "admin", "pin": "123456"}, follow_redirects=True)
     assert "示例日报" in home.get_data(as_text=True)
 
 
 def test_broadcast_compact_is_admin_setting(app_client):
     from datetime import date as _date
 
-    app_client.post("/login", data={"username": "admin", "pin": "1234"})
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
     today_html = app_client.get("/today").get_data(as_text=True)
     assert "数字化里日=0" not in today_html
     settings = app_client.get("/settings?tab=broadcast").get_data(as_text=True)
@@ -65,7 +65,7 @@ def test_broadcast_compact_is_admin_setting(app_client):
 
 
 def test_add_store_uses_city_and_hides_internal_code(app_client):
-    app_client.post("/login", data={"username": "admin", "pin": "1234"})
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
     page = app_client.get("/settings?tab=stores").get_data(as_text=True)
     assert "内部编码" not in page
     assert "地市" in page
@@ -97,7 +97,7 @@ def test_add_store_uses_city_and_hides_internal_code(app_client):
 
 
 def test_1_set_stores_persists(app_client):
-    app_client.post("/login", data={"username": "admin", "pin": "1234"})
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
         stores = db.list_all_stores(conn)
         uid = conn.execute("SELECT id FROM users WHERE username='alpha'").fetchone()["id"]
@@ -158,7 +158,7 @@ def test_2_seed_does_not_overwrite_admin_edits(tmp_db):
 def test_3_open_redirect_blocked(app_client):
     resp = app_client.post(
         "/login?next=//evil.com",
-        data={"username": "admin", "pin": "1234"},
+        data={"username": "admin", "pin": "123456"},
         follow_redirects=True,
     )
     assert resp.request.path == "/today"
@@ -194,7 +194,7 @@ def _admin_client(tmp_db):
     app = create_app()
     app.config["TESTING"] = True
     c = app.test_client()
-    c.post("/login", data={"username": "admin", "pin": "1234"})
+    c.post("/login", data={"username": "admin", "pin": "123456"})
     return c
 
 
@@ -211,7 +211,7 @@ def test_csrf_blocks_unsigned_post(tmp_db, monkeypatch):
     # 1) 登录（带 pre-login token）
     with client.session_transaction() as sess:
         sess["_csrf_token"] = "prelogin"
-    client.post("/login", data={"username": "admin", "pin": "1234", "_csrf_token": "prelogin"})
+    client.post("/login", data={"username": "admin", "pin": "123456", "_csrf_token": "prelogin"})
     # 2) 登录后获取新 token
     client.get("/today")
     with client.session_transaction() as sess:
@@ -279,7 +279,7 @@ def test_edits_page_paginates(tmp_db, monkeypatch):
 def test_bisuan_accepts_one_decimal_and_month_calibrates(app_client):
     from datetime import date as _date
 
-    app_client.post("/login", data={"username": "admin", "pin": "1234"})
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
         sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
     day = _date.today()
@@ -379,7 +379,7 @@ def test_board_shows_deals_and_exports_xlsx(tmp_db):
     app = create_app()
     app.config["TESTING"] = True
     c = app.test_client()
-    c.post("/login", data={"username": "admin", "pin": "1234"})
+    c.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
         sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
         uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
@@ -418,7 +418,7 @@ def test_bulletin_skips_stores_without_mobile_code(app_client):
     """没有移动编码的店不出现在通报表里。"""
     from app import db as _db
 
-    app_client.post("/login", data={"username": "admin", "pin": "1234"})
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
     with _db.get_db() as conn:
         # 加两家店：一个没编码，一个有编码
         _db.create_store(
@@ -449,7 +449,7 @@ def test_bulletin_skips_stores_without_mobile_code(app_client):
 
 
 def test_store_picker_has_city_and_manager_groupby(app_client):
-    app_client.post("/login", data={"username": "admin", "pin": "1234"})
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
     rec = app_client.get("/deal/records").get_data(as_text=True)
     assert 'data-group="city"' in rec
     assert 'data-group="manager"' in rec

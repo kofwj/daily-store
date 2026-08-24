@@ -88,7 +88,7 @@ def test_incentive_xlsx_exports_draft(tmp_db):
     app = create_app()
     app.config["TESTING"] = True
     c = app.test_client()
-    c.post("/login", data={"username": "admin", "pin": "1234"})
+    c.post("/login", data={"username": "admin", "pin": "123456"})
     r = c.get("/incentive.xlsx")
     assert r.status_code == 200
     assert "filename=settlement_" in r.headers.get("Content-Disposition", "")
@@ -118,7 +118,7 @@ def test_unreported_store_is_not_penalized(tmp_db):
     app = create_app()
     app.config["TESTING"] = True
     c = app.test_client()
-    c.post("/login", data={"username": "admin", "pin": "1234"})
+    c.post("/login", data={"username": "admin", "pin": "123456"})
     with _db.get_db() as conn:
         store = conn.execute("SELECT * FROM stores WHERE code='store-epsilon'").fetchone()
         judged = store_forecast(conn, store, date.today())

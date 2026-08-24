@@ -103,7 +103,7 @@ def test_classify_matches_jiangyan_and_xinghua(tmp_db):
 def test_import_creates_advance_rows_and_dedup(tmp_db):
     app = create_app(testing=True)
     c = app.test_client()
-    c.post("/login", data={"username": "admin", "pin": "1234"})
+    c.post("/login", data={"username": "admin", "pin": "123456"})
     data = _make_sesame_xlsx(_sample_rows())
     # 第一次预览
     c.post("/advance/sesame/preview", data={"sesame_file": (BytesIO(data), "sesame.xlsx")})
@@ -136,7 +136,7 @@ def test_import_creates_advance_rows_and_dedup(tmp_db):
 def test_imported_rows_locked_from_filler(tmp_db):
     app = create_app(testing=True)
     c = app.test_client()
-    c.post("/login", data={"username": "admin", "pin": "1234"})
+    c.post("/login", data={"username": "admin", "pin": "123456"})
     data = _make_sesame_xlsx(_sample_rows()[:1])
     c.post("/advance/sesame/preview", data={"sesame_file": (BytesIO(data), "s.xlsx")})
     c.post("/advance/sesame/confirm", follow_redirects=True)
@@ -170,7 +170,7 @@ def test_imported_rows_locked_from_filler(tmp_db):
     assert "店员不能删" in deleted
     # 管理员可以删
     c.get("/logout")
-    c.post("/login", data={"username": "admin", "pin": "1234"})
+    c.post("/login", data={"username": "admin", "pin": "123456"})
     admin_del = c.post(
         "/advance/delete",
         data={"store_id": str(row["store_id"]), "advance_id": str(row["id"])},
@@ -182,7 +182,7 @@ def test_imported_rows_locked_from_filler(tmp_db):
 def test_sesame_shows_in_advance_totals(tmp_db):
     app = create_app(testing=True)
     c = app.test_client()
-    c.post("/login", data={"username": "admin", "pin": "1234"})
+    c.post("/login", data={"username": "admin", "pin": "123456"})
     data = _make_sesame_xlsx(_sample_rows()[:1])
     c.post("/advance/sesame/preview", data={"sesame_file": (BytesIO(data), "s.xlsx")})
     c.post("/advance/sesame/confirm", follow_redirects=True)
@@ -201,7 +201,7 @@ def test_sesame_shows_in_advance_totals(tmp_db):
 def test_sesame_export_has_column(tmp_db):
     app = create_app(testing=True)
     c = app.test_client()
-    c.post("/login", data={"username": "admin", "pin": "1234"})
+    c.post("/login", data={"username": "admin", "pin": "123456"})
     data = _make_sesame_xlsx(_sample_rows()[:1])
     c.post("/advance/sesame/preview", data={"sesame_file": (BytesIO(data), "s.xlsx")})
     c.post("/advance/sesame/confirm", follow_redirects=True)
@@ -220,7 +220,7 @@ def test_import_more_than_200_rows_imports_all(tmp_db):
     """回归：预览只展示前 200 笔，但确认时必须导入全部，不能静默丢后段。"""
     app = create_app(testing=True)
     c = app.test_client()
-    c.post("/login", data={"username": "admin", "pin": "1234"})
+    c.post("/login", data={"username": "admin", "pin": "123456"})
     rows = []
     for i in range(230):
         rows.append(
@@ -257,7 +257,7 @@ def test_all_store_advance_page_shows_all_rows(tmp_db):
     """回归：垫资全店页不能因 200 条上限截断列表/未兑计数。"""
     app = create_app(testing=True)
     c = app.test_client()
-    c.post("/login", data={"username": "admin", "pin": "1234"})
+    c.post("/login", data={"username": "admin", "pin": "123456"})
     rows = []
     for i in range(230):
         rows.append(

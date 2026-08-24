@@ -68,9 +68,11 @@ ADMIN_PIN_MIN = 6
 
 DEFAULT_FILLER_PIN = "123456"
 
-DEFAULT_ADMIN_PIN = "1234"
+DEFAULT_ADMIN_PIN = "123456"
 
-DEFAULT_PINS = frozenset({DEFAULT_ADMIN_PIN, DEFAULT_FILLER_PIN})
+LEGACY_ADMIN_PIN = "1234"
+
+DEFAULT_PINS = frozenset({DEFAULT_ADMIN_PIN, DEFAULT_FILLER_PIN, LEGACY_ADMIN_PIN})
 
 FILLER_PIN_RESET_KEY = "filler_default_pin_v1"
 
@@ -216,6 +218,7 @@ MIGRATIONS: List[Tuple[int, str, callable]] = [
     (9, "add_advance_sesame", "_ensure_advance_sesame"),
     (10, "mark_sesame_paid", "_mark_sesame_paid"),
     (11, "scale_bisuan_tenths", "_scale_bisuan_tenths"),
+    (12, "admin_pin_six_digits", "_admin_pin_six_digits"),
 ]
 
 def _now() -> str:
@@ -312,6 +315,7 @@ def migrate() -> None:
             "_ensure_advance_sesame": _ensure_advance_sesame,
             "_mark_sesame_paid": _mark_sesame_paid,
             "_scale_bisuan_tenths": _scale_bisuan_tenths,
+            "_admin_pin_six_digits": _admin_pin_six_digits,
         }
         for version, name, fn_name in sorted(MIGRATIONS):
             if version in applied:
@@ -599,6 +603,17 @@ def _mark_sesame_paid(conn: sqlite3.Connection) -> None:
         WHERE source='sesame' AND paid=0
         """
     )
+
+
+def _admin_pin_six_digits(conn: sqlite3.Connection) -> None:
+    """仍用 4 位默认口令 1234 的管理员，改成 123456 并强制下次改密。"""
+    hashed = hash_pin(DEFAULT_ADMIN_PIN)
+    for row in conn.execute("SELECT id, pin_hash FROM users WHERE role='admin'"):
+        if verify_pin(LEGACY_ADMIN_PIN, row["pin_hash"]):
+            conn.execute(
+                "UPDATE users SET pin_hash=?, must_change_pin=1 WHERE id=?",
+                (hashed, row["id"]),
+            )
 
 
 def _scale_bisuan_tenths(conn: sqlite3.Connection) -> None:

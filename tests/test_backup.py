@@ -4,7 +4,7 @@ from app import backup, db
 
 
 def test_admin_can_backup_download_and_restore(tmp_db, client):
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     page = client.get("/settings?tab=backup").get_data(as_text=True)
     assert "备份恢复" in page
     made = client.post(

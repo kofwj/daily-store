@@ -191,7 +191,7 @@ def test_totals_row_sums_and_break_zero_count():
 
 
 def test_bulletin_review_preset_switch(app_client):
-    app_client.post("/login", data={"username": "admin", "pin": "1234"})
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
     page = app_client.get("/bulletin").get_data(as_text=True)
     assert "套用" not in page or True
     assert "精简" in page
@@ -210,7 +210,7 @@ def test_bulletin_export_xlsx(client):
 
     import openpyxl
 
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     biz_date = date.today().isoformat()
     # 先提交两店日报，让通报表有数据
     from app import db

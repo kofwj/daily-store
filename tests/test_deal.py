@@ -64,7 +64,7 @@ def test_show_phone_keeps_full_number():
 
 
 def test_deal_post_counts_by_store(client):
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
         sid = conn.execute("SELECT id FROM stores WHERE short_name='示例乙店'").fetchone()["id"]
     client.post(
@@ -126,7 +126,7 @@ def test_deal_post_counts_by_store(client):
 
 
 def test_admin_records_page_shows_all_stores_today(client):
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
         sid_a = conn.execute("SELECT id, short_name FROM stores WHERE short_name='示例乙店'").fetchone()
         sid_b = conn.execute("SELECT id, short_name FROM stores WHERE short_name='示例甲店'").fetchone()
@@ -154,7 +154,7 @@ def test_admin_records_page_shows_all_stores_today(client):
 
 
 def test_admin_records_filter_by_city_and_manager(client):
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
         nt = conn.execute("SELECT id FROM stores WHERE short_name='示例乙店'").fetchone()["id"]
         tz = conn.execute("SELECT id FROM stores WHERE short_name='示例丁店'").fetchone()["id"]
@@ -176,7 +176,7 @@ def test_admin_records_filter_by_city_and_manager(client):
 
 
 def test_admin_exports_all_stores_deal_csv(client):
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
         sid_a = conn.execute("SELECT id FROM stores ORDER BY id LIMIT 1").fetchone()["id"]
         sid_b = conn.execute("SELECT id FROM stores ORDER BY id DESC LIMIT 1").fetchone()["id"]
@@ -197,7 +197,7 @@ def test_admin_exports_all_stores_deal_csv(client):
     assert "/today" in r.headers.get("Location", "")
     # 管理员导出全部门店
     client.get("/logout")
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     r = client.get("/deal/export")
     assert r.status_code == 200
     assert r.mimetype == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -292,7 +292,7 @@ def test_edits_page_filters_by_kind(tmp_db):
     app = create_app()
     app.config["TESTING"] = True
     c = app.test_client()
-    c.post("/login", data={"username": "admin", "pin": "1234"})
+    c.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
         sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
         uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
@@ -325,7 +325,7 @@ def test_past_deal_is_readonly(client):
     """当天成交可改可删；往日成交只能看。"""
     from datetime import timedelta
 
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
         sid = conn.execute("SELECT id FROM stores WHERE short_name='示例乙店'").fetchone()["id"]
         uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
@@ -388,7 +388,7 @@ def test_past_deal_is_readonly(client):
 
 
 def test_new_deal_defaults_opener_to_store_advisor(client):
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
         sid = conn.execute("SELECT id FROM stores WHERE short_name='示例乙店'").fetchone()["id"]
         conn.execute("UPDATE stores SET advisor_name='王店长' WHERE id=?", (sid,))

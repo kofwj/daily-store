@@ -120,6 +120,6 @@ def test_readonly_login_lands_on_report(client):
 def test_admin_still_sees_all(client):
     _mk_readonly(client, username="rd_admin", store_code="store-alpha")
     client.get("/logout")
-    client.post("/login", data={"username": "admin", "pin": "1234"})
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     bulletin = client.get("/bulletin").get_data(as_text=True)
     assert "示例甲店" in bulletin

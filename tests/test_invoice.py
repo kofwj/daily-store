@@ -7,7 +7,7 @@ from app import db, invoice
 
 
 def test_save_invoice_and_export_matches_template(app_client):
-    app_client.post("/login", data={"username": "admin", "pin": "1234"})
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
         store = conn.execute("SELECT * FROM stores WHERE active=1 ORDER BY id LIMIT 1").fetchone()
         sid = int(store["id"])
@@ -90,7 +90,7 @@ def test_invoice_page_admin_only_save_and_delete(app_client):
     filler = app_client.get("/incentive/invoice")
     assert filler.status_code in (302, 403)
     app_client.get("/logout")
-    app_client.post("/login", data={"username": "admin", "pin": "1234"})
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
     page = app_client.get("/incentive/invoice").get_data(as_text=True)
     assert "开票申请" in page
     assert "服务费" in page
