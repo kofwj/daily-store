@@ -34,7 +34,7 @@
     <input type="hidden" name="city" value="{{ city }}">
     <div class="official-row">
       <strong>录移动取数</strong>
-      <span class="muted">笔算新增+高的本月累计，默认截止到前一天；对照截止日上报同期，差额补到截止日。移数没更新时截止日保持不动。</span>
+      <span class="muted">只记移动侧笔算累计，用来和填报对照，不改店员填的数。默认截止前一天；移数没更新时截止日保持不动。</span>
       <label class="filter">
         <span>取数截止</span>
         <input type="date" name="asof" value="{{ (mobile_asof or biz_date).isoformat() }}" required>
@@ -45,7 +45,7 @@
         {% endfor %}
       </select>
       <input type="number" min="0" step="0.1" name="mobile" placeholder="移 如 12.5" required>
-      <button type="submit">保存校准</button>
+      <button type="submit">保存对照</button>
     </div>
   </form>
 </div>

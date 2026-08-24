@@ -487,7 +487,7 @@ def register_admin(app) -> None:
     @app.route("/bulletin/bisuan-mobile", methods=["POST"])
     @admin_required
     def bulletin_bisuan_mobile():
-        """通报表录移动取数（笔算新增+高，截止某日累计），差额落到截止日「比算新增」。"""
+        """通报表录移动取数：只存移动侧数字，用来和填报笔算对照，不改 daily_facts。"""
         store_id = request.form.get("store_id") or ""
         biz_raw = request.form.get("date") or ""
         asof_raw = request.form.get("asof") or ""
@@ -513,51 +513,16 @@ def register_admin(app) -> None:
         with db.get_db() as conn:
             if not db.user_can_access_store(conn, g.user, sid):
                 return Response("forbidden", status=403)
-            # 对照截止日同期上报数（笔算新增 + 高）
+            # 对照截止日同期上报数（笔算新增 + 高）；只算差额展示，不写回填报
             current = db.week_metric_total(conn, sid, month_start, asof, ("bisuan", "bisuan_high"))
             delta = mobile - current
             month_key = biz_date.strftime("%Y-%m")
             db.set_setting(conn, f"bisuan_mobile_{sid}_{month_key}", f"{mobile / 10:.1f}")
             db.set_setting(conn, f"bisuan_mobile_asof_{month_key}", asof.isoformat())
-            note = f"月校准笔算 移{format_stored('bisuan', mobile)} 至{asof.isoformat()}"
-            if delta > 0:
-                day_val = int(db.day_values(conn, sid, asof).get("bisuan", 0) or 0)
-                db.set_day_value(
-                    conn,
-                    store_id=sid,
-                    biz_date=asof,
-                    metric_code="bisuan",
-                    value=day_val + delta,
-                    user_id=g.user["id"],
-                    note=note,
-                )
-            elif delta < 0:
-                need = -delta
-                days = [
-                    month_start + timedelta(days=i)
-                    for i in range((asof - month_start).days + 1)
-                ]
-                for day in reversed(days):
-                    cur = int(db.day_values(conn, sid, day).get("bisuan", 0) or 0)
-                    if cur <= 0:
-                        continue
-                    take = min(cur, need)
-                    db.set_day_value(
-                        conn,
-                        store_id=sid,
-                        biz_date=day,
-                        metric_code="bisuan",
-                        value=cur - take,
-                        user_id=g.user["id"],
-                        note=note,
-                    )
-                    need -= take
-                    if need <= 0:
-                        break
             sign = "+" if delta > 0 else ""
             flash(
                 f"已录移 {format_stored('bisuan', mobile)}（至{asof.month}/{asof.day}），"
-                f"上报同期 {format_stored('bisuan', current)}，差额 {sign}{format_stored('bisuan', delta)}",
+                f"上报同期 {format_stored('bisuan', current)}，差额 {sign}{format_stored('bisuan', delta)}（填报未改）",
                 "ok",
             )
         return redirect(url_for("bulletin_page", date=biz_date.isoformat(), city=city))
