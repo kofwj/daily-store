@@ -14,8 +14,10 @@ POLICY_REQUIRE_KEY = "policy_require_read"
 ALLOWED_TAGS = {
     "p", "br", "b", "strong", "i", "em", "u", "ul", "ol", "li",
     "h2", "h3", "h4", "blockquote", "span", "div", "a",
+    "table", "thead", "tbody", "tr", "th", "td",
 }
 VOID_TAGS = {"br"}
+TABLE_TAGS = {"table", "thead", "tbody", "tr", "th", "td"}
 
 
 class _Sanitizer(HTMLParser):
@@ -27,6 +29,7 @@ class _Sanitizer(HTMLParser):
         tag = tag.lower()
         if tag not in ALLOWED_TAGS:
             return
+        extra = ""
         if tag == "a":
             href = ""
             for key, val in attrs:
@@ -36,7 +39,14 @@ class _Sanitizer(HTMLParser):
                         href = html.escape(raw, quote=True)
             self.out.append(f'<a href="{href}" target="_blank" rel="noopener">' if href else "<a>")
             return
-        self.out.append(f"<{tag}>")
+        if tag in ("th", "td"):
+            for key, val in attrs:
+                k = key.lower()
+                if k in {"colspan", "rowspan"} and str(val or "").isdigit():
+                    extra += f' {k}="{int(val)}"'
+                elif k == "align" and str(val or "").lower() in {"left", "center", "right"}:
+                    extra += f' align="{val.lower()}"'
+        self.out.append(f"<{tag}{extra}>")
         if tag in VOID_TAGS:
             return
 
@@ -118,7 +128,7 @@ def sanitize_policy_html(raw: str) -> str:
     if not text:
         return ""
     # 已经是我们存过的 HTML 就只消毒；否则当 Markdown 转
-    if re.match(r"<(p|h[2-4]|ul|ol|div|blockquote)\b", text, re.I):
+    if re.match(r"<(p|h[2-4]|ul|ol|div|blockquote|table)\b", text, re.I):
         html_out = text
     else:
         html_out = render_policy_markdown(text)

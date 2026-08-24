@@ -718,13 +718,35 @@
           <span><strong>启用</strong><span class="muted">关掉后前台不显示</span></span>
           <input type="checkbox" name="active" value="1" {% if not policy_edit or policy_edit.active %}checked{% endif %}>
         </label>
-        <p><label>正文（Markdown）</label>
-          <textarea id="policyBody" name="body" rows="14" placeholder="## 标题
-空一行分段。
-- 列表
-**加粗** 和 [链接](https://example.com)">{{ policy_edit.body if policy_edit else '' }}</textarea>
+        <p><label>正文</label>
+          <textarea id="policyBody" name="body" rows="14">{{ policy_edit.body if policy_edit else '' }}</textarea>
         </p>
-        <p class="muted">支持标题 # / ##、列表、- 或 1.、**加粗**、*斜体*、[文字](链接)。换行会保留。脚本标签会被清掉。</p>
+        <p class="muted">所见即所得：标题、列表、表格、链接。保存时会清掉脚本。</p>
+        <link rel="stylesheet" href="{{ url_for('static', filename='vendor/suneditor/suneditor.min.css') }}">
+        <script src="{{ url_for('static', filename='vendor/suneditor/suneditor.min.js') }}"></script>
+        <script src="{{ url_for('static', filename='vendor/suneditor/zh_cn.js') }}"></script>
+        <script>
+        (function () {
+          var ta = document.getElementById('policyBody');
+          if (!ta || !window.SUNEDITOR) return;
+          var editor = SUNEDITOR.create(ta, {
+            lang: SUNEDITOR_LANG['zh_cn'],
+            height: '320px',
+            width: '100%',
+            buttonList: [
+              ['undo', 'redo'],
+              ['fontSize', 'formatBlock', 'bold', 'underline', 'italic'],
+              ['fontColor', 'hiliteColor', 'removeFormat'],
+              ['align', 'list', 'table', 'link', 'horizontalRule'],
+              ['fullScreen', 'codeView']
+            ],
+            defaultStyle: 'font-size:15px; line-height:1.6;',
+          });
+          ta.form.addEventListener('submit', function () {
+            ta.value = editor.getContents();
+          });
+        })();
+        </script>
         <div class="toolbar"><button type="submit">保存政策</button></div>
       </form>
     </div>

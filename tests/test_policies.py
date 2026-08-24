@@ -19,6 +19,15 @@ def test_markdown_keeps_newlines_and_lists():
     assert "<strong>重点</strong>" in html
 
 
+def test_sanitize_keeps_table():
+    html = db.sanitize_policy_html(
+        '<table><tr><th colspan="2">档</th></tr><tr><td>A</td><td>B</td></tr></table><script>x</script>'
+    )
+    assert "<table>" in html and "<th colspan=\"2\">" in html
+    assert "<td>A</td>" in html
+    assert "script" not in html.lower()
+
+
 def test_save_policy_bumps_version(tmp_db):
     with db.get_db() as conn:
         uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
