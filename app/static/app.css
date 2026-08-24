@@ -542,39 +542,41 @@ table.bulletin .bisuan-official {
   font-size: 11px; font-weight: 700; border-radius: 4px; line-height: 16px;
   border: 1px solid transparent;
 }
-/* 移 − 上报：对齐 / 小差 / 中差 / 大差；up=上报偏少 down=上报偏多
-   统一保留深色文字方便读，大差距只在左侧加一条彩条并用更饱和的底色 */
+/* 移 − 上报：
+   ok=一致(绿)
+   up=移>报，填报偏少(红系)
+   down=移<报，填报偏多(蓝系)
+   小/中/大差加深；大差左侧加彩条 */
 table.bulletin .bisuan-gap-ok {
   background: #ecfdf5; color: #14532d; border-color: #a7f3d0;
 }
 table.bulletin .bisuan-gap-soft-up {
-  background: #fff7ed; color: #7c2d12; border-color: #fed7aa;
+  background: #fff1f2; color: #9f1239; border-color: #fecdd3;
 }
 table.bulletin .bisuan-gap-soft-down {
-  background: #fffbeb; color: #78350f; border-color: #fde68a;
+  background: #eff6ff; color: #1e3a8a; border-color: #bfdbfe;
 }
 table.bulletin .bisuan-gap-mid-up {
-  background: #ffedd5; color: #7c2d12; border-color: #fdba74;
+  background: #ffe4e6; color: #9f1239; border-color: #fda4af;
 }
 table.bulletin .bisuan-gap-mid-down {
-  background: #fef3c7; color: #78350f; border-color: #fbbf24;
+  background: #dbeafe; color: #1e3a8a; border-color: #93c5fd;
 }
-/* 大差距：底色略微加深，左侧加 3px 彩条；不再整格刷红底白字，也不描格 */
 table.bulletin .bisuan-gap-big-up {
-  background: #ffe4e6; color: #9f1239; border-color: #fda4af;
+  background: #fecdd3; color: #881337; border-color: #fb7185;
   font-weight: 800;
 }
 table.bulletin .bisuan-gap-big-up::before {
   content: ""; position: absolute; left: 0; top: 1px; bottom: 1px; width: 3px;
-  border-radius: 2px 0 0 2px; background: #ef4444;
+  border-radius: 2px 0 0 2px; background: #e11d48;
 }
 table.bulletin .bisuan-gap-big-down {
-  background: #ffedd5; color: #9a3412; border-color: #fdba74;
+  background: #bfdbfe; color: #1e3a8a; border-color: #60a5fa;
   font-weight: 800;
 }
 table.bulletin .bisuan-gap-big-down::before {
   content: ""; position: absolute; left: 0; top: 1px; bottom: 1px; width: 3px;
-  border-radius: 2px 0 0 2px; background: #f97316;
+  border-radius: 2px 0 0 2px; background: #2563eb;
 }
 table.bulletin td.bisuan-gap-big-up-cell,
 table.bulletin td.bisuan-gap-big-down-cell {
