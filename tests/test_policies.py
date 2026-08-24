@@ -28,6 +28,12 @@ def test_sanitize_keeps_table():
     assert "script" not in html.lower()
 
 
+def test_mark_add_and_remove_words():
+    html = db.sanitize_policy_html("融合服务新增，并剔除线上卡")
+    assert 'class="policy-mark-add"' in html and "新增" in html
+    assert 'class="policy-mark-del"' in html and "剔除" in html
+
+
 def test_save_policy_bumps_version(tmp_db):
     with db.get_db() as conn:
         uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]

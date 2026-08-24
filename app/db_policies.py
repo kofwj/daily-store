@@ -139,7 +139,25 @@ def sanitize_policy_html(raw: str) -> str:
     except Exception:
         return html.escape(re.sub(r"<[^>]+>", "", text)).replace("\n", "<br>")
     out = "".join(parser.out)
+    out = _mark_policy_keywords(out)
     return re.sub(r"(?:<br\s*/?>\s*){3,}", "<br><br>", out)
+
+
+def _mark_policy_keywords(html_out: str) -> str:
+    parts = re.split(r"(<[^>]+>)", html_out)
+    add = ("新增", "增加", "新入网")
+    drop = ("去除", "剔除", "取消")
+    out = []
+    for part in parts:
+        if part.startswith("<"):
+            out.append(part)
+            continue
+        for word in add:
+            part = part.replace(word, f'<span class="policy-mark-add">{word}</span>')
+        for word in drop:
+            part = part.replace(word, f'<span class="policy-mark-del">{word}</span>')
+        out.append(part)
+    return "".join(out)
 
 
 def _ensure_policy_tables(conn: sqlite3.Connection) -> None:

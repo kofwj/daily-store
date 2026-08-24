@@ -91,17 +91,22 @@ a:hover { color: #374151; }
   border: 1px solid transparent; display: flex; justify-content: space-between; gap: 8px;
 }
 .policy-nav a.active { background: var(--ink); color: #fff; font-weight: 600; }
+.policy-article { min-width: 0; }
 .policy-article-head h2 { margin: 0 0 4px; }
-.policy-body { line-height: 1.7; }
+.policy-body { line-height: 1.7; overflow-x: auto; }
 .policy-body h2, .policy-body h3 { margin: 16px 0 8px; }
 .policy-body ul, .policy-body ol { padding-left: 1.3em; }
 .policy-body table {
-  width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px;
+  width: max-content; max-width: none; border-collapse: collapse;
+  margin: 12px 0; font-size: 12px; table-layout: auto;
 }
 .policy-body th, .policy-body td {
-  border: 1px solid var(--line); padding: 6px 8px; text-align: left;
+  border: 1px solid var(--line); padding: 4px 6px; text-align: left;
+  white-space: nowrap; vertical-align: middle;
 }
 .policy-body th { background: #f3f4f6; font-weight: 650; }
+.policy-mark-add { color: #067647; background: #ecfdf3; font-weight: 700; padding: 0 4px; border-radius: 4px; }
+.policy-mark-del { color: #b42318; background: #fef3f2; font-weight: 700; padding: 0 4px; border-radius: 4px; text-decoration: line-through; }
 .sun-editor { border-radius: 8px; }
 @media (max-width: 800px) {
   .policy-layout { grid-template-columns: 1fr; }
