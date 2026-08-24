@@ -55,18 +55,79 @@ class _Sanitizer(HTMLParser):
         self.out.append(f"&#{name};")
 
 
+def _inline_md(text: str) -> str:
+    out = html.escape(text)
+    out = re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", r'<a href="\2">\1</a>', out)
+    out = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", out)
+    out = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<em>\1</em>", out)
+    return out
+
+
+def render_policy_markdown(raw: str) -> str:
+    """很小的 Markdown：标题、列表、粗斜体、链接、换行。"""
+    lines = (raw or "").replace("\r\n", "\n").split("\n")
+    blocks: List[str] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        if not line.strip():
+            i += 1
+            continue
+        if line.startswith("### "):
+            blocks.append(f"<h4>{_inline_md(line[4:])}</h4>")
+            i += 1
+            continue
+        if line.startswith("## "):
+            blocks.append(f"<h3>{_inline_md(line[3:])}</h3>")
+            i += 1
+            continue
+        if line.startswith("# "):
+            blocks.append(f"<h2>{_inline_md(line[2:])}</h2>")
+            i += 1
+            continue
+        stripped = line.lstrip()
+        if stripped.startswith(("- ", "* ")):
+            items = []
+            while i < n and lines[i].lstrip().startswith(("- ", "* ")):
+                items.append("<li>" + _inline_md(lines[i].lstrip()[2:]) + "</li>")
+                i += 1
+            blocks.append("<ul>" + "".join(items) + "</ul>")
+            continue
+        if re.match(r"\d+\.\s", stripped):
+            items = []
+            while i < n and re.match(r"\d+\.\s", lines[i].lstrip()):
+                items.append("<li>" + _inline_md(re.sub(r"^\d+\.\s", "", lines[i].lstrip())) + "</li>")
+                i += 1
+            blocks.append("<ol>" + "".join(items) + "</ol>")
+            continue
+        para = [line]
+        i += 1
+        while i < n and lines[i].strip() and not lines[i].startswith(("# ", "## ", "### ")):
+            nxt = lines[i].lstrip()
+            if nxt.startswith(("- ", "* ")) or re.match(r"\d+\.\s", nxt):
+                break
+            para.append(lines[i])
+            i += 1
+        blocks.append("<p>" + "<br>".join(_inline_md(p) for p in para) + "</p>")
+    return "".join(blocks)
+
+
 def sanitize_policy_html(raw: str) -> str:
-    text = (raw or "").strip()
+    text = (raw or "").replace("\r\n", "\n").strip()
     if not text:
         return ""
-    if "<" not in text:
-        text = "<p>" + html.escape(text).replace("\n", "<br>") + "</p>"
+    # 已经是我们存过的 HTML 就只消毒；否则当 Markdown 转
+    if re.match(r"<(p|h[2-4]|ul|ol|div|blockquote)\b", text, re.I):
+        html_out = text
+    else:
+        html_out = render_policy_markdown(text)
     parser = _Sanitizer()
     try:
-        parser.feed(text)
+        parser.feed(html_out)
         parser.close()
     except Exception:
-        return html.escape(re.sub(r"<[^>]+>", "", text))
+        return html.escape(re.sub(r"<[^>]+>", "", text)).replace("\n", "<br>")
     out = "".join(parser.out)
     return re.sub(r"(?:<br\s*/?>\s*){3,}", "<br><br>", out)
 

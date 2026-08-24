@@ -10,6 +10,15 @@ def test_sanitize_strips_script():
     assert "口径" in html
 
 
+def test_markdown_keeps_newlines_and_lists():
+    html = db.sanitize_policy_html("第一行\n第二行\n\n## 小标题\n- 甲\n- 乙\n\n**重点**")
+    assert "<br>" in html
+    assert "第一行" in html and "第二行" in html
+    assert "<h3>" in html and "小标题" in html
+    assert "<ul>" in html and "<li>" in html
+    assert "<strong>重点</strong>" in html
+
+
 def test_save_policy_bumps_version(tmp_db):
     with db.get_db() as conn:
         uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]

@@ -718,10 +718,13 @@
           <span><strong>启用</strong><span class="muted">关掉后前台不显示</span></span>
           <input type="checkbox" name="active" value="1" {% if not policy_edit or policy_edit.active %}checked{% endif %}>
         </label>
-        <p><label>正文（可写简单 HTML：p / b / ul / li / a / h3）</label>
-          <textarea id="policyBody" name="body" rows="14" placeholder="&lt;p&gt;正文&lt;/p&gt;&lt;ul&gt;&lt;li&gt;要点&lt;/li&gt;&lt;/ul&gt;">{{ policy_edit.body if policy_edit else '' }}</textarea>
+        <p><label>正文（Markdown）</label>
+          <textarea id="policyBody" name="body" rows="14" placeholder="## 标题
+空一行分段。
+- 列表
+**加粗** 和 [链接](https://example.com)">{{ policy_edit.body if policy_edit else '' }}</textarea>
         </p>
-        <p class="muted">保存时会清掉脚本等危险标签。不会用 HTML 就直接打字，换行会保留。</p>
+        <p class="muted">支持标题 # / ##、列表、- 或 1.、**加粗**、*斜体*、[文字](链接)。换行会保留。脚本标签会被清掉。</p>
         <div class="toolbar"><button type="submit">保存政策</button></div>
       </form>
     </div>
