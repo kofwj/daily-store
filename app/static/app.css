@@ -544,39 +544,39 @@ table.bulletin .bisuan-official {
 }
 /* 移 − 上报：
    ok=一致(绿)
-   up=移>报，填报偏少(红系)
-   down=移<报，填报偏多(蓝系)
+   up=移>报，填报偏少(蓝系)
+   down=移<报，填报偏多(红系)
    小/中/大差加深；大差左侧加彩条 */
 table.bulletin .bisuan-gap-ok {
   background: #ecfdf5; color: #14532d; border-color: #a7f3d0;
 }
 table.bulletin .bisuan-gap-soft-up {
-  background: #fff1f2; color: #9f1239; border-color: #fecdd3;
-}
-table.bulletin .bisuan-gap-soft-down {
   background: #eff6ff; color: #1e3a8a; border-color: #bfdbfe;
 }
-table.bulletin .bisuan-gap-mid-up {
-  background: #ffe4e6; color: #9f1239; border-color: #fda4af;
+table.bulletin .bisuan-gap-soft-down {
+  background: #fff1f2; color: #9f1239; border-color: #fecdd3;
 }
-table.bulletin .bisuan-gap-mid-down {
+table.bulletin .bisuan-gap-mid-up {
   background: #dbeafe; color: #1e3a8a; border-color: #93c5fd;
 }
+table.bulletin .bisuan-gap-mid-down {
+  background: #ffe4e6; color: #9f1239; border-color: #fda4af;
+}
 table.bulletin .bisuan-gap-big-up {
-  background: #fecdd3; color: #881337; border-color: #fb7185;
+  background: #bfdbfe; color: #1e3a8a; border-color: #60a5fa;
   font-weight: 800;
 }
 table.bulletin .bisuan-gap-big-up::before {
   content: ""; position: absolute; left: 0; top: 1px; bottom: 1px; width: 3px;
-  border-radius: 2px 0 0 2px; background: #e11d48;
+  border-radius: 2px 0 0 2px; background: #2563eb;
 }
 table.bulletin .bisuan-gap-big-down {
-  background: #bfdbfe; color: #1e3a8a; border-color: #60a5fa;
+  background: #fecdd3; color: #881337; border-color: #fb7185;
   font-weight: 800;
 }
 table.bulletin .bisuan-gap-big-down::before {
   content: ""; position: absolute; left: 0; top: 1px; bottom: 1px; width: 3px;
-  border-radius: 2px 0 0 2px; background: #2563eb;
+  border-radius: 2px 0 0 2px; background: #e11d48;
 }
 table.bulletin td.bisuan-gap-big-up-cell,
 table.bulletin td.bisuan-gap-big-down-cell {
