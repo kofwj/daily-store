@@ -48,6 +48,20 @@ from .db_invoice import (  # noqa: F401
     save_invoice_from_form,
     save_invoice_month,
 )
+from .db_policies import (  # noqa: F401
+    ack_map,
+    delete_policy,
+    get_policy,
+    list_policies,
+    list_revisions,
+    mark_policy_read,
+    policy_require_read,
+    sanitize_policy_html,
+    save_policy,
+    set_policy_active,
+    set_policy_require_read,
+    unread_policies,
+)
 from .db_query import (  # noqa: F401
     dashboard_today,
     day_values,

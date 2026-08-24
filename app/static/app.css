@@ -84,6 +84,22 @@ a:hover { color: #374151; }
 }
 
 .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 16px 64px; }
+.policy-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; align-items: start; }
+.policy-nav { display: grid; gap: 4px; }
+.policy-nav a {
+  padding: 8px 10px; border-radius: 8px; color: var(--muted);
+  border: 1px solid transparent; display: flex; justify-content: space-between; gap: 8px;
+}
+.policy-nav a.active { background: var(--ink); color: #fff; font-weight: 600; }
+.policy-article-head h2 { margin: 0 0 4px; }
+.policy-body { line-height: 1.7; }
+.policy-body h2, .policy-body h3 { margin: 16px 0 8px; }
+.policy-body ul, .policy-body ol { padding-left: 1.3em; }
+@media (max-width: 800px) {
+  .policy-layout { grid-template-columns: 1fr; }
+  .policy-nav { display: flex; gap: 8px; overflow: auto; }
+  .policy-nav a { white-space: nowrap; }
+}
 body.settings-body .wrap {
   max-width: 1180px;
   margin: 0 auto;

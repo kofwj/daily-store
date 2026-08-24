@@ -126,6 +126,29 @@ def pin_change_required():
     return redirect(url_for("settings", tab="account"))
 
 
+def policy_read_required():
+    """开关打开时，未读完启用中的政策不能填报。管理员可关开关。"""
+    if g.user is None:
+        return None
+    endpoint = request.endpoint or ""
+    if endpoint in {"policies_page", "policy_ack", "settings", "logout", "login", "health", "static"}:
+        return None
+    if request.method != "POST":
+        return None
+    if endpoint not in {"today", "deal_page", "advance_page"}:
+        return None
+    if g.user["role"] in ("readonly", "admin"):
+        return None
+    with db.get_db() as conn:
+        if not db.policy_require_read(conn):
+            return None
+        unread = db.unread_policies(conn, g.user["id"])
+    if not unread:
+        return None
+    flash(f"请先阅读并确认 {len(unread)} 条政策，再填报。", "error")
+    return redirect(url_for("policies_page"))
+
+
 def csrf_protect():
     """非安全方法必须有合法 CSRF token。测试环境（TESTING）关闭。"""
     if current_app.config.get("TESTING"):

@@ -507,6 +507,13 @@
         </span>
         <input type="checkbox" name="filler_edit_month" value="1" {% if filler_edit_month %}checked{% endif %}>
       </label>
+      <label class="settings-switch">
+        <span>
+          <strong>填报前必须先确认政策</strong>
+          <span class="muted">打开后，店员未点「已阅读」不能提交今日填报 / 触客 / 垫资。管理员改政策正文会升版本，需重新确认。</span>
+        </span>
+        <input type="checkbox" name="policy_require_read" value="1" {% if policy_require_read %}checked{% endif %}>
+      </label>
       <div class="toolbar"><button type="submit">保存权限设置</button></div>
     </form>
     {% endif %}
@@ -689,6 +696,89 @@
       <p><label>系统名称</label><input name="brand_title" value="{{ brand_form.title }}" maxlength="20" required></p>
       <div class="toolbar"><button type="submit">保存登录页</button></div>
     </form>
+    {% endif %}
+
+    {% if tab == 'policies' and g.user['role'] == 'admin' %}
+    <div class="settings-page-head">
+      <h1>政策</h1>
+      <p class="muted">店员在顶栏「政策」阅读。改正文会升一版；打开权限开关后，未确认新版不能填报。</p>
+    </div>
+    <div class="card settings-card">
+      <div class="settings-card-head">
+        <h2>{{ '编辑政策' if policy_edit else '新增政策' }}</h2>
+        {% if policy_edit %}<a class="btn ghost" href="{{ url_for('settings', tab='policies') }}">取消编辑</a>{% endif %}
+      </div>
+      <form method="post" class="settings-form" style="max-width:none">
+        <input type="hidden" name="action" value="save_policy">
+        <input type="hidden" name="tab" value="policies">
+        {% if policy_edit %}<input type="hidden" name="policy_id" value="{{ policy_edit.id }}">{% endif %}
+        <p><label>标题</label><input name="title" value="{{ policy_edit.title if policy_edit else '' }}" maxlength="80" required placeholder="如 金币直降口径"></p>
+        <p><label>排序</label><input name="sort_order" type="number" value="{{ policy_edit.sort_order if policy_edit else 0 }}"></p>
+        <label class="settings-switch" style="border:0;padding:0">
+          <span><strong>启用</strong><span class="muted">关掉后前台不显示</span></span>
+          <input type="checkbox" name="active" value="1" {% if not policy_edit or policy_edit.active %}checked{% endif %}>
+        </label>
+        <p><label>正文（可写简单 HTML：p / b / ul / li / a / h3）</label>
+          <textarea id="policyBody" name="body" rows="14" placeholder="&lt;p&gt;正文&lt;/p&gt;&lt;ul&gt;&lt;li&gt;要点&lt;/li&gt;&lt;/ul&gt;">{{ policy_edit.body if policy_edit else '' }}</textarea>
+        </p>
+        <p class="muted">保存时会清掉脚本等危险标签。不会用 HTML 就直接打字，换行会保留。</p>
+        <div class="toolbar"><button type="submit">保存政策</button></div>
+      </form>
+    </div>
+    <div class="card settings-card">
+      <div class="settings-card-head"><h2>已有政策</h2></div>
+      {% if policies %}
+      <table class="data settings-table">
+        <thead><tr><th class="left">标题</th><th>版本</th><th>状态</th><th>更新</th><th></th></tr></thead>
+        <tbody>
+          {% for p in policies %}
+          <tr>
+            <td class="left">{{ p.title }}</td>
+            <td>v{{ p.version }}</td>
+            <td>{{ '启用' if p.active else '停用' }}</td>
+            <td>{{ p.updated_at }}</td>
+            <td class="right">
+              <a class="btn ghost" href="{{ url_for('settings', tab='policies', policy_id=p.id) }}">改</a>
+              <form method="post" class="inline-reset">
+                <input type="hidden" name="action" value="toggle_policy">
+                <input type="hidden" name="tab" value="policies">
+                <input type="hidden" name="policy_id" value="{{ p.id }}">
+                <input type="hidden" name="active" value="{{ 0 if p.active else 1 }}">
+                <button class="ghost" type="submit">{{ '停用' if p.active else '启用' }}</button>
+              </form>
+              <form method="post" class="inline-reset" onsubmit="return confirm('删除「{{ p.title }}」？历史版本一并去掉。')">
+                <input type="hidden" name="action" value="delete_policy">
+                <input type="hidden" name="tab" value="policies">
+                <input type="hidden" name="policy_id" value="{{ p.id }}">
+                <button class="ghost" type="submit">删</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">还没有政策。</p>
+      {% endif %}
+    </div>
+    {% if policy_revisions %}
+    <div class="card settings-card">
+      <div class="settings-card-head"><h2>版本历史</h2></div>
+      <table class="data settings-table">
+        <thead><tr><th>版本</th><th class="left">标题</th><th>编辑人</th><th>时间</th></tr></thead>
+        <tbody>
+          {% for r in policy_revisions %}
+          <tr>
+            <td>v{{ r.version }}</td>
+            <td class="left">{{ r.title }}</td>
+            <td>{{ r.editor or '—' }}</td>
+            <td>{{ r.edited_at }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
     {% endif %}
 
     {% if tab == 'backup' and g.user['role'] == 'admin' %}

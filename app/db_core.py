@@ -275,8 +275,10 @@ def init_db() -> None:
         _ensure_login_attempts(conn)
         _ensure_auth_events(conn)
         from .db_invoice import _ensure_invoice_tables
+        from .db_policies import _ensure_policy_tables
 
         _ensure_invoice_tables(conn)
+        _ensure_policy_tables(conn)
         # 种子（建表/加列/回填默认）每次幂等执行即可；真正“动数据”的迁移走 migrate() 一次
         _seed_metrics(conn)
         _seed_kpi_targets(conn)

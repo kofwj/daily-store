@@ -166,8 +166,10 @@ def restore_bytes(data: bytes) -> Path:
             db_core._ensure_advance_edits(conn)
             db_core._ensure_advance_sesame(conn)
             from .db_invoice import _ensure_invoice_tables
+            from .db_policies import _ensure_policy_tables
 
             _ensure_invoice_tables(conn)
+            _ensure_policy_tables(conn)
             if not had_flag:
                 db_core._add_must_change_pin(conn)
         # 旧备份可能停在更早的 schema 版本，恢复后再补索引/金额单位

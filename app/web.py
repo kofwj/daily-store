@@ -25,11 +25,18 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from . import db
 from . import version as app_version
 from .errors import register_errors
-from .helpers import brand_settings, csrf_protect, load_user, pin_change_required
+from .helpers import (
+    brand_settings,
+    csrf_protect,
+    load_user,
+    pin_change_required,
+    policy_read_required,
+)
 from .views_admin import register_admin
 from .views_advance import register_advance
 from .views_auth import register_auth
 from .views_daily import register_daily
+from .views_policies import register_policies
 from .views_report import register_report
 from .views_settings import register_settings
 
@@ -69,6 +76,7 @@ def create_app(*, testing: bool = False) -> Flask:
     app.before_request(load_user)
     app.before_request(csrf_protect)
     app.before_request(pin_change_required)
+    app.before_request(policy_read_required)
 
     @app.context_processor
     def inject_now():
@@ -93,6 +101,7 @@ def create_app(*, testing: bool = False) -> Flask:
     register_report(app)
     register_admin(app)
     register_settings(app)
+    register_policies(app)
     register_errors(app)
     return app
 

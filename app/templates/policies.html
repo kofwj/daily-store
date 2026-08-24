@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}政策说明{% endblock %}
+{% block body_class %}policy-page-body{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div class="page-title">
+    <h1>政策说明</h1>
+    <p class="muted">{% if require %}开关已开：未确认的政策要先点「已阅读」才能填报。{% else %}最新业务口径，管理员在设置里维护。{% endif %}</p>
+  </div>
+</div>
+{% if not items %}
+<div class="card"><p class="muted">还没有政策，请管理员在「设置 → 政策」里添加。</p></div>
+{% else %}
+<div class="policy-layout">
+  <aside class="policy-nav">
+    {% for p in items %}
+    <a href="{{ url_for('policies_page', id=p.id) }}" class="{{ 'active' if current and p.id == current.id else '' }}">
+      {{ p.title }}
+      {% if p.id in unread_ids %}<span class="chip">未读</span>{% endif %}
+    </a>
+    {% endfor %}
+  </aside>
+  <article class="card policy-article">
+    <div class="policy-article-head">
+      <h2>{{ current.title }}</h2>
+      <p class="muted">第 {{ current.version }} 版{% if current.updated_at %} · 更新于 {{ current.updated_at }}{% endif %}</p>
+    </div>
+    <div class="policy-body">{{ current.body|safe }}</div>
+    {% if current.id in unread_ids %}
+    <form method="post" action="{{ url_for('policy_ack') }}" class="toolbar">
+      <input type="hidden" name="policy_id" value="{{ current.id }}">
+      <button type="submit">已阅读并确认</button>
+    </form>
+    {% else %}
+    <p class="muted">已确认本版。</p>
+    {% endif %}
+  </article>
+</div>
+{% endif %}
+{% endblock %}

@@ -36,6 +36,7 @@ def _settings_tab() -> str:
         "invoice",
         "brand",
         "backup",
+        "policies",
     }
     if tab not in allowed:
         return "account"
@@ -267,7 +268,32 @@ def register_settings(app) -> None:
                     elif action == "save_permissions":
                         filler_month = "1" if request.form.get("filler_edit_month") == "1" else "0"
                         db.set_setting(conn, "filler_edit_month", filler_month)
+                        db.set_policy_require_read(conn, request.form.get("policy_require_read") == "1")
                         flash("权限设置已保存", "ok")
+                    elif action == "save_policy":
+                        raw_id = (request.form.get("policy_id") or "").strip()
+                        pid = int(raw_id) if raw_id.isdigit() else None
+                        db.save_policy(
+                            conn,
+                            title=request.form.get("title") or "",
+                            body=request.form.get("body") or "",
+                            sort_order=int(request.form.get("sort_order") or 0),
+                            active=request.form.get("active") == "1",
+                            user_id=g.user["id"],
+                            policy_id=pid,
+                        )
+                        flash("政策已保存", "ok")
+                        return redirect(url_for("settings", tab="policies"))
+                    elif action == "toggle_policy":
+                        pid = int(request.form.get("policy_id") or 0)
+                        db.set_policy_active(conn, pid, request.form.get("active") == "1")
+                        flash("政策状态已改", "ok")
+                        return redirect(url_for("settings", tab="policies"))
+                    elif action == "delete_policy":
+                        pid = int(request.form.get("policy_id") or 0)
+                        db.delete_policy(conn, pid)
+                        flash("政策已删除", "ok")
+                        return redirect(url_for("settings", tab="policies"))
                     elif action == "save_brand":
                         brand = parse_brand_form(request.form)
                         for key, value in brand.items():
@@ -409,6 +435,18 @@ def register_settings(app) -> None:
                 user_map=user_map,
                 store_label=store_label,
                 filler_edit_month=db.get_setting(conn, "filler_edit_month", "0") == "1",
+                policy_require_read=db.policy_require_read(conn),
+                policies=db.list_policies(conn) if g.user["role"] == "admin" else [],
+                policy_edit=(
+                    db.get_policy(conn, int(request.args.get("policy_id")))
+                    if (request.args.get("policy_id") or "").isdigit()
+                    else None
+                ),
+                policy_revisions=(
+                    db.list_revisions(conn, int(request.args.get("policy_id")))
+                    if (request.args.get("policy_id") or "").isdigit()
+                    else []
+                ),
                 broadcast_compact=db.get_setting(conn, "broadcast_compact", "1") == "1",
                 broadcast_compact_family=db.get_setting(conn, "broadcast_compact_family", "0") == "1",
                 wecom_global=db.get_setting(conn, "wecom_global", ""),
