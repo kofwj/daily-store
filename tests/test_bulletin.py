@@ -27,6 +27,49 @@ def test_bisuan_adds_high():
     assert bisuan_total({}) == 0
 
 
+def test_summary_single_first_bisuan_uses_mobile_when_present():
+    rows = [
+        build_row(
+            {
+                "id": 1,
+                "name": "海安万达",
+                "code": "a",
+                "city": "",
+                "region_group": "通泰",
+                "mobile_code": "1",
+                "area_manager": "",
+                "store_manager": "",
+            },
+            month_bisuan=110,  # 填报 11.0（store 值 = ×10）
+            month_bisuan_mobile=80,  # 移动 8.0
+            day_ai=0, month_ai=1, day_bisuan=0,
+            submitted=True,
+        ),
+        build_row(
+            {
+                "id": 2,
+                "name": "如皋宁海路",
+                "code": "b",
+                "city": "",
+                "region_group": "通泰",
+                "mobile_code": "2",
+                "area_manager": "",
+                "store_manager": "",
+            },
+            month_bisuan=60,  # 填报 6.0
+            month_bisuan_mobile=120,  # 移动 12.0
+            day_ai=0, month_ai=1, day_bisuan=0,
+            submitted=True,
+        ),
+    ]
+    rows = apply_scales(rows)
+    text = summary(rows, date(2026, 8, 25), "南通")
+    # 单项第一·笔算按移动：如皋宁海路(12.0) > 海安万达(8.0)
+    assert "笔算 如皋宁海路" in text
+    # 但这不影响填报合计
+    assert "笔算" in text
+
+
 def test_bulletin_row_and_tsv_match_sheet():
     store = {
         "id": 1,

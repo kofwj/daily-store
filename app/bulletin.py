@@ -173,7 +173,12 @@ def build_row(
     month_bisuan_sys_asof: Any = None,
 ) -> Dict[str, Any]:
     follow_ai = month_ai > 0
-    follow_bisuan = month_bisuan > 0
+    eff_mobile = month_bisuan_mobile
+    try:
+        effort = int(eff_mobile) if eff_mobile not in (None, "") else month_bisuan
+    except (TypeError, ValueError):
+        effort = month_bisuan
+    follow_bisuan = effort > 0
     return {
         "store_id": store["id"],
         "code": store["code"],
@@ -537,6 +542,17 @@ def _metric(row: Mapping[str, Any], key: str) -> int:
     return int(row.get(key) or 0)
 
 
+def _month_bisuan_for_rank(row: Mapping[str, Any]) -> int:
+    """排序用当月笔算：有移动校准数就用移动，否则用填报。与评测口径一致。"""
+    m = row.get("_month_bisuan_mobile_stored")
+    if m not in (None, ""):
+        try:
+            return int(m)
+        except (TypeError, ValueError):
+            pass
+    return int(row.get("month_bisuan") or 0)
+
+
 def _join_names(names: Sequence[str]) -> str:
     return "、".join(names)
 
@@ -579,6 +595,14 @@ def _best_name(rows: Sequence[Mapping[str, Any]], key: str) -> str:
     return _row_name(ranked[0])
 
 
+def _rank_bisuan_best(rows: Sequence[Mapping[str, Any]]) -> str:
+    """当月笔算第一：用移动校准数（有则用）而不是填报。"""
+    ranked = sorted(rows, key=_month_bisuan_for_rank, reverse=True)
+    if not ranked or _month_bisuan_for_rank(ranked[0]) <= 0:
+        return ""
+    return _row_name(ranked[0])
+
+
 def summary(
     rows: Sequence[Mapping[str, Any]],
     biz_date: date,
@@ -613,7 +637,7 @@ def summary(
     month_rate = close_rate(month_closed, month_count)
     ranked = sorted(
         rows,
-        key=lambda r: _metric(r, "month_ai") + _metric(r, "month_bisuan") + _metric(r, "month_coin"),
+        key=lambda r: _metric(r, "month_ai") + _month_bisuan_for_rank(r) + _metric(r, "month_coin"),
         reverse=True,
     )
     top = ranked[0]
@@ -641,7 +665,7 @@ def summary(
         praise.append(f"今日三项都有：{_join_names(triple)}")
 
     month_ai_best = _best_name(rows, "month_ai")
-    month_bisuan_best = _best_name(rows, "month_bisuan")
+    month_bisuan_best = _rank_bisuan_best(rows)
     month_coin_best = _best_name(rows, "month_coin")
     month_bits = []
     if month_ai_best:
@@ -653,7 +677,7 @@ def summary(
 
     day_bisuan_text = fmt_metric("bisuan", day_bisuan)
     month_bisuan_text = fmt_metric("bisuan", month_bisuan)
-    top_bisuan_text = fmt_metric("bisuan", _metric(top, "month_bisuan"))
+    top_bisuan_text = fmt_metric("bisuan", _month_bisuan_for_rank(top))
     praise_text = ("表扬\n" + "\n".join(praise)) if praise else "表扬：今日暂无单项破零，继续加油"
     month_bits_text = ("单项第一：" + " · ".join(month_bits)) if month_bits else ""
     top_detail = (
