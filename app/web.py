@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 from flask import Flask, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import db
+from . import backup, db
 from . import version as app_version
 from .errors import register_errors
 from .helpers import (
@@ -72,6 +72,7 @@ def create_app(*, testing: bool = False) -> Flask:
     if os.environ.get("STORE_DAILY_TRUST_PROXY", "1") == "1":
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     db.init_db()
+    backup.prune()
 
     app.before_request(load_user)
     app.before_request(csrf_protect)

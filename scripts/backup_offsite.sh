@@ -299,10 +299,18 @@ if [[ -n "${REMOTE_TARGET}" ]]; then
   fi
 fi
 
+MAX_KEEP="${MAX_KEEP:-20}"
+prune_primary_count() {
+  # 只留最新 MAX_KEEP 份，防止异机写进来的库无限堆积
+  ls -1t "${PRIMARY_DIR}"/data/backups/store_daily_*.db 2>/dev/null | tail -n +$((MAX_KEEP + 1)) | while read -r f; do
+    rm -f -- "$f" 2>/dev/null || true
+  done || true
+}
 prune_local() {
   find "${PRIMARY_DIR}/data/backups" -type f \
     \( -name 'store_daily_offsite_*.db' -o -name 'env_offsite_*.env' \) \
     -mtime +"${KEEP_DAYS}" -delete 2>/dev/null || true
+  prune_primary_count
 }
 
 if [[ "${DRY_RUN}" != "1" ]]; then
@@ -310,7 +318,16 @@ if [[ "${DRY_RUN}" != "1" ]]; then
     prune_local
   else
     ssh_p "${PRIMARY_SSH_PORT}" "${PRIMARY}" \
-      "find $(printf %q "${PRIMARY_DIR}/data/backups") -type f \\( -name 'store_daily_offsite_*.db' -o -name 'env_offsite_*.env' \\) -mtime +${KEEP_DAYS} -delete 2>/dev/null || true"
+      "MAX_KEEP=$(printf %q "${MAX_KEEP}") bash -s" <<'EOS'
+set -euo pipefail
+# 只留最新 MAX_KEEP 份，防止异机写进来的库无限堆积
+ls -1t "${PRIMARY_DIR}"/data/backups/store_daily_*.db 2>/dev/null | tail -n +$((MAX_KEEP + 1)) | while read -r f; do
+  rm -f -- "$f" 2>/dev/null || true
+done || true
+find "${PRIMARY_DIR}/data/backups" -type f \
+  \( -name 'store_daily_offsite_*.db' -o -name 'env_offsite_*.env' \) \
+  -mtime +"${KEEP_DAYS}" -delete 2>/dev/null || true
+EOS
   fi
 fi
 

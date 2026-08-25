@@ -78,7 +78,10 @@ def _stamp() -> str:
 
 
 def snapshot(tag: str = "manual") -> Path:
-    """把当前库拷一份到 backups，返回文件路径。"""
+    """把当前库拷一份到 backups，返回文件路径。
+
+    snapshot 会先 _prune 一次，保证总数不超过 MAX_KEEP。
+    """
     dest = backup_dir() / f"{BACKUP_PREFIX}{tag}_{_stamp()}_{token_hex(4)}.db"
     src = sqlite3.connect(str(db_core.DB_PATH))
     dst = sqlite3.connect(str(dest))
@@ -98,6 +101,11 @@ def _prune() -> None:
             old.unlink()
         except OSError:
             pass
+
+
+def prune() -> None:
+    """启动时清一次，把每天/异机写进来的备份压回 MAX_KEEP 份。"""
+    _prune()
 
 
 def list_backups() -> List[dict]:

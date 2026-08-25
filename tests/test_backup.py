@@ -1,4 +1,5 @@
 import sqlite3
+from pathlib import Path
 
 from app import backup, db
 
@@ -87,7 +88,6 @@ def test_filler_cannot_open_backup(client):
 def test_offsite_fingerprint_skips_unchanged(tmp_path):
     import subprocess
     import sys
-    from pathlib import Path
 
     script = Path(__file__).resolve().parents[1] / "scripts" / "offsite_fingerprint.py"
     primary = tmp_path / "primary"
@@ -109,3 +109,18 @@ def test_offsite_fingerprint_skips_unchanged(tmp_path):
     assert backup.live_fingerprint(db_path, env_path) == first
     env_path.write_text("x=2\n", encoding="utf-8")
     assert run("check") == "COPY"
+
+
+def test_prune_keeps_latest_20():
+    d = backup.backup_dir()
+    for i in range(30):
+        (d / f"store_daily_offsite_20260825_0000{i:02d}.db").write_bytes(b"x")
+        import time as _t
+
+        _t.sleep(0.01)
+    assert len(list(d.glob("store_daily_*.db"))) >= 20
+    backup.prune()
+    left = sorted(d.glob("store_daily_*.db"), key=lambda p: p.stat().st_mtime)
+    assert len(left) <= backup.MAX_KEEP
+    # 最新一份仍在
+    assert str(left[-1].name).endswith("000029.db")
