@@ -19,6 +19,7 @@
           <tr><td class="left">内存使用</td><td>{{ s.mem.used_mb }} MB / {{ s.mem.total_mb }} MB（{{ s.mem.used_pct }}%）</td></tr>
           <tr><td class="left">剩余可用</td><td>{{ s.mem.avail_mb }} MB</td></tr>
           {% endif %}
+          {% if s.app is not none %}<tr><td class="left">本应用进程(RSS)</td><td>{{ s.app }} MB</td></tr>{% endif %}
           {% if s.procs %}<tr><td class="left">进程数</td><td>{{ s.procs }}</td></tr>{% endif %}
         </tbody>
       </table>

@@ -79,7 +79,15 @@ def _change_own_pin() -> None:
 
 def _server_status_stats() -> dict:
     """采集服务器负载与数据库状态，只给管理员看。"""
-    stats = {"db": {}, "load": None, "mem": None, "procs": None}
+    stats = {"db": {}, "load": None, "mem": None, "procs": None, "app": None}
+    # 本应用进程自身占用的物理内存（RSS）
+    try:
+        for line in open("/proc/self/status", encoding="utf-8"):
+            if line.startswith("VmRSS:"):
+                stats["app"] = int(line.split()[1]) // 1024  # KB -> MiB
+                break
+    except OSError:
+        pass
     # 负载与进程数
     try:
         one, five, fm = (os.getloadavg()[i] for i in range(3))
