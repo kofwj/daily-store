@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import calendar
 from datetime import date, timedelta
-from typing import Any, Dict, Mapping, Sequence
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 from .metrics_seed import KPI_TARGETS, ROLLUPS, format_display, from_stored, rollup_amount
 
@@ -67,17 +67,25 @@ def build_insights(
     prev_week_facts: Mapping[int, Mapping[str, int]],
     reported_today: set,
     reported_month: set,
+    mobile_bisuan: Optional[Mapping[int, int]] = None,
 ) -> Dict[str, Any]:
     days_in_month = calendar.monthrange(as_of.year, as_of.month)[1]
     elapsed = max(1, min(as_of.day, days_in_month))
     pace = elapsed / days_in_month * 100
     n = len(stores)
+    mobile_bisuan = mobile_bisuan or {}
     month_by_store: Dict[int, Dict[str, int]] = {}
     week_by_store: Dict[int, Dict[str, int]] = {}
     prev_by_store: Dict[int, Dict[str, int]] = {}
     for store in stores:
         sid = int(store["id"])
-        month_by_store[sid] = _rollup_store(month_facts.get(sid) or {})
+        facts = _rollup_store(month_facts.get(sid) or {})
+        mv = mobile_bisuan.get(sid)
+        if mv is not None:
+            # 有移动校准数：当月比算总量用移动口径，评优/落后判断跟着改。
+            # 周环比仍看填报（移动数只给整月）。
+            facts["bisuan_total"] = int(mv)
+        month_by_store[sid] = facts
         week_by_store[sid] = _rollup_store(week_facts.get(sid) or {})
         prev_by_store[sid] = _rollup_store(prev_week_facts.get(sid) or {})
 
@@ -195,6 +203,7 @@ def build_insights(
                 "week": week_bits,
                 "month": month_bits,
                 "week_delta_sum": week_delta_sum,
+                "mobile_based": sid in mobile_bisuan,
             }
         )
     store_rows.sort(
@@ -210,6 +219,7 @@ def build_insights(
     prev_start, prev_end = prev_week_span(as_of)
     return {
         "as_of": as_of,
+        "mobile_used": bool(mobile_bisuan),
         "pace": pace,
         "days_in_month": days_in_month,
         "elapsed": elapsed,

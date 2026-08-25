@@ -67,6 +67,35 @@ def test_insights_pace_week_compare_and_laggards():
     assert by_name["甲店"]["week"][1]["delta"] == -1
 
 
+def test_insights_mobile_bisuan_overrides_month_for_ranking():
+    as_of = date(2026, 8, 16)
+    stores = [_store(1, "甲店"), _store(2, "乙店")]
+    payload = build_insights(
+        stores=stores,
+        as_of=as_of,
+        kpi_targets={"bisuan_total": 10},
+        month_facts={
+            1: {"bisuan": 5, "bisuan_high": 0},  # 填报 5 台
+            2: {"bisuan": 30, "bisuan_high": 0},  # 填报 30 台
+        },
+        week_facts={1: {}, 2: {}},
+        prev_week_facts={1: {}, 2: {}},
+        reported_today=set(),
+        reported_month={1, 2},
+        mobile_bisuan={1: 80},  # 甲店移动校准 8.0（store 80 = 8.0×10）
+    )
+    by_name = {r["name"]: r for r in payload["store_rows"]}
+    # 甲店当月比算用移动 8.0，而非填报 0.5
+    m1 = {b["code"]: b for b in by_name["甲店"]["month"]}
+    assert m1["bisuan_total"]["value"] == 8.0
+    # 乙店无移动校准，仍是填报 3.0
+    m2 = {b["code"]: b for b in by_name["乙店"]["month"]}
+    assert m2["bisuan_total"]["value"] == 3.0
+    # 总进度跟着移动口径
+    kpi = {k["code"]: k for k in payload["kpis"]}["bisuan_total"]
+    assert kpi["value"] == 11.0
+
+
 def test_insights_page_admin_only(app_client):
     denied = app_client.get("/insights")
     assert denied.status_code in (302, 401, 403)

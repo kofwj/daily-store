@@ -257,6 +257,13 @@ button.ghost:hover, .btn.ghost:hover { background: var(--accent-soft); }
   font-size: 12px;
   color: var(--muted);
 }
+.chip-mobile {
+  background: #e0f2fe;
+  color: #0369a1;
+  margin-left: 6px;
+  font-weight: 700;
+  vertical-align: middle;
+}
 .check {
   display: flex;
   align-items: center;

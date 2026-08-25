@@ -326,6 +326,16 @@ def register_admin(app) -> None:
                 }
             else:
                 reported_today = set()
+            month_key = as_of.strftime("%Y-%m")
+            mobile_bisuan = {}
+            for st in stores:
+                raw = _bisuan_mobile_raw(conn, st["id"], month_key)
+                if raw:
+                    try:
+                        # 库内 0.1 精度整数（=`值*10`），与 rollup 口径一致
+                        mobile_bisuan[st["id"]] = int(round(float(raw) * 10))
+                    except (TypeError, ValueError):
+                        pass
             payload = insights.build_insights(
                 stores=stores,
                 as_of=as_of,
@@ -335,6 +345,7 @@ def register_admin(app) -> None:
                 prev_week_facts=prev_facts,
                 reported_today=reported_today,
                 reported_month=reported_month,
+                mobile_bisuan=mobile_bisuan,
             )
             if advisor == "yes":
                 scope["label"] = scope["label"] + " · 有顾问"

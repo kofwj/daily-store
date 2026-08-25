@@ -27,6 +27,7 @@
 
 <div class="kpi-row">
   <div class="kpi">
+    {% if mobile_used %}<p class="muted insight-mobile-note">比算当月总计有店按移动校准数（表内标「移」）。</p>{% endif %}
     <div class="muted">本月时间进度</div>
     <div class="kpi-num">{{ '%.0f'|format(pace) }}%</div>
     <div class="muted">{{ elapsed }}/{{ days_in_month }} 天 · {{ done_month }}/{{ n }} 店交过</div>
@@ -107,7 +108,7 @@
       {% set shown.n = shown.n + 1 %}
       <tr class="{% if not r.today_ok %}row-miss{% elif r.lag_bits %}row-lag{% endif %}">
         <td>
-          <div class="insight-store">{{ r.name }}</div>
+          <div class="insight-store">{{ r.name }}{% if r.mobile_based %}<span class="chip chip-mobile" title="当月比算按移动校准数">移</span>{% endif %}</div>
           {% if r.flags %}<div class="insight-flags">{% for f in r.flags %}<span class="flag {{ 'flag-miss' if '未交' in f else 'flag-lag' }}">{{ f }}</span>{% endfor %}</div>{% endif %}
         </td>
         <td>{{ r.manager }}</td>
