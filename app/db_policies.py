@@ -153,15 +153,20 @@ def sanitize_policy_html(raw: str) -> str:
     return re.sub(r"(?:<br\s*/?>\s*){3,}", "<br><br>", out)
 
 
-def _plain_tokens(raw: str) -> List[str]:
+def _plain_chunks(raw: str, size: int = 40) -> List[str]:
+    """去标签去空格后按固定长度切成块。
+
+    用块而非单字做 diff，DP 的 O(n·m) 时间和内存被压到文本长度/块大小，
+    避免巨型政策把 /policies 打到卡死或 OOM。块内不再细分，标注落在改动块上。
+    """
     text = re.sub(r"<[^>]+>", "", raw or "")
     text = html.unescape(text).replace("\xa0", " ")
     text = re.sub(r"\s+", "", text)
-    return re.findall(r"新增|增加|新入网|去除|剔除|取消|.", text) or list(text)
+    return [text[i : i + size] for i in range(0, len(text), size)] or [""]
 
 
 def _diff_ops(old: str, new: str) -> List[tuple]:
-    a, b = _plain_tokens(old), _plain_tokens(new)
+    a, b = _plain_chunks(old), _plain_chunks(new)
     n, m = len(a), len(b)
     dp = [[0] * (m + 1) for _ in range(n + 1)]
     for i in range(n + 1):
