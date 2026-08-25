@@ -19,4 +19,4 @@ COPY wsgi.py .
 COPY VERSION ./VERSION
 
 EXPOSE 5055
-CMD ["gunicorn", "--bind", "0.0.0.0:5055", "--workers", "2", "--threads", "4", "--timeout", "60", "wsgi:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5055", "--workers", "4", "--threads", "4", "--timeout", "60", "wsgi:app"]
