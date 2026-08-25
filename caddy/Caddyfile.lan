@@ -1,4 +1,5 @@
 # 局域网直连：手机/电脑访问 http://your-lan-host:8099
+# 店员走 Cloudflare 时同一端口也会打进来，优先用 Cf-Connecting-Ip。
 # 不要强制 https，否则 HTTP 下登录 Cookie 会丢。
 
 {
@@ -7,6 +8,16 @@
 
 :80 {
 	encode gzip
+
+	@from_cf header Cf-Connecting-Ip *
+	handle @from_cf {
+		reverse_proxy app:5055 {
+			header_up X-Forwarded-For {http.request.header.Cf-Connecting-Ip}
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-Host {host}
+			header_up X-Real-IP {http.request.header.Cf-Connecting-Ip}
+		}
+	}
 
 	handle {
 		reverse_proxy app:5055 {
