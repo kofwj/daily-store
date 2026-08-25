@@ -25,6 +25,12 @@ def register_policies(app) -> None:
                 want = 0
             current = next((p for p in items if p["id"] == want), items[0])
         unread_ids = {p["id"] for p in items if int(acks.get(p["id"], 0)) < int(p["version"])}
+        diff_html = ""
+        if current and int(current["version"]) > 1:
+            with db.get_db() as conn:
+                prev = db.previous_revision_body(conn, current["id"], current["version"])
+            if prev:
+                diff_html = db.render_policy_diff(prev, current["body"])
         return render_template(
             "policies.html",
             items=items,
@@ -32,6 +38,7 @@ def register_policies(app) -> None:
             acks=acks,
             unread_ids=unread_ids,
             require=require,
+            diff_html=diff_html,
         )
 
     @app.route("/policies/ack", methods=["POST"])

@@ -12,9 +12,10 @@ from .db_core import _now
 
 POLICY_REQUIRE_KEY = "policy_require_read"
 ALLOWED_TAGS = {
-    "p", "br", "b", "strong", "i", "em", "u", "ul", "ol", "li",
-    "h2", "h3", "h4", "blockquote", "span", "div", "a",
+    "p", "br", "b", "strong", "i", "em", "u", "s", "strike", "del",
+    "ul", "ol", "li", "h2", "h3", "h4", "blockquote", "span", "div", "a",
     "table", "thead", "tbody", "tr", "th", "td",
+    "ins",
 }
 VOID_TAGS = {"br"}
 TABLE_TAGS = {"table", "thead", "tbody", "tr", "th", "td"}
@@ -30,6 +31,16 @@ class _Sanitizer(HTMLParser):
         if tag not in ALLOWED_TAGS:
             return
         extra = ""
+        if tag == "span":
+            cls = ""
+            for key, val in attrs:
+                if key.lower() == "class":
+                    cls = val or ""
+            keep = [c for c in cls.split() if c in {"policy-add", "policy-del"}]
+            if keep:
+                extra = f' class="{" ".join(keep)}"'
+            self.out.append(f"<span{extra}>")
+            return
         if tag == "a":
             href = ""
             for key, val in attrs:
@@ -139,25 +150,108 @@ def sanitize_policy_html(raw: str) -> str:
     except Exception:
         return html.escape(re.sub(r"<[^>]+>", "", text)).replace("\n", "<br>")
     out = "".join(parser.out)
-    out = _mark_policy_keywords(out)
     return re.sub(r"(?:<br\s*/?>\s*){3,}", "<br><br>", out)
 
 
-def _mark_policy_keywords(html_out: str) -> str:
-    parts = re.split(r"(<[^>]+>)", html_out)
-    add = ("新增", "增加", "新入网")
-    drop = ("去除", "剔除", "取消")
-    out = []
-    for part in parts:
-        if part.startswith("<"):
-            out.append(part)
-            continue
-        for word in add:
-            part = part.replace(word, f'<span class="policy-mark-add">{word}</span>')
-        for word in drop:
-            part = part.replace(word, f'<span class="policy-mark-del">{word}</span>')
-        out.append(part)
-    return "".join(out)
+def _plain_tokens(raw: str) -> List[str]:
+    text = re.sub(r"<[^>]+>", "", raw or "")
+    text = html.unescape(text).replace("\xa0", " ")
+    text = re.sub(r"\s+", "", text)
+    return re.findall(r"新增|增加|新入网|去除|剔除|取消|.", text) or list(text)
+
+
+def _diff_ops(old: str, new: str) -> List[tuple]:
+    a, b = _plain_tokens(old), _plain_tokens(new)
+    n, m = len(a), len(b)
+    dp = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(n + 1):
+        dp[i][0] = i
+    for j in range(m + 1):
+        dp[0][j] = j
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            if a[i - 1] == b[j - 1]:
+                dp[i][j] = dp[i - 1][j - 1]
+            else:
+                dp[i][j] = 1 + min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
+    i, j = n, m
+    rev: List[tuple] = []
+    while i > 0 or j > 0:
+        if i > 0 and j > 0 and a[i - 1] == b[j - 1] and dp[i][j] == dp[i - 1][j - 1]:
+            rev.append(("=", b[j - 1]))
+            i -= 1
+            j -= 1
+        elif i > 0 and j > 0 and dp[i][j] == dp[i - 1][j - 1] + 1:
+            rev.append(("~", a[i - 1], b[j - 1]))
+            i -= 1
+            j -= 1
+        elif i > 0 and dp[i][j] == dp[i - 1][j] + 1:
+            rev.append(("-", a[i - 1]))
+            i -= 1
+        else:
+            rev.append(("+", b[j - 1]))
+            j -= 1
+    rev.reverse()
+    return rev
+
+
+def render_policy_diff(old_html: str, new_html: str) -> str:
+    """对照上一版：删除划线，新增绿色高亮。"""
+    if not (old_html or "").strip():
+        return new_html or ""
+    ops = _diff_ops(old_html, new_html)
+    chunks: List[str] = []
+    buf = ""
+    kind = ""
+
+    def flush() -> None:
+        nonlocal buf, kind
+        if not buf:
+            return
+        esc = html.escape(buf)
+        if kind == "+":
+            chunks.append(f'<span class="policy-add">{esc}</span>')
+        elif kind == "-":
+            chunks.append(f'<del class="policy-del">{esc}</del>')
+        else:
+            chunks.append(esc)
+        buf = ""
+        kind = ""
+
+    for op in ops:
+        if op[0] == "=":
+            if kind != "=":
+                flush()
+                kind = "="
+            buf += op[1]
+        elif op[0] == "+":
+            if kind != "+":
+                flush()
+                kind = "+"
+            buf += op[1]
+        elif op[0] == "-":
+            if kind != "-":
+                flush()
+                kind = "-"
+            buf += op[1]
+        else:
+            if kind != "-":
+                flush()
+                kind = "-"
+            buf += op[1]
+            flush()
+            kind = "+"
+            buf += op[2]
+    flush()
+    return "<p>" + "".join(chunks) + "</p>"
+
+
+def previous_revision_body(conn: sqlite3.Connection, policy_id: int, version: int) -> str:
+    row = conn.execute(
+        "SELECT body FROM policy_revisions WHERE policy_id=? AND version<? ORDER BY version DESC LIMIT 1",
+        (int(policy_id), int(version)),
+    ).fetchone()
+    return (row["body"] if row else "") or ""
 
 
 def _ensure_policy_tables(conn: sqlite3.Connection) -> None:

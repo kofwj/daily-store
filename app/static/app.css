@@ -106,8 +106,15 @@ a:hover { color: #374151; }
   vertical-align: middle; max-width: 9em;
 }
 .policy-body th { background: #f3f4f6; font-weight: 650; }
-.policy-mark-add { color: #067647; background: #ecfdf3; font-weight: 700; padding: 0 4px; border-radius: 4px; }
-.policy-mark-del { color: #b42318; background: #fef3f2; font-weight: 700; padding: 0 4px; border-radius: 4px; text-decoration: line-through; }
+.policy-add, .policy-body ins {
+  color: #067647; background: #dcfce7; font-weight: 650; padding: 0 2px; border-radius: 3px;
+}
+.policy-del, .policy-body del, .policy-body s, .policy-body strike {
+  color: #b42318; background: #fee2e2; text-decoration: line-through;
+  padding: 0 2px; border-radius: 3px;
+}
+.policy-diff { margin-top: 16px; }
+.policy-diff summary { cursor: pointer; color: var(--muted); margin-bottom: 8px; }
 .sun-editor { border-radius: 8px; }
 @media (max-width: 800px) {
   .policy-layout { grid-template-columns: 1fr; }

@@ -721,7 +721,7 @@
         <p><label>正文</label>
           <textarea id="policyBody" name="body" rows="14">{{ policy_edit.body if policy_edit else '' }}</textarea>
         </p>
-        <p class="muted">所见即所得：标题、列表、表格、链接。保存时会清掉脚本。</p>
+        <p class="muted">审批标注：选中文字点删除线表示去掉，点绿色高亮表示新增。也可保存后在政策页看「对照上一版」。</p>
         <link rel="stylesheet" href="{{ url_for('static', filename='vendor/suneditor/suneditor.min.css') }}">
         <script src="{{ url_for('static', filename='vendor/suneditor/suneditor.min.js') }}"></script>
         <script src="{{ url_for('static', filename='vendor/suneditor/zh_cn.js') }}"></script>
@@ -735,7 +735,7 @@
             width: '100%',
             buttonList: [
               ['undo', 'redo'],
-              ['fontSize', 'formatBlock', 'bold', 'underline', 'italic'],
+              ['fontSize', 'formatBlock', 'bold', 'underline', 'italic', 'strike'],
               ['fontColor', 'hiliteColor', 'removeFormat'],
               ['align', 'list', 'table', 'link', 'horizontalRule'],
               ['fullScreen', 'codeView']

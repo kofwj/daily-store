@@ -26,6 +26,12 @@
       <p class="muted">第 {{ current.version }} 版{% if current.updated_at %} · 更新于 {{ current.updated_at }}{% endif %}</p>
     </div>
     <div class="policy-body">{{ current.body|safe }}</div>
+    {% if diff_html %}
+    <details class="policy-diff">
+      <summary>对照上一版：删除划线，新增绿色</summary>
+      <div class="policy-body">{{ diff_html|safe }}</div>
+    </details>
+    {% endif %}
     {% if current.id in unread_ids %}
     <form method="post" action="{{ url_for('policy_ack') }}" class="toolbar">
       <input type="hidden" name="policy_id" value="{{ current.id }}">
