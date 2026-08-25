@@ -105,3 +105,32 @@ def test_gate_off_does_not_block(client):
         follow_redirects=True,
     )
     assert page.request.path == "/today"
+
+
+def test_unread_gate_blocks_readonly_pages(client):
+    client.post("/login", data={"username": "admin", "pin": "1234"})
+    with db.get_db() as conn:
+        uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        db.save_policy(conn, title="合约", body="店长也要读", user_id=uid)
+        db.set_policy_require_read(conn, True)
+        sid = conn.execute("SELECT id FROM stores ORDER BY id LIMIT 1").fetchone()["id"]
+        db.create_user(
+            conn,
+            username="dz_policy",
+            display_name="店长测",
+            pin="123456",
+            role="readonly",
+            store_ids=[sid],
+            scope="",
+        )
+        conn.execute("UPDATE users SET must_change_pin=0 WHERE username='dz_policy'")
+    client.get("/logout")
+    client.post("/login", data={"username": "dz_policy", "pin": "123456"})
+    blocked = client.get("/report", follow_redirects=True)
+    assert blocked.request.path == "/policies"
+    assert "请先阅读" in blocked.get_data(as_text=True)
+    with db.get_db() as conn:
+        pid = conn.execute("SELECT id FROM policies WHERE title='合约'").fetchone()["id"]
+    client.post("/policies/ack", data={"policy_id": str(pid)}, follow_redirects=True)
+    ok = client.get("/report", follow_redirects=True)
+    assert ok.request.path == "/report"
