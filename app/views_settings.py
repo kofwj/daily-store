@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 
 from flask import Response, flash, g, redirect, render_template, request, url_for
 
@@ -75,6 +77,54 @@ def _change_own_pin() -> None:
         db.update_user_pin(conn, g.user["id"], new)
 
 
+def _server_status_stats() -> dict:
+    """采集服务器负载与数据库状态，只给管理员看。"""
+    stats = {"db": {}, "load": None, "mem": None, "procs": None}
+    # 负载与进程数
+    try:
+        one, five, fm = (os.getloadavg()[i] for i in range(3))
+        stats["load"] = {"one": round(one, 2), "five": round(five, 2)}
+    except OSError:
+        pass
+    try:
+        stats["procs"] = len(os.listdir("/proc"))
+    except OSError:
+        pass
+    # 内存
+    try:
+        mem = {}
+        for line in open("/proc/meminfo", encoding="utf-8"):
+            k, _, v = line.partition(":")
+            if k in ("MemTotal", "MemAvailable"):
+                mem[k] = int(v.split()[0]) // 1024  # KB -> MiB
+        if mem:
+            total = mem.get("MemTotal", 0)
+            avail = mem.get("MemAvailable", 0)
+            stats["mem"] = {
+                "total_mb": total,
+                "avail_mb": avail,
+                "used_mb": total - avail,
+                "used_pct": round(100 * (total - avail) / total, 1) if total else 0,
+            }
+    except OSError:
+        pass
+    # 数据库进程/文件信息
+    wal_bytes = 0
+    try:
+        wal_path = Path(str(db.DB_PATH) + "-wal")
+        wal_bytes = wal_path.stat().st_size if wal_path.exists() else 0
+    except OSError:
+        pass
+    with db.get_db() as conn:
+        stats["db"] = {
+            "backups": len(list(backup.backup_dir().glob(f"{backup.BACKUP_PREFIX}*.db"))),
+            "stores": conn.execute("SELECT COUNT(*) FROM stores").fetchone()[0],
+            "users": conn.execute("SELECT COUNT(*) FROM users WHERE role!='admin'").fetchone()[0],
+            "wal_mb": round(wal_bytes / 1024 / 1024, 2),
+        }
+    return stats
+
+
 def register_settings(app) -> None:
     @app.route("/settings/backup/<name>")
     @admin_required
@@ -90,6 +140,12 @@ def register_settings(app) -> None:
             mimetype="application/octet-stream",
             headers={"Content-Disposition": f"attachment; filename={ascii_filename(safe)}"},
         )
+
+    @app.route("/settings/status")
+    @admin_required
+    def settings_status():
+        stats = _server_status_stats()
+        return render_template("settings.html", s=stats, tab="status")
 
     @app.route("/settings", methods=["GET", "POST"])
     @login_required

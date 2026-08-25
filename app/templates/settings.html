@@ -6,6 +6,36 @@
 <div class="settings">
   {% include "_settings_nav.html" %}
   <div class="settings-main">
+    {% if tab == 'status' %}
+    <div class="settings-page-head"><h1>服务器状态</h1><p class="muted">仅供管理员查看。</p></div>
+    <div class="card settings-card">
+      <div class="settings-card-head"><h2>负载与内存</h2></div>
+      <table class="data settings-table">
+        <tbody>
+          {% if s.load %}
+          <tr><td class="left">系统负载(1/5分钟)</td><td>{{ s.load.one }} / {{ s.load.five }}</td></tr>
+          {% endif %}
+          {% if s.mem %}
+          <tr><td class="left">内存使用</td><td>{{ s.mem.used_mb }} MB / {{ s.mem.total_mb }} MB（{{ s.mem.used_pct }}%）</td></tr>
+          <tr><td class="left">剩余可用</td><td>{{ s.mem.avail_mb }} MB</td></tr>
+          {% endif %}
+          {% if s.procs %}<tr><td class="left">进程数</td><td>{{ s.procs }}</td></tr>{% endif %}
+        </tbody>
+      </table>
+      {% if s.mem and s.mem.used_pct >= 90 %}<p class="warn">内存使用率高，建议留意 VPS 上其他容器。</p>{% endif %}
+    </div>
+    <div class="card settings-card">
+      <div class="settings-card-head"><h2>业务数据</h2></div>
+      <table class="data settings-table">
+        <tbody>
+          <tr><td class="left">门店</td><td>{{ s.db.stores }}</td></tr>
+          <tr><td class="left">店员账号</td><td>{{ s.db.users }}</td></tr>
+          <tr><td class="left">WAL 积压</td><td>{{ s.db.wal_mb }} MB（接近 0 表示已落盘）</td></tr>
+          <tr><td class="left">本地备份保留</td><td>{{ s.db.backups }} 份</td></tr>
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
     {% if tab == 'account' %}
     <div class="settings-page-head">
       <h1>账号</h1>

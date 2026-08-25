@@ -29,6 +29,7 @@
     <a href="{{ url_for('logins_page') }}" class="{{ 'active' if tab=='logins' else '' }}">登录日志</a>
     <a href="{{ url_for('settings', tab='brand') }}" class="{{ 'active' if tab=='brand' else '' }}">登录页</a>
     <a href="{{ url_for('settings', tab='backup') }}" class="{{ 'active' if tab=='backup' else '' }}">备份恢复</a>
+    <a href="{{ url_for('settings_status') }}" class="{{ 'active' if tab=='status' else '' }}">服务器状态</a>
   </div>
   {% endif %}
 </aside>

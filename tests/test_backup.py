@@ -4,6 +4,15 @@ from pathlib import Path
 from app import backup, db
 
 
+def test_admin_status_page_ok(tmp_db, client):
+    client.post("/login", data={"username": "admin", "pin": "123456"})
+    page = client.get("/settings/status")
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    assert "服务器状态" in body
+    assert "门店" in body
+
+
 def test_admin_can_backup_download_and_restore(tmp_db, client):
     client.post("/login", data={"username": "admin", "pin": "123456"})
     page = client.get("/settings?tab=backup").get_data(as_text=True)
