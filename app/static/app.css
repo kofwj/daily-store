@@ -428,14 +428,18 @@ table.data.insight-stores .insight-metric {
   box-shadow: 0 10px 24px rgba(17, 24, 39, 0.18);
 }
 .login-kicker {
-  font-size: 12px;
-  color: var(--muted);
-  letter-spacing: 0.04em;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.03em;
+  line-height: 1.2;
 }
 .login-mark h1 {
-  margin: 2px 0 0;
-  font-size: 28px;
-  letter-spacing: -0.04em;
+  margin: 4px 0 0;
+  font-size: 14px;
+  font-weight: 550;
+  color: var(--muted);
+  letter-spacing: 0.02em;
 }
 .login {
   margin: 0;
