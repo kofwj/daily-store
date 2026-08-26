@@ -15,3 +15,17 @@ fi
 
 echo "→ ruff check"
 "$RUFF" check .
+
+# 静态类型检查：只盯算钱的几个模块，防类型错误静默变成错数字
+# mypy 未装则跳过（与 ruff 同样不阻塞未装环境）
+if command -v mypy >/dev/null 2>&1; then
+  MYPY=mypy
+elif [ -x "$HOME/Library/Python/3.9/bin/mypy" ]; then
+  MYPY="$HOME/Library/Python/3.9/bin/mypy"
+else
+  MYPY=""
+fi
+if [ -n "$MYPY" ]; then
+  echo "→ mypy (算钱模块)"
+  "$MYPY" || exit 1
+fi

@@ -11,3 +11,20 @@ ignore = ["E501", "DTZ"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app", "tests"]
+
+[tool.mypy]
+python_version = "3.9"
+# 只盯算钱的三个模块 + 它们的直接依赖，防类型错误静默变成错数字
+files = [
+    "app/metrics_seed.py",
+    "app/db_advances.py",
+    "app/insights.py",
+    "app/db_core.py",
+    "app/db_policies.py",
+]
+# sqlite3.Row 在类型桩里不算 Sequence，业务代码到处 row["x"]，不为此加 cast
+disable_error_code = ["index", "union-attr"]
+# 第三方库（flask/openpyxl 等）没桩不报
+ignore_missing_imports = true
+# 不强制函数都加注解；只校验已有的
+check_untyped_defs = false

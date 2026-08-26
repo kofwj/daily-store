@@ -60,7 +60,7 @@ def _money_select(alias: str = "a") -> str:
     )
 
 
-def _snapshot(row, *, cents: bool = False) -> dict:
+def _snapshot(row: Optional[sqlite3.Row], *, cents: bool = False) -> dict:
     if row is None:
         return {}
     out = {key: row[key] for key in row.keys()}
@@ -98,7 +98,7 @@ def record_advance(
     paid: bool = False,
     advance_id: Optional[int] = None,
 ) -> int:
-    payload = {
+    payload: Dict[str, Any] = {
         "user_id": user_id,
         "updated_at": _now(),
         "biz_date": biz_date.isoformat(),
@@ -166,9 +166,9 @@ def record_advance(
             paid_by,
         ),
     )
-    created = conn.execute("SELECT * FROM advance_posts WHERE id=?", (int(cur.lastrowid),)).fetchone()
+    created = conn.execute("SELECT * FROM advance_posts WHERE id=?", (int(cur.lastrowid or 0),)).fetchone()
     _audit(conn, created, user_id=user_id, action="create", before={}, after=_snapshot(created, cents=True))
-    return int(cur.lastrowid)
+    return int(cur.lastrowid or 0)
 
 
 def get_advance(conn: sqlite3.Connection, advance_id: int, store_id: int):

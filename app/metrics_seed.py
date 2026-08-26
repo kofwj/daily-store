@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 # 播报分组：与现有微信群格式对齐
 # header 为 None 表示基础项，直接跟在店名后面
@@ -128,7 +128,7 @@ COIN_NEW_PARTS = (
 COIN_ALL_PARTS = ("coin_cut_old",) + COIN_NEW_PARTS + ("coin_cut_xtc",)
 
 # 群播报把老用户/新用户/全品类/小天才合成「金币直降」一行；月指标只计新用户四项
-ROLLUPS = {
+ROLLUPS: Dict[str, Dict[str, Any]] = {
     "coin_cut": {
         "name": "新用户直降",
         "parts": COIN_NEW_PARTS,
@@ -222,28 +222,27 @@ def metric_step(code: str) -> str:
     return "0.1" if is_decimal_metric(code) else "1"
 
 
-def rollup_pair(values: Dict, key: str) -> Tuple[int, int]:
+def rollup_pair(values: Mapping[str, Any], key: str) -> Tuple[int, int]:
     spec = ROLLUPS[key]
-    codes = spec["parts"] + spec["legacy"]
+    codes: Sequence[str] = [*spec["parts"], *spec["legacy"]]
     day = sum(int((values.get(code) or (0, 0))[0] or 0) for code in codes)
     cum = sum(int((values.get(code) or (0, 0))[1] or 0) for code in codes)
     return day, cum
 
 
-def rollup_amount(values: Dict[str, int], key: str) -> int:
+def rollup_amount(values: Mapping[str, int], key: str) -> int:
     spec = ROLLUPS[key]
-    codes = spec["parts"] + spec["legacy"]
-    return sum(int(values.get(code, 0) or 0) for code in codes)
+    return sum(int(values.get(code, 0) or 0) for code in [*spec["parts"], *spec["legacy"]])
 
 
-def display_rollup(values: Dict[str, int], key: str) -> float:
+def display_rollup(values: Mapping[str, int], key: str) -> float:
     stored = rollup_amount(values, key)
     if key == "bisuan_total" or any(is_decimal_metric(code) for code in ROLLUPS[key]["parts"]):
         return round(stored / METRIC_SCALE, 1)
     return float(stored)
 
 
-def format_rollup(values: Dict[str, int], key: str) -> str:
+def format_rollup(values: Mapping[str, int], key: str) -> str:
     value = display_rollup(values, key)
     if key == "bisuan_total" or any(is_decimal_metric(code) for code in ROLLUPS[key]["parts"]):
         return f"{value:.1f}"
@@ -252,5 +251,5 @@ def format_rollup(values: Dict[str, int], key: str) -> str:
     return str(value)
 
 
-def sum_stored(codes: Iterable[str], values: Dict[str, int]) -> int:
+def sum_stored(codes: Iterable[str], values: Mapping[str, int]) -> int:
     return sum(int(values.get(code, 0) or 0) for code in codes)

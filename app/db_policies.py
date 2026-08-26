@@ -386,7 +386,7 @@ def save_policy(
         """,
         (title, body, int(sort_order or 0), 1 if active else 0, now, user_id or None),
     )
-    pid = int(cur.lastrowid)
+    pid = int(cur.lastrowid or 0)
     conn.execute(
         """
         INSERT INTO policy_revisions(policy_id, version, title, body, edited_at, edited_by)

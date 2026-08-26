@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import calendar
 from datetime import date, timedelta
-from typing import Any, Dict, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from .metrics_seed import (
     KPI_TARGETS,
@@ -149,7 +149,7 @@ def build_insights(
         sid = int(store["id"])
         bits = []
         month_bits = []
-        week_bits = []
+        week_bits: List[Dict[str, Any]] = []
         for code, name, _note in KPI_TARGETS:
             scale = _scale(code)
             target = int(kpi_targets.get(code, 0) or 0)

@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta
 from hashlib import pbkdf2_hmac
 from pathlib import Path
 from secrets import token_hex
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from .metrics_seed import KPI_TARGETS, all_metrics
@@ -205,7 +205,7 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 );
 """
 
-MIGRATIONS: List[Tuple[int, str, callable]] = [
+MIGRATIONS: List[Tuple[int, str, str]] = [
     # 旧版在每次启动 seed 里搬数据；改为一次性迁移，避免生产重启反复重做
     (1, "retire_legacy_coin_cut", "_retire_legacy_coin_cut"),
     (2, "split_new_user_coin_cut", "_split_new_user_coin_cut"),
@@ -313,7 +313,7 @@ def migrate() -> None:
         # 多 worker 同时启动时抢一把写锁，避免两人各跑一遍再撞 UNIQUE
         conn.execute("BEGIN IMMEDIATE")
         applied = {int(row["version"]) for row in conn.execute("SELECT version FROM schema_migrations")}
-        fns: Dict[str, callable] = {
+        fns: Dict[str, Callable[[sqlite3.Connection], None]] = {
             "_retire_legacy_coin_cut": _retire_legacy_coin_cut,
             "_split_new_user_coin_cut": _split_new_user_coin_cut,
             "_expand_user_roles_readonly": _expand_user_roles_readonly,
