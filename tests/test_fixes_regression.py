@@ -336,16 +336,12 @@ def test_bisuan_accepts_one_decimal_and_month_calibrates(app_client):
             (sid, month_start, asof.isoformat()),
         ).fetchone()["n"]
         assert asof_total == before_total == 15  # 填报 1.5 不变
-        mobile = conn.execute(
-            "SELECT value FROM app_meta WHERE key=?",
-            (f"bisuan_mobile_{sid}_{day.strftime('%Y-%m')}",),
-        ).fetchone()
-        assert mobile and mobile["value"] == "2.0"
-        asof_row = conn.execute(
-            "SELECT value FROM app_meta WHERE key=?",
-            (f"bisuan_mobile_asof_{day.strftime('%Y-%m')}",),
-        ).fetchone()
-        assert asof_row and asof_row["value"] == asof.isoformat()
+        # 移动校准数现在落在 bisuan_mobile 表（整数 0.1 精度），并留审计
+        row = db.get_bisuan_mobile(conn, sid, day.strftime("%Y-%m"))
+        assert row and row["value_tenths"] == 20
+        assert row["asof"] == asof.isoformat()
+        edits = db.list_bisuan_mobile_edits(conn, month=day.strftime("%Y-%m"), store_id=sid)
+        assert edits and edits[0]["after"]["value_tenths"] == 20
     page = app_client.get(f"/bulletin?date={day.isoformat()}").get_data(as_text=True)
     assert "移2.0" in page
     # 今天没更新移数（截止日早于通报表日）=> 复盘不带分店对照
@@ -457,3 +453,59 @@ def test_store_picker_has_city_and_manager_groupby(app_client):
     settings = app_client.get("/settings?tab=stores").get_data(as_text=True)
     assert 'id="storeGroupBy"' in settings
     assert 'data-group="manager"' in settings
+
+
+def test_bisuan_mobile_migrates_from_old_settings(tmp_db):
+    """旧 app_meta 键要能搬进新表，且截止日按店保留。"""
+    from app.db_bisuan_mobile import _migrate_bisuan_mobile_from_settings
+
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores LIMIT 1").fetchone()["id"]
+        db.set_setting(conn, f"bisuan_mobile_{sid}_2026-07", "12.5")
+        db.set_setting(conn, "bisuan_mobile_asof_2026-07", "2026-07-20")
+        _migrate_bisuan_mobile_from_settings(conn)
+        row = db.get_bisuan_mobile(conn, sid, "2026-07")
+        assert row["value_tenths"] == 125
+        assert row["asof"] == "2026-07-20"
+        # 旧键已清掉，重复迁移不会翻倍
+        _migrate_bisuan_mobile_from_settings(conn)
+        assert db.get_bisuan_mobile(conn, sid, "2026-07")["value_tenths"] == 125
+        assert db.get_setting(conn, f"bisuan_mobile_{sid}_2026-07", "") == ""
+
+
+def test_bisuan_mobile_rejects_negative(tmp_db):
+    from datetime import date as _date
+
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores LIMIT 1").fetchone()["id"]
+        try:
+            db.save_bisuan_mobile(
+                conn, store_id=sid, month="2026-08", value_tenths=-5, asof=_date(2026, 8, 20)
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("负数应被拒绝")
+
+
+def test_bisuan_mobile_shows_in_audit_page(app_client):
+    """移动校准要能在修改审计里查到谁改的。"""
+    day = db.today_local()
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
+    with db.get_db() as conn:
+        sid = conn.execute(
+            "SELECT id FROM stores WHERE COALESCE(mobile_code,'')!='' LIMIT 1"
+        ).fetchone()["id"]
+    app_client.post(
+        "/bulletin/bisuan-mobile",
+        data={
+            "store_id": str(sid),
+            "date": day.isoformat(),
+            "asof": day.isoformat(),
+            "mobile": "9.5",
+            "city": "",
+        },
+        follow_redirects=True,
+    )
+    page = app_client.get("/edits?kind=mobile&days=1").get_data(as_text=True)
+    assert "移动校准" in page

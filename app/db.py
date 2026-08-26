@@ -26,6 +26,13 @@ from .db_advances import (  # noqa: F401
     set_advance_paid,
     yuan_to_cents,
 )
+from .db_bisuan_mobile import (  # noqa: F401
+    bisuan_mobile_asof_map,
+    bisuan_mobile_map,
+    get_bisuan_mobile,
+    list_bisuan_mobile_edits,
+    save_bisuan_mobile,
+)
 from .db_core import *  # noqa: F401,F403 — 公开 API 由 core 汇集
 from .db_core import _now  # noqa: F401 — 测试直接调用 db._now()
 from .db_deals import (  # noqa: F401

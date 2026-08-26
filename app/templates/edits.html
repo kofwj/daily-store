@@ -21,6 +21,7 @@
           <option value="deal" {% if kind == 'deal' %}selected{% endif %}>触客播报</option>
           <option value="advance" {% if kind == 'advance' %}selected{% endif %}>垫资</option>
           <option value="invoice" {% if kind == 'invoice' %}selected{% endif %}>开票</option>
+          <option value="mobile" {% if kind == 'mobile' %}selected{% endif %}>移动校准</option>
         </select>
       </label>
       <label class="filter">
@@ -57,7 +58,7 @@
           {% for r in rows %}
           <tr>
             <td>{{ r.edited_at }}</td>
-            <td>{% if r.kind == 'deal' %}<span class="tag tag-deal">触客</span>{% elif r.kind == 'advance' %}<span class="tag tag-deal">垫资</span>{% elif r.kind == 'invoice' %}<span class="tag tag-deal">开票</span>{% else %}<span class="tag tag-daily">日报</span>{% endif %}</td>
+            <td>{% if r.kind == 'deal' %}<span class="tag tag-deal">触客</span>{% elif r.kind == 'advance' %}<span class="tag tag-deal">垫资</span>{% elif r.kind == 'invoice' %}<span class="tag tag-deal">开票</span>{% elif r.kind == 'mobile' %}<span class="tag tag-deal">移动校准</span>{% else %}<span class="tag tag-daily">日报</span>{% endif %}</td>
             <td>{{ r.store_name }}</td>
             <td><code>{{ r.user_name }}</code></td>
             <td>{{ r.biz_date }}{% if r.note %} <span class="muted">（{{ r.note }}）</span>{% endif %}</td>

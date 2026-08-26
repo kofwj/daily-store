@@ -219,6 +219,7 @@ MIGRATIONS: List[Tuple[int, str, callable]] = [
     (10, "mark_sesame_paid", "_mark_sesame_paid"),
     (11, "scale_bisuan_tenths", "_scale_bisuan_tenths"),
     (12, "admin_pin_six_digits", "_admin_pin_six_digits"),
+    (13, "bisuan_mobile_table", "_migrate_bisuan_mobile_from_settings"),
 ]
 
 def _now() -> str:
@@ -287,6 +288,13 @@ def init_db() -> None:
         _reset_filler_pins_once(conn)
     migrate()
 
+def _bisuan_mobile_migration(conn: sqlite3.Connection) -> None:
+    # 延迟引入：db_bisuan_mobile 反向依赖 db_core._now
+    from .db_bisuan_mobile import _migrate_bisuan_mobile_from_settings
+
+    _migrate_bisuan_mobile_from_settings(conn)
+
+
 def migrate() -> None:
     """执行尚未跑过的数据迁移，并记录版本。独立连接，可在表重建前关外键/开旧式 ALTER。"""
     with get_db() as conn:
@@ -318,6 +326,7 @@ def migrate() -> None:
             "_mark_sesame_paid": _mark_sesame_paid,
             "_scale_bisuan_tenths": _scale_bisuan_tenths,
             "_admin_pin_six_digits": _admin_pin_six_digits,
+            "_migrate_bisuan_mobile_from_settings": _bisuan_mobile_migration,
         }
         for version, name, fn_name in sorted(MIGRATIONS):
             if version in applied:

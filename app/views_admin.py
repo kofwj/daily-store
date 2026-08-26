@@ -41,14 +41,6 @@ from .metrics_seed import (
 )
 
 
-def _bisuan_mobile_raw(conn, store_id: int, month_key: str) -> str:
-    """读移动取数；兼容旧 key bisuan_official_*。"""
-    raw = db.get_setting(conn, f"bisuan_mobile_{store_id}_{month_key}", "")
-    if raw:
-        return raw
-    return db.get_setting(conn, f"bisuan_official_{store_id}_{month_key}", "")
-
-
 def _default_bisuan_mobile_asof(biz_date: date) -> date:
     """移动取数默认截止到通报表日前一天（当天通常还没数）。"""
     month_start = biz_date.replace(day=1)
@@ -65,20 +57,11 @@ def _clamp_bisuan_mobile_asof(asof: date, biz_date: date) -> date:
     return asof
 
 
-def _bisuan_mobile_asof(conn, month_key: str, biz_date: date) -> date:
-    raw = db.get_setting(conn, f"bisuan_mobile_asof_{month_key}", "")
-    if raw:
-        try:
-            return _clamp_bisuan_mobile_asof(date.fromisoformat(raw[:10]), biz_date)
-        except ValueError:
-            pass
-    return _default_bisuan_mobile_asof(biz_date)
-
-
 def _bulletin_rows(conn, stores, biz_date: date):
     month_key = biz_date.strftime("%Y-%m")
     month_start = biz_date.replace(day=1)
-    asof = _bisuan_mobile_asof(conn, month_key, biz_date)
+    mobile_map = db.bisuan_mobile_map(conn, month_key)
+    asof_map = db.bisuan_mobile_asof_map(conn, month_key)
     rows = []
     for store in stores:
         if not (store["mobile_code"] or "").strip():
@@ -94,17 +77,20 @@ def _bulletin_rows(conn, stores, biz_date: date):
         )
         day_coin, month_coin = rollup_pair(pairs, "coin_cut")
         report = db.get_report(conn, store["id"], biz_date)
-        mobile_raw = _bisuan_mobile_raw(conn, store["id"], month_key)
-        mobile = None
-        try:
-            mobile = int(round(float(mobile_raw) * 10)) if mobile_raw else None
-        except (TypeError, ValueError):
-            mobile = None
+        mobile = mobile_map.get(int(store["id"]))
+        # 截止日按店取，没存就用默认（通报表日前一天）
+        raw_asof = (asof_map.get(int(store["id"])) or "").strip()
+        store_asof = _default_bisuan_mobile_asof(biz_date)
+        if raw_asof:
+            try:
+                store_asof = _clamp_bisuan_mobile_asof(date.fromisoformat(raw_asof[:10]), biz_date)
+            except ValueError:
+                pass
         sys_asof = None
         if mobile is not None:
             # 对照用截止日同期上报数，不是通报表选中日的整月
             sys_asof = db.week_metric_total(
-                conn, store["id"], month_start, asof, ("bisuan", "bisuan_high")
+                conn, store["id"], month_start, store_asof, ("bisuan", "bisuan_high")
             )
         rows.append(
             bulletin.build_row(
@@ -117,7 +103,7 @@ def _bulletin_rows(conn, stores, biz_date: date):
                 month_coin=month_coin,
                 submitted=report is not None,
                 month_bisuan_mobile=mobile,
-                month_bisuan_asof=asof.isoformat() if mobile is not None else "",
+                month_bisuan_asof=store_asof.isoformat() if mobile is not None else "",
                 month_bisuan_sys_asof=sys_asof,
             )
         )
@@ -327,15 +313,7 @@ def register_admin(app) -> None:
             else:
                 reported_today = set()
             month_key = as_of.strftime("%Y-%m")
-            mobile_bisuan = {}
-            for st in stores:
-                raw = _bisuan_mobile_raw(conn, st["id"], month_key)
-                if raw:
-                    try:
-                        # 库内 0.1 精度整数（=`值*10`），与 rollup 口径一致
-                        mobile_bisuan[st["id"]] = int(round(float(raw) * 10))
-                    except (TypeError, ValueError):
-                        pass
+            mobile_bisuan = db.bisuan_mobile_map(conn, month_key)
             payload = insights.build_insights(
                 stores=stores,
                 as_of=as_of,
@@ -447,8 +425,18 @@ def register_admin(app) -> None:
                 else ""
             )
             month_key = biz_date.strftime("%Y-%m")
-            # 表单默认：已存截止日，否则前一天
-            mobile_asof = _bisuan_mobile_asof(conn, month_key, biz_date)
+            # 表单默认：取已录各店里最新的截止日（截止日现在按店存），都没录则前一天
+            asof_values = [
+                v for v in db.bisuan_mobile_asof_map(conn, month_key).values() if (v or "").strip()
+            ]
+            mobile_asof = _default_bisuan_mobile_asof(biz_date)
+            if asof_values:
+                try:
+                    mobile_asof = _clamp_bisuan_mobile_asof(
+                        date.fromisoformat(max(asof_values)[:10]), biz_date
+                    )
+                except ValueError:
+                    pass
             has_mobile = any(r.get("_month_bisuan_mobile_stored") is not None for r in rows)
             mobile_asof_head = (
                 f"移动数据更新至{mobile_asof.month}/{mobile_asof.day}" if has_mobile else ""
@@ -528,8 +516,15 @@ def register_admin(app) -> None:
             current = db.week_metric_total(conn, sid, month_start, asof, ("bisuan", "bisuan_high"))
             delta = mobile - current
             month_key = biz_date.strftime("%Y-%m")
-            db.set_setting(conn, f"bisuan_mobile_{sid}_{month_key}", f"{mobile / 10:.1f}")
-            db.set_setting(conn, f"bisuan_mobile_asof_{month_key}", asof.isoformat())
+            db.save_bisuan_mobile(
+                conn,
+                store_id=sid,
+                month=month_key,
+                value_tenths=mobile,
+                asof=asof,
+                user_id=g.user["id"],
+                note=f"上报同期 {format_stored('bisuan', current)}",
+            )
             sign = "+" if delta > 0 else ""
             flash(
                 f"已录移 {format_stored('bisuan', mobile)}（至{asof.month}/{asof.day}），"
@@ -695,7 +690,7 @@ def register_admin(app) -> None:
         store_id = request.args.get("store_id", "")
         days = request.args.get("days", "7")
         kind = request.args.get("kind", "all")
-        if kind not in ("all", "daily", "deal", "advance", "invoice"):
+        if kind not in ("all", "daily", "deal", "advance", "invoice", "mobile"):
             kind = "all"
         try:
             days_int = max(1, min(int(days), 90))
@@ -784,6 +779,23 @@ def register_admin(app) -> None:
                 "LEFT JOIN users u ON u.id=inv.user_id WHERE " + w
             )
             params += ps
+        if kind in ("mobile", "all"):
+            w = "bm.edited_at >= ?"
+            ps = [cutoff]
+            if sid:
+                w += " AND bm.store_id=?"
+                ps.append(sid)
+            elif scoped_ids:
+                clause, ids = sql_in("bm.store_id", scoped_ids)
+                w += f" AND {clause}"
+                ps.extend(ids)
+            parts.append(
+                "SELECT 'mobile' AS kind, bm.id, bm.month AS biz_date, bm.edited_at, bm.note, "
+                "bm.before_json, bm.after_json, bm.action, s.name AS store_name, u.username AS user_name "
+                "FROM bisuan_mobile_edits bm LEFT JOIN stores s ON s.id=bm.store_id "
+                "LEFT JOIN users u ON u.id=bm.user_id WHERE " + w
+            )
+            params += ps
         union_sql = " UNION ALL ".join(parts) if parts else \
             "SELECT 'daily' AS kind, NULL AS id, '' AS biz_date, '' AS edited_at, '' AS note, " \
             "'{}' AS before_json, '{}' AS after_json, '' AS store_name, '' AS user_name " \
@@ -829,6 +841,20 @@ def register_admin(app) -> None:
                     r.get("action"), "开票："
                 )
                 r["diff"] = action + db.invoice_diff(before, after)
+            elif r["kind"] == "mobile":
+                from .metrics_seed import format_stored as _fs
+
+                b = before.get("value_tenths")
+                a = after.get("value_tenths")
+                head = "新录移动：" if r.get("action") == "create" else "改移动："
+                if b is None:
+                    body = f"{_fs('bisuan', a or 0)}"
+                else:
+                    body = f"{_fs('bisuan', b or 0)}→{_fs('bisuan', a or 0)}"
+                asof_txt = (after.get("asof") or "")[:10]
+                if asof_txt:
+                    body += f"（至{asof_txt}）"
+                r["diff"] = head + body
             else:
                 r["diff"] = build_diff(before, after, names)
             r["store_name"] = r["store_name"] or "?"
