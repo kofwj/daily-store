@@ -1,0 +1,235 @@
+    {% if tab == 'stores' and g.user['role'] == 'admin' %}
+    <div class="settings-page-head">
+      <h1>门店</h1>
+      <p class="muted">改店档、考核口径和顾问。账号去「人员账号」页管。</p>
+    </div>
+    <div class="stores-desk">
+      <aside class="store-list card" id="storeList">
+        <div class="store-list-sticky">
+          <div class="store-list-head">
+            <h2>目录</h2>
+            <span class="muted" id="storeCount">{{ stores|length }} 家</span>
+          </div>
+          <div class="store-list-tools">
+            <label class="store-search">
+              <span class="sr-only">搜索门店</span>
+              <input type="search" id="storeFilter" placeholder="搜店名、地址…" autocomplete="off" enterkeyhint="search">
+            </label>
+            <div class="sp-groupby" id="storeGroupBy" role="tablist" aria-label="分组">
+              <button type="button" class="sp-gb is-on" data-group="city">地市</button>
+              <button type="button" class="sp-gb" data-group="manager">经理</button>
+            </div>
+          </div>
+          <a class="store-list-item add {{ 'active' if not current_store else '' }}" href="{{ url_for('settings', tab='stores', store_id='new') }}">添加门店</a>
+        </div>
+        <div class="store-list-body" id="storeListBody">
+          {% for group in store_groups %}
+            {% for s in group.stores %}
+            <a class="store-list-item {{ 'active' if current_store and s.id == current_store.id else '' }}" href="{{ url_for('settings', tab='stores', store_id=s.id) }}" data-city="{{ group.city }}" data-manager="{{ (s.area_manager or '')|trim }}" data-text="{{ store_label(s) }} {{ s.name }} {{ s.store_manager }} {{ s.area_manager }} {{ s.city }} {{ s.mobile_code }} {{ s.region_group }}">
+              <span class="store-list-name">{{ store_label(s) }}</span>
+              <span class="muted store-list-people" data-alt-city="{{ s.store_manager or '未设店长' }}{% if s.store_grade %} · {{ s.store_grade }}类{% endif %}" data-alt-mgr="{{ (s.area_manager or '')|trim or '未设经理' }}">{{ s.store_manager or '未设店长' }}{% if s.store_grade %} · {{ s.store_grade }}类{% endif %}</span>
+            </a>
+            {% endfor %}
+          {% endfor %}
+          <p class="muted store-empty" id="storeEmpty" hidden>没有匹配的门店</p>
+        </div>
+      </aside>
+
+      <div class="store-editor card">
+        {% if current_store %}
+        <div class="store-editor-head">
+          <div>
+            <h2>{{ store_label(current_store) }}</h2>
+            <p class="muted">{{ current_store.name }}</p>
+          </div>
+          {% if current_store.advisor_name %}
+          <span class="status done">有顾问 · {{ current_store.advisor_name }}</span>
+          {% else %}
+          <span class="status wait">无顾问 · 双破 0</span>
+          {% endif %}
+        </div>
+        <div class="store-editor-meta">
+          <span>{{ current_store.city or '未分地市' }}</span>
+          <span>{{ current_store.store_grade or 'A' }}类</span>
+          <span>{{ current_store.mobile_code or '无移动编码' }}</span>
+        </div>
+        <form method="post" class="store-editor-form">
+          <input type="hidden" name="action" value="edit_store">
+          <input type="hidden" name="tab" value="stores">
+          <input type="hidden" name="store_id" value="{{ current_store.id }}">
+          <h3 class="settings-section">归属</h3>
+          <div class="store-editor-grid">
+            <p>
+              <label>大区</label>
+              <input name="region_group" value="{{ current_store.region_group }}" autocomplete="off">
+            </p>
+            <p>
+              <label>地市</label>
+              <input name="city" value="{{ current_store.city }}" autocomplete="off">
+            </p>
+            <p class="span-2">
+              <label>移动编码</label>
+              <input name="mobile_code" value="{{ current_store.mobile_code }}" inputmode="numeric" autocomplete="off">
+            </p>
+          </div>
+          <h3 class="settings-section">人员</h3>
+          <div class="store-editor-grid">
+            <p>
+              <label>区域经理</label>
+              <input name="area_manager" value="{{ current_store.area_manager }}" autocomplete="off">
+            </p>
+            <p>
+              <label>店长</label>
+              <input name="store_manager" value="{{ current_store.store_manager }}" autocomplete="off">
+            </p>
+            <p class="span-2">
+              <label>运营商顾问</label>
+              <input name="advisor_name" value="{{ current_store.advisor_name }}" placeholder="无顾问留空" autocomplete="off">
+            </p>
+          </div>
+          <h3 class="settings-section">考核口径</h3>
+          <div class="store-editor-grid">
+            <p>
+              <label>门店类别</label>
+              <select name="store_grade">
+                <option value="A" {% if current_store.store_grade == 'A' %}selected{% endif %}>A（酬金目标 4000）</option>
+                <option value="B" {% if current_store.store_grade == 'B' %}selected{% endif %}>B（酬金目标 1000）</option>
+              </select>
+            </p>
+            <p>
+              <label>AI 目标</label>
+              <input name="ai_target" type="number" min="0" value="{{ current_store.ai_target or 10 }}" inputmode="numeric">
+            </p>
+          </div>
+          <h3 class="settings-section">开票 / 租赁</h3>
+          <div class="store-editor-grid">
+            <p class="span-2"><label>发票上门店全称</label><input name="invoice_name" value="{{ current_store.invoice_name }}" placeholder="如 TZ南通市海安万达广场vivo体验店"></p>
+            <p><label>租赁面积</label><input name="lease_area" value="{{ current_store.lease_area }}" placeholder="平方米，与合同一致"></p>
+            <p><label>租赁期限</label><input name="lease_period" value="{{ current_store.lease_period }}" placeholder="如 2026-01-01至2026-12-31"></p>
+            <p class="span-2"><label>租赁地址</label><input name="lease_address" value="{{ current_store.lease_address }}" placeholder="市、区/县、街路村乡镇道巷号"></p>
+          </div>
+          <div class="toolbar"><button type="submit">保存这家店</button></div>
+        </form>
+        {% else %}
+        <div class="store-editor-head">
+          <div>
+            <h2>添加门店</h2>
+            <p class="muted">新店加进来后会出现在左边名单。</p>
+          </div>
+        </div>
+        <form method="post" class="store-editor-form">
+          <input type="hidden" name="action" value="add_store">
+          <input type="hidden" name="tab" value="stores">
+          <h3 class="settings-section">基础</h3>
+          <div class="store-editor-grid">
+            <p class="span-2"><label>店名</label><input name="store_name" required placeholder="邻市戊路vivo体验店"></p>
+            <p><label>简称</label><input name="short_name" required placeholder="如 示例戊店"></p>
+            <p><label>地市</label><input name="city" required placeholder="示例市 / 邻市"></p>
+            <p><label>大区</label><input name="region_group" value="示例" required></p>
+            <p><label>移动编码</label><input name="mobile_code" placeholder="20001744" inputmode="numeric"></p>
+          </div>
+          <h3 class="settings-section">人员</h3>
+          <div class="store-editor-grid">
+            <p><label>区域经理</label><input name="area_manager"></p>
+            <p><label>店长</label><input name="store_manager"></p>
+            <p class="span-2"><label>运营商顾问</label><input name="advisor_name" placeholder="无顾问留空"></p>
+          </div>
+          <h3 class="settings-section">考核口径</h3>
+          <div class="store-editor-grid">
+            <p>
+              <label>门店类别</label>
+              <select name="store_grade">
+                <option value="A" selected>A（酬金目标 4000）</option>
+                <option value="B">B（酬金目标 1000）</option>
+              </select>
+            </p>
+            <p>
+              <label>AI 目标</label>
+              <input name="ai_target" type="number" min="0" value="10" inputmode="numeric">
+            </p>
+          </div>
+          <h3 class="settings-section">开票 / 租赁</h3>
+          <div class="store-editor-grid">
+            <p class="span-2"><label>发票上门店全称</label><input name="invoice_name" placeholder="空则用店名"></p>
+            <p><label>租赁面积</label><input name="lease_area" placeholder="平方米"></p>
+            <p><label>租赁期限</label><input name="lease_period"></p>
+            <p class="span-2"><label>租赁地址</label><input name="lease_address"></p>
+          </div>
+          <div class="toolbar"><button type="submit">添加</button></div>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    <script>
+    (function () {
+      var input = document.getElementById('storeFilter');
+      var empty = document.getElementById('storeEmpty');
+      var count = document.getElementById('storeCount');
+      var body = document.getElementById('storeListBody');
+      var groupBy = document.getElementById('storeGroupBy');
+      if (!input || !body) return;
+      function norm(s) {
+        return String(s || '').toLowerCase().replace(/\s+/g, '').replace(/[市县区]/g, '');
+      }
+      function match(text, raw) {
+        var q = String(raw || '').trim().toLowerCase();
+        if (!q) return true;
+        var h = norm(text);
+        if (h.indexOf(norm(q)) !== -1) return true;
+        return q.split(/\s+/).filter(Boolean).every(function (p) {
+          return h.indexOf(norm(p)) !== -1;
+        });
+      }
+      function mode() {
+        var on = groupBy ? groupBy.querySelector('.sp-gb.is-on') : null;
+        return on ? (on.getAttribute('data-group') || 'city') : 'city';
+      }
+      function groupKey(item, m) {
+        if (m === 'manager') return (item.getAttribute('data-manager') || '').trim() || '未设经理';
+        return (item.getAttribute('data-city') || '').trim() || '未分地市';
+      }
+      function filter() {
+        var q = input.value || '';
+        var m = mode();
+        body.querySelectorAll('.store-list-city').forEach(function (el) { el.remove(); });
+        var shown = [];
+        body.querySelectorAll('.store-list-item').forEach(function (item) {
+          var hit = match((item.getAttribute('data-text') || '') + ' ' + item.textContent, q);
+          item.hidden = !hit;
+          var people = item.querySelector('.store-list-people');
+          if (people) people.textContent = people.getAttribute(m === 'manager' ? 'data-alt-mgr' : 'data-alt-city') || '';
+          if (hit) shown.push(item);
+        });
+        var last = null;
+        shown.forEach(function (item) {
+          var key = groupKey(item, m);
+          if (key !== last) {
+            var head = document.createElement('div');
+            head.className = 'store-list-city';
+            head.textContent = key;
+            body.insertBefore(head, item);
+            last = key;
+          }
+        });
+        if (empty) empty.hidden = shown.length !== 0;
+        if (count) count.textContent = shown.length + ' 家';
+      }
+      input.addEventListener('input', filter);
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') e.preventDefault();
+      });
+      if (groupBy) {
+        groupBy.addEventListener('click', function (e) {
+          var btn = e.target.closest('.sp-gb');
+          if (!btn) return;
+          e.preventDefault();
+          groupBy.querySelectorAll('.sp-gb').forEach(function (el) {
+            el.classList.toggle('is-on', el === btn);
+          });
+          filter();
+        });
+      }
+      filter();
+    })();
+    </script>
+    {% endif %}

@@ -1,0 +1,118 @@
+    {% if tab == 'policies' and g.user['role'] == 'admin' %}
+    <div class="settings-page-head">
+      <h1>政策</h1>
+      <p class="muted">店员在顶栏「政策」阅读。改正文会升一版；打开权限开关后，未确认新版不能填报。</p>
+    </div>
+    <div class="card settings-card">
+      <div class="settings-card-head">
+        <h2>{{ '编辑政策' if policy_edit else '新增政策' }}</h2>
+        {% if policy_edit %}<a class="btn ghost" href="{{ url_for('settings', tab='policies') }}">取消编辑</a>{% endif %}
+      </div>
+      <form method="post" class="settings-form" style="max-width:none">
+        <input type="hidden" name="action" value="save_policy">
+        <input type="hidden" name="tab" value="policies">
+        {% if policy_edit %}<input type="hidden" name="policy_id" value="{{ policy_edit.id }}">{% endif %}
+        <p><label>标题</label><input name="title" value="{{ policy_edit.title if policy_edit else '' }}" maxlength="80" required placeholder="如 金币直降口径"></p>
+        <p><label>排序</label><input name="sort_order" type="number" value="{{ policy_edit.sort_order if policy_edit else 0 }}"></p>
+        <label class="settings-switch" style="border:0;padding:0">
+          <span><strong>启用</strong><span class="muted">关掉后前台不显示</span></span>
+          <input type="checkbox" name="active" value="1" {% if not policy_edit or policy_edit.active %}checked{% endif %}>
+        </label>
+        <p><label>正文</label>
+          <textarea id="policyBody" name="body" rows="14">{{ policy_edit.body if policy_edit else '' }}</textarea>
+        </p>
+        <p class="muted">审批标注：选中文字点删除线表示去掉，点绿色高亮表示新增。也可保存后在政策页看「对照上一版」。</p>
+        <link rel="stylesheet" href="{{ url_for('static', filename='vendor/suneditor/suneditor.min.css') }}">
+        <script src="{{ url_for('static', filename='vendor/suneditor/suneditor.min.js') }}"></script>
+        <script src="{{ url_for('static', filename='vendor/suneditor/zh_cn.js') }}"></script>
+        <script>
+        (function () {
+          var ta = document.getElementById('policyBody');
+          if (!ta || !window.SUNEDITOR) return;
+          var editor = SUNEDITOR.create(ta, {
+            lang: SUNEDITOR_LANG['zh_cn'],
+            height: '320px',
+            width: '100%',
+            buttonList: [
+              ['undo', 'redo'],
+              ['fontSize', 'formatBlock', 'bold', 'underline', 'italic', 'strike'],
+              ['fontColor', 'hiliteColor', 'removeFormat'],
+              ['align', 'list', 'table', 'link', 'horizontalRule'],
+              ['fullScreen', 'codeView']
+            ],
+            defaultStyle: 'font-size:15px; line-height:1.6;',
+          });
+          ta.form.addEventListener('submit', function () {
+            ta.value = editor.getContents();
+          });
+        })();
+        </script>
+        <div class="toolbar"><button type="submit">保存政策</button></div>
+      </form>
+    </div>
+    <div class="card settings-card">
+      <div class="settings-card-head"><h2>已有政策</h2></div>
+      {% if policies %}
+      <table class="data settings-table">
+        <thead><tr><th class="left">标题</th><th>版本</th><th>状态</th><th>更新</th><th></th></tr></thead>
+        <tbody>
+          {% for p in policies %}
+          <tr>
+            <td class="left">{{ p.title }}</td>
+            <td>v{{ p.version }}</td>
+            <td>{{ '启用' if p.active else '停用' }}</td>
+            <td>{{ p.updated_at }}</td>
+            <td class="right">
+              <a class="btn ghost" href="{{ url_for('settings', tab='policies', policy_id=p.id) }}">改</a>
+              <form method="post" class="inline-reset">
+                <input type="hidden" name="action" value="toggle_policy">
+                <input type="hidden" name="tab" value="policies">
+                <input type="hidden" name="policy_id" value="{{ p.id }}">
+                <input type="hidden" name="active" value="{{ 0 if p.active else 1 }}">
+                <button class="ghost" type="submit">{{ '停用' if p.active else '启用' }}</button>
+              </form>
+              <form method="post" class="inline-reset" onsubmit="return confirm('删除「{{ p.title }}」？历史版本一并去掉。')">
+                <input type="hidden" name="action" value="delete_policy">
+                <input type="hidden" name="tab" value="policies">
+                <input type="hidden" name="policy_id" value="{{ p.id }}">
+                <button class="ghost" type="submit">删</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">还没有政策。</p>
+      {% endif %}
+    </div>
+    {% if policy_revisions %}
+    <div class="card settings-card">
+      <div class="settings-card-head"><h2>版本历史</h2></div>
+      <table class="data settings-table">
+        <thead><tr><th>版本</th><th class="left">标题</th><th>编辑人</th><th>时间</th><th></th></tr></thead>
+        <tbody>
+          {% for r in policy_revisions %}
+          <tr>
+            <td>v{{ r.version }}</td>
+            <td class="left">{{ r.title }}</td>
+            <td>{{ r.editor or '—' }}</td>
+            <td>{{ r.edited_at }}</td>
+            <td class="right">
+              {% if policy_edit and r.version != policy_edit.version %}
+              <form method="post" class="inline-reset" onsubmit="return confirm('用第 {{ r.version }} 版覆盖当前正文？现内容会再存一版。')">
+                <input type="hidden" name="action" value="restore_policy">
+                <input type="hidden" name="tab" value="policies">
+                <input type="hidden" name="policy_id" value="{{ policy_edit.id }}">
+                <input type="hidden" name="version" value="{{ r.version }}">
+                <button class="ghost" type="submit">恢复这版</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    {% endif %}

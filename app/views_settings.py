@@ -133,6 +133,113 @@ def _server_status_stats() -> dict:
     return stats
 
 
+def _render_settings(conn, tab: str):
+    """GET 取数 + 渲染设置页。从 settings() 里抽出，逻辑不变。"""
+    users = db.list_users(conn) if g.user["role"] == "admin" else []
+    stores = db.list_all_stores(conn) if g.user["role"] == "admin" else []
+    kpis = []
+    if g.user["role"] == "admin":
+        targets = db.list_kpi_targets(conn)
+        kpis = [
+            {"code": code, "name": name, "note": note, "target": targets.get(code, 0)}
+            for code, name, note in KPI_TARGETS
+        ]
+    user_map = {u["id"]: db.user_store_ids(conn, u["id"]) for u in users}
+    store_by_id = {s["id"]: s for s in stores}
+    grouped_cities = {}
+    city_order = []
+    for s in stores:
+        city = (s["city"] or "").strip() or "未分地市"
+        if city not in grouped_cities:
+            grouped_cities[city] = []
+            city_order.append(city)
+        grouped_cities[city].append(s)
+    store_groups = [{"city": city, "stores": grouped_cities[city]} for city in city_order]
+    current_store = None
+    raw_sid = (request.args.get("store_id") or request.form.get("store_id") or "").strip()
+    if raw_sid != "new" and stores:
+        try:
+            sid = int(raw_sid) if raw_sid else 0
+        except ValueError:
+            sid = 0
+        current_store = store_by_id.get(sid) or stores[0]
+    people = []
+    people_by_store = {s["id"]: [] for s in stores}
+    area_by_store = {s["id"]: [] for s in stores}
+    area_people = []
+    unassigned_people = []
+    for u in users:
+        if u["role"] == "admin":
+            continue
+        sids = user_map.get(u["id"]) or []
+        assigned = [store_by_id[sid] for sid in sids if sid in store_by_id]
+        labels = [store_label(s) for s in assigned]
+        item = {
+            "user": u,
+            "store_ids": sids,
+            "store_id": sids[0] if sids else 0,
+            "store_label": "、".join(labels) if labels else "未分配",
+        }
+        people.append(item)
+        if u["role"] == "readonly" and (u["scope"] or "").strip():
+            item["store_label"] = "区域：" + (u["scope"] or "").strip()
+            area_people.append(item)
+            for s in stores:
+                if (s["area_manager"] or "").strip() == (u["scope"] or "").strip():
+                    area_by_store[s["id"]].append(item)
+            continue
+        if not sids:
+            unassigned_people.append(item)
+            continue
+        for sid in sids:
+            if sid in people_by_store:
+                people_by_store[sid].append(item)
+    return render_template(
+        "settings.html",
+        tab=tab,
+        users=users,
+        people=people,
+        people_by_store=people_by_store,
+        area_by_store=area_by_store,
+        area_people=area_people,
+        unassigned_people=unassigned_people,
+        stores=stores,
+        store_groups=store_groups,
+        current_store=current_store,
+        kpis=kpis,
+        user_map=user_map,
+        store_label=store_label,
+        filler_edit_month=db.get_setting(conn, "filler_edit_month", "0") == "1",
+        policy_require_read=db.policy_require_read(conn),
+        policies=db.list_policies(conn) if g.user["role"] == "admin" else [],
+        policy_edit=(
+            db.get_policy(conn, int(request.args.get("policy_id")))
+            if (request.args.get("policy_id") or "").isdigit()
+            else None
+        ),
+        policy_revisions=(
+            db.list_revisions(conn, int(request.args.get("policy_id")))
+            if (request.args.get("policy_id") or "").isdigit()
+            else []
+        ),
+        broadcast_compact=db.get_setting(conn, "broadcast_compact", "1") == "1",
+        broadcast_compact_family=db.get_setting(conn, "broadcast_compact_family", "0") == "1",
+        wecom_global=db.get_setting(conn, "wecom_global", ""),
+        wecom_cities={
+            "南通市": db.get_setting(conn, "wecom_city_南通市", ""),
+            "泰州市": db.get_setting(conn, "wecom_city_泰州市", ""),
+        },
+        incentive_rules=incentive_rules(conn),
+        brand_form=brand_settings(conn),
+        company_form=company_names(conn),
+        review_template=review_template_setting(conn),
+        review_presets=bulletin.REVIEW_PRESETS,
+        invoice_parties=invoice.invoice_parties(conn),
+        invoice_handler=invoice.invoice_handler(conn),
+        backups=backup.list_backups() if g.user["role"] == "admin" else [],
+    )
+
+
 def register_settings(app) -> None:
     @app.route("/settings/backup/<name>")
     @admin_required
@@ -430,106 +537,4 @@ def register_settings(app) -> None:
                     flash(str(exc), "error")
                 return redirect(url_for("settings", tab=tab))
 
-            users = db.list_users(conn) if g.user["role"] == "admin" else []
-            stores = db.list_all_stores(conn) if g.user["role"] == "admin" else []
-            kpis = []
-            if g.user["role"] == "admin":
-                targets = db.list_kpi_targets(conn)
-                kpis = [
-                    {"code": code, "name": name, "note": note, "target": targets.get(code, 0)}
-                    for code, name, note in KPI_TARGETS
-                ]
-            user_map = {u["id"]: db.user_store_ids(conn, u["id"]) for u in users}
-            store_by_id = {s["id"]: s for s in stores}
-            grouped_cities = {}
-            city_order = []
-            for s in stores:
-                city = (s["city"] or "").strip() or "未分地市"
-                if city not in grouped_cities:
-                    grouped_cities[city] = []
-                    city_order.append(city)
-                grouped_cities[city].append(s)
-            store_groups = [{"city": city, "stores": grouped_cities[city]} for city in city_order]
-            current_store = None
-            raw_sid = (request.args.get("store_id") or request.form.get("store_id") or "").strip()
-            if raw_sid != "new" and stores:
-                try:
-                    sid = int(raw_sid) if raw_sid else 0
-                except ValueError:
-                    sid = 0
-                current_store = store_by_id.get(sid) or stores[0]
-            people = []
-            people_by_store = {s["id"]: [] for s in stores}
-            area_by_store = {s["id"]: [] for s in stores}
-            area_people = []
-            unassigned_people = []
-            for u in users:
-                if u["role"] == "admin":
-                    continue
-                sids = user_map.get(u["id"]) or []
-                assigned = [store_by_id[sid] for sid in sids if sid in store_by_id]
-                labels = [store_label(s) for s in assigned]
-                item = {
-                    "user": u,
-                    "store_ids": sids,
-                    "store_id": sids[0] if sids else 0,
-                    "store_label": "、".join(labels) if labels else "未分配",
-                }
-                people.append(item)
-                if u["role"] == "readonly" and (u["scope"] or "").strip():
-                    item["store_label"] = "区域：" + (u["scope"] or "").strip()
-                    area_people.append(item)
-                    for s in stores:
-                        if (s["area_manager"] or "").strip() == (u["scope"] or "").strip():
-                            area_by_store[s["id"]].append(item)
-                    continue
-                if not sids:
-                    unassigned_people.append(item)
-                    continue
-                for sid in sids:
-                    if sid in people_by_store:
-                        people_by_store[sid].append(item)
-            return render_template(
-                "settings.html",
-                tab=tab,
-                users=users,
-                people=people,
-                people_by_store=people_by_store,
-                area_by_store=area_by_store,
-                area_people=area_people,
-                unassigned_people=unassigned_people,
-                stores=stores,
-                store_groups=store_groups,
-                current_store=current_store,
-                kpis=kpis,
-                user_map=user_map,
-                store_label=store_label,
-                filler_edit_month=db.get_setting(conn, "filler_edit_month", "0") == "1",
-                policy_require_read=db.policy_require_read(conn),
-                policies=db.list_policies(conn) if g.user["role"] == "admin" else [],
-                policy_edit=(
-                    db.get_policy(conn, int(request.args.get("policy_id")))
-                    if (request.args.get("policy_id") or "").isdigit()
-                    else None
-                ),
-                policy_revisions=(
-                    db.list_revisions(conn, int(request.args.get("policy_id")))
-                    if (request.args.get("policy_id") or "").isdigit()
-                    else []
-                ),
-                broadcast_compact=db.get_setting(conn, "broadcast_compact", "1") == "1",
-                broadcast_compact_family=db.get_setting(conn, "broadcast_compact_family", "0") == "1",
-                wecom_global=db.get_setting(conn, "wecom_global", ""),
-                wecom_cities={
-                    "南通市": db.get_setting(conn, "wecom_city_南通市", ""),
-                    "泰州市": db.get_setting(conn, "wecom_city_泰州市", ""),
-                },
-                incentive_rules=incentive_rules(conn),
-                brand_form=brand_settings(conn),
-                company_form=company_names(conn),
-                review_template=review_template_setting(conn),
-                review_presets=bulletin.REVIEW_PRESETS,
-                invoice_parties=invoice.invoice_parties(conn),
-                invoice_handler=invoice.invoice_handler(conn),
-                backups=backup.list_backups() if g.user["role"] == "admin" else [],
-            )
+            return _render_settings(conn, tab)

@@ -1,0 +1,180 @@
+    {% if tab == 'people' and g.user['role'] == 'admin' %}
+    <div class="settings-page-head">
+      <h1>人员账号</h1>
+      <p class="muted">谁能登录、看哪家店。门店档案去「门店」页改。</p>
+    </div>
+    <div class="card settings-card people-card">
+      <div class="people-toolbar toolbar">
+        <label class="people-search">
+          <span class="sr-only">搜索账号</span>
+          <input type="search" id="peopleFilter" placeholder="搜姓名、账号、门店" autocomplete="off">
+        </label>
+        <label class="people-filter">
+          <span class="sr-only">按角色筛</span>
+          <select id="peopleRole">
+            <option value="">全部角色</option>
+            <option value="admin">管理员</option>
+            <option value="filler">填报员</option>
+            <option value="manager">店长</option>
+            <option value="area">区域经理</option>
+          </select>
+        </label>
+        <span class="muted" id="peopleCount">{{ people|length + 1 }} 人</span>
+      </div>
+      <div class="table-wrap">
+        <table class="people-table">
+          <thead>
+            <tr>
+              <th>成员</th>
+              <th>角色</th>
+              <th>可见范围</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="people-row" data-text="{{ g.user.display_name }} {{ g.user.username }} 管理员" data-role="admin">
+              <td class="people-identity">
+                <strong>{{ g.user.display_name }}</strong>
+                <span class="people-sub"><code>{{ g.user.username }}</code></span>
+              </td>
+              <td><span class="role-chip admin">管理员</span></td>
+              <td class="muted">全部门店</td>
+              <td>使用中</td>
+              <td class="muted">当前登录</td>
+            </tr>
+            {% for p in people %}
+            {% set u = p.user %}
+            {% set kind = 'area' if u.role == 'readonly' and (u.scope or '')|trim else ('manager' if u.role == 'readonly' else u.role) %}
+            <tr class="people-row {{ 'off' if not u.active else '' }}" data-text="{{ u.display_name }} {{ u.username }} {{ p.store_label }}" data-role="{{ kind }}">
+              <td class="people-identity">
+                <strong>{{ u.display_name }}</strong>
+                <span class="people-sub"><code>{{ u.username }}</code></span>
+              </td>
+              <td>
+                {% if kind == 'area' %}<span class="role-chip view">区域经理</span>
+                {% elif kind == 'manager' %}<span class="role-chip view">店长</span>
+                {% else %}<span class="role-chip fill">填报员</span>{% endif %}
+              </td>
+              <td>
+                {% if kind == 'area' %}
+                <form method="post" class="inline-store">
+                  <input type="hidden" name="action" value="set_stores">
+                  <input type="hidden" name="tab" value="people">
+                  <input type="hidden" name="user_id" value="{{ u.id }}">
+                  <input type="hidden" name="bind" value="area">
+                  <input name="scope" value="{{ u.scope }}" placeholder="区域经理姓名" autocomplete="off" class="area-scope">
+                  <button class="ghost" type="submit">保存</button>
+                </form>
+                {% else %}
+                <form method="post" class="inline-store">
+                  <input type="hidden" name="action" value="set_stores">
+                  <input type="hidden" name="tab" value="people">
+                  <input type="hidden" name="user_id" value="{{ u.id }}">
+                  {{ store_picker(stores, selected=p.store_id or '', name='store_ids', all_value='', all_label='未分配') }}
+                </form>
+                {% endif %}
+              </td>
+              <td>{% if u.active %}使用中{% else %}已停用{% endif %}</td>
+              <td>
+                <div class="org-person-actions">
+                  <form method="post" class="inline-reset" onsubmit="return confirm('把 {{ u.display_name }} 的口令重置为默认 123456？\n对方下次登录必须改掉。')">
+                    <input type="hidden" name="action" value="reset_pin">
+                    <input type="hidden" name="tab" value="people">
+                    <input type="hidden" name="user_id" value="{{ u.id }}">
+                    <button class="ghost" type="submit">重置口令</button>
+                  </form>
+                  {% if u.id != g.user.id %}
+                  <form method="post">
+                    <input type="hidden" name="action" value="toggle_user">
+                    <input type="hidden" name="tab" value="people">
+                    <input type="hidden" name="user_id" value="{{ u.id }}">
+                    <input type="hidden" name="active" value="{{ 0 if u.active else 1 }}">
+                    <button class="ghost" type="submit">{{ '停用' if u.active else '启用' }}</button>
+                  </form>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="muted" id="peopleEmpty" hidden>没有匹配的账号</p>
+    </div>
+    <div class="card settings-card">
+      <div class="settings-card-head">
+        <h2>添加账号</h2>
+        <p class="muted">账号用姓名全拼。店长看一家店，区域经理按姓名看整片区。</p>
+      </div>
+      <form method="post" class="org-add-user" id="addUserForm">
+        <input type="hidden" name="action" value="add_user">
+        <input type="hidden" name="tab" value="people">
+        <div class="add-user-grid">
+          <p>
+            <label>角色</label>
+            <select name="role" id="addRole">
+              <option value="filler">填报员</option>
+              <option value="manager">店长（只读）</option>
+              <option value="area">区域经理（只读）</option>
+            </select>
+          </p>
+          <p><label>账号（姓名全拼）</label><input name="username" required placeholder="zhangsan" autocomplete="off"></p>
+          <p><label>显示名</label><input name="display_name" required placeholder="张三" autocomplete="off"></p>
+          <p><label>口令</label><input name="pin" type="password" inputmode="numeric" required minlength="6" placeholder="至少 6 位"></p>
+        </div>
+        <div id="addStoreField">
+          <p>
+            <label>所属门店</label>
+            {{ store_picker(stores, selected='', name='store_ids', all_value='', all_label='先选一家店', autosubmit=false) }}
+          </p>
+        </div>
+        <div id="addAreaField" hidden>
+          <p>
+            <label>区域经理姓名</label>
+            <input name="scope" placeholder="如 张管理、刘经理" autocomplete="off">
+            <input type="hidden" name="bind" value="area">
+          </p>
+        </div>
+        <div class="toolbar"><button type="submit">添加账号</button></div>
+      </form>
+    </div>
+    <script>
+    (function () {
+      var q = document.getElementById('peopleFilter');
+      var role = document.getElementById('peopleRole');
+      var empty = document.getElementById('peopleEmpty');
+      var count = document.getElementById('peopleCount');
+      function syncFilter() {
+        var text = ((q && q.value) || '').trim().toLowerCase();
+        var kind = (role && role.value) || '';
+        var shown = 0;
+        document.querySelectorAll('.people-row').forEach(function (row) {
+          var hitText = !text || (row.getAttribute('data-text') || '').toLowerCase().indexOf(text) !== -1;
+          var hitRole = !kind || row.getAttribute('data-role') === kind;
+          var hit = hitText && hitRole;
+          row.hidden = !hit;
+          if (hit) shown += 1;
+        });
+        if (empty) empty.hidden = shown !== 0;
+        if (count) count.textContent = shown + ' 人';
+      }
+      if (q) q.addEventListener('input', syncFilter);
+      if (role) role.addEventListener('change', syncFilter);
+      var addRole = document.getElementById('addRole');
+      var storeField = document.getElementById('addStoreField');
+      var areaField = document.getElementById('addAreaField');
+      if (addRole && storeField && areaField) {
+        var bind = areaField.querySelector('[name="bind"]');
+        function syncRole() {
+          var isArea = addRole.value === 'area';
+          storeField.hidden = isArea;
+          areaField.hidden = !isArea;
+          if (bind) bind.disabled = !isArea;
+        }
+        addRole.addEventListener('change', syncRole);
+        syncRole();
+      }
+    })();
+    </script>
+    {% endif %}
