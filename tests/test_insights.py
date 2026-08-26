@@ -1,6 +1,7 @@
 from datetime import date
 
 from app.insights import build_insights, prev_week_span, week_span
+from app.metrics_seed import effective_month_bisuan
 
 
 def _store(sid, name, city="南通市", manager="张经理", advisor="李顾问"):
@@ -94,6 +95,15 @@ def test_insights_mobile_bisuan_overrides_month_for_ranking():
     # 总进度跟着移动口径
     kpi = {k["code"]: k for k in payload["kpis"]}["bisuan_total"]
     assert kpi["value"] == 11.0
+
+
+def test_effective_month_bisuan_is_single_caliber():
+    """移动口径的单一入口：有移动用移动，否则填报，坏值回落。"""
+    assert effective_month_bisuan(120, 60) == 120
+    assert effective_month_bisuan(None, 60) == 60
+    assert effective_month_bisuan("", 60) == 60
+    assert effective_month_bisuan("坏", 60) == 60
+    assert effective_month_bisuan(None, 0) == 0
 
 
 def test_insights_page_admin_only(app_client):

@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Callable, Dict, List, Mapping, Sequence, Tuple
 
+from .metrics_seed import effective_month_bisuan
+
 # 设置页一键套用。key 稳定；正文用占位符，空段渲染时压掉。
 REVIEW_PRESETS: List[Dict[str, str]] = [
     {
@@ -173,12 +175,8 @@ def build_row(
     month_bisuan_sys_asof: Any = None,
 ) -> Dict[str, Any]:
     follow_ai = month_ai > 0
-    eff_mobile = month_bisuan_mobile
-    try:
-        effort = int(eff_mobile) if eff_mobile not in (None, "") else month_bisuan
-    except (TypeError, ValueError):
-        effort = month_bisuan
-    follow_bisuan = effort > 0
+    # 跟进标记也走统一口径：有移动数看移动，否则看填报
+    follow_bisuan = effective_month_bisuan(month_bisuan_mobile, month_bisuan) > 0
     return {
         "store_id": store["id"],
         "code": store["code"],
@@ -543,14 +541,8 @@ def _metric(row: Mapping[str, Any], key: str) -> int:
 
 
 def _month_bisuan_for_rank(row: Mapping[str, Any]) -> int:
-    """排序用当月笔算：有移动校准数就用移动，否则用填报。与评测口径一致。"""
-    m = row.get("_month_bisuan_mobile_stored")
-    if m not in (None, ""):
-        try:
-            return int(m)
-        except (TypeError, ValueError):
-            pass
-    return int(row.get("month_bisuan") or 0)
+    """排序用当月笔算：口径统一走 effective_month_bisuan（有移动用移动）。"""
+    return effective_month_bisuan(row.get("_month_bisuan_mobile_stored"), row.get("month_bisuan") or 0)
 
 
 def _join_names(names: Sequence[str]) -> str:

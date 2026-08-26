@@ -158,6 +158,22 @@ DECIMAL_METRICS = {"bisuan", "bisuan_high"}
 METRIC_SCALE = 10
 
 
+def effective_month_bisuan(mobile_stored, reported_stored) -> int:
+    """当月比算总量该用哪个：有移动校准数就用移动，否则用填报。
+
+    单一口径函数：评优、通报表排名都走它，以后再扩口径只改这一处。
+    两个入参都是库内 0.1 精度整数（值×10）；移动为 None/空/非数则回落填报。
+    """
+    if mobile_stored not in (None, ""):
+        try:
+            mv = int(mobile_stored)
+        except (TypeError, ValueError):
+            mv = None
+        if mv is not None:
+            return mv
+    return int(reported_stored or 0)
+
+
 def is_decimal_metric(code: str) -> bool:
     return code in DECIMAL_METRICS
 

@@ -6,7 +6,14 @@ import calendar
 from datetime import date, timedelta
 from typing import Any, Dict, Mapping, Optional, Sequence
 
-from .metrics_seed import KPI_TARGETS, ROLLUPS, format_display, from_stored, rollup_amount
+from .metrics_seed import (
+    KPI_TARGETS,
+    ROLLUPS,
+    effective_month_bisuan,
+    format_display,
+    from_stored,
+    rollup_amount,
+)
 
 KPI_CODES = [code for code, _name, _note in KPI_TARGETS]
 FACT_CODES = (
@@ -80,11 +87,9 @@ def build_insights(
     for store in stores:
         sid = int(store["id"])
         facts = _rollup_store(month_facts.get(sid) or {})
-        mv = mobile_bisuan.get(sid)
-        if mv is not None:
-            # 有移动校准数：当月比算总量用移动口径，评优/落后判断跟着改。
-            # 周环比仍看填报（移动数只给整月）。
-            facts["bisuan_total"] = int(mv)
+        # 有移动校准数：当月比算总量用移动口径，评优/落后判断跟着改。
+        # 周环比仍看填报（移动数只给整月）。口径统一走 effective_month_bisuan。
+        facts["bisuan_total"] = effective_month_bisuan(mobile_bisuan.get(sid), facts.get("bisuan_total", 0))
         month_by_store[sid] = facts
         week_by_store[sid] = _rollup_store(week_facts.get(sid) or {})
         prev_by_store[sid] = _rollup_store(prev_week_facts.get(sid) or {})
