@@ -618,3 +618,26 @@ def test_policy_image_upload_and_serve(app_client):
         content_type="multipart/form-data",
     )
     assert r2.status_code in (302, 403)
+
+
+def test_policy_image_upload_is_resized_down(app_client):
+    """政策插图上传后服务端把超大图缩到长边 <= 1600。"""
+    from io import BytesIO
+
+    from PIL import Image
+
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
+    big = BytesIO()
+    Image.new("RGB", (4000, 2000), (200, 100, 50)).save(big, "PNG")
+    big.seek(0)
+    r = app_client.post(
+        "/settings/policy-image",
+        data={"file-0": (big, "big.png")},
+        content_type="multipart/form-data",
+    )
+    assert r.status_code == 200
+    url = r.get_json()["result"][0]["url"]
+    saved = app_client.get(url)
+    assert saved.status_code == 200
+    im = Image.open(BytesIO(saved.data))
+    assert max(im.width, im.height) <= 1600, (im.width, im.height)

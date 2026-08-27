@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+from io import BytesIO
 from pathlib import Path
 
 from flask import (
@@ -45,6 +46,37 @@ def _looks_like_image(data: bytes) -> bool:
     if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return True
     return False
+
+
+# 政策插图服务端缩放上限：长边超过就压缩，控制存储体积（手机原图常是几 MB）。
+_POLICY_IMG_MAX_EDGE = 1600
+_POLICY_IMG_JPEG_QUALITY = 85
+
+
+def _resize_policy_image(data: bytes, ext: str) -> bytes:
+    """把上传图片压到长边 <= _POLICY_IMG_MAX_EDGE，重编码去元数据。GIF 动画保持原样。"""
+    if ext == ".gif":
+        return data
+    try:
+        from PIL import Image
+
+        im: Image.Image = Image.open(BytesIO(data))
+        im.load()  # 真正解码，解码失败说明不是有效图片
+    except Exception:
+        return data  # 解码不了，退回原始字节交给后面的魔数/扩展名校验收尾
+    if im.width > _POLICY_IMG_MAX_EDGE or im.height > _POLICY_IMG_MAX_EDGE:
+        im.thumbnail((_POLICY_IMG_MAX_EDGE, _POLICY_IMG_MAX_EDGE), Image.Resampling.LANCZOS)
+    fmt = {".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG", ".webp": "WEBP"}.get(ext)
+    if fmt == "PNG" and im.mode in ("RGBA", "LA", "P"):
+        im = im.convert("RGBA")
+    elif fmt in ("JPEG", "WEBP") and im.mode not in ("RGB", "L"):
+        im = im.convert("RGB")
+    out = BytesIO()
+    save_kwargs: dict[str, object] = {"format": fmt, "optimize": True}
+    if fmt in ("JPEG", "WEBP"):
+        save_kwargs["quality"] = _POLICY_IMG_JPEG_QUALITY
+    im.save(out, **save_kwargs)
+    return out.getvalue()
 
 
 def _settings_tab() -> str:
@@ -280,12 +312,14 @@ def register_settings(app) -> None:
         # 简单魔数校验，防把非图片当图片存
         if not _looks_like_image(data):
             return {"errorMessage": "不是有效图片"}, 400
+        # 服务端缩放压缩原图（长边 > 1600 才缩），控制存储体积
+        resized = _resize_policy_image(data, ext)
         upload_dir = db_core.DATA_DIR / "uploads" / "policy"
         upload_dir.mkdir(parents=True, exist_ok=True)
         name = f"{secrets.token_hex(12)}{ext}"
-        (upload_dir / name).write_bytes(data)
+        (upload_dir / name).write_bytes(resized)
         url = f"/uploads/policy/{name}"
-        return {"result": [{"url": url, "name": f.filename, "size": len(data)}]}
+        return {"result": [{"url": url, "name": f.filename, "size": len(resized)}]}
 
     @app.route("/uploads/policy/<path:filename>")
     @login_required
