@@ -26,6 +26,10 @@ def register_policies(app) -> None:
             current = next((p for p in items if p["id"] == want), items[0])
         unread_ids = {p["id"] for p in items if int(acks.get(p["id"], 0)) < int(p["version"])}
         diff_html = ""
+        read_status = []
+        if g.user["role"] == "admin":
+            with db.get_db() as conn:
+                read_status = db.policy_read_status(conn)
         if current and int(current["version"]) > 1:
             with db.get_db() as conn:
                 prev = db.previous_revision_body(conn, current["id"], current["version"])
@@ -39,6 +43,7 @@ def register_policies(app) -> None:
             unread_ids=unread_ids,
             require=require,
             diff_html=diff_html,
+            read_status=read_status,
         )
 
     @app.route("/policies/ack", methods=["POST"])

@@ -336,6 +336,49 @@ def register_admin(app) -> None:
             })
             return render_template("insights.html", **payload)
 
+    @app.route("/deviation")
+    @admin_required
+    def deviation():
+        """填报偏差榜：当月填报比算 vs 移动校准比算。
+
+        温差=移动−填报。正=少报/低报，负=多报。只列有移动数的店。
+        """
+        today_d = db.today_local()
+        month = parse_date(request.args.get("month"), today_d.replace(day=1)).replace(day=1)
+        if month.month == 12:
+            month_end = date(month.year + 1, 1, 1) - timedelta(days=1)
+        else:
+            month_end = date(month.year, month.month + 1, 1) - timedelta(days=1)
+        month_key = month.strftime("%Y-%m")
+        if month.month == 1:
+            prev_month = date(month.year - 1, 12, 1)
+        else:
+            prev_month = date(month.year, month.month - 1, 1)
+        if month.month == 12:
+            next_month = date(month.year + 1, 1, 1)
+        else:
+            next_month = date(month.year, month.month + 1, 1)
+        with db.get_db() as conn:
+            stores = accessible_stores(conn)
+            store_ids = [int(s["id"]) for s in stores]
+            month_facts = db.range_metric_totals(
+                conn, store_ids, month, month_end, ("bisuan", "bisuan_high")
+            )
+            mobile = db.bisuan_mobile_map(conn, month_key)
+            rows = insights.build_deviation_board(
+                stores=stores, month_facts=month_facts, mobile_bisuan=mobile
+            )
+        has_mobile = bool(mobile)
+        return render_template(
+            "deviation.html",
+            rows=rows,
+            month=month,
+            month_key=month_key,
+            prev_month=prev_month,
+            next_month=next_month,
+            has_mobile=has_mobile,
+        )
+
     @app.route("/board.xlsx")
     @admin_required
     def board_xlsx():

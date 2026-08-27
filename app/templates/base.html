@@ -25,6 +25,7 @@
       {% if g.user['role'] == 'admin' %}
       <a href="{{ url_for('board') }}" class="{{ 'active' if request.endpoint == 'board' else '' }}">看板</a>
       <a href="{{ url_for('insights_page') }}" class="{{ 'active' if request.endpoint == 'insights_page' else '' }}">洞察</a>
+      <a href="{{ url_for('deviation') }}" class="{{ 'active' if request.endpoint == 'deviation' else '' }}"><span class="full">偏差</span><span class="short">偏差</span></a>
       <a href="{{ url_for('incentive_page') }}" class="{{ 'active' if request.endpoint == 'incentive_page' else '' }}">考核</a>
       {% endif %}
       {% endif %}

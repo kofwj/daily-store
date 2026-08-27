@@ -1660,3 +1660,9 @@ table.board-table td { text-align: left; vertical-align: middle; }
 .pos { color: var(--ok, #16a34a); font-weight: 700; }
 .neg { color: var(--err, #dc2626); font-weight: 700; }
 table.board-table td.fill { background: #fff3cd; color: #7c5e10; }
+
+/* 填报偏差榜 */
+.dev-under { color: #b45309; }   /* 少报/低报 */
+.dev-over  { color: #dc2626; }   /* 多报 */
+.month-nav { display: flex; gap: .6rem; align-items: center; margin: .5rem 0 1rem; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }

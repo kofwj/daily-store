@@ -484,3 +484,48 @@ def mark_policy_read(conn: sqlite3.Connection, user_id: int, policy_id: int) -> 
         """,
         (int(user_id), int(policy_id), int(item["version"]), _now()),
     )
+
+
+def policy_read_status(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
+    """每项政策的已读统计：目标人数、已读人数、未读用户名单。
+
+    读 = 该用户的 ack 版本 >= 政策当前版本。目标 = 全部可登录用户。
+    """
+    from .db_core import list_users
+
+    policies = list_policies(conn, active_only=True)
+    # 键 = (policy_id, user_id)，否则多用户同策会互相覆盖
+    acks = {
+        (int(r["policy_id"]), int(r["user_id"])): int(r["version"])
+        for r in conn.execute("SELECT user_id, policy_id, version FROM policy_acks")
+    }
+    users = list_users(conn)
+    active = [u for u in users if bool(int(u["active"] or 0))]
+    rows = []
+    for p in policies:
+        pid = int(p["id"])
+        pv = int(p["version"])
+        read = sum(1 for u in active if int(acks.get((pid, u["id"]), 0)) >= pv)
+        unread = [
+            _user_label(u)
+            for u in active
+            if int(acks.get((pid, u["id"]), 0)) < pv
+        ]
+        rows.append(
+            {
+                "id": pid,
+                "title": p["title"] or "",
+                "version": pv,
+                "total": len(active),
+                "read": read,
+                "pct": round(read / len(active) * 100) if active else 0,
+                "unread": unread,
+            }
+        )
+    return rows
+
+
+def _user_label(u) -> str:
+    name = (u["display_name"] or "").strip()
+    return name or (u["username"] or "")
+

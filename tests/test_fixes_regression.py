@@ -509,3 +509,69 @@ def test_bisuan_mobile_shows_in_audit_page(app_client):
     )
     page = app_client.get("/edits?kind=mobile&days=1").get_data(as_text=True)
     assert "移动校准" in page
+
+
+def test_build_deviation_board_sorts_and_signs():
+    """偏差榜：按绝对值降序，少报=正、多报=负，无移动的店排除。"""
+    from app.insights import build_deviation_board
+
+    stores = [
+        {"id": 1, "short_name": "甲店", "name": "甲店", "city": "南通"},
+        {"id": 2, "short_name": "乙店", "name": "乙店", "city": "泰州"},
+        {"id": 3, "short_name": "丙店", "name": "丙店", "city": ""},
+    ]
+    facts = {
+        1: {"bisuan": 100, "bisuan_high": 20},  # 填报120 < 移动150 → +30 少报
+        2: {"bisuan": 200, "bisuan_high": 0},   # 填报200 > 移动150 → -50 多报
+    }
+    mobile = {1: 150, 2: 150}
+    rows = build_deviation_board(
+        stores=stores, month_facts=facts, mobile_bisuan=mobile
+    )
+    assert [r["id"] for r in rows] == [2, 1]  # |−50| 排前
+    by_id = {r["id"]: r for r in rows}
+    assert by_id[1]["diff"] == 30 and by_id[1]["under"] is True
+    assert by_id[2]["diff"] == -50 and by_id[2]["over"] is True
+    assert 3 not in by_id  # 无移动校准数，排除
+
+
+def test_deviation_page_admin_only(app_client):
+    """偏差路由是管理员专属，且能渲染。"""
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
+    r = app_client.get("/deviation")
+    assert r.status_code == 200
+    assert "填报偏差榜" in r.get_data(as_text=True)
+
+
+def test_policy_read_status_counts_unread(tmp_db):
+    """已读统计：只有确认当前版本的用户才算已读。"""
+    with db.get_db() as conn:
+        admin = conn.execute(
+            "SELECT id, display_name FROM users WHERE username='admin'"
+        ).fetchone()
+        fillers = [
+            r
+            for r in conn.execute(
+                "SELECT id, display_name, active, username FROM users WHERE role='filler'"
+            )
+        ]
+        assert len(fillers) >= 2
+        u1 = fillers[0]["id"]
+        u2 = fillers[1]["id"]
+        pid = db.save_policy(conn, title="考勤", body="第一版", user_id=admin["id"])
+        # 只有 u1 已读
+        db.mark_policy_read(conn, u1, pid)
+        _ = u2
+        rows = db.policy_read_status(conn)
+    target = next(r for r in rows if r["id"] == pid)
+    assert target["title"] == "考勤"
+    assert target["read"] == 1
+    assert len(target["unread"]) == target["total"] - 1
+    # 升版后已读作废
+    with db.get_db() as conn:
+        db.save_policy(
+            conn, title="考勤", body="第二版", user_id=admin["id"], policy_id=pid
+        )
+        rows2 = db.policy_read_status(conn)
+    t2 = next(r for r in rows2 if r["id"] == pid)
+    assert t2["read"] == 0  # 版本号追上 b4，之前读了也不算

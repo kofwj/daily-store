@@ -43,4 +43,25 @@
   </article>
 </div>
 {% endif %}
+{% if read_status %}
+<details class="policy-read-status">
+  <summary>已读情况（仅管理员可见）</summary>
+  <table class="grid">
+    <thead>
+      <tr><th>政策</th><th>版本</th><th>已读</th><th>进度</th><th>尚未确认</th></tr>
+    </thead>
+    <tbody>
+      {% for s in read_status %}
+      <tr>
+        <td>{{ s.title }}</td>
+        <td>{{ s.version }}</td>
+        <td>{{ s.read }}/{{ s.total }}</td>
+        <td>{% if s.pct >= 100 %}✅{% else %}{{ s.pct }}%{% endif %}</td>
+        <td class="muted">{% if s.unread %}{{ s.unread|join('、') }}{% else %}全部已读{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</details>
+{% endif %}
 {% endblock %}

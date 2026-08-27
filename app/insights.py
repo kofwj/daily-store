@@ -34,6 +34,43 @@ def _store_name(store: Mapping[str, Any]) -> str:
     return (store["short_name"] or store["name"] or "").strip() or "未命名"
 
 
+def build_deviation_board(
+    *,
+    stores: Sequence[Mapping[str, Any]],
+    month_facts: Mapping[int, Mapping[str, int]],
+    mobile_bisuan: Mapping[int, int],
+) -> List[Dict[str, Any]]:
+    """填报偏差榜：各店当月填报比算 vs 移动校准比算，按偏差距降序。
+
+    只列填了移动校准数的店（没有就没得比）。填报、移动都是 ×10 整数。
+    diff = 移动 − 填报：正=填报比移动少（少报/低报），负=填报比移动多。
+    """
+    rows = []
+    for store in stores:
+        sid = int(store["id"])
+        if sid not in mobile_bisuan:
+            continue
+        facts = month_facts.get(sid) or {}
+        reported = int(facts.get("bisuan") or 0) + int(facts.get("bisuan_high") or 0)
+        mobile = int(mobile_bisuan[sid])
+        diff = mobile - reported
+        rows.append(
+            {
+                "id": sid,
+                "name": _store_name(store),
+                "city": (store["city"] or "").strip() or "未分地市",
+                "reported": reported,
+                "mobile": mobile,
+                "diff": diff,
+                "abs_diff": abs(diff),
+                "under": diff > 0,  # 填报 < 移动
+                "over": diff < 0,  # 填报 > 移动
+            }
+        )
+    rows.sort(key=lambda r: (-int(r["abs_diff"]), r["name"]))
+    return rows
+
+
 def week_span(as_of: date) -> tuple[date, date]:
     """本周一到 as_of（含）。"""
     start = as_of - timedelta(days=as_of.weekday())
