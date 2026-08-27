@@ -35,10 +35,12 @@
             width: '100%',
             buttonList: [
               ['undo', 'redo'],
-              ['fontSize', 'formatBlock', 'bold', 'underline', 'italic', 'strike'],
+              ['fontSize', 'formatBlock'],
+              ['bold', 'underline', 'italic', 'strike', 'subscript', 'superscript'],
               ['fontColor', 'hiliteColor', 'removeFormat'],
-              ['align', 'list', 'table', 'link', 'image', 'horizontalRule'],
-              ['fullScreen', 'codeView']
+              ['align', 'list', 'lineHeight', 'indent', 'outdent'],
+              ['table', 'link', 'image', 'horizontalRule'],
+              ['fullScreen', 'codeView', 'preview']
             ],
             imageUploadUrl: '{{ url_for("settings_policy_image") }}',
             imageUploadHeader: { 'X-CSRF-Token': '{{ csrf_token }}' },

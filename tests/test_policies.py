@@ -40,6 +40,23 @@ def test_sanitize_keeps_safe_img_strips_bad_src():
     assert html.count("<img") == 1
 
 
+def test_sanitize_keeps_safe_style_strips_injection():
+    html = db.sanitize_policy_html(
+        '<p style="font-size:18px; color:#ff0000; text-align:center; line-height:2">口径</p>'
+        '<span style="background-color:#ffff00">高亮</span>'
+        '<p style="background:url(javascript:alert(1)); position:fixed">坏</p>'
+    )
+    assert 'font-size: 18px' in html
+    assert 'color: #ff0000' in html
+    assert 'text-align: center' in html
+    assert 'line-height: 2' in html
+    assert 'background-color: #ffff00' in html
+    # 不在白名单的样式被丢弃
+    assert 'position' not in html
+    assert 'url(' not in html
+    assert 'javascript' not in html.lower()
+
+
 def test_diff_marks_insert_and_delete():
     html = db.render_policy_diff("融合服务，剔除线上卡", "融合服务新增，线上卡")
     assert 'class="policy-add"' in html and "新增" in html

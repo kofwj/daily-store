@@ -97,8 +97,10 @@ if [[ -n "${REMOTE_BACKUP}" ]]; then
 fi
 REMOTE_SNAP_NAME="store_daily_${TAG}.db"
 REMOTE_ENV_NAME="env_${TAG}.env"
+REMOTE_UPLOADS_NAME="uploads_${TAG}.tar.gz"
 REMOTE_SNAP="${PRIMARY_DIR}/data/backups/${REMOTE_SNAP_NAME}"
 REMOTE_ENV="${PRIMARY_DIR}/data/backups/${REMOTE_ENV_NAME}"
+REMOTE_UPLOADS="${PRIMARY_DIR}/data/backups/${REMOTE_UPLOADS_NAME}"
 
 ssh_p() {
   local port="$1"; shift
@@ -175,6 +177,10 @@ snapshot_primary() {
   else
     echo "警告: 生产机没有 .env" >&2
   fi
+  if [[ -d "${PRIMARY_DIR}/data/uploads" ]]; then
+    tar czf "${PRIMARY_DIR}/data/backups/${REMOTE_UPLOADS_NAME}" -C "${PRIMARY_DIR}/data" uploads
+    echo "已附带 uploads -> ${REMOTE_UPLOADS_NAME}"
+  fi
   ls -la "${host_snap}" "${host_env}" 2>/dev/null || ls -la "${host_snap}"
 }
 
@@ -185,7 +191,7 @@ elif [[ "${ON_PRIMARY}" == "1" ]]; then
   snapshot_primary
 else
   ssh_p "${PRIMARY_SSH_PORT}" "${PRIMARY}" \
-    "PRIMARY_DIR=$(printf %q "${PRIMARY_DIR}") SNAP_NAME=$(printf %q "${REMOTE_SNAP_NAME}") ENV_NAME=$(printf %q "${REMOTE_ENV_NAME}") bash -s" <<'EOS'
+    "PRIMARY_DIR=$(printf %q "${PRIMARY_DIR}") SNAP_NAME=$(printf %q "${REMOTE_SNAP_NAME}") ENV_NAME=$(printf %q "${REMOTE_ENV_NAME}") UPLOADS_NAME=$(printf %q "${REMOTE_UPLOADS_NAME}") bash -s" <<'EOS'
 set -euo pipefail
 mkdir -p "${PRIMARY_DIR}/data/backups"
 HOST_DB="${PRIMARY_DIR}/data/store_daily.db"
@@ -218,12 +224,17 @@ if [[ -f "${PRIMARY_DIR}/.env" ]]; then
 else
   echo "警告: 生产机没有 .env" >&2
 fi
+if [[ -d "${PRIMARY_DIR}/data/uploads" ]]; then
+  tar czf "${PRIMARY_DIR}/data/backups/${UPLOADS_NAME}" -C "${PRIMARY_DIR}/data" uploads
+  echo "已附带 uploads -> ${UPLOADS_NAME}"
+fi
 ls -la "${HOST_SNAP}" "${HOST_ENV}" 2>/dev/null || ls -la "${HOST_SNAP}"
 EOS
 fi
 
 LOCAL_DB="${WORKDIR}/${REMOTE_SNAP_NAME}"
 LOCAL_ENV="${WORKDIR}/${REMOTE_ENV_NAME}"
+LOCAL_UPLOADS="${WORKDIR}/${REMOTE_UPLOADS_NAME}"
 
 echo "→ 拉回临时目录并校验"
 if [[ "${DRY_RUN}" == "1" ]]; then
@@ -231,9 +242,11 @@ if [[ "${DRY_RUN}" == "1" ]]; then
 elif [[ "${ON_PRIMARY}" == "1" ]]; then
   cp -f "${REMOTE_SNAP}" "${LOCAL_DB}"
   [[ -f "${REMOTE_ENV}" ]] && cp -f "${REMOTE_ENV}" "${LOCAL_ENV}" || true
+  [[ -f "${REMOTE_UPLOADS}" ]] && cp -f "${REMOTE_UPLOADS}" "${LOCAL_UPLOADS}" || true
 else
   scp_p "${PRIMARY_SSH_PORT}" "${PRIMARY}:${REMOTE_SNAP}" "${LOCAL_DB}"
   scp_p "${PRIMARY_SSH_PORT}" "${PRIMARY}:${REMOTE_ENV}" "${LOCAL_ENV}" 2>/dev/null || true
+  scp_p "${PRIMARY_SSH_PORT}" "${PRIMARY}:${REMOTE_UPLOADS}" "${LOCAL_UPLOADS}" 2>/dev/null || true
 fi
 
 if [[ "${DRY_RUN}" != "1" ]]; then
@@ -261,11 +274,14 @@ push_one() {
     echo "  [dry-run] rsync → ${dest_host}"
     return
   fi
-  ssh_p "${dest_port}" "${dest_host}" "mkdir -p '${dest_dir}/db' '${dest_dir}/env'"
+  ssh_p "${dest_port}" "${dest_host}" "mkdir -p '${dest_dir}/db' '${dest_dir}/env' '${dest_dir}/uploads'"
   # Termux 常只有 scp、没有 rsync；统一用 scp，兼容安卓备份机
   scp_p "${dest_port}" "${LOCAL_DB}" "${dest_host}:${dest_dir}/db/"
   if [[ -f "${LOCAL_ENV}" ]]; then
     scp_p "${dest_port}" "${LOCAL_ENV}" "${dest_host}:${dest_dir}/env/"
+  fi
+  if [[ -f "${LOCAL_UPLOADS}" ]]; then
+    scp_p "${dest_port}" "${LOCAL_UPLOADS}" "${dest_host}:${dest_dir}/uploads/"
   fi
   ssh_p "${dest_port}" "${dest_host}" \
     "DIR=$(printf %q "${dest_dir}") DAYS=$(printf %q "${KEEP_DAYS}") DB=$(printf %q "${REMOTE_SNAP_NAME}") ENV=$(printf %q "${REMOTE_ENV_NAME}") bash -s" <<'EOS'
@@ -274,6 +290,7 @@ chmod 600 "${DIR}/db/${DB}" 2>/dev/null || true
 chmod 600 "${DIR}/env/${ENV}" 2>/dev/null || true
 find "${DIR}/db" -type f -name 'store_daily_offsite_*.db' -mtime +"${DAYS}" -delete 2>/dev/null || true
 find "${DIR}/env" -type f -name 'env_offsite_*.env' -mtime +"${DAYS}" -delete 2>/dev/null || true
+find "${DIR}/uploads" -type f -name 'uploads_offsite_*.tar.gz' -mtime +"${DAYS}" -delete 2>/dev/null || true
 echo "  最近备份："
 ls -lt "${DIR}/db" 2>/dev/null | head -5 || true
 EOS
@@ -308,7 +325,7 @@ prune_primary_count() {
 }
 prune_local() {
   find "${PRIMARY_DIR}/data/backups" -type f \
-    \( -name 'store_daily_offsite_*.db' -o -name 'env_offsite_*.env' \) \
+    \( -name 'store_daily_offsite_*.db' -o -name 'env_offsite_*.env' -o -name 'uploads_offsite_*.tar.gz' \) \
     -mtime +"${KEEP_DAYS}" -delete 2>/dev/null || true
   prune_primary_count
 }

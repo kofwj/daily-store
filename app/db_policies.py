@@ -15,10 +15,38 @@ ALLOWED_TAGS = {
     "p", "br", "b", "strong", "i", "em", "u", "s", "strike", "del",
     "ul", "ol", "li", "h2", "h3", "h4", "blockquote", "span", "div", "a",
     "table", "thead", "tbody", "tr", "th", "td",
-    "ins", "img",
+    "ins", "img", "sub", "sup",
 }
 VOID_TAGS = {"br", "img"}
 TABLE_TAGS = {"table", "thead", "tbody", "tr", "th", "td"}
+
+# 允许的内联样式属性 → 值校验正则（防 CSS 注入）
+_STYLE_WHITELIST = {
+    "font-size": re.compile(r"^\d{1,3}(\.\d+)?(px|em|pt|rem|%)$"),
+    "color": re.compile(r"^(#[0-9a-fA-F]{3,8}|rgb\(\d{1,3},\s*\d{1,3},\s*\d{1,3}\)|[a-zA-Z]+)$"),
+    "background-color": re.compile(r"^(#[0-9a-fA-F]{3,8}|rgb\(\d{1,3},\s*\d{1,3},\s*\d{1,3}\)|[a-zA-Z]+)$"),
+    "text-align": re.compile(r"^(left|right|center|justify)$"),
+    "line-height": re.compile(r"^\d{1,3}(\.\d+)?(px|em|%)?$"),
+    "margin-left": re.compile(r"^\d{1,4}(\.\d+)?(px|em|rem|%)$"),
+    "text-indent": re.compile(r"^\d{1,4}(\.\d+)?(px|em|rem|%)$"),
+    "width": re.compile(r"^\d{1,4}(\.\d+)?(px|em|rem|%)$"),
+    "height": re.compile(r"^\d{1,4}(\.\d+)?(px|em|rem|%)$"),
+}
+
+
+def _safe_style(raw: str) -> str:
+    """只保留白名单内的内联样式，其余丢弃。返回干净的 style 串（可能为空）。"""
+    kept = []
+    for part in (raw or "").split(";"):
+        if ":" not in part:
+            continue
+        prop, _, val = part.partition(":")
+        prop = prop.strip().lower()
+        val = val.strip()
+        rule = _STYLE_WHITELIST.get(prop)
+        if rule and rule.match(val):
+            kept.append(f"{prop}: {val}")
+    return "; ".join(kept)
 
 
 class _Sanitizer(HTMLParser):
@@ -33,12 +61,18 @@ class _Sanitizer(HTMLParser):
         extra = ""
         if tag == "span":
             cls = ""
+            style = ""
             for key, val in attrs:
-                if key.lower() == "class":
+                k = key.lower()
+                if k == "class":
                     cls = val or ""
+                elif k == "style":
+                    style = _safe_style(val or "")
             keep = [c for c in cls.split() if c in {"policy-add", "policy-del"}]
             if keep:
-                extra = f' class="{" ".join(keep)}"'
+                extra += f' class="{" ".join(keep)}"'
+            if style:
+                extra += f' style="{html.escape(style, quote=True)}"'
             self.out.append(f"<span{extra}>")
             return
         if tag == "a":
@@ -85,6 +119,17 @@ class _Sanitizer(HTMLParser):
                     extra += f' {k}="{int(val)}"'
                 elif k == "align" and str(val or "").lower() in {"left", "center", "right"}:
                     extra += f' align="{val.lower()}"'
+                elif k == "style":
+                    st = _safe_style(val or "")
+                    if st:
+                        extra += f' style="{html.escape(st, quote=True)}"'
+        else:
+            # p/div/h2-h4/blockquote/li/table 等：只保留安全内联样式
+            for key, val in attrs:
+                if key.lower() == "style":
+                    st = _safe_style(val or "")
+                    if st:
+                        extra += f' style="{html.escape(st, quote=True)}"'
         self.out.append(f"<{tag}{extra}>")
         if tag in VOID_TAGS:
             return
