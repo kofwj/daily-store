@@ -1,42 +1,56 @@
 {% extends "base.html" %}
 {% block title %}填报偏差榜{% endblock %}
 {% block body %}
-<h1>填报偏差榜 · {{ month.strftime('%Y年%m月') }}</h1>
-<p class="muted">
-  各店当月<b>填报比算</b>与<b>移动校准比算</b>的差。温差 = 移动 − 填报：
-  <span class="dev-under">▲ 少报/低报</span>（填报比移动少）、
-  <span class="dev-over">▼ 多报</span>（填报比移动多）。只列已填移动数的店。
-</p>
-<div class="month-nav">
-  <a class="btn ghost" href="{{ url_for('deviation', month=prev_month.strftime('%Y-%m-01')) }}">‹ 上月</a>
-  <span class="muted">当前月</span>
-  <a class="btn ghost" href="{{ url_for('deviation', month=next_month.strftime('%Y-%m-01')) }}">下月 ›</a>
-  {% if not has_mobile %}<span class="warn">本月尚无移动校准数，榜为空。</span>{% endif %}
+<div class="page-head">
+  <div class="page-title">
+    <h1>填报偏差榜 · {{ month.strftime('%Y年%m月') }}</h1>
+    <p class="muted">填报比算与移动校准比算的差距（温差 = 移动 − 填报）。</p>
+  </div>
+  <div class="dev-nav">
+    <a class="btn ghost" href="{{ url_for('deviation', month=prev_month.strftime('%Y-%m-01')) }}">‹ 上月</a>
+    <a class="btn ghost" href="{{ url_for('deviation', month=next_month.strftime('%Y-%m-01')) }}">下月 ›</a>
+  </div>
 </div>
-{% if rows %}
-<table class="grid">
+
+{% if not has_mobile %}
+<div class="card"><p class="muted">本月尚未填移动校准数，榜为空。先去「通报表」录入移动数。</p></div>
+{% else %}
+<div class="dev-summary">
+  <span class="sum chip-mobile">少报 <b>{{ summary.under }}</b> 店</span>
+  <span class="sum-sum-gray">·</span>
+  <span class="sum over">多报 <b>{{ summary.over }}</b> 店</span>
+  <span class="sum muted">· 持平 {{ summary.even }} 店</span>
+</div>
+<table class="data insight-stores dev-table">
   <thead>
     <tr>
-      <th>#</th><th>门店</th><th>地市</th><th>填报比算</th><th>移动校准</th><th>温差</th>
+      <th>门店</th>
+      <th>地市</th>
+      <th>填报比算</th>
+      <th>移动校准</th>
+      <th>温差</th>
     </tr>
   </thead>
   <tbody>
     {% for r in rows %}
-    <tr class="{{ 'dev-over' if r.over else '' }}{{ ' dev-under' if r.under else '' }}">
-      <td>{{ loop.index }}</td>
-      <td>{{ r.name }}</td>
-      <td>{{ r.city }}</td>
-      <td class="num">{{ (r.reported / 10)|round(1) }} 元</td>
-      <td class="num">{{ (r.mobile / 10)|round(1) }} 元</td>
-      <td class="num">
-        {{ '▲' if r.under else ('▼' if r.over else '—') }}
-        {{ (r.diff / 10)|round(1) }}
+    <tr class="{{ 'dev-under-row' if r.under else '' }}{{ ' dev-over-row' if r.over else '' }}">
+      <td class="store">
+        <span class="dev-rank">{{ loop.index }}</span>{{ r.name }}
+      </td>
+      <td class="muted">{{ r.city }}</td>
+      <td>{{ (r.reported / 10)|round(1) }}</td>
+      <td><b>{{ (r.mobile / 10)|round(1) }}</b></td>
+      <td class="dev-diff {{ 'under' if r.under else ('over' if r.over else '') }}">
+        <span class="diff-num">{{ '+' if r.under else '' }}{{ (r.diff / 10)|round(1) }}</span>
+        {% if summary.max_abs %}
+        <span class="diff-bar"><i class="{{ 'under' if r.under else ('over' if r.over else '') }}"
+           style="width: {{ (r.abs_diff / summary.max_abs * 100)|round(0) }}%"></i></span>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
-{% else %}
-<p class="muted">本月没有可比的店（还没有移动校准数）。</p>
+<p class="muted dev-note">少报（填报比移动少）标 <span class="under-dot">●</span> 橙；多报（填报比移动多）标 <span class="over-dot">●</span> 红，按温差绝对值排序。</p>
 {% endif %}
 {% endblock %}

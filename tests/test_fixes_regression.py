@@ -536,11 +536,21 @@ def test_build_deviation_board_sorts_and_signs():
 
 
 def test_deviation_page_admin_only(app_client):
-    """偏差路由是管理员专属，且能渲染。"""
+    """偏差路由是管理员专属，且能渲染（单位是个，不是元）。"""
+    with db.get_db() as conn:
+        conn.execute("UPDATE users SET must_change_pin=0")
+        sid = conn.execute("SELECT id FROM stores LIMIT 1").fetchone()["id"]
+        db.save_bisuan_mobile(
+            conn, store_id=sid, month="2026-08", value_tenths=120, asof=db.today_local()
+        )
     app_client.post("/login", data={"username": "admin", "pin": "123456"})
-    r = app_client.get("/deviation")
+    r = app_client.get("/deviation?month=2026-08-01")
+    html = r.get_data(as_text=True)
     assert r.status_code == 200
-    assert "填报偏差榜" in r.get_data(as_text=True)
+    assert "填报偏差榜" in html
+    assert "温差" in html
+    assert "元" not in html  # 计数单位是个，不是金额
+    assert "少报" in html and "多报" in html
 
 
 def test_policy_read_status_counts_unread(tmp_db):
