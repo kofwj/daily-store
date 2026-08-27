@@ -60,7 +60,7 @@ COPYFILE_DISABLE=1 tar czf - \
   --exclude='.venv' --exclude='__pycache__' --exclude='.pytest_cache' \
   --exclude='.ruff_cache' --exclude='.git' --exclude='data' --exclude='.pi' \
   --exclude='*.xlsx' --exclude='*.pdf' --exclude='.DS_Store' \
-  --exclude='._*' --exclude='.AppleDouble' \
+  --exclude='._*' --exclude='.AppleDouble' --exclude='app/stores_seed_local.py' \
   app caddy scripts tests Dockerfile docker-compose.yml requirements.txt \
   wsgi.py README.md VERSION .env .gitignore docs pyproject.toml 2>/dev/null \
   | "${SSH_PVE[@]}" "cd '${PVE_DIR}' && tar xzf - && chmod +x scripts/*.sh"

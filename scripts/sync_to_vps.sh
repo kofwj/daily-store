@@ -31,6 +31,21 @@ for arg in "$@"; do
   esac
 done
 
+# 部署门禁：lint + 类型 + 测试全过才推。约 75 秒。
+# pytest 必须过；ruff/mypy 本地没装则跳过（与 pre-commit 同策略）
+echo "→ 部署前检查"
+python3 -m pytest -q
+if python3 -m ruff --version >/dev/null 2>&1; then
+  python3 -m ruff check . || exit 1
+else
+  echo "  (未装 ruff，跳过)"
+fi
+if python3 -m mypy --version >/dev/null 2>&1; then
+  python3 -m mypy || exit 1
+else
+  echo "  (未装 mypy，跳过)"
+fi
+
 if [[ ! -f .env ]]; then
   echo "本机还没有 .env，先从示例生成一个（请再改 STORE_DAILY_SECRET）：" >&2
   cp .env.example .env
@@ -100,6 +115,7 @@ RSYNC=(
   --exclude 'data/*.db-shm'
   --exclude 'data/*.db-wal'
   --exclude 'data/backups/'
+  --exclude 'app/stores_seed_local.py'
 )
 
 SYNC_SOURCES=(./app ./caddy ./scripts ./tests \
@@ -128,6 +144,8 @@ fi
 
 "${SSH[@]}" "${REMOTE}" "cd '${VPS_DIR}' && chmod +x scripts/*.sh && ./scripts/deploy_vps.sh"
 echo
+# 部署后把完整 git 历史推送到 offsite 备份机（代码灾备）
+./scripts/backup_code.sh
 PORT="${CADDY_PORT:-8099}"
 echo "目标机本机健康检查: ssh -p ${VPS_SSH_PORT} ${REMOTE} curl -s http://127.0.0.1:${PORT}/health"
 echo "若 CADDY_BIND=0.0.0.0 可试: http://${VPS_HOST}:${PORT}"
