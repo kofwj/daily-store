@@ -1681,10 +1681,6 @@ table.board-table td.fill { background: #fff3cd; color: #7c5e10; }
 .dev-diff.over .diff-num  { color: #dc2626; }
 .dev-table tr.dev-under-row td.store { box-shadow: inset 3px 0 0 #b45309; }
 .dev-table tr.dev-over-row  td.store { box-shadow: inset 3px 0 0 #dc2626; }
-.diff-bar { display: inline-block; width: 46px; height: 4px; background: #eef0f3; border-radius: 99px; overflow: hidden; margin-left: 8px; vertical-align: middle; }
-.diff-bar i { display: block; height: 100%; border-radius: 99px; }
-.diff-bar i.under { background: #f59e0b; }
-.diff-bar i.over  { background: #f87171; }
 .dev-note { margin-top: .6rem; }
 .under-dot { color: #b45309; }
 .over-dot  { color: #dc2626; }

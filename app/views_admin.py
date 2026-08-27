@@ -373,7 +373,6 @@ def register_admin(app) -> None:
             "under": sum(1 for r in rows if r["under"]),
             "over": sum(1 for r in rows if r["over"]),
             "even": sum(1 for r in rows if not r["under"] and not r["over"]),
-            "max_abs": max((r["abs_diff"] for r in rows), default=0),
         }
         return render_template(
             "deviation.html",

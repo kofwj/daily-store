@@ -24,8 +24,8 @@
 <table class="data insight-stores dev-table">
   <thead>
     <tr>
-      <th>门店</th>
       <th>地市</th>
+      <th>门店</th>
       <th>填报比算</th>
       <th>移动校准</th>
       <th>温差</th>
@@ -34,18 +34,14 @@
   <tbody>
     {% for r in rows %}
     <tr class="{{ 'dev-under-row' if r.under else '' }}{{ ' dev-over-row' if r.over else '' }}">
+      <td class="muted">{{ r.city }}</td>
       <td class="store">
         <span class="dev-rank">{{ loop.index }}</span>{{ r.name }}
       </td>
-      <td class="muted">{{ r.city }}</td>
       <td>{{ (r.reported / 10)|round(1) }}</td>
       <td><b>{{ (r.mobile / 10)|round(1) }}</b></td>
       <td class="dev-diff {{ 'under' if r.under else ('over' if r.over else '') }}">
         <span class="diff-num">{{ '+' if r.under else '' }}{{ (r.diff / 10)|round(1) }}</span>
-        {% if summary.max_abs %}
-        <span class="diff-bar"><i class="{{ 'under' if r.under else ('over' if r.over else '') }}"
-           style="width: {{ (r.abs_diff / summary.max_abs * 100)|round(0) }}%"></i></span>
-        {% endif %}
       </td>
     </tr>
     {% endfor %}
