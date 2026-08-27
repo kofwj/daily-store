@@ -146,6 +146,24 @@ fi
 echo
 # 部署后把完整 git 历史推送到 offsite 备份机（代码灾备）
 ./scripts/backup_code.sh
+
+# 部署成功后自动提交 VERSION 保留痕迹，保持工作区干净。
+# 只提交 VERSION；代码改动仍需你手动提交（部署前）。
+if git rev-parse --git-dir >/dev/null 2>&1 \
+   && ! git diff --quiet VERSION \
+   && git rev-parse --verify HEAD >/dev/null 2>&1; then
+  VERLINE="$(sed -n '1p' VERSION | tr -d '\r')"
+  git add VERSION
+  if git -c user.name='pi-deploy' -c user.email='pi-deploy@local' \
+       commit -q -m "升版本 ${VERLINE}（部署后自动提交）"; then
+    echo "→ 已自动提交 VERSION: ${VERLINE}"
+  else
+    echo "  (VERSION 自动提交失败，见上)" >&2
+    exit 1
+  fi
+else
+  echo "  (VERSION 无改动或不在 git 仓库，跳过自动提交)"
+fi
 PORT="${CADDY_PORT:-8099}"
 echo "目标机本机健康检查: ssh -p ${VPS_SSH_PORT} ${REMOTE} curl -s http://127.0.0.1:${PORT}/health"
 echo "若 CADDY_BIND=0.0.0.0 可试: http://${VPS_HOST}:${PORT}"
