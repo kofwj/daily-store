@@ -18,36 +18,46 @@
           <span><strong>启用</strong><span class="muted">关掉后前台不显示</span></span>
           <input type="checkbox" name="active" value="1" {% if not policy_edit or policy_edit.active %}checked{% endif %}>
         </label>
-        <p><label>正文</label>
+        <div><label>正文</label>
           <textarea id="policyBody" name="body" rows="14">{{ policy_edit.body if policy_edit else '' }}</textarea>
-        </p>
+        </div>
         <p class="muted">审批标注：选中文字点删除线表示去掉，点绿色高亮表示新增。也可保存后在政策页看「对照上一版」。</p>
-        <link rel="stylesheet" href="{{ url_for('static', filename='vendor/suneditor/suneditor.min.css') }}">
-        <script src="{{ url_for('static', filename='vendor/suneditor/suneditor.min.js') }}"></script>
-        <script src="{{ url_for('static', filename='vendor/suneditor/zh_cn.js') }}"></script>
+        <link rel="stylesheet" href="{{ url_for('static', filename='vendor/suneditor/suneditor.min.css') }}?v={{ app_version }}">
+        <script src="{{ url_for('static', filename='vendor/suneditor/suneditor.min.js') }}?v={{ app_version }}"></script>
+        <script src="{{ url_for('static', filename='vendor/suneditor/zh_cn.js') }}?v={{ app_version }}"></script>
         <script>
         (function () {
           var ta = document.getElementById('policyBody');
-          if (!ta || !window.SUNEDITOR) return;
-          var editor = SUNEDITOR.create(ta, {
-            lang: SUNEDITOR_LANG['zh_cn'],
-            height: '320px',
-            width: '100%',
-            buttonList: [
-              ['undo', 'redo'],
-              ['fontSize', 'formatBlock'],
-              ['bold', 'underline', 'italic', 'strike', 'subscript', 'superscript'],
-              ['fontColor', 'hiliteColor', 'removeFormat'],
-              ['align', 'list', 'lineHeight', 'indent', 'outdent'],
-              ['table', 'link', 'image', 'horizontalRule'],
-              ['fullScreen', 'codeView', 'preview']
-            ],
-            imageUploadUrl: '{{ url_for("settings_policy_image") }}',
-            imageUploadHeader: { 'X-CSRF-Token': '{{ csrf_token }}' },
-            defaultStyle: 'font-size:15px; line-height:1.6;',
-          });
+          if (!ta) return;
+          var editor = null;
+          if (window.SUNEDITOR) {
+            try {
+              editor = SUNEDITOR.create(ta, {
+                lang: SUNEDITOR_LANG['zh_cn'],
+                height: '320px',
+                width: '100%',
+                buttonList: [
+                  ['undo', 'redo'],
+                  ['fontSize', 'formatBlock'],
+                  ['bold', 'underline', 'italic', 'strike', 'subscript', 'superscript'],
+                  ['fontColor', 'hiliteColor', 'removeFormat'],
+                  ['align', 'list', 'lineHeight', 'indent', 'outdent'],
+                  ['table', 'link', 'image', 'horizontalRule'],
+                  ['fullScreen', 'codeView', 'preview']
+                ],
+                imageUploadUrl: '{{ url_for("settings_policy_image") }}',
+                imageUploadHeader: { 'X-CSRF-Token': '{{ csrf_token }}' },
+                defaultStyle: 'font-size:15px; line-height:1.6;',
+              });
+            } catch (e) {
+              editor = null;
+            }
+          }
+          // 无论编辑器是否初始化成功，提交时都把内容同步回 textarea
           ta.form.addEventListener('submit', function () {
-            ta.value = editor.getContents();
+            if (editor) {
+              ta.value = editor.getContents();
+            }
           });
         })();
         </script>
