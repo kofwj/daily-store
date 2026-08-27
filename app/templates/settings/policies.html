@@ -10,6 +10,7 @@
       </div>
       <form method="post" class="settings-form" style="max-width:none">
         <input type="hidden" name="action" value="save_policy">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="tab" value="policies">
         {% if policy_edit %}<input type="hidden" name="policy_id" value="{{ policy_edit.id }}">{% endif %}
         <p><label>标题</label><input name="title" value="{{ policy_edit.title if policy_edit else '' }}" maxlength="80" required placeholder="如 金币直降口径"></p>

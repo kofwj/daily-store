@@ -217,3 +217,34 @@ def test_session_lasts_24_hours(tmp_db):
     with client.session_transaction() as sess:
         assert sess.permanent is True
         assert sess.get("user_id")
+
+
+def test_policy_form_csrf_enforced_and_baked_token_works(tmp_db):
+    # csrf_protect 在 TESTING 模式下关闭，用非测试 app 真实验证：
+    # 缺 token 的保存会被拒，而服务端烘焙进表单的 _csrf_token 能保存成功。
+    app = create_app()
+    app.config["TESTING"] = False  # 关键：开启 CSRF 校验
+    client = app.test_client()
+    # 先 GET /login 让 session 生成 CSRF token，再用它登录（真实浏览器 base.html 会自动带上）
+    client.get("/login")
+    with client.session_transaction() as sess:
+        token = sess["_csrf_token"]
+    client.post("/login", data={"username": "admin", "pin": "123456",
+                                "_csrf_token": token})
+    # 抓取 settings 页面里服务端烘焙进政策表单的 csrf token
+    html = client.get("/settings?tab=policies").get_data(as_text=True)
+    import re
+    m = re.search(r'name="_csrf_token"\s+value="([0-9a-f]+)"', html)
+    assert m, "政策表单必须烘焙 _csrf_token 隐藏字段"
+    baked = m.group(1)
+    # 不带 token → CSRF 拒绝
+    r = client.post("/settings", data={"action": "save_policy", "tab": "policies",
+                                        "title": "x", "body": "b"}, follow_redirects=True)
+    assert "页面停留太久" in r.get_data(as_text=True)
+    # 带服务端烘焙的 token → 成功（且不需 base.html 的 JS 注入）
+    r = client.post("/settings", data={"action": "save_policy", "tab": "policies",
+                                        "title": "csrf", "body": "ok",
+                                        "_csrf_token": baked})
+    assert "页面停留太久" not in r.get_data(as_text=True)
+    with db.get_db() as conn:
+        assert "csrf" in [x["title"] for x in conn.execute("SELECT title FROM policies")]
