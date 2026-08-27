@@ -4,11 +4,21 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 from pathlib import Path
 
-from flask import Response, flash, g, redirect, render_template, request, url_for
+from flask import (
+    Response,
+    flash,
+    g,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+    url_for,
+)
 
-from . import backup, bulletin, db, incentive, invoice
+from . import backup, bulletin, db, db_core, incentive, invoice
 from .helpers import (
     admin_required,
     ascii_filename,
@@ -22,6 +32,19 @@ from .helpers import (
     store_label,
 )
 from .metrics_seed import KPI_TARGETS
+
+
+def _looks_like_image(data: bytes) -> bool:
+    """按文件头魔数判断是否图片，防把任意文件当图片存。"""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True
+    if data.startswith(b"\xff\xd8\xff"):  # JPEG
+        return True
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return True
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return True
+    return False
 
 
 def _settings_tab() -> str:
@@ -241,6 +264,35 @@ def _render_settings(conn, tab: str):
 
 
 def register_settings(app) -> None:
+    @app.route("/settings/policy-image", methods=["POST"])
+    @admin_required
+    def settings_policy_image():
+        """政策正文插图上传。SunEditor 用 file-0 字段，期望 JSON。"""
+        f = request.files.get("file-0")
+        if f is None or not f.filename:
+            return {"errorMessage": "没有文件"}, 400
+        ext = Path(f.filename).suffix.lower()
+        if ext not in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
+            return {"errorMessage": "只支持 png/jpg/gif/webp"}, 400
+        data = f.read()
+        if not data or len(data) > 5 * 1024 * 1024:
+            return {"errorMessage": "图片为空或超过 5MB"}, 400
+        # 简单魔数校验，防把非图片当图片存
+        if not _looks_like_image(data):
+            return {"errorMessage": "不是有效图片"}, 400
+        upload_dir = db_core.DATA_DIR / "uploads" / "policy"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        name = f"{secrets.token_hex(12)}{ext}"
+        (upload_dir / name).write_bytes(data)
+        url = f"/uploads/policy/{name}"
+        return {"result": [{"url": url, "name": f.filename, "size": len(data)}]}
+
+    @app.route("/uploads/policy/<path:filename>")
+    @login_required
+    def policy_image(filename):
+        upload_dir = db_core.DATA_DIR / "uploads" / "policy"
+        return send_from_directory(upload_dir, filename)
+
     @app.route("/settings/backup/<name>")
     @admin_required
     def settings_backup_download(name):

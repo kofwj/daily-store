@@ -28,6 +28,18 @@ def test_sanitize_keeps_table():
     assert "script" not in html.lower()
 
 
+def test_sanitize_keeps_safe_img_strips_bad_src():
+    html = db.sanitize_policy_html(
+        '<p>图</p><img src="/uploads/policy/a.png" alt="口径" width="300">'
+        '<img src="javascript:alert(1)"><img src="data:text/html;x">'
+    )
+    assert '<img src="/uploads/policy/a.png" alt="口径" width="300">' in html
+    assert "javascript" not in html.lower()
+    assert "data:text" not in html.lower()
+    # 无合法 src 的 img 被丢弃，不残留空 img
+    assert html.count("<img") == 1
+
+
 def test_diff_marks_insert_and_delete():
     html = db.render_policy_diff("融合服务，剔除线上卡", "融合服务新增，线上卡")
     assert 'class="policy-add"' in html and "新增" in html

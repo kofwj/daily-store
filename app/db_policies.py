@@ -15,9 +15,9 @@ ALLOWED_TAGS = {
     "p", "br", "b", "strong", "i", "em", "u", "s", "strike", "del",
     "ul", "ol", "li", "h2", "h3", "h4", "blockquote", "span", "div", "a",
     "table", "thead", "tbody", "tr", "th", "td",
-    "ins",
+    "ins", "img",
 }
-VOID_TAGS = {"br"}
+VOID_TAGS = {"br", "img"}
 TABLE_TAGS = {"table", "thead", "tbody", "tr", "th", "td"}
 
 
@@ -49,6 +49,34 @@ class _Sanitizer(HTMLParser):
                     if raw.startswith(("http://", "https://", "/")):
                         href = html.escape(raw, quote=True)
             self.out.append(f'<a href="{href}" target="_blank" rel="noopener">' if href else "<a>")
+            return
+        if tag == "img":
+            src = ""
+            alt = ""
+            width = ""
+            height = ""
+            for key, val in attrs:
+                k = key.lower()
+                v = (val or "").strip()
+                if k == "src" and v.startswith(("/uploads/", "http://", "https://")):
+                    src = html.escape(v, quote=True)
+                elif k == "alt":
+                    alt = html.escape(v, quote=True)
+                elif k in {"width", "height"} and v.isdigit():
+                    if k == "width":
+                        width = v
+                    else:
+                        height = v
+            if not src:
+                return  # 无合法 src 的 img 直接丢弃
+            extra = f' src="{src}"'
+            if alt:
+                extra += f' alt="{alt}"'
+            if width:
+                extra += f' width="{width}"'
+            if height:
+                extra += f' height="{height}"'
+            self.out.append(f"<img{extra}>")  # img 是 void 元素
             return
         if tag in ("th", "td"):
             for key, val in attrs:

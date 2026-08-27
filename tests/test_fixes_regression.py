@@ -585,3 +585,36 @@ def test_policy_read_status_counts_unread(tmp_db):
         rows2 = db.policy_read_status(conn)
     t2 = next(r for r in rows2 if r["id"] == pid)
     assert t2["read"] == 0  # 版本号追上 b4，之前读了也不算
+
+
+def test_policy_image_upload_and_serve(app_client):
+    """政策插图：管理员可传 PNG，非图片被拒，非管理员被拦。"""
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
+    r = app_client.post(
+        "/settings/policy-image",
+        data={"file-0": (__import__("io").BytesIO(png), "口径.png")},
+        content_type="multipart/form-data",
+    )
+    assert r.status_code == 200
+    url = r.get_json()["result"][0]["url"]
+    assert url.startswith("/uploads/policy/")
+    # 能取回
+    got = app_client.get(url)
+    assert got.status_code == 200 and got.data[:8] == b"\x89PNG\r\n\x1a\n"
+    # 非图片被拒
+    bad = app_client.post(
+        "/settings/policy-image",
+        data={"file-0": (__import__("io").BytesIO(b"not an image"), "x.png")},
+        content_type="multipart/form-data",
+    )
+    assert bad.status_code == 400
+    # 非管理员被拦
+    c2 = app_client.application.test_client()
+    c2.post("/login", data={"username": "alpha", "pin": "123456"})
+    r2 = c2.post(
+        "/settings/policy-image",
+        data={"file-0": (__import__("io").BytesIO(png), "a.png")},
+        content_type="multipart/form-data",
+    )
+    assert r2.status_code in (302, 403)

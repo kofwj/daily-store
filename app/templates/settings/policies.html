@@ -37,9 +37,11 @@
               ['undo', 'redo'],
               ['fontSize', 'formatBlock', 'bold', 'underline', 'italic', 'strike'],
               ['fontColor', 'hiliteColor', 'removeFormat'],
-              ['align', 'list', 'table', 'link', 'horizontalRule'],
+              ['align', 'list', 'table', 'link', 'image', 'horizontalRule'],
               ['fullScreen', 'codeView']
             ],
+            imageUploadUrl: '{{ url_for("settings_policy_image") }}',
+            imageUploadHeader: { 'X-CSRF-Token': '{{ csrf_token }}' },
             defaultStyle: 'font-size:15px; line-height:1.6;',
           });
           ta.form.addEventListener('submit', function () {

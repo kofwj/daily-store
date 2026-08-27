@@ -115,6 +115,7 @@ RSYNC=(
   --exclude 'data/*.db-shm'
   --exclude 'data/*.db-wal'
   --exclude 'data/backups/'
+  --exclude 'data/uploads/'
   --exclude 'app/stores_seed_local.py'
 )
 
