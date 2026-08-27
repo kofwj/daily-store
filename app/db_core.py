@@ -22,15 +22,16 @@ from .stores_seed import STORES as SAMPLE_STORES
 
 
 def _catalog():
-    """生产用 stores_seed_local（不进 git）；测试设 STORE_DAILY_SAMPLE_SEED=1 强制示例店。"""
+    """生产用 stores_seed_local（不进 git）；测试设 STORE_DAILY_SAMPLE_SEED=1 强制示例店。
+    生产没有 local 文件时不要灌示例店。"""
     if os.environ.get("STORE_DAILY_SAMPLE_SEED") == "1":
         from . import stores_seed as seed
-    else:
-        try:
-            from . import stores_seed_local as seed
-        except ImportError:
-            from . import stores_seed as seed
-    return seed.STORES, seed.filler_accounts, seed.NINGHAI_CODE
+        return seed.STORES, seed.filler_accounts, seed.NINGHAI_CODE
+    try:
+        from . import stores_seed_local as seed
+        return seed.STORES, seed.filler_accounts, seed.NINGHAI_CODE
+    except ImportError:
+        return [], (lambda: []), ""
 
 
 def _catalog_stores():
@@ -1546,6 +1547,39 @@ def set_user_stores(conn: sqlite3.Connection, user_id: int, store_ids: Iterable[
 
 def set_user_active(conn: sqlite3.Connection, user_id: int, active: bool) -> None:
     conn.execute("UPDATE users SET active=? WHERE id=?", (1 if active else 0, user_id))
+
+
+def set_store_active(conn: sqlite3.Connection, store_id: int, active: bool) -> None:
+    conn.execute("UPDATE stores SET active=? WHERE id=?", (1 if active else 0, int(store_id)))
+
+
+def store_has_data(conn: sqlite3.Connection, store_id: int) -> bool:
+    sid = int(store_id)
+    tables = (
+        "daily_facts",
+        "daily_reports",
+        "deal_posts",
+        "advance_posts",
+        "invoice_months",
+        "bisuan_mobile",
+    )
+    for table in tables:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ).fetchone()
+        if not exists:
+            continue
+        if conn.execute(f"SELECT 1 FROM {table} WHERE store_id=? LIMIT 1", (sid,)).fetchone():
+            return True
+    return False
+
+
+def delete_store(conn: sqlite3.Connection, store_id: int) -> None:
+    sid = int(store_id)
+    if store_has_data(conn, sid):
+        raise ValueError("这家店已有填报/触客/垫资，不能删，只能停用")
+    conn.execute("DELETE FROM user_stores WHERE store_id=?", (sid,))
+    conn.execute("DELETE FROM stores WHERE id=?", (sid,))
 
 def set_metric_target(conn: sqlite3.Connection, code: str, target: int) -> None:
     conn.execute("UPDATE metrics SET monthly_target=? WHERE code=?", (max(0, int(target)), code))

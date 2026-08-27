@@ -155,6 +155,34 @@ def test_2_seed_does_not_overwrite_admin_edits(tmp_db):
         assert db.user_store_ids(conn, uid) == []
 
 
+def test_delete_empty_store_and_block_store_with_facts(tmp_db, app_client):
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
+    with db.get_db() as conn:
+        empty = db.create_store(conn, "空店", short_name="空店")
+        used = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        db.save_daily(
+            conn,
+            store_id=used,
+            biz_date=date.today(),
+            user_id=conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"],
+            values={"phone_sales": 1},
+        )
+    blocked = app_client.post(
+        "/settings",
+        data={"action": "delete_store", "tab": "stores", "store_id": str(used)},
+        follow_redirects=True,
+    )
+    assert "不能删" in blocked.get_data(as_text=True)
+    ok = app_client.post(
+        "/settings",
+        data={"action": "delete_store", "tab": "stores", "store_id": str(empty)},
+        follow_redirects=True,
+    )
+    assert "门店已删除" in ok.get_data(as_text=True)
+    with db.get_db() as conn:
+        assert conn.execute("SELECT 1 FROM stores WHERE id=?", (empty,)).fetchone() is None
+
+
 def test_3_open_redirect_blocked(app_client):
     resp = app_client.post(
         "/login?next=//evil.com",

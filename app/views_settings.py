@@ -411,6 +411,20 @@ def register_settings(app) -> None:
                         )
                         flash("门店档案已改", "ok")
                         return redirect(url_for("settings", tab="stores", store_id=sid))
+                    elif action == "toggle_store":
+                        sid = int(request.form.get("store_id") or 0)
+                        store = db.get_store(conn, sid) if sid else None
+                        if store is None:
+                            raise ValueError("没有这家店")
+                        on = not int(store["active"] or 0)
+                        db.set_store_active(conn, sid, on)
+                        flash("门店已启用" if on else "门店已停用", "ok")
+                        return redirect(url_for("settings", tab="stores", store_id=sid))
+                    elif action == "delete_store":
+                        sid = int(request.form.get("store_id") or 0)
+                        db.delete_store(conn, sid)
+                        flash("门店已删除", "ok")
+                        return redirect(url_for("settings", tab="stores"))
                     elif action == "save_profiles":
                         for store in db.list_all_stores(conn):
                             sid = store["id"]

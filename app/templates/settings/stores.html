@@ -25,8 +25,8 @@
         <div class="store-list-body" id="storeListBody">
           {% for group in store_groups %}
             {% for s in group.stores %}
-            <a class="store-list-item {{ 'active' if current_store and s.id == current_store.id else '' }}" href="{{ url_for('settings', tab='stores', store_id=s.id) }}" data-city="{{ group.city }}" data-manager="{{ (s.area_manager or '')|trim }}" data-text="{{ store_label(s) }} {{ s.name }} {{ s.store_manager }} {{ s.area_manager }} {{ s.city }} {{ s.mobile_code }} {{ s.region_group }}">
-              <span class="store-list-name">{{ store_label(s) }}</span>
+            <a class="store-list-item {{ 'active' if current_store and s.id == current_store.id else '' }}{% if not s.active %} is-off{% endif %}" href="{{ url_for('settings', tab='stores', store_id=s.id) }}" data-city="{{ group.city }}" data-manager="{{ (s.area_manager or '')|trim }}" data-text="{{ store_label(s) }} {{ s.name }} {{ s.store_manager }} {{ s.area_manager }} {{ s.city }} {{ s.mobile_code }} {{ s.region_group }}">
+              <span class="store-list-name">{{ store_label(s) }}{% if not s.active %} · 已停用{% endif %}</span>
               <span class="muted store-list-people" data-alt-city="{{ s.store_manager or '未设店长' }}{% if s.store_grade %} · {{ s.store_grade }}类{% endif %}" data-alt-mgr="{{ (s.area_manager or '')|trim or '未设经理' }}">{{ s.store_manager or '未设店长' }}{% if s.store_grade %} · {{ s.store_grade }}类{% endif %}</span>
             </a>
             {% endfor %}
@@ -108,8 +108,24 @@
             <p><label>租赁期限</label><input name="lease_period" value="{{ current_store.lease_period }}" placeholder="如 2026-01-01至2026-12-31"></p>
             <p class="span-2"><label>租赁地址</label><input name="lease_address" value="{{ current_store.lease_address }}" placeholder="市、区/县、街路村乡镇道巷号"></p>
           </div>
-          <div class="toolbar"><button type="submit">保存这家店</button></div>
+          <div class="toolbar">
+            <button type="submit">保存这家店</button>
+          </div>
         </form>
+        <div class="toolbar store-danger">
+          <form method="post">
+            <input type="hidden" name="action" value="toggle_store">
+            <input type="hidden" name="tab" value="stores">
+            <input type="hidden" name="store_id" value="{{ current_store.id }}">
+            <button class="ghost" type="submit">{{ '启用' if not current_store.active else '停用' }}</button>
+          </form>
+          <form method="post" onsubmit="return confirm('删除后名单里没有这家店。有填报记录的不能删，只能停用。确定删？');">
+            <input type="hidden" name="action" value="delete_store">
+            <input type="hidden" name="tab" value="stores">
+            <input type="hidden" name="store_id" value="{{ current_store.id }}">
+            <button class="ghost" type="submit">删除</button>
+          </form>
+        </div>
         {% else %}
         <div class="store-editor-head">
           <div>

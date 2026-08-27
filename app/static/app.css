@@ -943,6 +943,8 @@ details.extra summary { cursor: pointer; font-weight: 600; }
 }
 .store-editor-grid p { margin: 0; }
 .store-editor-grid .span-2 { grid-column: 1 / -1; }
+.store-list-item.is-off { opacity: .55; }
+.store-danger { margin-top: 14px; gap: 8px; }
 .rules-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
