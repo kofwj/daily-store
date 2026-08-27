@@ -117,6 +117,7 @@ RSYNC=(
   --exclude 'data/backups/'
   --exclude 'data/uploads/'
   --exclude 'app/stores_seed_local.py'
+  --filter 'P app/stores_seed_local.py'
 )
 
 SYNC_SOURCES=(./app ./caddy ./scripts ./tests \

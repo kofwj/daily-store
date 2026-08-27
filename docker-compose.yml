@@ -14,6 +14,7 @@ services:
       STORE_DAILY_LOCK_MINUTE: ${STORE_DAILY_LOCK_MINUTE:-0}
     volumes:
       - ./data:/app/data
+      - ./app/stores_seed_local.py:/app/app/stores_seed_local.py:ro
     expose:
       - "5055"
     healthcheck:
