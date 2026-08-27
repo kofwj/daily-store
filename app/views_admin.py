@@ -369,11 +369,6 @@ def register_admin(app) -> None:
                 stores=stores, month_facts=month_facts, mobile_bisuan=mobile
             )
         has_mobile = bool(mobile)
-        summary = {
-            "under": sum(1 for r in rows if r["under"]),
-            "over": sum(1 for r in rows if r["over"]),
-            "even": sum(1 for r in rows if not r["under"] and not r["over"]),
-        }
         return render_template(
             "deviation.html",
             rows=rows,
@@ -382,7 +377,6 @@ def register_admin(app) -> None:
             prev_month=prev_month,
             next_month=next_month,
             has_mobile=has_mobile,
-            summary=summary,
         )
 
     @app.route("/board.xlsx")

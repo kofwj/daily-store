@@ -1662,25 +1662,7 @@ table.board-table td { text-align: left; vertical-align: middle; }
 table.board-table td.fill { background: #fff3cd; color: #7c5e10; }
 
 /* 填报偏差榜 */
-.under { color: #b45309; }   /* 少报/低报 */
-.over  { color: #dc2626; }   /* 多报 */
 .dev-nav { display: flex; gap: .5rem; }
 .dev-table td.store { text-align: left; white-space: nowrap; }
-.dev-rank {
-  display: inline-block; min-width: 22px; margin-right: 6px;
-  color: var(--muted); font-variant-numeric: tabular-nums;
-}
-.dev-table td { vertical-align: middle; text-align: right; }
-.dev-summary { display: flex; gap: .8rem; align-items: baseline; font-size: 13px; margin: .4rem 0 1rem; }
-.dev-summary b { font-size: 14px; }
-.sum.under b { color: #b45309; }
-.sum.over b  { color: #dc2626; }
-.dev-diff { min-width: 110px; }
-.diff-num { font-weight: 700; font-variant-numeric: tabular-nums; }
-.dev-diff.under .diff-num { color: #b45309; }
-.dev-diff.over .diff-num  { color: #dc2626; }
-.dev-table tr.dev-under-row td.store { box-shadow: inset 3px 0 0 #b45309; }
-.dev-table tr.dev-over-row  td.store { box-shadow: inset 3px 0 0 #dc2626; }
-.dev-note { margin-top: .6rem; }
-.under-dot { color: #b45309; }
-.over-dot  { color: #dc2626; }
+.dev-table td.under { color: #b45309; }   /* 少报/低报 */
+.dev-table td.over  { color: #dc2626; }   /* 多报 */
