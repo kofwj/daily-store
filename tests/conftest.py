@@ -3,9 +3,14 @@
 说明：这里默认把 db.is_locked 关掉，避免测试运行到锁定时间（23:00 北京时间）之后，
 保存“当天”的用例随机失败。专门的锁定/权限用例会自行重新 monkeypatch 开锁。
 """
+import os
 from pathlib import Path
 
 import pytest
+
+# create_app 模块级 import 就会执行，，先种好测试开关和密钥（fixture 里会再按需覆盖）
+os.environ.setdefault("STORE_DAILY_TESTING", "1")
+os.environ.setdefault("STORE_DAILY_SECRET", "test-" + "a" * 48)
 
 from app import db, db_core
 from app.web import create_app
@@ -19,6 +24,8 @@ def tmp_db(tmp_path, monkeypatch):
     monkeypatch.setenv("STORE_DAILY_DATA", str(tmp_path))
     # create_app deliberately has no deployment fallback; tests explicitly provide a key.
     monkeypatch.setenv("STORE_DAILY_SECRET", "test-" + "a" * 48)
+    # 显式测试开关（不靠 "pytest" in sys.modules 探测；生产进程误 import pytest 也不会关掉 CSRF）
+    monkeypatch.setenv("STORE_DAILY_TESTING", "1")
     # 测试一律用示例店，避免加载 stores_seed_local 里的真实门店
     monkeypatch.setenv("STORE_DAILY_SAMPLE_SEED", "1")
     # DB_PATH/DATA_DIR 真正被读的地方是 db_core.connect()（模块级全局），

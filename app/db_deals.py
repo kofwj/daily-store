@@ -154,13 +154,14 @@ def record_deal_post(
             "SELECT * FROM deal_posts WHERE id=? AND store_id=?",
             (deal_id, store_id),
         ).fetchone()
-        if row:
-            from .deal import is_today_deal
+        if not row:
+            raise ValueError("deal_not_found")
+        from .deal import is_today_deal
 
-            if not is_today_deal(row, day):
-                raise ValueError("past_deal_locked")
-            existing_id = int(row["id"])
-            existing_row = row
+        if not is_today_deal(row, day):
+            raise ValueError("past_deal_locked")
+        existing_id = int(row["id"])
+        existing_row = row
     if existing_id is None and payload["phone"]:
         row = conn.execute(
             """

@@ -515,11 +515,7 @@ def _advance_amounts_to_cents(conn: sqlite3.Connection) -> None:
     if not cols:
         return
 
-    sample = conn.execute(
-        "SELECT broadband, rebate, other FROM advance_posts LIMIT 50"
-    ).fetchall()
     declared = (cols.get("broadband") or "").upper()
-
     # 新库列声明是 INTEGER：值已经是分，只写标记。
     if declared == "INTEGER":
         conn.execute(
@@ -527,25 +523,13 @@ def _advance_amounts_to_cents(conn: sqlite3.Connection) -> None:
         )
         return
 
-    # 旧库 REAL 列：靠值判断是元还是分。
-    # 有小数或 0<|v|<1 才认定是元；整数（含 0）无法区分，默认不转，只写标记。
-    looks_yuan = False
-    for row in sample:
-        for raw in row:
-            try:
-                value = float(raw or 0)
-            except (TypeError, ValueError):
-                continue
-            if abs(value - round(value)) > 1e-9 or (0 < abs(value) < 1):
-                looks_yuan = True
-                break
-        if looks_yuan:
-            break
-    if looks_yuan:
-        conn.execute(
-            "UPDATE advance_posts SET broadband=CAST(ROUND(broadband * 100) AS INTEGER), "
-            "rebate=CAST(ROUND(rebate * 100) AS INTEGER), other=CAST(ROUND(other * 100) AS INTEGER)"
-        )
+    # 旧库 REAL 列：当初写入的就是元（record_advance 直接存元）。
+    # 一律×100 转分——包括整数元（200、500），不能靠采样值猜（整元与整分无法取值区分）。
+    # 若某库当年已手动转过，列声明必是 INTEGER（新表结构），走到上面分支跳过。
+    conn.execute(
+        "UPDATE advance_posts SET broadband=CAST(ROUND(broadband * 100) AS INTEGER), "
+        "rebate=CAST(ROUND(rebate * 100) AS INTEGER), other=CAST(ROUND(other * 100) AS INTEGER)"
+    )
     conn.execute(
         "INSERT OR IGNORE INTO app_meta(key, value) VALUES('advance_cents_marker','1')"
     )

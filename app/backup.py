@@ -157,6 +157,20 @@ def restore_bytes(data: bytes) -> Path:
         safety = snapshot("before_restore")
         dest = Path(db_core.DB_PATH)
         dest.parent.mkdir(parents=True, exist_ok=True)
+        # 先把活库 WAL 收进主文件并清掉 -wal/-shm：
+        # 否则换库后残留旧 WAL 会带着恢复窗口期的写入（甚至混进新主文件），本应用 WAL 模式多 worker 并发写时更易触发。
+
+        try:
+            live = sqlite3.connect(str(dest))
+            try:
+                live.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            finally:
+                live.close()
+        except sqlite3.OperationalError:
+            pass  # 库文件不存在/占锁时，unlink 也不会有残留
+        for suffix in ("-wal", "-shm"):
+            Path(str(dest) + suffix).unlink(missing_ok=True)
+
         src = sqlite3.connect(str(tmp))
         dst = sqlite3.connect(str(dest))
         try:

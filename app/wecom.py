@@ -12,7 +12,18 @@ logger = logging.getLogger("wecom")
 
 WEBHOOK_PREFIX = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send"
 TIMEOUT = 8
-MAX_CONTENT = 4000  # 企微 text 消息上限 4096 字节，留余量
+MAX_CONTENT = 4000  # 企微 text 消息上限 4096 字节，留余量（一个中文 3 字节）
+
+
+def _cut_utf8_bytes(text: str, limit: int) -> str:
+    """按字节截断，不把多字节字符切断。"""
+    data = text.encode("utf-8")
+    if len(data) <= limit:
+        return text
+    data = data[:limit]
+    while data and (data[-1] & 0xC0) == 0x80:
+        data = data[:-1]
+    return data.decode("utf-8", errors="ignore")
 
 
 def _is_valid_webhook(url: str) -> bool:
@@ -42,8 +53,8 @@ def send_text(conn, store, text: str, *, source: str = "") -> bool:
     content = (text or "").strip()
     if not content:
         return False
-    if len(content) > MAX_CONTENT:
-        content = content[:MAX_CONTENT - 3] + "..."
+    if len(content.encode("utf-8")) > MAX_CONTENT:
+        content = _cut_utf8_bytes(content, MAX_CONTENT - 3) + "..."
     payload = {"msgtype": "text", "text": {"content": content}}
     try:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")

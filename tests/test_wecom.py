@@ -76,3 +76,23 @@ def test_daily_save_triggers_wecom(client):
         follow_redirects=True,
     )
     assert "已保存" in resp.get_data(as_text=True)
+
+
+def test_long_chinese_content_truncated_by_bytes(tmp_db):
+    """企微按 4096 字节限制，中文 3 字节/字——按字符截断会超限掉消息。"""
+    import json
+
+    from app.wecom import MAX_CONTENT
+
+    url = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc"
+    with db.get_db() as conn:
+        db_core.set_setting(conn, "wecom_global", url)
+        store = conn.execute("SELECT * FROM stores WHERE code='store-alpha'").fetchone()
+        with patch("app.wecom.urlopen") as mock_open:
+            mock_open.return_value.__enter__.return_value.read.return_value = b'{"errcode":0,"errmsg":"ok"}'
+            result = send_text(conn, store, "好" * 2000, source="daily")
+            assert result is True
+        payload = json.loads(mock_open.call_args.args[0].data)
+    content = payload["text"]["content"]
+    assert len(content.encode("utf-8")) <= MAX_CONTENT
+    assert content.endswith("...")

@@ -254,27 +254,39 @@ def register_daily(app) -> None:
                     return redirect(
                         url_for("deal_page", store_id=store["id"], deal_id=deal_id_int)
                     )
+                if deal_id_int is None and values.get("phone"):
+                    dup = conn.execute(
+                        "SELECT user_id FROM deal_posts WHERE store_id=? AND biz_date=? AND phone=? "
+                        "ORDER BY id DESC LIMIT 1",
+                        (store["id"], today_d.isoformat(), values["phone"]),
+                    ).fetchone()
+                    if dup is not None and int(dup["user_id"] or 0) != int(g.user["id"]):
+                        flash("同日同号已有一条记录（他人填的），提交后按规则覆盖。", "warn")
                 text = deal.render_deal(
                     broadcast_store_name(store),
                     **{k: v for k, v in values.items() if k != "deal_id"},
                 )
-                saved_id = db.record_deal_post(
-                    conn,
-                    store_id=store["id"],
-                    user_id=g.user["id"],
-                    closed=deal.yn(values["closed"], "1", "0") == "1",
-                    model=values["model"],
-                    phone=values["phone"],
-                    spend=values["spend"],
-                    hall_query=deal.yn(values["hall_query"], "1", "0") == "1",
-                    recommend=values["recommend"],
-                    student=deal.yn(values["student"], "1", "0") == "1",
-                    opener=values["opener"],
-                    note=values["note"],
-                    text=text,
-                    deal_id=deal_id_int,
-                    biz_date=today_d,
-                )
+                try:
+                    saved_id = db.record_deal_post(
+                        conn,
+                        store_id=store["id"],
+                        user_id=g.user["id"],
+                        closed=deal.yn(values["closed"], "1", "0") == "1",
+                        model=values["model"],
+                        phone=values["phone"],
+                        spend=values["spend"],
+                        hall_query=deal.yn(values["hall_query"], "1", "0") == "1",
+                        recommend=values["recommend"],
+                        student=deal.yn(values["student"], "1", "0") == "1",
+                        opener=values["opener"],
+                        note=values["note"],
+                        text=text,
+                        deal_id=deal_id_int,
+                        biz_date=today_d,
+                    )
+                except ValueError:
+                    flash("这条触客记录不存在或已删除，请刷新后重试。", "error")
+                    return redirect(url_for("deal_records", store_id=store["id"]))
                 values["deal_id"] = saved_id
                 editable = True
                 try:

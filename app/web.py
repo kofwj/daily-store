@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import os
 import secrets
-import sys
 from datetime import datetime, timedelta
 
 from flask import Flask, session
@@ -107,6 +106,6 @@ def create_app(*, testing: bool = False) -> Flask:
     return app
 
 
-# Flask/WSGI imports this symbol, while pytest imports modules before fixtures run.
-# The test-only branch still creates a fresh random key and is never a deployment fallback.
-app = create_app(testing="pytest" in sys.modules)
+# Flask/WSGI imports this symbol; pytest sets STORE_DAILY_TESTING=1 in conftest fixtures.
+# 不用 sys.modules 探测：生产进程若碰巧 import 过 pytest，TESTING=True 会关掉 CSRF。
+app = create_app(testing=os.environ.get("STORE_DAILY_TESTING", "0") == "1")

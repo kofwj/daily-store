@@ -326,3 +326,26 @@ def test_advance_stores_cents_and_reads_yuan(client):
     assert int(raw["other"]) == 3999
     assert float(viewed["other"]) == 39.99
     assert float(viewed["total"]) == 39.99
+def test_advance_old_real_whole_yuan_converted(tmp_path):
+    """旧库 REAL 列存的是元——整元（200、500）也必须乘100，不能只靠采样猜。"""
+
+    import sqlite3
+
+    from app import db_core
+
+    conn = sqlite3.connect(str(tmp_path / "old.db"))
+    db_core._ensure_app_meta(conn)
+    conn.execute("CREATE TABLE advance_posts (id INTEGER PRIMARY KEY AUTOINCREMENT, broadband REAL NOT NULL DEFAULT 0, rebate REAL NOT NULL DEFAULT 0, other REAL NOT NULL DEFAULT 0)")
+    conn.executemany(
+        "INSERT INTO advance_posts (broadband, rebate, other) VALUES (?, ?, ?)",
+        [(200, 35.5, 0), (500, 0, 12.25)],
+    )
+    db_core._advance_amounts_to_cents(conn)
+    rows = conn.execute(
+        "SELECT broadband, rebate, other FROM advance_posts ORDER BY id"
+    ).fetchall()
+    # 整元 200→20000 分、500→50000 分；小数照转
+    assert list(rows) == [(20000, 3550, 0), (50000, 0, 1225)]
+    marker = conn.execute("SELECT value FROM app_meta WHERE key='advance_cents_marker'").fetchone()
+    assert marker[0] == "1"
+    conn.close()

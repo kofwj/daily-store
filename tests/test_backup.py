@@ -133,3 +133,24 @@ def test_prune_keeps_latest_20():
     assert len(left) <= backup.MAX_KEEP
     # 最新一份仍在
     assert str(left[-1].name).endswith("000029.db")
+
+
+def test_restore_drops_stale_wal(tmp_db):
+    """恢复前活库在 WAL 模式的残留 -wal 必须清掉，否则换库后旧 WAL 会夹带恢复窗口期的写。"""
+    from app import db_core
+
+    with db.get_db() as conn:
+        before_n = int(conn.execute("SELECT COUNT(*) AS n FROM advance_posts").fetchone()["n"])
+        snap = backup.snapshot("wal_test")
+    with db.get_db() as conn:
+        conn.execute(
+            "INSERT INTO advance_posts (store_id, user_id, created_at, biz_date, broadband)"
+            " VALUES (1, 1, '2026-08-28T00:00:00', '2026-08-28',  100)"
+        )
+    danger = Path(str(db_core.DB_PATH) + "-wal")
+    assert danger.exists()
+    backup.restore_bytes(snap.read_bytes())
+    # 恢复后新库会自建 WAL（属于新主文件，不是残留杯；真正要验的是恢复窗口期的写入没混进新库->看下面行数断言
+    with db.get_db() as conn:
+        n = int(conn.execute("SELECT COUNT(*) AS n FROM advance_posts").fetchone()["n"])
+        assert n == before_n  # 恢复窗口期写入被回滚，没混进新库

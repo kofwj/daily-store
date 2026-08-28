@@ -406,3 +406,23 @@ def test_deal_diff_formats_bool_fields():
     assert "开口 ✓→✗" in text
     assert "学豆 ✗→✓" in text
     assert "机型 S60→S70" in text
+
+
+def test_deal_unknown_id_raises_not_overwrite(tmp_db):
+    """无效 deal_id 不能静默落去重分支改别人的记录。"""
+    import pytest
+
+    from app.deal import is_today_deal  # noqa: F401 — 借用触发 app 导入
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        with pytest.raises(ValueError):
+            db.record_deal_post(
+                conn,
+                store_id=sid,
+                user_id=1,
+                closed=True,
+                model="X300",
+                phone="13900000000",
+                deal_id=999999,
+                biz_date=db.today_local(),
+            )
