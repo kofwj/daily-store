@@ -157,27 +157,26 @@ def restore_bytes(data: bytes) -> Path:
         safety = snapshot("before_restore")
         dest = Path(db_core.DB_PATH)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        # 先把活库 WAL 收进主文件并清掉 -wal/-shm：
-        # 否则换库后残留旧 WAL 会带着恢复窗口期的写入（甚至混进新主文件），本应用 WAL 模式多 worker 并发写时更易触发。
-
+        # 恢复用 backup API 整库替换：WAL 模式下它自带写锁串行化——
+        # 恢复期间其它 worker 的写会按 busy_timeout 等待/失败，不会混入旧数据；
+        # 并发读者按快照语义各读各的，同样安全。
+        # 不要删 -wal/-shm：别的 worker 可能还开着连接，运行中删除属于未定义行为。
+        dst = sqlite3.connect(str(dest), timeout=30)
         try:
-            live = sqlite3.connect(str(dest))
+            # 先探写锁：若别的连接卡着长写事务，这里等 30s 后抛可读的错误，
+            # 免得 backup() 在锁上无限重试把请求挂死。
             try:
-                live.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                dst.execute("BEGIN IMMEDIATE")
+                dst.commit()
+            except sqlite3.OperationalError as exc:
+                raise ValueError("数据库正被其它操作占用，请稍等几秒重试") from exc
+            src = sqlite3.connect(str(tmp))
+            try:
+                src.backup(dst)
             finally:
-                live.close()
-        except sqlite3.OperationalError:
-            pass  # 库文件不存在/占锁时，unlink 也不会有残留
-        for suffix in ("-wal", "-shm"):
-            Path(str(dest) + suffix).unlink(missing_ok=True)
-
-        src = sqlite3.connect(str(tmp))
-        dst = sqlite3.connect(str(dest))
-        try:
-            src.backup(dst)
+                src.close()
         finally:
             dst.close()
-            src.close()
         # 旧备份可能缺新列/表，恢复后补上，避免当场把登录打挂
         with db_core.get_db() as conn:
             cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}

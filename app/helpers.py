@@ -155,11 +155,16 @@ def csrf_protect():
     given = request.form.get("_csrf_token") or request.headers.get("X-CSRF-Token", "")
     if not token or not given or not _compare_digest(token, given):
         flash("页面停留太久，操作校验失败，请刷新后重试。", "error")
-        # 只跟同源 referrer，防开放重定向
+        # 只跟同源 referrer，防开放重定向。Referer 几乎总是绝对 URL，
+        # 同源的转成站内路径再跳；外站、协议相对 //、带反斜杠的一律丢弃。
         target = request.referrer or ""
-        if not target.startswith("/") or target.startswith("//") or "\\" in target:
+        if "\\" in target or target.startswith("//"):
             target = ""
-        elif "://" in target and not target.startswith(request.host_url):
+        elif target.startswith(request.host_url):
+            target = target[len(request.host_url):]  # 同源绝对 URL → 站内路径
+            if not target.startswith("/"):
+                target = "/" + target
+        elif not target.startswith("/"):
             target = ""
         return redirect(target or url_for("today"))
     return None

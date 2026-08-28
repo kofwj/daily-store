@@ -239,9 +239,6 @@ def build_invoice_zip(conn, stores, as_of: date) -> bytes:
             if name in used:
                 name = f"invoice_{as_of.strftime('%Y%m')}_{store['id']}.xlsx"
             used.add(name)
-            rec = get_invoice_month(conn, int(store["id"]), month)
-            if not rec.get("id"):
-                continue
             data = build_invoice_xlsx(conn, store, as_of, rec)
             zf.writestr(name, data)
     return buf.getvalue()
