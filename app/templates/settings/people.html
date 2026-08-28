@@ -34,31 +34,32 @@
           </thead>
           <tbody>
             <tr class="people-row" data-text="{{ g.user.display_name }} {{ g.user.username }} 管理员" data-role="admin">
-              <td class="people-identity">
+              <td class="people-identity" data-label="成员">
                 <strong>{{ g.user.display_name }}</strong>
                 <span class="people-sub"><code>{{ g.user.username }}</code></span>
               </td>
-              <td><span class="role-chip admin">管理员</span></td>
-              <td class="muted">全部门店</td>
-              <td>使用中</td>
-              <td class="muted">当前登录</td>
+              <td data-label="角色"><span class="role-chip admin">管理员</span></td>
+              <td class="muted" data-label="可见范围">全部门店</td>
+              <td data-label="状态">使用中</td>
+              <td class="muted" data-label="操作">当前登录</td>
             </tr>
             {% for p in people %}
             {% set u = p.user %}
             {% set kind = 'area' if u.role == 'readonly' and (u.scope or '')|trim else ('manager' if u.role == 'readonly' else u.role) %}
             <tr class="people-row {{ 'off' if not u.active else '' }}" data-text="{{ u.display_name }} {{ u.username }} {{ p.store_label }}" data-role="{{ kind }}">
-              <td class="people-identity">
+              <td class="people-identity" data-label="成员">
                 <strong>{{ u.display_name }}</strong>
                 <span class="people-sub"><code>{{ u.username }}</code></span>
               </td>
-              <td>
+              <td data-label="角色">
                 {% if kind == 'area' %}<span class="role-chip view">区域经理</span>
                 {% elif kind == 'manager' %}<span class="role-chip view">店长</span>
                 {% else %}<span class="role-chip fill">填报员</span>{% endif %}
               </td>
-              <td>
+              <td data-label="可见范围">
                 {% if kind == 'area' %}
                 <form method="post" class="inline-store">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                   <input type="hidden" name="action" value="set_stores">
                   <input type="hidden" name="tab" value="people">
                   <input type="hidden" name="user_id" value="{{ u.id }}">
@@ -67,18 +68,24 @@
                   <button class="ghost" type="submit">保存</button>
                 </form>
                 {% else %}
-                <form method="post" class="inline-store">
+                <form method="post" class="inline-store people-store-form">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                   <input type="hidden" name="action" value="set_stores">
                   <input type="hidden" name="tab" value="people">
                   <input type="hidden" name="user_id" value="{{ u.id }}">
-                  {{ store_picker(stores, selected=p.store_id or '', name='store_ids', all_value='', all_label='未分配') }}
+                  <select name="store_ids" class="people-store-select" multiple size="3" aria-label="{{ u.display_name }} 可见门店">
+                    {% for s in stores if s.active or s.id in p.store_ids %}
+                    <option value="{{ s.id }}" {% if s.id in p.store_ids %}selected{% endif %}{% if not s.active %} disabled{% endif %}>{{ store_label(s) }}{% if not s.active %}（已停用，保存后解除）{% endif %}</option>
+                    {% endfor %}
+                  </select>
+                  <button class="ghost" type="submit">保存</button>
                 </form>
                 {% endif %}
               </td>
-              <td>{% if u.active %}使用中{% else %}已停用{% endif %}</td>
-              <td>
+              <td data-label="状态">{% if u.active %}使用中{% else %}已停用{% endif %}</td>
+              <td data-label="操作">
                 <div class="org-person-actions">
-                  <form method="post" class="inline-reset" onsubmit="return confirm('把 {{ u.display_name }} 的口令重置为默认 123456？\n对方下次登录必须改掉。')">
+                  <form method="post" class="inline-reset" onsubmit="return confirm('确认把这个账号的口令重置为默认 123456？\n对方下次登录必须改掉。')">
                     <input type="hidden" name="action" value="reset_pin">
                     <input type="hidden" name="tab" value="people">
                     <input type="hidden" name="user_id" value="{{ u.id }}">
@@ -108,6 +115,7 @@
         <p class="muted">账号用姓名全拼。店长看一家店，区域经理按姓名看整片区。</p>
       </div>
       <form method="post" class="org-add-user" id="addUserForm">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="action" value="add_user">
         <input type="hidden" name="tab" value="people">
         <div class="add-user-grid">
@@ -126,7 +134,12 @@
         <div id="addStoreField">
           <p>
             <label>所属门店</label>
-            {{ store_picker(stores, selected='', name='store_ids', all_value='', all_label='先选一家店', autosubmit=false) }}
+            <select name="store_ids" class="people-store-select" multiple size="4" aria-label="新账号可见门店">
+              {% for s in stores if s.active %}
+              <option value="{{ s.id }}">{{ store_label(s) }}</option>
+              {% endfor %}
+            </select>
+            <span class="muted">可按住 Ctrl / Command 多选门店。</span>
           </p>
         </div>
         <div id="addAreaField" hidden>

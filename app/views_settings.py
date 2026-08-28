@@ -211,13 +211,19 @@ def _render_settings(conn, tab: str):
         grouped_cities[city].append(s)
     store_groups = [{"city": city, "stores": grouped_cities[city]} for city in city_order]
     current_store = None
+    store_selection_invalid = False
     raw_sid = (request.args.get("store_id") or request.form.get("store_id") or "").strip()
-    if raw_sid != "new" and stores:
+    if raw_sid == "new":
+        pass
+    elif not raw_sid and stores:
+        current_store = stores[0]
+    elif stores:
         try:
-            sid = int(raw_sid) if raw_sid else 0
+            sid = int(raw_sid)
         except ValueError:
             sid = 0
-        current_store = store_by_id.get(sid) or stores[0]
+        current_store = store_by_id.get(sid)
+        store_selection_invalid = current_store is None
     people = []
     people_by_store = {s["id"]: [] for s in stores}
     area_by_store = {s["id"]: [] for s in stores}
@@ -261,6 +267,7 @@ def _render_settings(conn, tab: str):
         stores=stores,
         store_groups=store_groups,
         current_store=current_store,
+        store_selection_invalid=store_selection_invalid,
         kpis=kpis,
         user_map=user_map,
         store_label=store_label,
@@ -391,8 +398,8 @@ def register_settings(app) -> None:
                         return redirect(url_for("settings", tab="stores", store_id=new_store_id))
                     elif action == "edit_store":
                         sid = int(request.form.get("store_id") or 0)
-                        if not db.user_can_access_store(conn, g.user, sid):
-                            raise ValueError("无权改这家店")
+                        if db.get_store(conn, sid) is None:
+                            raise ValueError("没有这家店")
                         db.update_store_profile(
                             conn,
                             sid,
@@ -455,13 +462,33 @@ def register_settings(app) -> None:
                         elif kind in ("readonly", "manager"):
                             role = "readonly"
                             scope = ""
-                            store_ids = [int(x) for x in request.form.getlist("store_ids") if str(x).strip().isdigit()]
+                            store_ids = [
+                                int(x)
+                                for x in request.form.getlist("store_ids")
+                                if str(x).strip().isdigit()
+                            ]
+                            active_ids = {
+                                int(row["id"])
+                                for row in conn.execute("SELECT id FROM stores WHERE active=1")
+                            }
+                            if any(store_id not in active_ids for store_id in store_ids):
+                                raise ValueError("只能绑定已启用的门店")
                             if not store_ids:
                                 raise ValueError("店长要选一家店")
                         else:
                             role = "filler"
                             scope = ""
-                            store_ids = [int(x) for x in request.form.getlist("store_ids") if str(x).strip().isdigit()]
+                            store_ids = [
+                                int(x)
+                                for x in request.form.getlist("store_ids")
+                                if str(x).strip().isdigit()
+                            ]
+                            active_ids = {
+                                int(row["id"])
+                                for row in conn.execute("SELECT id FROM stores WHERE active=1")
+                            }
+                            if any(store_id not in active_ids for store_id in store_ids):
+                                raise ValueError("只能绑定已启用的门店")
                         if not username or not display or not pin:
                             raise ValueError("账号、姓名、口令都要填")
                         min_len = db.FILLER_PIN_MIN
@@ -512,8 +539,20 @@ def register_settings(app) -> None:
                             db.set_user_scope(conn, uid, scope)
                             db.set_user_stores(conn, uid, [])
                         else:
-                            store_ids = [int(x) for x in request.form.getlist("store_ids") if str(x).strip().isdigit()]
-                            db.set_user_stores(conn, uid, store_ids)
+                            submitted_ids = [
+                                int(x)
+                                for x in request.form.getlist("store_ids")
+                                if str(x).strip().isdigit()
+                            ]
+                            active_ids = {
+                                int(row["id"])
+                                for row in conn.execute("SELECT id FROM stores WHERE active=1")
+                            }
+                            if any(store_id not in active_ids for store_id in submitted_ids):
+                                raise ValueError("只能绑定已启用的门店")
+                            if target["role"] == "readonly" and not target["scope"] and not submitted_ids:
+                                raise ValueError("店长至少保留一家已启用门店")
+                            db.set_user_stores(conn, uid, submitted_ids)
                             if target["role"] == "readonly":
                                 db.set_user_scope(conn, uid, "")
                         flash("门店权限已改", "ok")
@@ -529,12 +568,18 @@ def register_settings(app) -> None:
                         if (request.form.get("tab") or "") in ("people", "stores"):
                             return _people_redirect()
                     elif action == "set_targets":
-                        for code, _name, _note in KPI_TARGETS:
+                        targets = {}
+                        for code, name, _note in KPI_TARGETS:
                             raw = request.form.get(f"t_{code}", "0")
                             try:
-                                db.set_kpi_target(conn, code, int(raw or 0))
-                            except ValueError:
-                                pass
+                                value = int(raw or 0)
+                            except ValueError as exc:
+                                raise ValueError(f"{name}必须是整数") from exc
+                            if value < 0:
+                                raise ValueError(f"{name}不能为负数")
+                            targets[code] = value
+                        for code, value in targets.items():
+                            db.set_kpi_target(conn, code, value)
                         flash("月目标已保存", "ok")
                     elif action == "save_permissions":
                         filler_month = "1" if request.form.get("filler_edit_month") == "1" else "0"

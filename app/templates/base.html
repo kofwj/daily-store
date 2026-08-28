@@ -49,6 +49,7 @@
   </main>
   <script>
   // 给所有 POST 表单自动带上 CSRF 令牌，登录/填报/设置/删除都不用逐个加隐藏字段
+  window.__csrfToken = {{ csrf_token|tojson }};
   document.addEventListener('submit', function (e) {
     var f = e.target;
     if (f && f.method && f.method.toLowerCase() === 'post' &&

@@ -483,6 +483,30 @@ def test_store_picker_has_city_and_manager_groupby(app_client):
     assert 'data-group="manager"' in settings
 
 
+def test_settings_preserves_multi_store_permissions_and_escapes_dynamic_text(app_client):
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
+    with db.get_db() as conn:
+        stores = db.list_all_stores(conn)
+        uid = conn.execute("SELECT id FROM users WHERE username='alpha'").fetchone()["id"]
+        selected = [stores[0]["id"], stores[1]["id"]]
+    response = app_client.post(
+        "/settings",
+        data={
+            "action": "set_stores",
+            "tab": "people",
+            "user_id": str(uid),
+            "store_ids": [str(store_id) for store_id in selected],
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    with db.get_db() as conn:
+        assert db.user_store_ids(conn, uid) == selected
+    page = app_client.get("/settings?tab=people").get_data(as_text=True)
+    assert 'class="people-store-select" multiple' in page
+    assert "onclick=\"applyReviewPreset" not in page
+
+
 def test_bisuan_mobile_migrates_from_old_settings(tmp_db):
     """旧 app_meta 键要能搬进新表，且截止日按店保留。"""
     from app.db_bisuan_mobile import _migrate_bisuan_mobile_from_settings

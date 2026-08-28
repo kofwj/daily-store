@@ -208,7 +208,20 @@
     close();
     if (autosubmit) {
       var form = pick.closest("form");
-      if (form) form.submit();
+      if (form) {
+        if (form.requestSubmit) form.requestSubmit();
+        else {
+          var token = form.querySelector('[name="_csrf_token"]');
+          if (!token) {
+            token = document.createElement("input");
+            token.type = "hidden";
+            token.name = "_csrf_token";
+            token.value = window.__csrfToken || "";
+            form.appendChild(token);
+          }
+          form.submit();
+        }
+      }
     }
   }
 

@@ -86,7 +86,7 @@
                 <input type="hidden" name="active" value="{{ 0 if p.active else 1 }}">
                 <button class="ghost" type="submit">{{ '停用' if p.active else '启用' }}</button>
               </form>
-              <form method="post" class="inline-reset" onsubmit="return confirm('删除「{{ p.title }}」？历史版本一并去掉。')">
+              <form method="post" class="inline-reset" onsubmit="return confirm('确认删除这条政策？历史版本会一并去掉。')">
                 <input type="hidden" name="action" value="delete_policy">
                 <input type="hidden" name="tab" value="policies">
                 <input type="hidden" name="policy_id" value="{{ p.id }}">

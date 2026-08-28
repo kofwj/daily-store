@@ -252,25 +252,29 @@
       <p class="muted">留空用内置默认。点套用再改字。通报表复盘区也可快速切换。占位符：<code>{head}</code> <code>{day_ai}</code> <code>{day_bisuan}</code> <code>{day_coin}</code> <code>{day_count}</code> <code>{day_closed}</code> <code>{day_rate}</code> <code>{praise}</code> <code>{month_ai}</code> <code>{month_bisuan}</code> <code>{month_coin}</code> <code>{month_count}</code> <code>{month_closed}</code> <code>{month_rate}</code> <code>{top_name}</code> <code>{top_detail}</code> <code>{month_bits}</code> <code>{mobile_compare}</code> <code>{missing}</code> <code>{zero_day}</code> <code>{zero_ai}</code> <code>{zero_bisuan}</code> <code>{zero_coin}</code> <code>{follow_ai_miss}</code> <code>{follow_bisuan_miss}</code> <code>{store_n}</code> <code>{submit_n}</code></p>
       <div class="preset-row">
         {% for p in review_presets %}
-        <button type="button" class="ghost" title="{{ p.hint }}" onclick="applyReviewPreset('{{ p.key }}')">套用{{ p.name }}</button>
+        <button type="button" class="ghost review-preset" title="{{ p.hint }}" data-preset-key="{{ p.key }}">套用{{ p.name }}</button>
         {% endfor %}
-        <button type="button" class="ghost" onclick="applyReviewPreset('')">清空用默认</button>
+        <button type="button" class="ghost review-preset" data-preset-key="">清空用默认</button>
       </div>
       <p><label>模板正文</label><textarea id="reviewTemplate" name="review_template" rows="16" placeholder="留空 = 用系统默认复盘">{{ review_template }}</textarea></p>
       <div class="toolbar"><button type="submit">保存</button></div>
       <script id="reviewPresetsJson" type="application/json">{{ review_presets|tojson }}</script>
       <script>
-      function applyReviewPreset(key) {
+      (function () {
         var el = document.getElementById('reviewTemplate');
-        if (!el) return;
-        if (!key) { el.value = ''; return; }
         var raw = document.getElementById('reviewPresetsJson');
+        if (!el || !raw) return;
         var list = [];
-        try { list = JSON.parse(raw.textContent || '[]'); } catch (e) { list = []; }
-        for (var i = 0; i < list.length; i++) {
-          if (list[i].key === key) { el.value = list[i].body || ''; return; }
-        }
-      }
+        try { list = JSON.parse(raw.textContent || '[]'); } catch (e) { return; }
+        document.querySelectorAll('.review-preset').forEach(function (button) {
+          button.addEventListener('click', function () {
+            var key = button.getAttribute('data-preset-key') || '';
+            if (!key) { el.value = ''; return; }
+            var preset = list.find(function (item) { return item.key === key; });
+            if (preset) el.value = preset.body || '';
+          });
+        });
+      })();
       </script>
     </form>
     {% endif %}

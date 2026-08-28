@@ -704,6 +704,7 @@ table.bulletin tr.wait td.flag-no { background: #ffedd5; }
   background: #111827;
   color: #fff;
   font-weight: 600;
+  box-shadow: inset 3px 0 #60a5fa;
 }
 .settings-main {
   min-width: 0;
@@ -778,6 +779,15 @@ table.people-table tr.off td { color: var(--muted); }
 .inline-reset input { width: 88px; min-width: 88px; height: 34px; padding: 6px 8px; }
 .inline-reset button, .people-table button { height: 34px; padding: 0 10px; }
 .inline-store select { min-width: 120px; height: 34px; padding: 4px 8px; }
+.people-store-form { align-items: stretch; }
+.people-store-select {
+  min-width: 220px;
+  height: 76px !important;
+  padding: 4px 8px !important;
+  font-size: 13px;
+}
+.people-store-select option { padding: 3px 2px; }
+.people-store-form .people-store-select + button { align-self: center; }
 .people-card { padding-top: 16px; }
 .people-toolbar {
   display: flex;
@@ -1031,6 +1041,8 @@ details.extra summary { cursor: pointer; font-weight: 600; }
   .add-user-action { grid-column: 1 / -1; }
   .people-toolbar { align-items: stretch; }
   .people-filter { width: 100%; }
+  .people-store-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .people-store-select { min-width: 0; width: 100%; }
   .stores-desk { grid-template-columns: 1fr; }
   .store-list {
     display: flex;
@@ -1048,6 +1060,17 @@ details.extra summary { cursor: pointer; font-weight: 600; }
   .store-list-body .store-empty { grid-column: 1 / -1; }
   .org-person { flex-direction: column; align-items: stretch; }
   .org-person-actions { justify-content: flex-start; }
+  table.people-table thead { display: none; }
+  table.people-table, table.people-table tbody, table.people-table tr, table.people-table td { display: block; width: 100%; }
+  table.people-table tr { padding: 12px 0; border-bottom: 1px solid var(--line); }
+  table.people-table td { border: 0; padding: 4px 0; text-align: left !important; }
+  table.people-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 3px;
+    color: var(--muted);
+    font-size: 11px;
+  }
   .store-editor-grid { grid-template-columns: 1fr; }
   .store-editor-grid .span-2 { grid-column: auto; }
 }

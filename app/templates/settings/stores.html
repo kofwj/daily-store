@@ -36,7 +36,13 @@
       </aside>
 
       <div class="store-editor card">
-        {% if current_store %}
+        {% if store_selection_invalid %}
+        <div class="empty-state">
+          <h2>门店不存在</h2>
+          <p class="muted">链接里的门店编号无效，请从左侧目录重新选择。</p>
+          <a class="btn" href="{{ url_for('settings', tab='stores') }}">返回门店目录</a>
+        </div>
+        {% elif current_store %}
         <div class="store-editor-head">
           <div>
             <h2>{{ store_label(current_store) }}</h2>
@@ -54,6 +60,7 @@
           <span>{{ current_store.mobile_code or '无移动编码' }}</span>
         </div>
         <form method="post" class="store-editor-form">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="action" value="edit_store">
           <input type="hidden" name="tab" value="stores">
           <input type="hidden" name="store_id" value="{{ current_store.id }}">
@@ -134,6 +141,7 @@
           </div>
         </div>
         <form method="post" class="store-editor-form">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="action" value="add_store">
           <input type="hidden" name="tab" value="stores">
           <h3 class="settings-section">基础</h3>
