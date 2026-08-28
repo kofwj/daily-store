@@ -108,6 +108,8 @@ def parse_sesame_xlsx(data: bytes) -> List[Dict[str, Any]]:
         biz_date = parse_created(_cell(row, 16))
         note = str(_cell(row, 15) or "")
         refund = "退款" in note or ext_id.endswith("_R")
+        # 方向由退款标志定，不赌表内符号
+        sign = -1.0 if refund else  1.0  # 退款退回→垫资为负；正常→垫资为正
         out.append(
             {
                 "ext_id": ext_id[:80],
@@ -121,7 +123,7 @@ def parse_sesame_xlsx(data: bytes) -> List[Dict[str, Any]]:
                 "month": str(_cell(row, 11) or "").strip(),
                 "order_amt": order_amt,
                 "platform_fee": platform_fee,
-                "amount": round(-platform_fee, 2),
+                "amount": round(sign * abs(platform_fee), 2),
                 "status": str(_cell(row, 14) or "").strip(),
                 "note": note,
                 "refund": refund,

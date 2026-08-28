@@ -7,7 +7,7 @@ import sqlite3
 from datetime import date
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from .db_core import _now, month_bounds, today_local
+from .db_core import _now, begin_immediate, month_bounds, today_local
 
 
 def _store_in(column: str, store_ids: Optional[Sequence[int]]) -> Tuple[str, List[int]]:
@@ -210,6 +210,7 @@ def set_advance_paid(
     ids = [int(i) for i in advance_ids if str(i).isdigit() or isinstance(i, int)]
     if not ids:
         return 0
+    begin_immediate(conn)
     placeholders = ",".join("?" * len(ids))
     rows = list(conn.execute(f"SELECT * FROM advance_posts WHERE id IN ({placeholders})", ids))
     if paid:

@@ -251,6 +251,16 @@ def connect() -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
+def begin_immediate(conn: sqlite3.Connection) -> None:
+    """写事务用 IMMEDIATE：先占写锁，避免 DEFERRED 事务升级写时
+    快照冲突偶发 "database is locked"（timeout 对此类冲突不生效）。"""
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+    except sqlite3.OperationalError as exc:
+        if "within a transaction" not in str(exc).lower():
+            raise
+
+
 @contextmanager
 def get_db():
     conn = connect()
@@ -440,6 +450,16 @@ def _ensure_deal_posts(conn: sqlite3.Connection) -> None:
                 raise
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_deal_posts_store_date ON deal_posts(store_id, biz_date)"
+    )
+    # 同一店同日同号只留最新一笔，再上部分唯一约束防并发重入
+    #（业务规则就是同号覆盖；空号不等同 NULL，多笔无号记录不该互相顶掉）
+    conn.execute(
+        "DELETE FROM deal_posts WHERE phone!='' AND id NOT IN ("
+        "SELECT MAX(id) FROM deal_posts WHERE phone!='' GROUP BY store_id, biz_date, phone)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_deal_posts_store_date_phone "
+        "ON deal_posts(store_id, biz_date, phone) WHERE phone!=''"
     )
 
 
@@ -827,7 +847,9 @@ def is_weak_new_pin(pin: str) -> bool:
 def _login_keys(username: str, ip: str) -> List[str]:
     name = (username or "").strip().lower() or "-"
     addr = (ip or "").strip() or "-"
-    return [f"user:{name}", f"ip:{addr}"]
+    # 按 (用户名+IP  计数，不再单按用户名：否则任何人拿受害账号刷 5 次失败
+    # 就把人锁 15 分钟（定向锁号）。IP 级仍全局节流防分布式爆破。
+    return [f"uip:{name}|{addr}", f"ip:{addr}"]
 
 
 def login_lock_remaining(conn: sqlite3.Connection, username: str, ip: str) -> int:
@@ -852,6 +874,7 @@ def login_lock_remaining(conn: sqlite3.Connection, username: str, ip: str) -> in
 
 def record_login_failure(conn: sqlite3.Connection, username: str, ip: str) -> int:
     """记一次失败，满 5 次锁 15 分钟。返回剩余冷却秒数。"""
+    begin_immediate(conn)
     now = datetime.now(TZ)
     remaining = 0
     for key in _login_keys(username, ip):
@@ -1170,9 +1193,12 @@ def _seed_catalog_stores(conn: sqlite3.Connection) -> None:
         row = by_code.get(code)
         if row is None and name in by_name:
             row = by_name[name]
-            conn.execute("UPDATE stores SET code=? WHERE id=?", (code, row["id"]))
-            row = conn.execute("SELECT * FROM stores WHERE id=?", (row["id"],)).fetchone()
-            by_code[code] = row
+            try:
+                conn.execute("UPDATE stores SET code=? WHERE id=?", (code, row["id"]))
+                row = conn.execute("SELECT * FROM stores WHERE id=?", (row["id"],)).fetchone()
+                by_code[code] = row
+            except sqlite3.IntegrityError:
+                pass  # 目标 code 被别家占用：保住现有档案，改名不强行改码，启动不崩
         if row is None:
             # 首次建目录店：按目录档案写入
             conn.execute(

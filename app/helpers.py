@@ -155,7 +155,13 @@ def csrf_protect():
     given = request.form.get("_csrf_token") or request.headers.get("X-CSRF-Token", "")
     if not token or not given or not _compare_digest(token, given):
         flash("页面停留太久，操作校验失败，请刷新后重试。", "error")
-        return redirect(request.referrer or url_for("today"))
+        # 只跟同源 referrer，防开放重定向
+        target = request.referrer or ""
+        if not target.startswith("/") or target.startswith("//") or "\\" in target:
+            target = ""
+        elif "://" in target and not target.startswith(request.host_url):
+            target = ""
+        return redirect(target or url_for("today"))
     return None
 
 
@@ -346,7 +352,8 @@ def pick_store(conn, raw_id: Optional[str]):
         try:
             sid = int(raw_id)
         except ValueError:
-            sid = stores[0]["id"]
+            flash("店号无效，请重新选择门店。", "error")
+            return None, stores  # 别静默落到第一家店，避免数据写错店
     else:
         sid = session.get("store_id") or stores[0]["id"]
     if not db.user_can_access_store(conn, g.user, sid):

@@ -11,7 +11,7 @@ import openpyxl
 from flask import flash, g, redirect, render_template, request, session, url_for
 from openpyxl.styles import Alignment, Font, PatternFill
 
-from . import db, sesame
+from . import db, db_core, sesame
 from .helpers import (
     _xlsx_safe,
     accessible_stores,
@@ -388,6 +388,7 @@ def register_advance(app) -> None:
             return redirect(url_for("advance_sesame_page"))
         ready = preview["ready"]
         with db.get_db() as conn:
+            db_core.begin_immediate(conn)  # 整批导入=一个长写事务，抢先占写锁防 DEFERRED 升级锁冲突
             # 再次校验未导入，避免并发重复
             stores = accessible_stores(conn)
             stores_by_id = {int(s["id"]): s for s in stores}

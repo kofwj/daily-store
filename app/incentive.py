@@ -95,8 +95,9 @@ def judge_without_advisor(ai: int, new_cut: int, r: Dict[str, int] | None = None
     r = r or DEFAULTS
     ai = int(ai or 0)
     new_cut = int(new_cut or 0)
-    ai_ok = ai >= r["ai_pass"]
-    cut_ok = new_cut >= r["ai_pass"]
+    # 无顾问店的“破 0”就是严格大于 0——不跟 ai_pass 走，否则管理员改 ai_pass 会连带改判定口径
+    ai_ok = ai >  0
+    cut_ok = new_cut >  0
     if ai_ok and cut_ok:
         return _result(True, "双破 0", "AI、新用户直降均已破 0", store_reward=r["reward_no_advisor"])
     if ai_ok or cut_ok:

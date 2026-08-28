@@ -5,7 +5,7 @@ import sqlite3
 from datetime import date
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from .db_core import _now, today_local
+from .db_core import _now, begin_immediate, today_local
 
 
 def _store_in(column: str, store_ids: Optional[Sequence[int]]) -> Tuple[str, List[int]]:
@@ -134,6 +134,7 @@ def record_deal_post(
     biz_date: Optional[date] = None,
 ) -> int:
     day = biz_date or today_local()
+    begin_immediate(conn)
     payload = _deal_payload(
         user_id=user_id,
         closed=closed,

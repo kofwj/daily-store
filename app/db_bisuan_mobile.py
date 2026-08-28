@@ -67,8 +67,10 @@ def _migrate_bisuan_mobile_from_settings(conn: sqlite3.Connection) -> None:
                 "SELECT key, value FROM app_meta WHERE key LIKE 'bisuan_mobile_%' OR key LIKE 'bisuan_official_%'"
             )
         )
-    except sqlite3.OperationalError:
-        return
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc).lower():
+            raise  # 锁等其他真错误：不吞，迁移版本不落，下次启动重试
+        return  # 早期库还没有 app_meta，没有旧键可搬
     # 月级截止日（旧设计全月共用），搬迁时作为各店的初始 asof
     asof_by_month: Dict[str, str] = {}
     for key, value in rows:

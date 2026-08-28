@@ -233,6 +233,9 @@ def build_invoice_zip(conn, stores, as_of: date) -> bytes:
         used = set()
         for store in stores:
             name = invoice_filename(store, as_of)
+            rec = get_invoice_month(conn, int(store["id"]), month)
+            if not rec.get("id"):
+                continue  # 无记录的店不占文件名（先判记录再取名）
             if name in used:
                 name = f"invoice_{as_of.strftime('%Y%m')}_{store['id']}.xlsx"
             used.add(name)
