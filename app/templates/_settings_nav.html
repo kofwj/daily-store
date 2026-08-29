@@ -14,14 +14,20 @@
     <a href="{{ url_for('settings', tab='stores') }}" class="{{ 'active' if tab=='stores' else '' }}">门店档案</a>
   </div>
   <div class="settings-nav-group">
-    <span class="settings-nav-label">业务</span>
+    <span class="settings-nav-label">考核</span>
     <a href="{{ url_for('settings', tab='targets') }}" class="{{ 'active' if tab=='targets' else '' }}">月目标</a>
     <a href="{{ url_for('settings', tab='rules') }}" class="{{ 'active' if tab=='rules' else '' }}">考核规则</a>
+    <a href="{{ url_for('settings', tab='permissions') }}" class="{{ 'active' if tab=='permissions' else '' }}">权限</a>
+  </div>
+  <div class="settings-nav-group">
+    <span class="settings-nav-label">通报</span>
     <a href="{{ url_for('settings', tab='broadcast') }}" class="{{ 'active' if tab=='broadcast' else '' }}">播报</a>
     <a href="{{ url_for('settings', tab='review') }}" class="{{ 'active' if tab=='review' else '' }}">复盘模板</a>
-    <a href="{{ url_for('settings', tab='invoice') }}" class="{{ 'active' if tab=='invoice' else '' }}">开票主体</a>
-    <a href="{{ url_for('settings', tab='permissions') }}" class="{{ 'active' if tab=='permissions' else '' }}">权限</a>
+  </div>
+  <div class="settings-nav-group">
+    <span class="settings-nav-label">政策与开票</span>
     <a href="{{ url_for('settings', tab='policies') }}" class="{{ 'active' if tab=='policies' else '' }}">政策</a>
+    <a href="{{ url_for('settings', tab='invoice') }}" class="{{ 'active' if tab=='invoice' else '' }}">开票主体</a>
   </div>
   <div class="settings-nav-group">
     <span class="settings-nav-label">系统</span>
@@ -33,3 +39,29 @@
   </div>
   {% endif %}
 </aside>
+<script>
+// 手机上导航是横向一排；把当前页所在的组挪到最前，再让高亮项滚进可视区，
+// 打开设置就能直接看到自己在哪、同组还能去哪。窗口放大回桌面时恢复原始分组顺序。
+(function () {
+  var nav = document.querySelector('.settings-nav');
+  if (!nav) return;
+  var active = nav.querySelector('a.active');
+  if (!active) return;
+  var group = active.closest('.settings-nav-group');
+  var brand = nav.querySelector('.settings-nav-brand');
+  if (!group) return;
+  var original = Array.prototype.slice.call(nav.children);
+  function arrange() {
+    if (window.matchMedia('(max-width: 800px)').matches) {
+      if (group.previousElementSibling !== brand) {
+        nav.insertBefore(group, brand ? brand.nextSibling : nav.firstChild);
+      }
+      active.scrollIntoView({ inline: 'center', block: 'nearest' });
+    } else {
+      original.forEach(function (el) { nav.appendChild(el); });
+    }
+  }
+  arrange();
+  window.addEventListener('resize', arrange);
+})();
+</script>

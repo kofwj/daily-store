@@ -503,7 +503,9 @@ def test_settings_preserves_multi_store_permissions_and_escapes_dynamic_text(app
     with db.get_db() as conn:
         assert db.user_store_ids(conn, uid) == selected
     page = app_client.get("/settings?tab=people").get_data(as_text=True)
-    assert 'class="people-store-select" multiple' in page
+    assert 'store_ids' in page
+    assert 'details class="store-bind" data-bind' in page
+    assert 'people-store-select' not in page
     assert "onclick=\"applyReviewPreset" not in page
 
 

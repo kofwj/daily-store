@@ -160,10 +160,10 @@
       </label>
       <div class="toolbar"><button type="submit">保存播报设置</button></div>
     </form>
-    <form method="post" class="card settings-card" style="margin-top:16px">
+    <form method="post" class="card settings-card">
       <input type="hidden" name="action" value="save_wecom">
       <input type="hidden" name="tab" value="broadcast">
-      <h2 style="margin:0 0 8px">企业微信群机器人</h2>
+      <h2>企业微信群机器人</h2>
       <p class="muted">保存日报或触客后自动发群。先在企微群里加机器人拿 webhook 地址。全局地址所有店都发；按地市填的会覆盖全局。</p>
       <label class="settings-field">
         <span>全局 Webhook（所有店默认发这）</span>
@@ -181,10 +181,10 @@
         <button type="submit">保存机器人</button>
       </div>
     </form>
-    <form method="post" class="card settings-card" style="margin-top:16px">
+    <form method="post" class="card settings-card">
       <input type="hidden" name="action" value="test_wecom">
       <input type="hidden" name="tab" value="broadcast">
-      <h2 style="margin:0 0 8px">测试发送</h2>
+      <h2>测试发送</h2>
       <label class="settings-field">
         <span>Webhook 地址</span>
         <input type="url" name="test_url" placeholder="贴一个 webhook 试发" autocomplete="off">
@@ -249,12 +249,34 @@
       <p><label>南通公司名</label><input name="org_name_nt" value="{{ company_form.nt }}" maxlength="30" required></p>
       <p><label>泰州公司名</label><input name="org_name_tz" value="{{ company_form.tz }}" maxlength="30" required></p>
       <h2>通报表复盘模板</h2>
-      <p class="muted">留空用内置默认。点套用再改字。通报表复盘区也可快速切换。占位符：<code>{head}</code> <code>{day_ai}</code> <code>{day_bisuan}</code> <code>{day_coin}</code> <code>{day_count}</code> <code>{day_closed}</code> <code>{day_rate}</code> <code>{praise}</code> <code>{month_ai}</code> <code>{month_bisuan}</code> <code>{month_coin}</code> <code>{month_count}</code> <code>{month_closed}</code> <code>{month_rate}</code> <code>{top_name}</code> <code>{top_detail}</code> <code>{month_bits}</code> <code>{mobile_compare}</code> <code>{missing}</code> <code>{zero_day}</code> <code>{zero_ai}</code> <code>{zero_bisuan}</code> <code>{zero_coin}</code> <code>{follow_ai_miss}</code> <code>{follow_bisuan_miss}</code> <code>{store_n}</code> <code>{submit_n}</code></p>
+      <p class="muted">留空用内置默认。点套用再改字。通报表复盘区也可快速切换。占位符按用途分组：</p>
+      <div class="ph-groups">
+        <div class="ph-group">
+          <span class="ph-tag">头部</span>
+          <span class="ph-codes"><code>{head}</code> <code>{store_n}</code> <code>{submit_n}</code></span>
+        </div>
+        <div class="ph-group">
+          <span class="ph-tag">日报</span>
+          <span class="ph-codes"><code>{day_ai}</code> <code>{day_bisuan}</code> <code>{day_coin}</code> <code>{day_count}</code> <code>{day_closed}</code> <code>{day_rate}</code> <code>{praise}</code></span>
+        </div>
+        <div class="ph-group">
+          <span class="ph-tag">月累计</span>
+          <span class="ph-codes"><code>{month_ai}</code> <code>{month_bisuan}</code> <code>{month_coin}</code> <code>{month_count}</code> <code>{month_closed}</code> <code>{month_rate}</code> <code>{month_bits}</code> <code>{mobile_compare}</code></span>
+        </div>
+        <div class="ph-group">
+          <span class="ph-tag">门店与跟进</span>
+          <span class="ph-codes"><code>{top_name}</code> <code>{top_detail}</code> <code>{missing}</code> <code>{zero_day}</code> <code>{zero_ai}</code> <code>{zero_bisuan}</code> <code>{zero_coin}</code> <code>{follow_ai_miss}</code> <code>{follow_bisuan_miss}</code></span>
+        </div>
+        <div class="ph-group">
+          <span class="ph-tag">达标数</span>
+          <span class="ph-codes"><code>{hit_ai_n}</code> <code>{hit_bisuan_n}</code> <code>{hit_coin_n}</code> <code>{triple_n}</code></span>
+        </div>
+      </div>
       <div class="preset-row">
         {% for p in review_presets %}
         <button type="button" class="ghost review-preset" title="{{ p.hint }}" data-preset-key="{{ p.key }}">套用{{ p.name }}</button>
         {% endfor %}
-        <button type="button" class="ghost review-preset" data-preset-key="">清空用默认</button>
+        <button type="button" class="ghost review-preset {{ 'active' if not review_template.strip() else '' }}" data-preset-key="">清空用默认</button>
       </div>
       <p><label>模板正文</label><textarea id="reviewTemplate" name="review_template" rows="16" placeholder="留空 = 用系统默认复盘">{{ review_template }}</textarea></p>
       <div class="toolbar"><button type="submit">保存</button></div>
@@ -269,9 +291,13 @@
         document.querySelectorAll('.review-preset').forEach(function (button) {
           button.addEventListener('click', function () {
             var key = button.getAttribute('data-preset-key') || '';
-            if (!key) { el.value = ''; return; }
-            var preset = list.find(function (item) { return item.key === key; });
-            if (preset) el.value = preset.body || '';
+            if (!key) { el.value = ''; } else {
+              var preset = list.find(function (item) { return item.key === key; });
+              if (preset) el.value = preset.body || '';
+            }
+            document.querySelectorAll('.review-preset').forEach(function (b) {
+              b.classList.toggle('active', b === button);
+            });
           });
         });
       })();

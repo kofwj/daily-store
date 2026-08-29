@@ -73,12 +73,24 @@
                   <input type="hidden" name="action" value="set_stores">
                   <input type="hidden" name="tab" value="people">
                   <input type="hidden" name="user_id" value="{{ u.id }}">
-                  <select name="store_ids" class="people-store-select" multiple size="3" aria-label="{{ u.display_name }} 可见门店">
-                    {% for s in stores if s.active or s.id in p.store_ids %}
-                    <option value="{{ s.id }}" {% if s.id in p.store_ids %}selected{% endif %}{% if not s.active %} disabled{% endif %}>{{ store_label(s) }}{% if not s.active %}（已停用，保存后解除）{% endif %}</option>
-                    {% endfor %}
-                  </select>
-                  <button class="ghost" type="submit">保存</button>
+                  <details class="store-bind" data-bind>
+                    <summary>
+                      <span class="store-bind-current" data-bind-current>{{ p.store_label }}</span>
+                      <span class="store-bind-count" data-bind-count>{{ p.store_ids|length }} 家</span>
+                    </summary>
+                    <div class="store-bind-panel">
+                      <input type="search" class="store-bind-q" placeholder="搜门店，点名字勾选" autocomplete="off">
+                      <div class="store-bind-list">
+                        {% for s in stores if s.active or s.id in p.store_ids %}
+                        <label class="store-bind-opt{{ ' is-off' if not s.active else '' }}" data-text="{{ store_label(s) }} {{ s.name }} {{ s.city }} {{ s.store_manager }}">
+                          <input type="checkbox" name="store_ids" value="{{ s.id }}" {% if s.id in p.store_ids %}checked{% endif %}{% if not s.active %} disabled{% endif %}>
+                          <span class="store-bind-name">{{ store_label(s) }}{% if not s.active %}（已停用，保存后解除）{% endif %}</span>
+                        </label>
+                        {% endfor %}
+                      </div>
+                      <div class="store-bind-actions"><button class="ghost" type="submit">保存</button></div>
+                    </div>
+                  </details>
                 </form>
                 {% endif %}
               </td>
@@ -132,15 +144,23 @@
           <p><label>口令</label><input name="pin" type="password" inputmode="numeric" required minlength="6" placeholder="至少 6 位"></p>
         </div>
         <div id="addStoreField">
-          <p>
-            <label>所属门店</label>
-            <select name="store_ids" class="people-store-select" multiple size="4" aria-label="新账号可见门店">
-              {% for s in stores if s.active %}
-              <option value="{{ s.id }}">{{ store_label(s) }}</option>
-              {% endfor %}
-            </select>
-            <span class="muted">可按住 Ctrl / Command 多选门店。</span>
-          </p>
+          <details class="store-bind" data-bind data-bind-empty-text="选门店，可多选">
+            <summary>
+              <span class="store-bind-current" data-bind-current>选门店，可多选</span>
+              <span class="store-bind-count" data-bind-count>0 家</span>
+            </summary>
+            <div class="store-bind-panel">
+              <input type="search" class="store-bind-q" placeholder="搜门店，点名字勾选" autocomplete="off">
+              <div class="store-bind-list">
+                {% for s in stores if s.active %}
+                <label class="store-bind-opt" data-text="{{ store_label(s) }} {{ s.name }} {{ s.city }} {{ s.store_manager }}">
+                  <input type="checkbox" name="store_ids" value="{{ s.id }}">
+                  <span class="store-bind-name">{{ store_label(s) }}</span>
+                </label>
+                {% endfor %}
+              </div>
+            </div>
+          </details>
         </div>
         <div id="addAreaField" hidden>
           <p>
@@ -158,6 +178,9 @@
       var role = document.getElementById('peopleRole');
       var empty = document.getElementById('peopleEmpty');
       var count = document.getElementById('peopleCount');
+      function norm(s) {
+        return String(s || '').toLowerCase().replace(/\s+/g, '').replace(/[市县区]/g, '');
+      }
       function syncFilter() {
         var text = ((q && q.value) || '').trim().toLowerCase();
         var kind = (role && role.value) || '';
@@ -174,6 +197,49 @@
       }
       if (q) q.addEventListener('input', syncFilter);
       if (role) role.addEventListener('change', syncFilter);
+
+      // 门店绑定：点选即中，搜索过滤，summary 显示已选
+      function bindOne(root) {
+        var boxes = Array.prototype.slice.call(root.querySelectorAll('.store-bind-opt input[type="checkbox"]'));
+        var opts = Array.prototype.slice.call(root.querySelectorAll('.store-bind-opt'));
+        var cur = root.querySelector('[data-bind-current]');
+        var cnt = root.querySelector('[data-bind-count]');
+        var q2 = root.querySelector('.store-bind-q');
+        var emptyText = root.getAttribute('data-bind-empty-text') || '未分配';
+        function labelOf(box) {
+          var opt = box.closest('.store-bind-opt');
+          var name = opt ? opt.querySelector('.store-bind-name') : null;
+          return (name ? name.textContent : '').replace(/（.*?）/g, '').trim();
+        }
+        function syncSummary() {
+          var picked = boxes.filter(function (b) { return b.checked; }).map(labelOf);
+          if (cnt) cnt.textContent = picked.length + ' 家';
+          if (cur) cur.textContent = picked.length ? picked.join('、') : emptyText;
+        }
+        boxes.forEach(function (b) { b.addEventListener('change', syncSummary); });
+        if (q2) {
+          q2.addEventListener('input', function () {
+            var kw = norm(q2.value);
+            opts.forEach(function (opt) {
+              opt.hidden = !!kw && norm(opt.getAttribute('data-text')).indexOf(kw) === -1;
+            });
+          });
+          q2.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') e.preventDefault();
+          });
+        }
+        syncSummary();
+      }
+      document.querySelectorAll('details[data-bind]').forEach(function (d) {
+        bindOne(d);
+        d.addEventListener('toggle', function () {
+          if (!d.open) return;
+          var q2 = d.querySelector('.store-bind-q');
+          if (!q2) return;
+          q2.value = '';
+          d.querySelectorAll('.store-bind-opt').forEach(function (opt) { opt.hidden = false; });
+        });
+      });
       var addRole = document.getElementById('addRole');
       var storeField = document.getElementById('addStoreField');
       var areaField = document.getElementById('addAreaField');
