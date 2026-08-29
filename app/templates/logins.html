@@ -26,6 +26,7 @@
           <option value="admin" {% if role == 'admin' %}selected{% endif %}>管理员</option>
           <option value="filler" {% if role == 'filler' %}selected{% endif %}>填报员</option>
           <option value="readonly" {% if role == 'readonly' %}selected{% endif %}>只读</option>
+          <option value="city" {% if role == 'city' %}selected{% endif %}>地市负责人</option>
         </select>
       </label>
       <label class="filter">
@@ -62,7 +63,7 @@
             <td>{% if r.action == 'logout' %}<span class="tag">退出</span>{% else %}<span class="tag tag-deal">登录</span>{% endif %}</td>
             <td>{{ r.display_name or '—' }}</td>
             <td><code>{{ r.username }}</code></td>
-            <td>{% if r.role == 'admin' %}管理员{% elif r.role == 'readonly' %}只读{% else %}填报员{% endif %}</td>
+            <td>{% if r.role == 'admin' %}管理员{% elif r.role == 'city' %}地市负责人{% elif r.role == 'readonly' %}只读{% else %}填报员{% endif %}</td>
             <td class="left">{{ r.ip or '—' }}</td>
           </tr>
           {% endfor %}

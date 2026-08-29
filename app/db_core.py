@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta
 from hashlib import pbkdf2_hmac
 from pathlib import Path
 from secrets import token_hex
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from .metrics_seed import KPI_TARGETS, all_metrics
@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT NOT NULL UNIQUE,
     display_name TEXT NOT NULL,
     pin_hash TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('admin', 'filler', 'readonly')),
+    role TEXT NOT NULL CHECK (role IN ('admin', 'filler', 'readonly', 'city')),
     scope TEXT NOT NULL DEFAULT '',
     must_change_pin INTEGER NOT NULL DEFAULT 0,
     active INTEGER NOT NULL DEFAULT 1,
@@ -204,6 +204,21 @@ CREATE TABLE IF NOT EXISTS login_attempts (
     locked_until TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS advisor_scores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    month TEXT NOT NULL,
+    advisor_name TEXT NOT NULL,
+    work_type TEXT NOT NULL DEFAULT '正式',
+    base_coeff REAL NOT NULL DEFAULT 1.2,
+    score_manager INTEGER,
+    score_area INTEGER,
+    score_city INTEGER,
+    note TEXT NOT NULL DEFAULT '',
+    updated_by INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT '',
+    UNIQUE(month, advisor_name)
+);
 """
 
 MIGRATIONS: List[Tuple[int, str, str]] = [
@@ -221,6 +236,7 @@ MIGRATIONS: List[Tuple[int, str, str]] = [
     (11, "scale_bisuan_tenths", "_scale_bisuan_tenths"),
     (12, "admin_pin_six_digits", "_admin_pin_six_digits"),
     (13, "bisuan_mobile_table", "_migrate_bisuan_mobile_from_settings"),
+    (14, "expand_user_roles_city", "_expand_user_roles_city"),
 ]
 
 def _now() -> str:
@@ -328,6 +344,7 @@ def migrate() -> None:
             "_retire_legacy_coin_cut": _retire_legacy_coin_cut,
             "_split_new_user_coin_cut": _split_new_user_coin_cut,
             "_expand_user_roles_readonly": _expand_user_roles_readonly,
+            "_expand_user_roles_city": _expand_user_roles_city,
             "_add_must_change_pin": _add_must_change_pin,
             "_ensure_advance_edits": _ensure_advance_edits,
             "_ensure_audit_edited_at_indexes": _ensure_audit_edited_at_indexes,
@@ -712,6 +729,46 @@ def _expand_user_roles_readonly(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys=ON")
 
 
+def _expand_user_roles_city(conn: sqlite3.Connection) -> None:
+    """打开 city（地市负责人）角色：CHECK 里没有 'city' 就重建 users 表。
+
+    到这条迁移时 scope/must_change_pin 列必然已由迁移 3/4 补齐，直接整列搬运。
+    """
+    sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").fetchone()
+    if sql and "'city'" in (sql["sql"] or ""):
+        return
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute("DROP TABLE IF EXISTS users_old")
+    conn.execute("ALTER TABLE users RENAME TO users_old")
+    conn.execute(
+        """
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            pin_hash TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('admin', 'filler', 'readonly', 'city')),
+            scope TEXT NOT NULL DEFAULT '',
+            must_change_pin INTEGER NOT NULL DEFAULT 0,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO users(id, username, display_name, pin_hash, role, scope, must_change_pin, active, created_at)
+        SELECT id, username, display_name, pin_hash, role, scope, must_change_pin, active, created_at FROM users_old
+        """
+    )
+    max_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM users").fetchone()[0]
+    conn.execute("DELETE FROM sqlite_sequence WHERE name='users'")
+    if max_id:
+        conn.execute("INSERT INTO sqlite_sequence(name, seq) VALUES ('users', ?)", (max_id,))
+    conn.execute("DROP TABLE users_old")
+    conn.execute("PRAGMA foreign_keys=ON")
+
+
 AUTH_EVENT_KEEP_DAYS = 90
 
 
@@ -801,7 +858,7 @@ def _auth_event_where(cutoff: str, action: str, role: str, q: str) -> Tuple[str,
     if action in ("login", "logout"):
         where.append("action=?")
         params.append(action)
-    if role in ("admin", "filler", "readonly"):
+    if role in ("admin", "filler", "readonly", "city"):
         where.append("role=?")
         params.append(role)
     text = (q or "").strip()
@@ -1300,6 +1357,17 @@ def get_user_by_username(conn: sqlite3.Connection, username: str) -> Optional[sq
 def list_user_stores(conn: sqlite3.Connection, user: sqlite3.Row) -> List[sqlite3.Row]:
     if user["role"] == "admin":
         return list(conn.execute("SELECT * FROM stores WHERE active=1 ORDER BY sort_order, id"))
+    if user["role"] == "city":
+        # 地市负责人：看本地市（scope=地市名）的启用门店
+        scope = (user["scope"] or "").strip() if "scope" in user.keys() else ""
+        if not scope:
+            return []
+        return list(
+            conn.execute(
+                "SELECT * FROM stores WHERE city=? AND active=1 ORDER BY sort_order, id",
+                (scope,),
+            )
+        )
     if user["role"] == "readonly":
         scope = (user["scope"] or "").strip() if "scope" in user.keys() else ""
         if scope:
@@ -1325,6 +1393,15 @@ def list_user_stores(conn: sqlite3.Connection, user: sqlite3.Row) -> List[sqlite
 def user_can_access_store(conn: sqlite3.Connection, user: sqlite3.Row, store_id: int) -> bool:
     if user["role"] == "admin":
         row = conn.execute("SELECT id FROM stores WHERE id=? AND active=1", (store_id,)).fetchone()
+        return row is not None
+    if user["role"] == "city":
+        scope = (user["scope"] or "").strip() if "scope" in user.keys() else ""
+        if not scope:
+            return False
+        row = conn.execute(
+            "SELECT 1 FROM stores WHERE id=? AND city=? AND active=1",
+            (store_id, scope),
+        ).fetchone()
         return row is not None
     if user["role"] == "readonly":
         scope = (user["scope"] or "").strip() if "scope" in user.keys() else ""
@@ -1519,7 +1596,7 @@ def create_user(
     store_ids: Iterable[int],
     scope: str = "",
 ) -> int:
-    if role not in ("admin", "filler", "readonly"):
+    if role not in ("admin", "filler", "readonly", "city"):
         raise ValueError("role")
     must_change = 1 if is_weak_new_pin(pin) else 0
     conn.execute(
@@ -1557,6 +1634,62 @@ def set_user_stores(conn: sqlite3.Connection, user_id: int, store_ids: Iterable[
 
 def set_user_active(conn: sqlite3.Connection, user_id: int, active: bool) -> None:
     conn.execute("UPDATE users SET active=? WHERE id=?", (1 if active else 0, user_id))
+
+_ADVISOR_SCORE_COLS = {
+    "work_type",
+    "base_coeff",
+    "score_manager",
+    "score_area",
+    "score_city",
+    "note",
+}
+
+
+def list_advisor_scores(conn: sqlite3.Connection, month: str) -> List[sqlite3.Row]:
+    """某月全部顾问打分行。"""
+    return list(
+        conn.execute(
+            "SELECT * FROM advisor_scores WHERE month=? ORDER BY advisor_name",
+            (month,),
+        )
+    )
+
+
+def upsert_advisor_score(
+    conn: sqlite3.Connection,
+    month: str,
+    advisor_name: str,
+    updates: Dict[str, Any],
+    user_id: int = 0,
+) -> None:
+    """按 (month, advisor_name) upsert，只更新 updates 里白名单内的列。
+
+    列名先过 _ADVISOR_SCORE_COLS 白名单再拼 SQL；值为 None 表示清空该列
+    （比如把打分改回未打）。空 updates 直接跳过。
+    """
+    clean = {k: v for k, v in updates.items() if k in _ADVISOR_SCORE_COLS}
+    name = (advisor_name or "").strip()
+    if not clean or not name:
+        return
+    row = conn.execute(
+        "SELECT id FROM advisor_scores WHERE month=? AND advisor_name=?",
+        (month, name),
+    ).fetchone()
+    now = _now()
+    if row is None:
+        conn.execute(
+            "INSERT INTO advisor_scores(month, advisor_name, updated_by, updated_at) VALUES (?, ?, ?, ?)",
+            (month, name, user_id, now),
+        )
+        row_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+    else:
+        row_id = int(row["id"])
+    sets = ", ".join(f"{k}=?" for k in clean)
+    params = list(clean.values()) + [user_id, now, row_id]
+    conn.execute(
+        f"UPDATE advisor_scores SET {sets}, updated_by=?, updated_at=? WHERE id=?",
+        params,
+    )
 
 
 def set_store_active(conn: sqlite3.Connection, store_id: int, active: bool) -> None:

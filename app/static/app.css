@@ -777,6 +777,13 @@ table.bulletin tr.wait td.flag-no { background: #ffedd5; }
 .role-chip.admin { background: #111827; color: #fff; }
 .role-chip.fill { background: #eff8ff; color: #175cd3; }
 .role-chip.view { background: #ecfdf3; color: #067647; }
+.role-chip.city { background: #ffedd5; color: #b54708; }
+.advisor-score-table td { vertical-align: middle; }
+.adv-input { width: 100%; min-width: 64px; height: 32px; padding: 4px 8px; font-size: 13px; }
+.adv-num { text-align: center; }
+.adv-coeff { text-align: center; font-variant-numeric: tabular-nums; }
+.adv-stores summary { cursor: pointer; color: var(--info); white-space: nowrap; }
+.adv-stores ul { margin: 6px 0 0; padding-left: 16px; color: var(--muted); font-size: 12px; }
 .settings-main .narrow { max-width: 360px; }
 .rules-form { max-width: 620px; }
 .rules-form h2 { margin-top: 18px; }

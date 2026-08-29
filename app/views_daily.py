@@ -48,27 +48,32 @@ def register_daily(app) -> None:
             today = db.today_local()
             metrics = db.list_metrics(conn)
             if request.method == "POST":
-                if g.user["role"] == "readonly":
+                role = g.user["role"]
+                if role == "readonly":
                     flash("只读账号不能填日报", "error")
                     return redirect(url_for("report", store_id=store["id"]))
                 filler_month = db.get_setting(conn, "filler_edit_month", "0") == "1"
                 same_month = biz_date.year == today.year and biz_date.month == today.month
-                if g.user["role"] != "admin":
+                if role != "admin":
                     if biz_date > today:
                         flash("非管理员不能填写未来日期。", "error")
                         return redirect(url_for("today", store_id=store["id"], date=biz_date.isoformat()))
-                    if biz_date != today and not (filler_month and same_month):
-                        flash("只能改当天（管理员开启『本月可改』后可补录本月）。历史跨月需找管理员修改。", "error")
+                    if not same_month:
+                        flash("只能改本月的日报，历史跨月需找管理员修改。", "error")
                         return redirect(url_for("today", store_id=store["id"]))
-                    # 当天锁定始终生效：本月可改只解锁本月的“过去日”，不放开“今天”
-                    if db.is_locked(biz_date):
+                    if role == "city":
+                        pass  # 地市负责人：本月任意日期，不受「本月可改」开关和当天锁定限制
+                    elif biz_date != today and not filler_month:
+                        flash("只能改当天（管理员开启『本月可改』后可补录本月）。", "error")
+                        return redirect(url_for("today", store_id=store["id"]))
+                    elif db.is_locked(biz_date):
                         flash(
                             f"当天数据已锁定（{db.LOCK_HOUR:02d}:{db.LOCK_MINUTE:02d} 后不可改），找管理员解锁修改。",
                             "error",
                         )
                         return redirect(url_for("today", store_id=store["id"], date=biz_date.isoformat()))
                 existing = db.get_report(conn, store["id"], biz_date)
-                if existing and existing["submitted_by"] and existing["submitted_by"] != g.user["id"] and g.user["role"] != "admin":
+                if existing and existing["submitted_by"] and existing["submitted_by"] != g.user["id"] and role not in ("admin", "city"):
                     flash("该日已有其他人提交，覆盖前请与对方确认。", "error")
                     return redirect(url_for("today", store_id=store["id"], date=biz_date.isoformat()))
                 values = {}
@@ -190,6 +195,11 @@ def register_daily(app) -> None:
                     g.user["role"] != "readonly"
                     and (
                         g.user["role"] == "admin"
+                        or (
+                            g.user["role"] == "city"
+                            and biz_date.year == today.year
+                            and biz_date.month == today.month
+                        )
                         or biz_date == today
                         or (filler_month and biz_date.year == today.year and biz_date.month == today.month)
                     )
@@ -238,7 +248,7 @@ def register_daily(app) -> None:
                         advisor = (store["advisor_name"] or "").strip()
                     values["opener"] = advisor or (g.user["display_name"] or "").strip()
             if request.method == "POST":
-                if g.user["role"] == "readonly":
+                if g.user["role"] in ("readonly", "city"):
                     flash("只读账号不能填触客播报", "error")
                     return redirect(url_for("deal_records", store_id=store["id"]))
                 deal_id = request.form.get("deal_id") or values.get("deal_id") or ""

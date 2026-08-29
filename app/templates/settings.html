@@ -219,6 +219,7 @@
           <p><label>整体欠佳罚顾问</label><input type="number" min="0" name="r_penal_advisor_mid" value="{{ incentive_rules['penal_advisor_mid'] }}"></p>
           <p><label>AI挂0罚门店</label><input type="number" min="0" name="r_penal_store_zero" value="{{ incentive_rules['penal_store_zero'] }}"></p>
           <p><label>AI挂0罚顾问</label><input type="number" min="0" name="r_penal_advisor_zero" value="{{ incentive_rules['penal_advisor_zero'] }}"></p>
+          <p class="span-2"><label>顾问奖惩折算除数（顾问打分页：主推奖惩 ÷ 此数 = 工资折算系数）</label><input type="number" min="1" name="advisor_penalty_divisor" value="{{ advisor_penalty_divisor }}"></p>
         </div>
       </div>
       <div class="card settings-card">

@@ -213,12 +213,12 @@ def admin_required(fn):
 
 
 def readonly_required(fn):
-    """管理员或只读角色（店长/区域经理）可访问；店员无权。"""
+    """管理员、只读角色（店长/区域经理）与地市负责人可访问；填报员无权。"""
     @wraps(fn)
     def wrapper(*args, **kwargs):
         if g.user is None:
             return redirect(url_for("login", next=request.path))
-        if g.user["role"] not in ("admin", "readonly"):
+        if g.user["role"] not in ("admin", "readonly", "city"):
             flash("需要管理员或只读权限", "error")
             return redirect(default_home())
         return fn(*args, **kwargs)
@@ -227,10 +227,10 @@ def readonly_required(fn):
 
 
 def viewer_only(fn):
-    """只读角色不能写（填报/成交/垫资提交），访问页面时直接挡住。"""
+    """只读与地市负责人不能写（成交/垫资删除等提交），访问页面时直接挡住。"""
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if g.user is not None and g.user["role"] == "readonly":
+        if g.user is not None and g.user["role"] in ("readonly", "city"):
             flash("只读账号不能填写或修改数据", "error")
             return redirect(url_for("report"))
         return fn(*args, **kwargs)
@@ -441,6 +441,84 @@ def store_forecast(
         }
     )
     return judged
+
+
+def advisor_month_rows(conn, stores, as_of: date, rules: Optional[Dict[str, int]] = None) -> List[Dict[str, Any]]:
+    """按顾问聚合当月考核：服务门店、主推奖惩（Σ 名下店的 advisor_penalty）。
+
+    顾问名单来自门店 advisor_name 去重（一人多店合并一行）；
+    stores 传入前已按当前用户权限过滤，聚合结果自然不出权限范围。
+    """
+    rules = rules if rules is not None else incentive_rules(conn)
+    divisor = advisor_penalty_divisor(conn)
+    by_advisor: Dict[str, Dict[str, Any]] = {}
+    for store in stores:
+        name = ((store["advisor_name"] if "advisor_name" in store.keys() else "") or "").strip()
+        if not name:
+            continue
+        judged = store_forecast(conn, store, as_of, rules)
+        item = by_advisor.setdefault(
+            name,
+            {
+                "advisor_name": name,
+                "store_ids": [],
+                "store_labels": [],
+                "penalty_total": 0,
+                "store_rows": [],
+            },
+        )
+        label = (store["short_name"] if "short_name" in store.keys() and (store["short_name"] or "").strip() else "") or store["name"]
+        item["store_ids"].append(store["id"])
+        item["store_labels"].append(label)
+        item["penalty_total"] += int(judged.get("advisor_penalty") or 0)
+        item["store_rows"].append(
+            {
+                "store_id": store["id"],
+                "label": label,
+                "judge_label": judged.get("label") or "",
+                "advisor_penalty": int(judged.get("advisor_penalty") or 0),
+            }
+        )
+    rows = list(by_advisor.values())
+    for item in rows:
+        item["penalty_total"] = round(item["penalty_total"], 2)
+        item["fold_coeff"] = round(item["penalty_total"] / divisor, 6)
+    rows.sort(key=lambda r: (-r["penalty_total"], r["advisor_name"]))
+    return rows
+
+
+def advisor_penalty_divisor(conn) -> int:
+    """主推奖惩折算工资系数的除数，默认 4000（A 类店酬金目标）。"""
+    try:
+        return max(1, int(db.get_setting(conn, "advisor_penalty_divisor", "4000") or 4000))
+    except (TypeError, ValueError):
+        return 4000
+
+
+def advisor_coeffs(base_coeff, fold_coeff, scores) -> Dict[str, Optional[float]]:
+    """评分系数 = (店长0.4 + 区域经理0.3 + 地市负责人0.3) / 10；最终 = (基础 + 折算) × 评分。
+
+    与线下「6月运营商顾问工资系数.xlsx」一致：三方都打才出系数。
+    """
+    if len(scores) != 3 or any(s is None for s in scores):
+        return {"rate": None, "final": None}
+    sm, sa, sc = (int(s) for s in scores)
+    rate = round((sm * 0.4 + sa * 0.3 + sc * 0.3) / 10, 2)
+    final = round((float(base_coeff or 1.2) + float(fold_coeff or 0)) * rate, 4)
+    return {"rate": rate, "final": final}
+
+
+def advisor_edit_column(user) -> str:
+    """能填的打分列：店长 / 区域经理 / 地市负责人 / 全部；填报员只看不填。"""
+    role = user["role"] if user is not None else ""
+    if role == "admin":
+        return "all"
+    if role == "city":
+        return "score_city"
+    if role == "readonly":
+        scope = (user["scope"] or "").strip() if "scope" in user.keys() else ""
+        return "score_area" if scope else "score_manager"
+    return ""
 
 
 def build_diff(before: Dict[str, int], after: Dict[str, int], names=None) -> str:

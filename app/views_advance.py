@@ -116,7 +116,7 @@ def register_advance(app) -> None:
                 flash("还没有可填的门店，请管理员先建店", "error")
                 return render_template("empty.html")
             today_d = db.today_local()
-            is_viewer = g.user["role"] == "readonly"
+            is_viewer = g.user["role"] in ("readonly", "city")
             form = _empty_form(today_d)
             if request.method == "GET":
                 raw_id = request.args.get("advance_id") or ""

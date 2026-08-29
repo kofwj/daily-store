@@ -210,6 +210,7 @@ def _render_settings(conn, tab: str):
             city_order.append(city)
         grouped_cities[city].append(s)
     store_groups = [{"city": city, "stores": grouped_cities[city]} for city in city_order]
+    city_options = sorted({(s["city"] or "").strip() for s in stores if s["active"] and (s["city"] or "").strip()})
     current_store = None
     store_selection_invalid = False
     raw_sid = (request.args.get("store_id") or request.form.get("store_id") or "").strip()
@@ -249,6 +250,8 @@ def _render_settings(conn, tab: str):
                 if (s["area_manager"] or "").strip() == (u["scope"] or "").strip():
                     area_by_store[s["id"]].append(item)
             continue
+        if u["role"] == "city" and (u["scope"] or "").strip():
+            item["store_label"] = "地市：" + (u["scope"] or "").strip()
         if not sids:
             unassigned_people.append(item)
             continue
@@ -266,6 +269,7 @@ def _render_settings(conn, tab: str):
         unassigned_people=unassigned_people,
         stores=stores,
         store_groups=store_groups,
+        city_options=city_options,
         current_store=current_store,
         store_selection_invalid=store_selection_invalid,
         kpis=kpis,
@@ -292,6 +296,7 @@ def _render_settings(conn, tab: str):
             "泰州市": db.get_setting(conn, "wecom_city_泰州市", ""),
         },
         incentive_rules=incentive_rules(conn),
+        advisor_penalty_divisor=db.get_setting(conn, "advisor_penalty_divisor", "4000") or "4000",
         brand_form=brand_settings(conn),
         company_form=company_names(conn),
         review_template=review_template_setting(conn),
@@ -451,13 +456,24 @@ def register_settings(app) -> None:
                         display = (request.form.get("display_name") or "").strip()
                         pin = request.form.get("pin") or ""
                         kind = request.form.get("role") or "filler"
-                        if kind not in ("filler", "readonly", "manager", "area"):
+                        if kind not in ("filler", "readonly", "manager", "area", "city"):
                             raise ValueError("只支持填报员或只读账号")
+                        valid_cities = {
+                            (s["city"] or "").strip()
+                            for s in db.list_all_stores(conn)
+                            if s["active"] and (s["city"] or "").strip()
+                        }
                         if kind == "area":
                             role = "readonly"
                             scope = (request.form.get("scope") or "").strip()
                             if not scope:
                                 raise ValueError("区域经理没填区域经理姓名")
+                            store_ids = []
+                        elif kind == "city":
+                            role = "city"
+                            scope = (request.form.get("scope") or "").strip()
+                            if scope not in valid_cities:
+                                raise ValueError("地市负责人要选一个有效地市")
                             store_ids = []
                         elif kind in ("readonly", "manager"):
                             role = "readonly"
@@ -532,7 +548,21 @@ def register_settings(app) -> None:
                             raise ValueError("查无此人")
                         if target["role"] == "admin":
                             raise ValueError("管理员无需分配门店")
-                        if target["role"] == "readonly" and request.form.get("bind") == "area":
+                        valid_cities = {
+                            (s["city"] or "").strip()
+                            for s in db.list_all_stores(conn)
+                            if s["active"] and (s["city"] or "").strip()
+                        }
+                        if target["role"] == "city":
+                            scope = (request.form.get("scope") or "").strip()
+                            if scope not in valid_cities:
+                                raise ValueError("地市负责人要选一个有效地市")
+                            db.set_user_scope(conn, uid, scope)
+                            db.set_user_stores(conn, uid, [])
+                            flash("地市范围已改", "ok")
+                            if (request.form.get("tab") or "") in ("people", "stores"):
+                                return _people_redirect()
+                        elif target["role"] == "readonly" and request.form.get("bind") == "area":
                             scope = (request.form.get("scope") or "").strip()
                             if not scope:
                                 raise ValueError("区域经理没填区域经理姓名")
@@ -675,6 +705,11 @@ def register_settings(app) -> None:
                             except ValueError:
                                 rules[key] = defaults[key]
                         db.set_setting(conn, "incentive_rules", json.dumps(rules, ensure_ascii=False))
+                        try:
+                            divisor = max(1, int(request.form.get("advisor_penalty_divisor") or 4000))
+                        except ValueError:
+                            divisor = 4000
+                        db.set_setting(conn, "advisor_penalty_divisor", str(divisor))
                         flash("考核规则已保存，立即生效", "ok")
                     else:
                         flash("未知操作", "error")

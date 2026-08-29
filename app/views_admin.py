@@ -13,10 +13,15 @@ from . import bulletin, db, insights, invoice, settlement
 from .helpers import (
     accessible_stores,
     admin_required,
+    advisor_coeffs,
+    advisor_edit_column,
+    advisor_month_rows,
+    advisor_penalty_divisor,
     build_diff,
     close_rate,
     deal_diff,
     incentive_rules,
+    login_required,
     pagination,
     parse_date,
     readonly_required,
@@ -650,6 +655,157 @@ def register_admin(app) -> None:
             month_end = date(month.year, month.month + 1, 1) - timedelta(days=1)
         return month, min(month_end, today_d)
 
+    @app.route("/advisors", methods=["GET", "POST"])
+    @login_required
+    def advisors_page():
+        """运营商顾问月度打分：主推奖惩自动带出，店长/区域经理/地市负责人分列打分。"""
+        month, as_of = _incentive_month()
+        month_text = month.strftime("%Y-%m")
+        edit_col = advisor_edit_column(g.user)
+        with db.get_db() as conn:
+            if request.method == "POST":
+                if not edit_col:
+                    flash("填报员不能打分", "error")
+                else:
+                    try:
+                        _save_advisor_scores(conn, month_text, edit_col)
+                        flash("顾问打分已保存", "ok")
+                    except ValueError as exc:
+                        flash(str(exc), "error")
+                return redirect(url_for("advisors_page", month=month_text))
+            stores = accessible_stores(conn)
+            rows = _advisor_table(conn, stores, as_of)
+            return render_template(
+                "advisors.html",
+                month=month,
+                as_of=as_of,
+                rows=rows,
+                edit_col=edit_col,
+                divisor=advisor_penalty_divisor(conn),
+                is_admin=g.user["role"] == "admin",
+            )
+
+    @app.route("/advisors.xlsx")
+    @admin_required
+    def advisors_xlsx():
+        month, as_of = _incentive_month()
+        month_text = month.strftime("%Y-%m")
+        with db.get_db() as conn:
+            stores = accessible_stores(conn)
+            rows = _advisor_table(conn, stores, as_of)
+            data = _build_advisor_xlsx(rows, month)
+        filename = f"advisor_coeff_{month_text}.xlsx"
+        return xlsx_response(data, filename)
+
+    def _advisor_table(conn, stores, as_of):
+        """聚合当月考核 + 已存打分，算出评分系数与最终系数。"""
+        month_text = as_of.strftime("%Y-%m")
+        saved = {r["advisor_name"]: r for r in db.list_advisor_scores(conn, month_text)}
+        table = []
+        for item in advisor_month_rows(conn, stores, as_of):
+            rec = saved.get(item["advisor_name"])
+            base = float(rec["base_coeff"]) if rec and rec["base_coeff"] else 1.2
+            sm = rec["score_manager"] if rec else None
+            sa = rec["score_area"] if rec else None
+            sc = rec["score_city"] if rec else None
+            coeff = advisor_coeffs(base, item["fold_coeff"], [sm, sa, sc])
+            table.append(
+                {
+                    **item,
+                    "work_type": ((rec["work_type"] if rec else "") or "正式"),
+                    "base_coeff": base,
+                    "score_manager": sm,
+                    "score_area": sa,
+                    "score_city": sc,
+                    "note": (rec["note"] if rec else "") or "",
+                    "rate": coeff["rate"],
+                    "final": coeff["final"],
+                    "updated_at": (rec["updated_at"] if rec else "") or "",
+                }
+            )
+        return table
+
+    def _parse_score(raw, name):
+        text = (raw or "").strip()
+        if not text:
+            return None
+        try:
+            value = int(float(text))
+        except ValueError as exc:
+            raise ValueError(f"{name} 的打分要填 0-10 的整数") from exc
+        if not 0 <= value <= 10:
+            raise ValueError(f"{name} 的打分要填 0-10 的整数")
+        return value
+
+    def _parse_coeff(raw, name):
+        text = (raw or "").strip()
+        if not text:
+            return 1.2
+        try:
+            value = float(text)
+        except ValueError as exc:
+            raise ValueError(f"{name} 的基础系数要填数字") from exc
+        if not 0 < value <= 5:
+            raise ValueError(f"{name} 的基础系数要在 0-5 之间")
+        return value
+
+    def _save_advisor_scores(conn, month_text, edit_col):
+        uid = int(g.user["id"])
+        allowed = {
+            ((s["advisor_name"] if "advisor_name" in s.keys() else "") or "").strip()
+            for s in accessible_stores(conn)
+        }
+        allowed.discard("")
+        fields = {"score_manager": "sm", "score_area": "sa", "score_city": "sc"}
+        cols = list(fields) if edit_col == "all" else [edit_col]
+        idx = 0
+        count = 0
+        while True:
+            name = (request.form.get(f"advisor_{idx}") or "").strip()
+            if not name:
+                break
+            if name not in allowed:
+                raise ValueError("只能给自己可见范围内的顾问打分")
+            updates = {}
+            if edit_col == "all":
+                wt = request.form.get(f"wt_{idx}")
+                if wt is not None and wt.strip():
+                    updates["work_type"] = wt.strip()[:20]
+                updates["base_coeff"] = _parse_coeff(request.form.get(f"bc_{idx}"), name)
+                note = request.form.get(f"note_{idx}")
+                if note is not None:
+                    updates["note"] = note.strip()[:200]
+            for col in cols:
+                updates[col] = _parse_score(request.form.get(f"{fields[col]}_{idx}"), name)
+            db.upsert_advisor_score(conn, month_text, name, updates, uid)
+            idx += 1
+            count += 1
+        if not count:
+            raise ValueError("没有可保存的顾问")
+
+    def _build_advisor_xlsx(rows, month):
+        """与线下「运营商顾问工资系数」表同构的导出。"""
+        header = [
+            "姓名", "工作性质", "基础系数", "主推奖惩", "奖惩折算系数",
+            "店长打分", "区域经理打分", "地市负责人打分", "评分系数", "最终系数",
+        ]
+        data = [
+            [
+                r["advisor_name"],
+                r["work_type"],
+                r["base_coeff"],
+                r["penalty_total"],
+                r["fold_coeff"],
+                r["score_manager"] if r["score_manager"] is not None else "",
+                r["score_area"] if r["score_area"] is not None else "",
+                r["score_city"] if r["score_city"] is not None else "",
+                r["rate"] if r["rate"] is not None else "",
+                r["final"] if r["final"] is not None else "",
+            ]
+            for r in rows
+        ]
+        return xlsx_bytes(header, data, sheet=month.strftime("%Y-%m"))
+
     @app.route("/incentive/invoice", methods=["GET", "POST"])
     @admin_required
     def invoice_page():
@@ -958,7 +1114,7 @@ def register_admin(app) -> None:
         q = (request.args.get("q") or "").strip()
         if action not in ("all", "login", "logout"):
             action = "all"
-        if role not in ("all", "admin", "filler", "readonly"):
+        if role not in ("all", "admin", "filler", "readonly", "city"):
             role = "all"
         try:
             days_int = max(1, min(int(days), 90))
