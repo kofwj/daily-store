@@ -160,6 +160,9 @@ h2 { font-size: 15px; }
 .flash li { padding: 10px 12px; border-radius: var(--radius-sm); margin-bottom: 8px; font-size: 13px; }
 .flash .ok { background: var(--ok-bg); color: var(--ok); }
 .flash .error { background: var(--err-bg); color: var(--err); }
+.flash-inline { margin: 8px 0 0; padding: 8px 10px; border-radius: var(--radius-sm); font-size: 13px; }
+.flash-inline.ok { background: var(--ok-bg); color: var(--ok); }
+.flash-inline.warn { background: var(--warn-bg); color: var(--warn); }
 
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
 label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 500; }

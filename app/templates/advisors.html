@@ -20,6 +20,13 @@
       运营商顾问用自己的姓名登录，可看各岗位给自己的分。
       {% endif %}
     </p>
+    {% if window_open %}
+    <p class="flash-inline ok">每月 1–5 日评上个月。本窗口到 {{ deadline.month }}月{{ deadline.day }}日，还剩 {{ (deadline - today).days }} 天。</p>
+    {% elif is_admin %}
+    <p class="flash-inline warn">打分窗口是次月 1–5 日。现在已过期，管理员仍可改。</p>
+    {% else %}
+    <p class="flash-inline warn">打分窗口是次月 1–5 日（截止 {{ deadline.month }}月{{ deadline.day }}日）。现在只能看{% if not self_advisor %}，改分找管理员{% endif %}。</p>
+    {% endif %}
   </div>
   <form method="get" class="page-filters">
     <label class="filter">

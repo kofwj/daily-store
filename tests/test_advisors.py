@@ -1,7 +1,14 @@
 """运营商顾问月度打分：加权系数、角色列、保存范围。"""
 
+from datetime import date
+
 from app import db
-from app.helpers import advisor_coeffs, advisor_edit_column
+from app.helpers import (
+    advisor_coeffs,
+    advisor_edit_column,
+    advisor_score_month,
+    advisor_score_open,
+)
 
 
 def _set_advisor(code="store-alpha", name="任阳"):
@@ -42,6 +49,20 @@ def test_advisor_edit_column_by_role():
     assert advisor_edit_column(U(role="readonly", scope="张管理")) == "score_area"
     assert advisor_edit_column(U(role="readonly", scope="")) == "score_manager"
     assert advisor_edit_column(U(role="filler", scope="")) == ""
+
+
+def test_score_window_is_next_month_days_1_to_5():
+    july = date(2026, 7, 1)
+    assert advisor_score_month(date(2026, 8, 3)) == july
+    assert advisor_score_open(date(2026, 8, 1), july)
+    assert advisor_score_open(date(2026, 8, 5), july)
+    assert not advisor_score_open(date(2026, 8, 6), july)
+    assert not advisor_score_open(date(2026, 7, 31), july)
+
+
+def _in_window(monkeypatch, today=date(2026, 8, 3)):
+    monkeypatch.setattr(db, "today_local", lambda: today)
+    return advisor_score_month(today).strftime("%Y-%m")
 
 
 def test_advisors_page_empty_then_appears(app_client):
@@ -99,9 +120,9 @@ def test_filler_cannot_score(app_client):
         assert db.list_advisor_scores(conn, month) == []
 
 
-def test_city_scores_only_city_column_and_own_city(app_client):
+def test_city_cannot_score_outside_window(app_client, monkeypatch):
+    monkeypatch.setattr(db, "today_local", lambda: date(2026, 8, 29))
     _set_advisor("store-alpha", "任阳")
-    _set_advisor("store-epsilon", "邻市顾问")
     with db.get_db() as conn:
         db.create_user(
             conn,
@@ -115,13 +136,40 @@ def test_city_scores_only_city_column_and_own_city(app_client):
         conn.execute("UPDATE users SET must_change_pin=0 WHERE username='cityboss'")
     app_client.post("/login", data={"username": "cityboss", "pin": "654321"})
     page = app_client.get("/advisors").get_data(as_text=True)
+    assert "每月 1–5 日" in page or "次月 1–5 日" in page
+    assert "保存打分" not in page
+    resp = app_client.post(
+        "/advisors",
+        data={"month": "2026-07", "advisor_0": "任阳", "sc_0": "8"},
+        follow_redirects=True,
+    )
+    assert "打分窗口已过" in resp.get_data(as_text=True)
+
+
+def test_city_scores_only_city_column_and_own_city(app_client, monkeypatch):
+    _set_advisor("store-alpha", "任阳")
+    _set_advisor("store-epsilon", "邻市顾问")
+    with db.get_db() as conn:
+        db.create_user(
+            conn,
+            username="cityboss",
+            display_name="地市负责",
+            pin="654321",
+            role="city",
+            store_ids=[],
+            scope="示例市",
+        )
+        conn.execute("UPDATE users SET must_change_pin=0 WHERE username='cityboss'")
+    month = _in_window(monkeypatch)
+    app_client.post("/login", data={"username": "cityboss", "pin": "654321"})
+    page = app_client.get("/advisors").get_data(as_text=True)
     assert "任阳" in page
     assert "邻市顾问" not in page
     assert 'name="sc_0"' in page
     assert 'name="sm_0"' not in page
     assert 'name="sa_0"' not in page
     assert "保存打分" in page
-    month = db.today_local().strftime("%Y-%m")
+    assert "还剩" in page
     resp = app_client.post(
         "/advisors",
         data={"month": month, "advisor_0": "任阳", "sc_0": "8", "sm_0": "10"},
@@ -140,9 +188,9 @@ def test_city_scores_only_city_column_and_own_city(app_client):
     assert "只能给自己可见范围内的顾问打分" in steal.get_data(as_text=True)
 
 
-def test_advisor_sees_own_three_scores(app_client):
+def test_advisor_sees_own_three_scores(app_client, monkeypatch):
+    month = _in_window(monkeypatch)
     _set_advisor("store-alpha", "示例甲店")
-    month = db.today_local().strftime("%Y-%m")
     with db.get_db() as conn:
         db.upsert_advisor_score(
             conn,

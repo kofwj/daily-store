@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, timedelta
 from functools import wraps
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -519,6 +519,31 @@ def advisor_edit_column(user) -> str:
         scope = (user["scope"] or "").strip() if "scope" in user.keys() else ""
         return "score_area" if scope else "score_manager"
     return ""
+
+
+ADVISOR_SCORE_UNTIL = 5  # 次月 1–5 日给上个月打分
+
+
+def advisor_score_month(today: date) -> date:
+    """默认打分对象：上个月。"""
+    return (today.replace(day=1) - timedelta(days=1)).replace(day=1)
+
+
+def advisor_score_open(today: date, month: date) -> bool:
+    """month 是被评月月初。窗口 = 次月 1 日到 5 日。"""
+    if month.month == 12:
+        nxt = date(month.year + 1, 1, 1)
+    else:
+        nxt = date(month.year, month.month + 1, 1)
+    return nxt <= today <= nxt.replace(day=ADVISOR_SCORE_UNTIL)
+
+
+def advisor_score_deadline(month: date) -> date:
+    if month.month == 12:
+        nxt = date(month.year + 1, 1, 1)
+    else:
+        nxt = date(month.year, month.month + 1, 1)
+    return nxt.replace(day=ADVISOR_SCORE_UNTIL)
 
 
 def named_advisor(conn, user) -> str:

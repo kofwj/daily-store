@@ -17,6 +17,9 @@ from .helpers import (
     advisor_edit_column,
     advisor_month_rows,
     advisor_penalty_divisor,
+    advisor_score_deadline,
+    advisor_score_month,
+    advisor_score_open,
     build_diff,
     close_rate,
     deal_diff,
@@ -647,9 +650,10 @@ def register_admin(app) -> None:
         filename = f"settlement_{month.strftime('%Y_%m')}.xlsx"
         return xlsx_response(data, filename)
 
-    def _incentive_month():
+    def _incentive_month(default=None):
         today_d = db.today_local()
-        month = parse_date(request.values.get("month"), today_d.replace(day=1)).replace(day=1)
+        fallback = default or today_d.replace(day=1)
+        month = parse_date(request.values.get("month"), fallback).replace(day=1)
         if month.month == 12:
             month_end = date(month.year + 1, 1, 1) - timedelta(days=1)
         else:
@@ -660,14 +664,20 @@ def register_admin(app) -> None:
     @login_required
     def advisors_page():
         """运营商顾问月度打分：主推奖惩自动带出，店长/区域经理/地市负责人分列打分。"""
-        month, as_of = _incentive_month()
+        today_d = db.today_local()
+        month, as_of = _incentive_month(advisor_score_month(today_d))
         month_text = month.strftime("%Y-%m")
         edit_col = advisor_edit_column(g.user)
+        window_open = advisor_score_open(today_d, month)
+        deadline = advisor_score_deadline(month)
+        can_edit = bool(edit_col) and (window_open or g.user["role"] == "admin")
         with db.get_db() as conn:
             me = named_advisor(conn, g.user)
             if request.method == "POST":
                 if not edit_col:
                     flash("没有打分权限", "error")
+                elif not can_edit:
+                    flash(f"打分窗口已过（每月 1–5 日评上个月，截止 {deadline.isoformat()}）", "error")
                 else:
                     try:
                         _save_advisor_scores(conn, month_text, edit_col)
@@ -687,10 +697,13 @@ def register_admin(app) -> None:
                 month=month,
                 as_of=as_of,
                 rows=rows,
-                edit_col=edit_col,
+                edit_col=edit_col if can_edit else "",
                 divisor=advisor_penalty_divisor(conn),
                 is_admin=g.user["role"] == "admin",
                 self_advisor=me,
+                window_open=window_open,
+                deadline=deadline,
+                today=today_d,
             )
 
     @app.route("/advisors.xlsx")
