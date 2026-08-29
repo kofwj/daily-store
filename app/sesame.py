@@ -14,25 +14,6 @@ from openpyxl import load_workbook
 from . import db_advances, db_core
 
 MAX_IMPORT_BYTES = 4 * 1024 * 1024
-HEADERS = (
-    "流水号",
-    "订单号",
-    "省份",
-    "城市",
-    "地区",
-    "商户号",
-    "营业执照号",
-    "营业执照名称",
-    "门店编码",
-    "门店名称",
-    "门店类型",
-    "统计月份",
-    "订单金额",
-    "服务费金额",
-    "状态",
-    "备注",
-    "创建时间",
-)
 
 
 def mobile_code_of(raw: Any) -> str:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 # 播报分组：与现有微信群格式对齐
@@ -178,11 +179,22 @@ def is_decimal_metric(code: str) -> bool:
     return code in DECIMAL_METRICS
 
 
+_THOUSANDS_RE = re.compile(r"^\d{1,3}[,，]\d{3}([,，]\d{3})*(\.\d+)?$")
+
+
 def to_stored(code: str, raw) -> int:
-    """页面数字 -> 库里的整数。笔算按 0.1 存成 10 倍。"""
-    text = str(raw or "").strip().replace(",", "").replace("，", "")
+    """页面数字 -> 库里的整数。笔算按 0.1 存成 10 倍。
+
+    只剥正规的千分位（1,234）；「12,5」这类小数逗号按无效输入记 0，
+    不然会被当千分位拼成 125，对 0.1 精度的指标是十倍误差。
+    """
+    text = str(raw or "").strip()
     if not text:
         return 0
+    if "," in text or "，" in text:
+        if not _THOUSANDS_RE.fullmatch(text):
+            return 0
+        text = text.replace(",", "").replace("，", "")
     try:
         number = float(text)
     except (TypeError, ValueError):

@@ -133,21 +133,6 @@ def fmt_metric(code: str, stored: Any) -> str:
     return format_stored(code, stored)
 
 
-def fmt_count(value: Any) -> str:
-    """整数原样；小数留一位，贴近原表的 1.0 / 10.0。0 也显示（通报表不留空白）。"""
-    if value is None or value == "":
-        return ""
-    try:
-        num = float(value)
-    except (TypeError, ValueError):
-        return ""
-    if num == 0:
-        return "0"
-    if abs(num - round(num)) < 1e-9:
-        return str(int(round(num)))
-    return f"{num:.1f}"
-
-
 def bisuan_total(values: Mapping[str, int]) -> int:
     return int(values.get("bisuan", 0) or 0) + int(values.get("bisuan_high", 0) or 0)
 

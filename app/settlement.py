@@ -17,9 +17,10 @@ from io import BytesIO
 from typing import Any, Dict, Iterable, List, Sequence
 
 import openpyxl
+from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
-from .helpers import incentive_rules, store_forecast
+from .helpers import incentive_rules, store_forecasts
 
 
 def prev_month_start(as_of: date) -> date:
@@ -100,33 +101,19 @@ def _style_range(ws, cells, *, fill=None, font=None, align=CENTER, num=None):
             cell.number_format = num
 
 
-def _group_stores(stores: Sequence[Any]) -> List[Dict[str, Any]]:
-    groups: List[Dict[str, Any]] = []
-    index: Dict[str, int] = {}
-    for store in stores:
-        manager = (store["area_manager"] or "").strip() or "未分经理"
-        if manager not in index:
-            index[manager] = len(groups)
-            groups.append({"manager": manager, "stores": []})
-        groups[index[manager]]["stores"].append(store)
-    return groups
-
-
 def build_settlement_rows(conn, stores: Iterable[Any], as_of: date) -> List[Dict[str, Any]]:
     from . import db
 
     stores = list(stores)
     rules = incentive_rules(conn)
     store_ids = [s["id"] for s in stores]
-    reported_ids = db.stores_reported_in_month(conn, store_ids, as_of)
     advances = db.advance_month_totals(conn, store_ids, as_of)
     invoice_month = prev_month_start(as_of)
     invoices = db.list_invoice_months(conn, store_ids, invoice_month.strftime("%Y-%m"))
+    judged_map = store_forecasts(conn, stores, as_of, rules)
     out = []
     for store in stores:
-        judged = store_forecast(
-            conn, store, as_of, rules, reported=store["id"] in reported_ids
-        )
+        judged = judged_map[store["id"]]
         grade = grade_of(store)
         adv = advances.get(store["id"], {"total": 0.0})
         inv = invoices.get(int(store["id"])) or {}
@@ -166,8 +153,7 @@ def group_rows(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def build_settlement_xlsx(conn, stores: Sequence[Any], as_of: date) -> bytes:
     rows = build_settlement_rows(conn, stores, as_of)
-    by_id = {r["store"]["id"]: r for r in rows}
-    groups = _group_stores(stores)
+    groups = group_rows(rows)
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "移动接入"
@@ -242,8 +228,7 @@ def build_settlement_xlsx(conn, stores: Sequence[Any], as_of: date) -> bytes:
     all_store_rows: List[int] = []
     for group in groups:
         start = current
-        for store in group["stores"]:
-            data = by_id[store["id"]]
+        for data in group["stores"]:
             _write_store_row(ws, current, group["manager"], data)
             all_store_rows.append(current)
             current += 1
@@ -318,7 +303,8 @@ def _write_store_row(ws, row: int, manager: str, data: Dict[str, Any]) -> None:
         ws[f"H{row}"] = None
     ws[f"H{row}"].fill = INPUT_FILL
     ws[f"I{row}"] = f"=F{row}+G{row}-H{row}"
-    ws[f"J{row}"] = f'=IF(E{row}=0,0,MIN(100,IF(I{row}/E{row}>=1,100,I{row}/E{row}*100)))'
+    # 实际酬金可能为负（垫资大于开票+房补），得分不给负数
+    ws[f"J{row}"] = f'=IF(E{row}=0,0,MAX(0,MIN(100,IF(I{row}/E{row}>=1,100,I{row}/E{row}*100))))'
     ws[f"K{row}"] = data["ai_target"]
     ws[f"L{row}"] = data["new_cut"]
     ws[f"M{row}"] = data["ai"]
@@ -330,9 +316,6 @@ def _write_store_row(ws, row: int, manager: str, data: Dict[str, Any]) -> None:
     )
     ws[f"R{row}"] = f"={bonus_formula(f'I{row}', grade)}"
     ws[f"S{row}"] = data["net"]
-    ws[f"S{row}"].comment = None
-    from openpyxl.comments import Comment
-
     ws[f"S{row}"].comment = Comment(f"{data['label']} · {data['money_text']}", "store-daily")
     for col in range(1, 20):
         cell = ws.cell(row, col)

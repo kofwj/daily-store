@@ -1,52 +1,18 @@
-"""酬金/租赁开票台账：按店按月记服务费、手续费、明细、租赁。"""
+"""酬金/租赁开票台账：按店按月记服务费、手续费、租赁。
+
+表里的 details_json 列是早期明细功能的遗留，一直没有写入路径（恒为 '{}'），
+保留列只为老库兼容；对应的明细常量与参数已随休眠功能一并移除。
+"""
 
 from __future__ import annotations
 
 import json
 import sqlite3
 from datetime import date
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Sequence
 
 from .db_advances import cents_to_yuan, parse_money, yuan_to_cents
 from .db_core import _now
-
-DETAIL_ITEMS = (
-    ("hao_new", 3, "当月新增放号获利"),
-    ("hao_high", 4, "高价值放号"),
-    ("hao_month", 5, "当月放号"),
-    ("hao_2", 6, "二返获利"),
-    ("hao_3", 7, "三返获利"),
-    ("hao_4", 8, "四返获利"),
-    ("hao_5", 9, "五返获利"),
-    ("term_2", 10, "合约机二返"),
-    ("term_fill", 11, "合约机补结"),
-    ("term_34", 12, "购机3-4返"),
-    ("bb_all", 13, "当月整体宽带"),
-    ("bb_new", 14, "新入网办理宽带获利"),
-    ("bb_old", 15, "存量办理宽带获利"),
-    ("bb_point", 16, "宽带积分"),
-    ("biz_change", 17, "套餐变更"),
-    ("biz_point", 18, "套餐变更积分"),
-    ("biz_group", 19, "存量用户入融合群"),
-    ("biz_vnet", 20, "家庭V网"),
-    ("biz_camp", 21, "营销活动"),
-    ("biz_back", 22, "回流"),
-    ("add_flow", 23, "数据流量包"),
-    ("add_new", 24, "新业务"),
-    ("add_soft", 25, "软件安装"),
-    ("add_tv", 26, "互联网电视和提速包"),
-    ("collect", 27, "代收话费"),
-    ("other", 28, "其他业务"),
-)
-
-DETAIL_GROUPS = (
-    ("放号酬金", DETAIL_ITEMS[0:7]),
-    ("终端酬金", DETAIL_ITEMS[7:10]),
-    ("宽带酬金", DETAIL_ITEMS[10:14]),
-    ("业务受理", DETAIL_ITEMS[14:20]),
-    ("增值业务", DETAIL_ITEMS[20:24]),
-    ("代收 / 其他", DETAIL_ITEMS[24:26]),
-)
 
 
 def _ensure_invoice_tables(conn: sqlite3.Connection) -> None:
@@ -152,14 +118,6 @@ def _audit(
 
 
 def _row_to_invoice(row) -> Dict[str, Any]:
-    details = {}
-    raw = row["details_json"] or "{}"
-    try:
-        loaded = json.loads(raw)
-        if isinstance(loaded, dict):
-            details = {str(k): float(v) for k, v in loaded.items() if v not in (None, "")}
-    except (TypeError, ValueError, json.JSONDecodeError):
-        details = {}
     service = cents_to_yuan(row["service_cents"])
     fee = cents_to_yuan(row["fee_cents"])
     return {
@@ -170,7 +128,6 @@ def _row_to_invoice(row) -> Dict[str, Any]:
         "fee": fee,
         "housing": cents_to_yuan(row["housing_cents"]),
         "invoice_total": round(service + fee, 2),
-        "details": details,
         "lease_area": row["lease_area"] or "",
         "lease": cents_to_yuan(row["lease_cents"]),
         "lease_address": row["lease_address"] or "",
@@ -211,7 +168,6 @@ def save_invoice_month(
     service: Any = 0,
     fee: Any = 0,
     housing: Any = 0,
-    details: Optional[Dict[str, float]] = None,
     lease_area: str = "",
     lease: Any = 0,
     lease_address: str = "",
@@ -224,7 +180,8 @@ def save_invoice_month(
         "service_cents": yuan_to_cents(parse_money(service)),
         "fee_cents": yuan_to_cents(parse_money(fee)),
         "housing_cents": yuan_to_cents(parse_money(housing)),
-        "details_json": json.dumps(details or {}, ensure_ascii=False),
+        # 明细功能未启用，恒写空表；列保留只为老库兼容
+        "details_json": "{}",
         "lease_area": (lease_area or "").strip()[:40],
         "lease_cents": yuan_to_cents(parse_money(lease)),
         "lease_address": (lease_address or "").strip()[:120],

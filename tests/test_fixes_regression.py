@@ -695,3 +695,196 @@ def test_policy_image_upload_is_resized_down(app_client):
     assert saved.status_code == 200
     im = Image.open(BytesIO(saved.data))
     assert max(im.width, im.height) <= 1600, (im.width, im.height)
+
+
+def test_9_week_report_range_clamped(app_client):
+    """周报区间钳到今天且最大 62 天，恶意大日期不能撑爆内存。"""
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
+    page = app_client.get(
+        "/report?view=week&start=2000-01-01&end=9999-12-31"
+    ).get_data(as_text=True)
+    assert "9999" not in page
+    assert "2000-01" not in page
+    # 起点在未来：起点跟着钳后的终点走，不出现倒挂区间
+    page = app_client.get(
+        "/report?view=week&start=9999-12-01&end=9999-12-31"
+    ).get_data(as_text=True)
+    assert "9999" not in page
+
+
+def test_10_delete_store_blocked_by_audit_rows(tmp_db, app_client):
+    """业务行删掉后审计行仍在，删店也必须被拦（否则撞外键 500）。"""
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
+    with db.get_db() as conn:
+        sid = db.create_store(conn, "审计空店", short_name="审计空店")
+        admin_id = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        deal_id = db.record_deal_post(
+            conn, store_id=sid, user_id=admin_id, closed=True, model="测试", phone="13800000001"
+        )
+        assert db.delete_deal_post(conn, deal_id, sid, admin_id)
+        # 业务行已删，只剩 deal_edits 审计行
+        assert conn.execute("SELECT 1 FROM deal_posts WHERE store_id=?", (sid,)).fetchone() is None
+        assert conn.execute("SELECT 1 FROM deal_edits WHERE store_id=?", (sid,)).fetchone()
+        try:
+            db.delete_store(conn, sid)
+            raise AssertionError("delete_store 应该被拦下")
+        except ValueError:
+            pass
+        assert conn.execute("SELECT 1 FROM stores WHERE id=?", (sid,)).fetchone()
+
+
+def test_11_broadcast_error_keeps_daily_saved(tmp_db, app_client):
+    """企微播报出问题也不能丢已保存的日报：先提交放锁，再播报。"""
+    from unittest.mock import patch
+
+    from app import db_core
+
+    app_client.post("/login", data={"username": "alpha", "pin": "123456"})
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        db_core.set_setting(conn, "wecom_global", "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc")
+    with patch("app.wecom.send_text", side_effect=RuntimeError("网络炸了")):
+        resp = app_client.post(
+            "/today",
+            data={"store_id": str(sid), "date": date.today().isoformat(), "m_phone_sales": "5"},
+            follow_redirects=True,
+        )
+    assert resp.status_code == 200
+    with db.get_db() as conn:
+        assert db.get_report(conn, sid, date.today()) is not None
+
+
+def test_12_advance_form_keeps_input_on_error(tmp_db, app_client):
+    """垫资校验失败要回显已填内容，不能让店员重敲一遍。"""
+    app_client.post("/login", data={"username": "alpha", "pin": "123456"})
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+    resp = app_client.post(
+        "/advance",
+        data={
+            "store_id": str(sid),
+            "biz_date": date.today().isoformat(),
+            "phone": "13800138000",
+            "broadband": "abc",
+            "note": "宽带垫资备注",
+        },
+    )
+    page = resp.get_data(as_text=True)
+    assert "金额请填数字" in page
+    assert "13800138000" in page
+    assert "宽带垫资备注" in page
+
+
+def test_13_month_cum_through_many_matches_single(tmp_db):
+    """批量月累计与逐店单查口径一致。"""
+    today = date.today()
+    with db.get_db() as conn:
+        sid_a = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        sid_b = db.create_store(conn, "批量对照店", short_name="批量对照店")
+        admin_id = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        db.save_daily(conn, store_id=sid_a, biz_date=today, user_id=admin_id, values={"phone_sales": 3})
+        db.save_daily(conn, store_id=sid_b, biz_date=today, user_id=admin_id, values={"phone_sales": 7})
+        many = db.month_cum_through_many(conn, [sid_a, sid_b, 999999], today)
+        single_a = db.month_cum_through(conn, sid_a, today)
+        single_b = db.month_cum_through(conn, sid_b, today)
+    assert many[sid_a]["phone_sales"] == single_a["phone_sales"] == 3
+    assert many[sid_b]["phone_sales"] == single_b["phone_sales"] == 7
+    assert 999999 not in many
+
+
+def test_14_mask_phone_standard_format():
+    """打码统一成 138****0000，短号原样兜底。"""
+    from app.deal import mask_phone
+
+    assert mask_phone("13812345678") == "138****5678"
+    assert mask_phone("95") == "95"
+    assert mask_phone("1234") == "****"
+
+
+def test_15_comma_input_strict(tmp_db):
+    """千分位正常剥；「12,5」这类小数逗号不再放大十倍。"""
+    from app.db_advances import parse_money
+    from app.metrics_seed import to_stored
+
+    assert to_stored("phone_sales", "1,234") == 1234
+    assert to_stored("bisuan_new", "12,5") == 0
+    assert parse_money("1,234.5") == 1234.5
+    try:
+        parse_money("12,5")
+        raise AssertionError("含糊逗号应报错")
+    except ValueError:
+        pass
+
+
+def test_16_advance_phone_masked_for_filler(tmp_db, app_client):
+    """垫资记录对店员打码，管理员保留完整号码（兑付对账用）。"""
+    app_client.post("/login", data={"username": "alpha", "pin": "123456"})
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        admin_id = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        db.record_advance(
+            conn, store_id=sid, user_id=admin_id, biz_date=date.today(),
+            phone="13812345678", broadband=100,
+        )
+    filler_page = app_client.get("/advance").get_data(as_text=True)
+    assert "138****5678" in filler_page
+    assert "13812345678" not in filler_page
+    app_client.post("/logout")
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
+    admin_page = app_client.get("/advance").get_data(as_text=True)
+    assert "13812345678" in admin_page
+
+
+def test_17_sesame_advance_cannot_unpay(tmp_db, app_client):
+    """芝麻导入的垫资「导入即已兑」，取消兑付对它无效。"""
+    app_client.post("/login", data={"username": "admin", "pin": "123456"})
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        admin_id = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        aid = db.record_advance(
+            conn, store_id=sid, user_id=admin_id, biz_date=date.today(),
+            sesame=5.5, source="sesame", ext_id="TEST_R1", paid=True,
+        )
+        db.set_advance_paid(conn, [aid], paid=False, user_id=admin_id)
+        row = conn.execute("SELECT paid FROM advance_posts WHERE id=?", (aid,)).fetchone()
+        assert int(row["paid"] or 0) == 1
+
+
+def test_18_reset_pin_kicks_old_session(tmp_db):
+    """管理员重置口令后，被重置人的旧会话立即失效。"""
+    from app.web import create_app
+
+    victim = create_app(testing=True).test_client()
+    victim.post("/login", data={"username": "alpha", "pin": "123456"})
+    assert victim.get("/today", follow_redirects=False).status_code == 200
+    admin_client = create_app(testing=True).test_client()
+    admin_client.post("/login", data={"username": "admin", "pin": "123456"})
+    with db.get_db() as conn:
+        uid = conn.execute("SELECT id FROM users WHERE username='alpha'").fetchone()["id"]
+    admin_client.post(
+        "/settings",
+        data={"action": "reset_pin", "tab": "people", "user_id": str(uid)},
+        follow_redirects=True,
+    )
+    resp = victim.get("/today", follow_redirects=False)
+    assert resp.status_code == 302 and "/login" in resp.headers["Location"]
+    # 重置后的默认口令能重新登录（要求先改密，跳到账号页）
+    victim.post("/login", data={"username": "alpha", "pin": "123456"})
+    resp2 = victim.get("/today", follow_redirects=False)
+    assert resp2.status_code == 302 and "/settings" in resp2.headers["Location"]
+
+
+def test_19_request_conn_shared(tmp_db):
+    """同一请求里多次 get_db 复用同一条连接。"""
+    from flask import g
+
+    from app.web import create_app
+
+    app_obj = create_app(testing=True)
+    with app_obj.test_request_context():
+        with db.get_db() as outer:
+            with db.get_db() as inner:
+                assert inner is outer
+        with db.get_db() as again:
+            assert again is outer
+        assert g._db_conn is outer

@@ -13,7 +13,7 @@ from io import BytesIO
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import openpyxl
-from flask import current_app, flash, g, redirect, request, session, url_for
+from flask import Response, current_app, flash, g, redirect, request, session, url_for
 
 from . import broadcast, db, incentive
 from .metrics_seed import rollup_amount
@@ -109,6 +109,10 @@ def load_user() -> None:
         return
     with db.get_db() as conn:
         row = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (uid,)).fetchone()
+        if row is not None and int(session.get("session_epoch", -1)) != int(row["session_epoch"] or 0):
+            # 口令被改过/被重置过：旧会话一律下线
+            session.clear()
+            return
         g.user = row
 
 
@@ -154,6 +158,14 @@ def csrf_protect():
     token = session.get("_csrf_token")
     given = request.form.get("_csrf_token") or request.headers.get("X-CSRF-Token", "")
     if not token or not given or not _compare_digest(token, given):
+        # JSON 端点（如编辑器图片上传）拿到 302 HTML 解析不了，回 400 JSON
+        if (
+            request.accept_mimetypes.best_match(["application/json", "text/html"])
+            == "application/json"
+        ):
+            return Response(
+                '{"ok": false, "error": "csrf"}', status=400, mimetype="application/json"
+            )
         flash("页面停留太久，操作校验失败，请刷新后重试。", "error")
         # 只跟同源 referrer，防开放重定向。Referer 几乎总是绝对 URL，
         # 同源的转成站内路径再跳；外站、协议相对 //、带反斜杠的一律丢弃。
@@ -274,7 +286,8 @@ def close_rate(closed: int, total: int) -> str:
     total_n = int(total or 0)
     if total_n <= 0:
         return "—"
-    return f"{round(closed_n * 100 / total_n)}%"
+    # 四舍五入到整数；round() 的银行家舍入会把 32.5% 显示成 32、33.5% 显示成 34
+    return f"{int(closed_n * 100 / total_n + 0.5)}%"
 
 
 def with_close_rate(counts: Dict[str, int]) -> Dict[str, Any]:
@@ -394,8 +407,11 @@ def store_forecast(
     rules: Optional[Dict[str, int]] = None,
     *,
     reported: Optional[bool] = None,
+    month_vals: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
-    month_vals = db.month_cum_through(conn, store["id"], as_of)
+    # month_vals 可传批量预取结果（见 store_forecasts），单店调用不用管
+    if month_vals is None:
+        month_vals = db.month_cum_through(conn, store["id"], as_of)
     ai = int(month_vals.get("ai_contract", 0) or 0)
     new_cut = rollup_amount(month_vals, "coin_cut")
     advisor_name = (store["advisor_name"] if "advisor_name" in store.keys() else "") or ""
@@ -443,6 +459,30 @@ def store_forecast(
     return judged
 
 
+def store_forecasts(
+    conn, stores, as_of: date, rules: Optional[Dict[str, int]] = None
+) -> Dict[int, Dict[str, Any]]:
+    """批量考核：月累计、已交日报各一条 SQL 查完，避免结算/考核/看板页每店两条。
+
+    返回 {store_id: judged}。stores 传入前已按权限过滤，结果不出权限范围。
+    """
+    rules = rules if rules is not None else incentive_rules(conn)
+    store_ids = [s["id"] for s in stores]
+    reported_ids = set(db.stores_reported_in_month(conn, store_ids, as_of))
+    cum = db.month_cum_through_many(conn, store_ids, as_of)
+    return {
+        s["id"]: store_forecast(
+            conn,
+            s,
+            as_of,
+            rules,
+            reported=s["id"] in reported_ids,
+            month_vals=cum.get(s["id"]),
+        )
+        for s in stores
+    }
+
+
 def advisor_month_rows(conn, stores, as_of: date, rules: Optional[Dict[str, int]] = None) -> List[Dict[str, Any]]:
     """按顾问聚合当月考核：服务门店、主推奖惩（Σ 名下店的 advisor_penalty）。
 
@@ -451,12 +491,13 @@ def advisor_month_rows(conn, stores, as_of: date, rules: Optional[Dict[str, int]
     """
     rules = rules if rules is not None else incentive_rules(conn)
     divisor = advisor_penalty_divisor(conn)
+    judged_map = store_forecasts(conn, stores, as_of, rules)
     by_advisor: Dict[str, Dict[str, Any]] = {}
     for store in stores:
         name = ((store["advisor_name"] if "advisor_name" in store.keys() else "") or "").strip()
         if not name:
             continue
-        judged = store_forecast(conn, store, as_of, rules)
+        judged = judged_map[store["id"]]
         item = by_advisor.setdefault(
             name,
             {

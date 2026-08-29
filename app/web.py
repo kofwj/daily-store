@@ -18,7 +18,7 @@ import os
 import secrets
 from datetime import datetime, timedelta
 
-from flask import Flask, session
+from flask import Flask, g, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import backup, db
@@ -65,13 +65,28 @@ def create_app(*, testing: bool = False) -> Flask:
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=24)
     app.config["SESSION_REFRESH_EACH_REQUEST"] = True
     app.config["PREFERRED_URL_SCHEME"] = "https" if secure else "http"
-    app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
+    # 32MiB 是恢复备份的硬上限；multipart 编码有开销，入口上限放宽一点，恰好 32MiB 的合法备份不被 413
+    app.config["MAX_CONTENT_LENGTH"] = 34 * 1024 * 1024
     # 容器只对 Caddy 暴露 5055，默认信一层反代，登录日志才能记下真实 IP。
     # 若把 app 端口直接打到公网，必须设 STORE_DAILY_TRUST_PROXY=0，否则头可被伪造。
     if os.environ.get("STORE_DAILY_TRUST_PROXY", "1") == "1":
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     db.init_db()
     backup.prune()
+
+    from .deal import mask_phone
+
+    app.add_template_filter(mask_phone, "mask_phone")
+
+    @app.teardown_appcontext
+    def _close_request_conn(exc):
+        # 请求级共享连接（见 app/db.py 的 get_db）：请求结束统一关闭
+        conn = g.pop("_db_conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001 — 关闭失败不影响响应
+                pass
 
     app.before_request(load_user)
     app.before_request(csrf_protect)

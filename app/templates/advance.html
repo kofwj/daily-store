@@ -101,7 +101,7 @@
         <tr>
           <td class="left">{{ r.biz_date }}</td>
           {% if all_stores %}<td class="left">{{ row_store_name }}</td>{% endif %}
-          <td class="left">{{ r.phone or '—' }}</td>
+          <td class="left">{% if is_admin %}{{ r.phone or '—' }}{% else %}{{ r.phone|mask_phone or '—' }}{% endif %}</td>
           <td>{{ '%.2f'|format(r.broadband) if r.broadband else '—' }}</td>
           <td>{{ '%.2f'|format(r.rebate) if r.rebate else '—' }}</td>
           <td>{{ '%.2f'|format(r.other) if r.other else '—' }}</td>
@@ -152,7 +152,7 @@
       <div class="advance-card-top">
         <div>
           <strong>{{ r.biz_date }}{% if all_stores %} · {{ row_store_name }}{% endif %}</strong>
-          <div class="muted">{{ r.phone or '无号码' }}</div>
+          <div class="muted">{% if is_admin %}{{ r.phone or '无号码' }}{% else %}{{ r.phone|mask_phone or '无号码' }}{% endif %}</div>
         </div>
         <div class="advance-card-sum">
           <div class="kpi-num">{{ '%.2f'|format(r.total) }}</div>

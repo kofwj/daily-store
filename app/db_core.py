@@ -12,8 +12,8 @@ from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from hashlib import pbkdf2_hmac
 from pathlib import Path
-from secrets import token_hex
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from secrets import compare_digest, token_hex
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 from zoneinfo import ZoneInfo
 
 from .metrics_seed import KPI_TARGETS, all_metrics
@@ -246,6 +246,13 @@ def today_local() -> date:
     """业务时区（北京时间）的今天。"""
     return datetime.now(TZ).date()
 
+def store_in_clause(column: str, store_ids: Optional[Sequence[int]]) -> Tuple[str, List[int]]:
+    """生成门店 ID 的 IN 子句。占位符拼接，值仍走参数绑定。"""
+    ids = [int(i) for i in (store_ids or [])]
+    if not ids:
+        return "1=0", []
+    return f"{column} IN ({','.join('?' * len(ids))})", ids
+
 def hash_pin(pin: str, salt: Optional[str] = None) -> str:
     if salt is None:
         salt = token_hex(16)
@@ -257,7 +264,11 @@ def verify_pin(pin: str, stored: str) -> bool:
         salt, _digest = stored.split("$", 1)
     except ValueError:
         return False
-    return hash_pin(pin, salt) == stored
+    return compare_digest(hash_pin(pin, salt), stored)
+
+def burn_pin_time(pin: str) -> None:
+    """用户不存在时也跑一遍 PBKDF2，抹平响应时间差，防用户名枚举。"""
+    hash_pin(pin, "0" * 32)
 
 def connect() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -376,50 +387,66 @@ def migrate() -> None:
                 "INSERT OR IGNORE INTO app_meta(key, value) VALUES('bisuan_tenths_marker','1')"
             )
 
-def _ensure_store_columns(conn: sqlite3.Connection) -> None:
-    extra = {
-        "sort_order": "INTEGER NOT NULL DEFAULT 0",
-        "region_group": "TEXT NOT NULL DEFAULT '通泰'",
-        "city": "TEXT NOT NULL DEFAULT '南通市'",
-        "mobile_code": "TEXT NOT NULL DEFAULT ''",
-        "area_manager": "TEXT NOT NULL DEFAULT ''",
-        "store_manager": "TEXT NOT NULL DEFAULT ''",
-        "follow_ai": "INTEGER NOT NULL DEFAULT 0",
-        "follow_bisuan": "INTEGER NOT NULL DEFAULT 0",
-        "has_advisor": "INTEGER NOT NULL DEFAULT 0",
-        "advisor_name": "TEXT NOT NULL DEFAULT ''",
-        "short_name": "TEXT NOT NULL DEFAULT ''",
-        "store_grade": "TEXT NOT NULL DEFAULT ''",
-        "ai_target": "INTEGER NOT NULL DEFAULT 0",
-        "invoice_name": "TEXT NOT NULL DEFAULT ''",
-        "lease_area": "TEXT NOT NULL DEFAULT ''",
-        "lease_address": "TEXT NOT NULL DEFAULT ''",
-        "lease_period": "TEXT NOT NULL DEFAULT ''",
-    }
-    for name, ddl in extra.items():
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(stores)")}
+# 建表后给老库补列。ALTER TABLE 无法参数化，这里每列写一条完整字面量语句，
+# 不做任何拼接/格式化；键是列名，值是整条 SQL。
+_STORE_EXTRA_COLUMNS = {
+    "sort_order": "ALTER TABLE stores ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+    "region_group": "ALTER TABLE stores ADD COLUMN region_group TEXT NOT NULL DEFAULT '通泰'",
+    "city": "ALTER TABLE stores ADD COLUMN city TEXT NOT NULL DEFAULT '南通市'",
+    "mobile_code": "ALTER TABLE stores ADD COLUMN mobile_code TEXT NOT NULL DEFAULT ''",
+    "area_manager": "ALTER TABLE stores ADD COLUMN area_manager TEXT NOT NULL DEFAULT ''",
+    "store_manager": "ALTER TABLE stores ADD COLUMN store_manager TEXT NOT NULL DEFAULT ''",
+    "follow_ai": "ALTER TABLE stores ADD COLUMN follow_ai INTEGER NOT NULL DEFAULT 0",
+    "follow_bisuan": "ALTER TABLE stores ADD COLUMN follow_bisuan INTEGER NOT NULL DEFAULT 0",
+    "has_advisor": "ALTER TABLE stores ADD COLUMN has_advisor INTEGER NOT NULL DEFAULT 0",
+    "advisor_name": "ALTER TABLE stores ADD COLUMN advisor_name TEXT NOT NULL DEFAULT ''",
+    "short_name": "ALTER TABLE stores ADD COLUMN short_name TEXT NOT NULL DEFAULT ''",
+    "store_grade": "ALTER TABLE stores ADD COLUMN store_grade TEXT NOT NULL DEFAULT ''",
+    "ai_target": "ALTER TABLE stores ADD COLUMN ai_target INTEGER NOT NULL DEFAULT 0",
+    "invoice_name": "ALTER TABLE stores ADD COLUMN invoice_name TEXT NOT NULL DEFAULT ''",
+    "lease_area": "ALTER TABLE stores ADD COLUMN lease_area TEXT NOT NULL DEFAULT ''",
+    "lease_address": "ALTER TABLE stores ADD COLUMN lease_address TEXT NOT NULL DEFAULT ''",
+    "lease_period": "ALTER TABLE stores ADD COLUMN lease_period TEXT NOT NULL DEFAULT ''",
+}
+
+_USER_EXTRA_COLUMNS = {
+    "scope": "ALTER TABLE users ADD COLUMN scope TEXT NOT NULL DEFAULT ''",
+    "must_change_pin": "ALTER TABLE users ADD COLUMN must_change_pin INTEGER NOT NULL DEFAULT 0",
+    # 会话纪元：每次改口令自增，旧 session 带的纪元对不上就强制重新登录
+    "session_epoch": "ALTER TABLE users ADD COLUMN session_epoch INTEGER NOT NULL DEFAULT 0",
+}
+
+_DEAL_POST_EXTRA_COLUMNS = {
+    "updated_at": "ALTER TABLE deal_posts ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
+    "phone": "ALTER TABLE deal_posts ADD COLUMN phone TEXT NOT NULL DEFAULT ''",
+    "spend": "ALTER TABLE deal_posts ADD COLUMN spend TEXT NOT NULL DEFAULT ''",
+    "hall_query": "ALTER TABLE deal_posts ADD COLUMN hall_query INTEGER NOT NULL DEFAULT 1",
+    "recommend": "ALTER TABLE deal_posts ADD COLUMN recommend TEXT NOT NULL DEFAULT ''",
+    "student": "ALTER TABLE deal_posts ADD COLUMN student INTEGER NOT NULL DEFAULT 0",
+    "opener": "ALTER TABLE deal_posts ADD COLUMN opener TEXT NOT NULL DEFAULT ''",
+    "note": "ALTER TABLE deal_posts ADD COLUMN note TEXT NOT NULL DEFAULT ''",
+    "text": "ALTER TABLE deal_posts ADD COLUMN text TEXT NOT NULL DEFAULT ''",
+}
+
+
+def _apply_new_columns(conn: sqlite3.Connection, statements: Dict[str, str], cols: set) -> None:
+    """执行补列语句；已存在的列跳过，重复加列的并发报错按幂等处理。"""
+    for name, sql in statements.items():
         if name in cols:
             continue
         try:
-            conn.execute(f"ALTER TABLE stores ADD COLUMN {name} {ddl}")
+            conn.execute(sql)
         except sqlite3.OperationalError as exc:
             if "duplicate column" not in str(exc).lower():
                 raise
 
+def _ensure_store_columns(conn: sqlite3.Connection) -> None:
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(stores)")}
+    _apply_new_columns(conn, _STORE_EXTRA_COLUMNS, cols)
+
 def _ensure_user_columns(conn: sqlite3.Connection) -> None:
     cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
-    extra = {
-        "scope": "TEXT NOT NULL DEFAULT ''",
-        "must_change_pin": "INTEGER NOT NULL DEFAULT 0",
-    }
-    for name, ddl in extra.items():
-        if name in cols:
-            continue
-        try:
-            conn.execute(f"ALTER TABLE users ADD COLUMN {name} {ddl}")
-        except sqlite3.OperationalError as exc:
-            if "duplicate column" not in str(exc).lower():
-                raise
+    _apply_new_columns(conn, _USER_EXTRA_COLUMNS, cols)
 
 
 def _ensure_deal_posts(conn: sqlite3.Connection) -> None:
@@ -445,26 +472,8 @@ def _ensure_deal_posts(conn: sqlite3.Connection) -> None:
         )
         """
     )
-    extra = {
-        "updated_at": "TEXT NOT NULL DEFAULT ''",
-        "phone": "TEXT NOT NULL DEFAULT ''",
-        "spend": "TEXT NOT NULL DEFAULT ''",
-        "hall_query": "INTEGER NOT NULL DEFAULT 1",
-        "recommend": "TEXT NOT NULL DEFAULT ''",
-        "student": "INTEGER NOT NULL DEFAULT 0",
-        "opener": "TEXT NOT NULL DEFAULT ''",
-        "note": "TEXT NOT NULL DEFAULT ''",
-        "text": "TEXT NOT NULL DEFAULT ''",
-    }
     cols = {row[1] for row in conn.execute("PRAGMA table_info(deal_posts)")}
-    for name, ddl in extra.items():
-        if name in cols:
-            continue
-        try:
-            conn.execute(f"ALTER TABLE deal_posts ADD COLUMN {name} {ddl}")
-        except sqlite3.OperationalError as exc:
-            if "duplicate column" not in str(exc).lower():
-                raise
+    _apply_new_columns(conn, _DEAL_POST_EXTRA_COLUMNS, cols)
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_deal_posts_store_date ON deal_posts(store_id, biz_date)"
     )
@@ -933,6 +942,9 @@ def record_login_failure(conn: sqlite3.Connection, username: str, ip: str) -> in
     """记一次失败，满 5 次锁 15 分钟。返回剩余冷却秒数。"""
     begin_immediate(conn)
     now = datetime.now(TZ)
+    # 顺带清理 7 天没动静的行：键是 (用户名, IP) 组合，被扫的用户名/IP 会永久留行
+    stale_cutoff = (now - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("DELETE FROM login_attempts WHERE updated_at < ?", (stale_cutoff,))
     remaining = 0
     for key in _login_keys(username, ip):
         row = conn.execute(
@@ -1058,10 +1070,6 @@ def record_edit(
             note,
         ),
     )
-
-def wipe_daily_data(conn: sqlite3.Connection) -> None:
-    conn.execute("DELETE FROM daily_facts")
-    conn.execute("DELETE FROM daily_reports")
 
 def _seed_metrics(conn: sqlite3.Connection) -> None:
     existing = {row["code"] for row in conn.execute("SELECT code FROM metrics")}
@@ -1427,6 +1435,34 @@ def month_bounds(biz_date: date) -> Tuple[str, str]:
     start = biz_date.replace(day=1).isoformat()
     return start, biz_date.isoformat()
 
+def month_cum_through_many(
+    conn: sqlite3.Connection, store_ids: Sequence[int], biz_date: date
+) -> Dict[int, Dict[str, int]]:
+    """多店整月累计一条 SQL 查完（结算/考核/看板用），语义同逐店调 month_cum_through。
+
+    返回里只有库里有值的指标代码，取数方一律 .get(code, 0)。
+    月内 daily_facts 规模有限，整月聚合后按 store_ids 过滤，避免动态拼 IN 子句。
+    """
+    allowed = {int(i) for i in (store_ids or ())}
+    if not allowed:
+        return {}
+    start, end = month_bounds(biz_date)
+    out: Dict[int, Dict[str, int]] = {}
+    rows = conn.execute(
+        """
+        SELECT store_id, metric_code, SUM(day_value) AS total
+        FROM daily_facts
+        WHERE biz_date>=? AND biz_date<=?
+        GROUP BY store_id, metric_code
+        """,
+        (start, end),
+    )
+    for row in rows:
+        sid = int(row["store_id"])
+        if sid in allowed:
+            out.setdefault(sid, {})[row["metric_code"]] = int(row["total"] or 0)
+    return out
+
 def get_report(conn: sqlite3.Connection, store_id: int, biz_date: date) -> Optional[sqlite3.Row]:
     return conn.execute(
         """
@@ -1617,12 +1653,19 @@ def create_user(
 def set_user_scope(conn: sqlite3.Connection, user_id: int, scope: str) -> None:
     conn.execute("UPDATE users SET scope=? WHERE id=?", (scope.strip(), user_id))
 
-def update_user_pin(conn: sqlite3.Connection, user_id: int, pin: str) -> None:
+def update_user_pin(conn: sqlite3.Connection, user_id: int, pin: str) -> int:
+    """改口令并自增会话纪元：该用户所有旧会话立即失效。
+
+    返回新纪元值。改自己口令的调用方要把当前 session 的纪元同步刷新，
+    否则会把自己也登出。
+    """
     must_change = 1 if is_weak_new_pin(pin) else 0
     conn.execute(
-        "UPDATE users SET pin_hash=?, must_change_pin=? WHERE id=?",
+        "UPDATE users SET pin_hash=?, must_change_pin=?, session_epoch=session_epoch+1 WHERE id=?",
         (hash_pin(pin), must_change, user_id),
     )
+    row = conn.execute("SELECT session_epoch FROM users WHERE id=?", (user_id,)).fetchone()
+    return int(row["session_epoch"] or 0)
 
 def set_user_stores(conn: sqlite3.Connection, user_id: int, store_ids: Iterable[int]) -> None:
     conn.execute("DELETE FROM user_stores WHERE user_id=?", (user_id,))
@@ -1705,6 +1748,10 @@ def store_has_data(conn: sqlite3.Connection, store_id: int) -> bool:
         "advance_posts",
         "invoice_months",
         "bisuan_mobile",
+        # 审计表也引用 stores(id) 且无级联，删业务行后审计行仍在，漏查会让 delete_store 撞外键
+        "report_edits",
+        "deal_edits",
+        "advance_edits",
     )
     for table in tables:
         exists = conn.execute(

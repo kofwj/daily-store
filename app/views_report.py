@@ -28,6 +28,9 @@ from .metrics_seed import (
     to_stored,
 )
 
+# 报表视图允许的最大区间跨度（天），防止超大区间逐日建表
+MAX_REPORT_SPAN_DAYS = 62
+
 
 def register_report(app) -> None:
     @app.route("/report")
@@ -42,6 +45,11 @@ def register_report(app) -> None:
             if view == "week":
                 start = parse_date(request.args.get("start"), today_d - timedelta(days=today_d.weekday()))
                 end = parse_date(request.args.get("end"), start + timedelta(days=6))
+                # 日报只到今天，未来没有数据；钳住区间避免恶意大日期逐日建表撑爆内存
+                end = min(end, today_d)
+                start = min(start, end)
+                if (end - start).days > MAX_REPORT_SPAN_DAYS:
+                    start = end - timedelta(days=MAX_REPORT_SPAN_DAYS)
             elif view == "day":
                 start = parse_date(request.args.get("start"), today_d)
                 end = start
@@ -67,7 +75,7 @@ def register_report(app) -> None:
                 grid[row["metric_code"]][row["biz_date"]] = stored
                 totals[row["metric_code"]] += stored
 
-            # 提交状态 + 区间总天数（工作日口径：周一~周五）
+            # 提交状态 + 区间总天数（自然日）
             submitted = {
                 row["biz_date"]
                 for row in conn.execute(

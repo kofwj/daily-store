@@ -1,18 +1,12 @@
-"""门店 db 模块 — 见 app/db.py 的拆分说明。"""
+"""成交播报数据层：记录、去重、计数、列表、删除与成交审计。"""
 from __future__ import annotations
 
 import sqlite3
 from datetime import date
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from .db_core import _now, begin_immediate, today_local
-
-
-def _store_in(column: str, store_ids: Optional[Sequence[int]]) -> Tuple[str, List[int]]:
-    ids = [int(i) for i in (store_ids or [])]
-    if not ids:
-        return "1=0", []
-    return f"{column} IN ({','.join('?' * len(ids))})", ids
+from .db_core import store_in_clause as _store_in
 
 
 def _deal_payload(

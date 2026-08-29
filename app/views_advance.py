@@ -139,13 +139,6 @@ def register_advance(app) -> None:
                     aid = None
                 biz_date = parse_date(request.form.get("biz_date"), today_d)
                 phone = (request.form.get("phone") or "").strip()
-                try:
-                    broadband = db.parse_money(request.form.get("broadband"))
-                    rebate = db.parse_money(request.form.get("rebate"))
-                    other = db.parse_money(request.form.get("other"))
-                except ValueError:
-                    flash("金额请填数字，可留空。", "error")
-                    return redirect(url_for("advance_page", store_id=store["id"]))
                 note = (request.form.get("note") or "").strip()
                 form = {
                     "advance_id": raw_id,
@@ -156,13 +149,20 @@ def register_advance(app) -> None:
                     "other": request.form.get("other") or "",
                     "note": note,
                 }
+                try:
+                    broadband = db.parse_money(request.form.get("broadband"))
+                    rebate = db.parse_money(request.form.get("rebate"))
+                    other = db.parse_money(request.form.get("other"))
+                except ValueError:
+                    flash("金额请填数字，可留空。", "error")
+                    return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
                 same_month = biz_date.year == today_d.year and biz_date.month == today_d.month
                 if not is_admin and biz_date > today_d:
                     flash("非管理员不能记未来日期。", "error")
-                    return redirect(url_for("advance_page", store_id=store["id"]))
+                    return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
                 if not is_admin and not same_month:
                     flash("门店只能记本月垫资。", "error")
-                    return redirect(url_for("advance_page", store_id=store["id"]))
+                    return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
                 if not is_admin and not phone:
                     flash("门店填写垫资必须带号码。", "error")
                     return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
@@ -189,7 +189,7 @@ def register_advance(app) -> None:
                         flash("芝麻服务费是官方导入的，不能改。", "error")
                     else:
                         flash("这条垫资不存在。", "error")
-                    return redirect(url_for("advance_page", store_id=store["id"]))
+                    return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
                 flash("垫资已保存，可在下方本月记录里核对；填错了点「改」。", "ok")
                 return redirect(url_for("advance_page", store_id=store["id"]))
             return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d, all_stores=all_stores)

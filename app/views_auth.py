@@ -38,11 +38,15 @@ def register_auth(app) -> None:
                     flash(_lock_message(remaining), "error")
                     return render_template("login.html")
                 user = db.get_user_by_username(conn, username)
+                if user is None:
+                    # 不存在的用户名也跑一遍哈希，避免响应时序暴露有效用户名
+                    db.burn_pin_time(pin)
                 if user and db.verify_pin(pin, user["pin_hash"]):
                     db.clear_login_failures(conn, username, ip)
                     db.record_auth_event(conn, user=user, action="login", ip=ip)
                     session.clear()
                     session["user_id"] = user["id"]
+                    session["session_epoch"] = int(user["session_epoch"] or 0)
                     session.permanent = True
                     if int(user["must_change_pin"] or 0):
                         return redirect(url_for("settings", tab="account"))

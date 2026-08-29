@@ -33,7 +33,7 @@ from .helpers import (
     review_preset_key,
     review_template_setting,
     sql_in,
-    store_forecast,
+    store_forecasts,
     store_label,
     values_for_broadcast,
     with_close_rate,
@@ -148,9 +148,9 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
     rules = incentive_rules(conn)
     store_ids = [s["id"] for s in stores]
     month_begin = biz_date.replace(day=1)
-    reported_ids = db.stores_reported_in_month(conn, store_ids, biz_date)
     deal_today_map = db.deal_counts(conn, store_ids, biz_date, biz_date)
     deal_month_map = db.deal_counts(conn, store_ids, month_begin, biz_date)
+    judged_map = store_forecasts(conn, stores, biz_date, rules)
     rows = []
     for store in stores:
         sid = store["id"]
@@ -180,7 +180,6 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
                 }
             )
         rep = db.get_report(conn, sid, biz_date)
-        reported_this_month = sid in reported_ids
         deal_today = with_close_rate(deal_today_map.get(sid, {"total": 0, "closed": 0}))
         deal_month = with_close_rate(deal_month_map.get(sid, {"total": 0, "closed": 0}))
         rows.append(
@@ -189,10 +188,8 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
                 "submitted_today": rep is not None,
                 "submitter_name": rep["submitter_name"] if rep else None,
                 "submitted_at": rep["submitted_at"] if rep else None,
-                "reported_this_month": reported_this_month,
-                "forecast": store_forecast(
-                    conn, store, biz_date, rules, reported=reported_this_month
-                ),
+                "reported_this_month": bool(judged_map[sid].get("reported")),
+                "forecast": judged_map[sid],
                 "kpis": kpis,
                 "day_sum": day_sum,
                 "month_sum": sum(k["month"] for k in kpis),
@@ -607,11 +604,9 @@ def register_admin(app) -> None:
                 "reported": 0,
             }
             rules = incentive_rules(conn)
-            reported_ids = db.stores_reported_in_month(conn, [s["id"] for s in stores], as_of)
+            judged_map = store_forecasts(conn, stores, as_of, rules)
             for store in stores:
-                judged = store_forecast(
-                    conn, store, as_of, rules, reported=store["id"] in reported_ids
-                )
+                judged = judged_map[store["id"]]
                 rows.append(judged)
                 totals["store_reward"] += judged["store_reward"]
                 totals["store_penalty"] += judged["store_penalty"]
@@ -1018,7 +1013,7 @@ def register_admin(app) -> None:
             params += ps
         union_sql = " UNION ALL ".join(parts) if parts else \
             "SELECT 'daily' AS kind, NULL AS id, '' AS biz_date, '' AS edited_at, '' AS note, " \
-            "'{}' AS before_json, '{}' AS after_json, '' AS store_name, '' AS user_name " \
+            "'{}' AS before_json, '{}' AS after_json, '' AS action, '' AS store_name, '' AS user_name " \
             "WHERE 0"
         with db.get_db() as conn:
             total = conn.execute(

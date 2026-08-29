@@ -7,19 +7,11 @@ from app.bulletin import (
     bisuan_total,
     build_row,
     csv_rows,
-    fmt_count,
     scale_color,
     summary,
     totals_row,
     tsv,
 )
-
-
-def test_fmt_count_hides_zero():
-    assert fmt_count(0) == "0"
-    assert fmt_count(4) == "4"
-    assert fmt_count(1.0) == "1"
-    assert fmt_count(1.2) == "1.2"
 
 
 def test_bisuan_adds_high():

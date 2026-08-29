@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from flask import Response, flash, g, redirect, render_template, request, url_for
+from flask import (
+    Response,
+    current_app,
+    flash,
+    g,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 
 from . import broadcast, db, deal
 from .helpers import (
@@ -102,20 +111,23 @@ def register_daily(app) -> None:
                         note="覆盖保存",
                     )
                 flash("已保存，累计已按本月重算。点「复制全文」贴进微信群。", "ok")
-                try:
-                    from . import wecom
-                    broadcast_pairs = values_for_broadcast(conn, store["id"], biz_date)
-                    broadcast_sections = broadcast_compact_sections(conn)
-                    broadcast_text = broadcast.render_broadcast(
-                        broadcast_store_name(store),
-                        biz_date,
-                        broadcast_pairs,
-                        compact=bool(broadcast_sections),
-                        compact_sections=broadcast_sections,
-                    )
-                    wecom.send_text(conn, store, broadcast_text, source="daily")
-                except Exception:  # noqa: BLE001
-                    pass
+                # 先提交放写锁：企微播报的网络调用慢，不能拖住其他店的保存
+                conn.commit()
+                from . import wecom
+
+                if wecom.get_webhook(conn, store):
+                    try:
+                        broadcast_pairs = values_for_broadcast(conn, store["id"], biz_date)
+                        broadcast_text = broadcast.render_broadcast(
+                            broadcast_store_name(store),
+                            biz_date,
+                            broadcast_pairs,
+                            compact=bool(compact_sections),
+                            compact_sections=compact_sections,
+                        )
+                        wecom.send_text(conn, store, broadcast_text, source="daily")
+                    except Exception:  # noqa: BLE001
+                        current_app.logger.exception("wecom daily broadcast failed")
                 return redirect(
                     url_for(
                         "today",
@@ -299,11 +311,12 @@ def register_daily(app) -> None:
                     return redirect(url_for("deal_records", store_id=store["id"]))
                 values["deal_id"] = saved_id
                 editable = True
-                try:
-                    from . import wecom
+                # 先提交放写锁，企微播报的网络调用不拖住其他店保存
+                conn.commit()
+                from . import wecom
+
+                if wecom.get_webhook(conn, store):
                     wecom.send_text(conn, store, text, source="deal")
-                except Exception:  # noqa: BLE001
-                    pass
             month_start = today_d.replace(day=1)
             store_ids = [s["id"] for s in stores]
             today_counts = db.deal_counts(conn, store_ids, today_d, today_d)

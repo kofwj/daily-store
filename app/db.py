@@ -11,6 +11,10 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
+from flask import g, has_app_context
+
 from .db_advances import (  # noqa: F401
     advance_month_totals,
     advance_today_inbox,
@@ -35,6 +39,8 @@ from .db_bisuan_mobile import (  # noqa: F401
 )
 from .db_core import *  # noqa: F401,F403 — 公开 API 由 core 汇集
 from .db_core import _now  # noqa: F401 — 测试直接调用 db._now()
+from .db_core import connect as _connect
+from .db_core import get_db as _plain_get_db
 from .db_deals import (  # noqa: F401
     _deal_payload,
     count_deal_posts,
@@ -46,8 +52,6 @@ from .db_deals import (  # noqa: F401
     record_deal_post,
 )
 from .db_invoice import (  # noqa: F401
-    DETAIL_GROUPS,
-    DETAIL_ITEMS,
     delete_invoice_month,
     get_invoice_month,
     invoice_diff,
@@ -95,3 +99,37 @@ from .wecom import (  # noqa: F401
     send_test,
     send_text,
 )
+
+
+@contextmanager
+def get_db():
+    """请求内复用一条连接（挂在 flask.g 上），替代「一开一关」的原始 get_db。
+
+    一个请求里 load_user / 政策检查 / 品牌设置 / 路由各自开连接是纯浪费，
+    现在整条请求共用一条。语义与原版一致：
+    - 最外层 with 块退出才 commit（异常则 rollback）；嵌套块（如渲染模板时的
+      context processor）只复用连接、不动事务，避免里层把外层未提交的写提前提交
+    - 连接由 web.py 的 teardown_appcontext 统一关闭
+    - 没有 app 上下文（脚本、init_db/migrate、测试直连）时行为与原来完全相同
+    """
+    if not has_app_context():
+        with _plain_get_db() as conn:
+            yield conn
+        return
+    conn = getattr(g, "_db_conn", None)
+    if conn is None:
+        conn = _connect()
+        g._db_conn = conn
+    depth = getattr(g, "_db_depth", 0)
+    g._db_depth = depth + 1
+    try:
+        yield conn
+    except Exception:
+        if depth == 0:
+            conn.rollback()
+        raise
+    else:
+        if depth == 0:
+            conn.commit()
+    finally:
+        g._db_depth = depth

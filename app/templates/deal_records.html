@@ -66,7 +66,7 @@
           <td class="left">{{ (r.created_at or '')[:16] }}</td>
           {% if is_admin %}<td class="left">{{ row_store_name }}</td>{% endif %}
           <td class="left"><a href="{{ url_for('deal_page', store_id=row_store_id, deal_id=r.id) }}">{{ r.model or '—' }}</a></td>
-          <td class="left">{{ r.phone[:-4] + '****' if r.phone|length >= 4 else (r.phone or '—') }}</td>
+          <td class="left">{{ r.phone|mask_phone if r.phone else '—' }}</td>
           <td>{{ r.spend or '—' }}</td>
           <td class="left">{{ r.recommend or '—' }}</td>
           <td class="left">{{ r.opener or r.submitter_name or '—' }}</td>

@@ -156,30 +156,11 @@ const IS_WECHAT = /MicroMessenger/i.test(UA);
 const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(UA);
 
 function setHint(text) {
-  const hint = document.getElementById('copyHint');
-  if (hint) hint.textContent = text;
+  setCopyHint(text);
 }
 
 function copyReviewText() {
-  const el = document.getElementById('reviewText');
-  if (!el) return;
-  const text = el.innerText || el.textContent || '';
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).then(() => setHint('复盘文案已复制，去微信粘贴'))
-      .catch(() => fallbackCopy(el));
-  } else {
-    fallbackCopy(el);
-  }
-}
-
-function fallbackCopy(el) {
-  const range = document.createRange();
-  range.selectNodeContents(el);
-  const sel = window.getSelection();
-  sel.removeAllRanges();
-  sel.addRange(range);
-  try { document.execCommand('copy'); setHint('复盘文案已复制'); }
-  catch (e) { setHint('请手动长按选择复制复盘文字'); }
+  copyText(document.getElementById('reviewText'), '复盘文案已复制，去微信粘贴');
 }
 
 function showPreview(url) {

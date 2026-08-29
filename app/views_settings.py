@@ -10,12 +10,14 @@ from pathlib import Path
 
 from flask import (
     Response,
+    current_app,
     flash,
     g,
     redirect,
     render_template,
     request,
     send_from_directory,
+    session,
     url_for,
 )
 
@@ -129,7 +131,9 @@ def _change_own_pin() -> None:
     if not db.verify_pin(old, g.user["pin_hash"]):
         raise ValueError("当前口令不对")
     with db.get_db() as conn:
-        db.update_user_pin(conn, g.user["id"], new)
+        epoch = db.update_user_pin(conn, g.user["id"], new)
+    # 自己改自己的口令：当前会话刷到新纪元，其他旧会话下线
+    session["session_epoch"] = epoch
 
 
 def _server_status_stats() -> dict:
@@ -533,7 +537,10 @@ def register_settings(app) -> None:
                             if target["role"] == "admin"
                             else db.DEFAULT_FILLER_PIN
                         )
-                        db.update_user_pin(conn, uid, pin)
+                        epoch = db.update_user_pin(conn, uid, pin)
+                        # 被重置人的旧会话随纪元自增一并失效；管理员重置自己则刷新当前会话
+                        if uid == int(g.user["id"]):
+                            session["session_epoch"] = epoch
                         name = target["display_name"] or target["id"]
                         flash(
                             f"已把 {name} 的口令重置为默认 {pin}，下次登录必须改掉。",
@@ -566,6 +573,14 @@ def register_settings(app) -> None:
                             scope = (request.form.get("scope") or "").strip()
                             if not scope:
                                 raise ValueError("区域经理没填区域经理姓名")
+                            # 姓名必须能对上某家启用店的区域经理，不然账号会静默变成零门店
+                            known_managers = {
+                                (s["area_manager"] or "").strip()
+                                for s in conn.execute("SELECT area_manager FROM stores WHERE active=1")
+                                if (s["area_manager"] or "").strip()
+                            }
+                            if scope not in known_managers:
+                                raise ValueError("区域经理姓名要对得上门店档案里的区域经理")
                             db.set_user_scope(conn, uid, scope)
                             db.set_user_stores(conn, uid, [])
                         else:
@@ -713,8 +728,11 @@ def register_settings(app) -> None:
                         flash("考核规则已保存，立即生效", "ok")
                     else:
                         flash("未知操作", "error")
-                except Exception as exc:  # noqa: BLE001 — 表单校验用
+                except ValueError as exc:  # 表单校验/备份恢复的预期错误，原文可给用户看
                     flash(str(exc), "error")
+                except Exception:  # noqa: BLE001 — 其余是服务端问题，原文可能带表名/路径，不外露
+                    current_app.logger.exception("settings action failed: %s", action)
+                    flash("操作失败，请稍后重试；若反复出现请联系管理员查看日志。", "error")
                 return redirect(url_for("settings", tab=tab))
 
             return _render_settings(conn, tab)

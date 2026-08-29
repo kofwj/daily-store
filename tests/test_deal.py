@@ -27,7 +27,7 @@ def test_closed_deal_uses_short_layout():
         note="用户因价格问题来回拉扯，推荐芝麻直降1600，剩余额度办了分期免息，旧手机抵325元",
     )
     assert text.startswith("示例乙店 · 成交\n")
-    assert "S60元气版｜1551440****｜消费99" in text
+    assert "S60元气版｜155****8478｜消费99" in text
     assert "15514408478" not in text
     assert "掌厅已查 · 荐89 · 非中高考" in text
     assert "开口 王店长" in text
@@ -97,7 +97,7 @@ def test_deal_post_counts_by_store(client):
     rec = client.get(f"/deal/records?store_id={sid}").get_data(as_text=True)
     assert "触客记录" in rec
     assert "S60" in rec
-    assert "1551440****" in rec
+    assert "155****8478" in rec
     assert "15514408478" not in rec
     assert "删除" in rec
     with db.get_db() as conn:

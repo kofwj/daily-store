@@ -13,6 +13,9 @@ app/stores_seed_local.py
 .env
 scripts/backup.env
 .pi/
+.mimosa/
+.video_agent/
+.mypy_cache/
 *.xlsx
 !app/invoice_templates/*.xlsx
 *.pdf

@@ -3,18 +3,13 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sqlite3
 from datetime import date
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from .db_core import _now, begin_immediate, month_bounds, today_local
-
-
-def _store_in(column: str, store_ids: Optional[Sequence[int]]) -> Tuple[str, List[int]]:
-    ids = [int(i) for i in (store_ids or [])]
-    if not ids:
-        return "1=0", []
-    return f"{column} IN ({','.join('?' * len(ids))})", ids
+from .db_core import store_in_clause as _store_in
 
 MAX_AMOUNT = 10_000_000.0
 
@@ -30,8 +25,16 @@ def cents_to_yuan(value: Any) -> float:
     return round(int(value or 0) / 100, 2)
 
 
+_THOUSANDS_RE = re.compile(r"^\d{1,3}[,，]\d{3}([,，]\d{3})*(\.\d+)?$")
+
+
 def parse_money(raw: Any) -> float:
-    text = str(raw or "").strip().replace(",", "").replace("，", "")
+    """只剥正规的千分位（1,234）；「12,5」这类含糊输入直接报错，不猜。"""
+    text = str(raw or "").strip()
+    if text and ("," in text or "，" in text):
+        if not _THOUSANDS_RE.fullmatch(text):
+            raise ValueError("金额格式不对")
+        text = text.replace(",", "").replace("，", "")
     if not text:
         return 0.0
     return cents_to_yuan(yuan_to_cents(text))
@@ -211,36 +214,35 @@ def set_advance_paid(
     if not ids:
         return 0
     begin_immediate(conn)
-    placeholders = ",".join("?" * len(ids))
-    rows = list(conn.execute(f"SELECT * FROM advance_posts WHERE id IN ({placeholders})", ids))
-    if paid:
-        day = (paid_at or today_local()).isoformat()
-        cur = conn.execute(
-            f"""
-            UPDATE advance_posts
-            SET paid=1, paid_at=?, paid_by=?, updated_at=?
-            WHERE id IN ({placeholders}) AND paid=0
-            """,
-            [day, user_id, _now(), *ids],
-        )
-    else:
-        cur = conn.execute(
-            f"""
-            UPDATE advance_posts
-            SET paid=0, paid_at='', paid_by=NULL, updated_at=?
-            WHERE id IN ({placeholders}) AND paid=1
-            """,
-            [_now(), *ids],
-        )
-    changed = int(cur.rowcount or 0)
+    now_s = _now()
+    rows = []
+    for i in ids:
+        row = conn.execute("SELECT * FROM advance_posts WHERE id=?", (i,)).fetchone()
+        if row is not None:
+            rows.append(row)
+    day = (paid_at or today_local()).isoformat()
+    changed = 0
     for old in rows:
-        if paid and int(old["paid"] or 0):
+        was_paid = int(old["paid"] or 0)
+        if paid and was_paid:
             continue
-        if not paid and not int(old["paid"] or 0):
+        if not paid and not was_paid:
             continue
+        if paid:
+            conn.execute(
+                "UPDATE advance_posts SET paid=1, paid_at=?, paid_by=?, updated_at=? WHERE id=? AND paid=0",
+                (day, user_id, now_s, old["id"]),
+            )
+        else:
+            # 芝麻导入的记录「导入即已兑」，不进取消兑付；与其他路径对 sesame 的保护一致
+            conn.execute(
+                "UPDATE advance_posts SET paid=0, paid_at='', paid_by=NULL, updated_at=? WHERE id=? AND paid=1 AND source!='sesame'",
+                (now_s, old["id"]),
+            )
         new = conn.execute("SELECT * FROM advance_posts WHERE id=?", (old["id"],)).fetchone()
         _audit(conn, new, user_id=user_id, action="pay" if paid else "unpay",
                before=_snapshot(old, cents=True), after=_snapshot(new, cents=True), note="兑付状态变更")
+        changed += 1
     return changed
 
 
@@ -385,7 +387,8 @@ def advance_month_totals(
         WHERE biz_date>=? AND biz_date<=? AND store_id IN ({placeholders})
         GROUP BY store_id
         """,
-        [start, end, *ids],
+        # date 一律转 ISO 字符串：默认 adapter 自 Python 3.12 起已弃用
+        [str(start), str(end), *ids],
     )
     for row in rows:
         sid = int(row["store_id"])

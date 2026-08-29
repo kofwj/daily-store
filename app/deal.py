@@ -23,8 +23,13 @@ def is_today_deal(row: Any, today: date) -> bool:
 
 
 def mask_phone(phone: str, *, hide_tail: bool = True) -> str:
+    """统一打码口径：11 位手机号 138****0000；其他长度去尾打码，不足 4 位原样。"""
     raw = (phone or "").strip()
-    if not hide_tail or len(raw) < 4:
+    if not hide_tail or not raw:
+        return raw
+    if len(raw) == 11 and raw.isdigit():
+        return raw[:3] + "****" + raw[7:]
+    if len(raw) < 4:
         return raw
     return raw[:-4] + "****"
 

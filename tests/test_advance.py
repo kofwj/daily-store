@@ -50,7 +50,9 @@ def test_filler_saves_and_admin_pays(client):
         follow_redirects=True,
     ).get_data(as_text=True)
     assert "垫资已保存" in saved
-    assert "13900001111" in saved
+    # 店员视角号码打码
+    assert "139****1111" in saved
+    assert "13900001111" not in saved
     assert "未兑" in saved
     with db.get_db() as conn:
         aid = conn.execute("SELECT id FROM advance_posts WHERE store_id=?", (sid,)).fetchone()["id"]
@@ -292,7 +294,9 @@ def test_store_sees_month_list_and_admin_sees_today_inbox(client):
     )
     page = client.get("/advance").get_data(as_text=True)
     assert "本月记录" in page
-    assert "13900003333" in page
+    # 店员视角号码打码
+    assert "139****3333" in page
+    assert "13900003333" not in page
     assert "改" in page and "删" in page
     client.get("/logout")
     client.post("/login", data={"username": "admin", "pin": "123456"})

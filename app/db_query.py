@@ -1,11 +1,11 @@
-"""门店 db 模块 — 见 app/db.py 的拆分说明。"""
+"""门店查询层：月累计、日值、保存、校准、区间事实与看板聚合。"""
 from __future__ import annotations
 
 import sqlite3
 from datetime import date
 from typing import Any, Dict, Iterable, List, Sequence
 
-from .db_core import _now, get_report, list_metrics, month_bounds, record_edit
+from .db_core import _now, begin_immediate, get_report, list_metrics, month_bounds, record_edit
 from .metrics_seed import to_stored
 
 
@@ -72,6 +72,8 @@ def save_daily(
     compact: bool = False,
     note: str = "",
 ) -> None:
+    # 最高频写路径：先占写锁再写，避免并发保存时 DEFERRED 升级写锁偶发 locked
+    begin_immediate(conn)
     codes = {row["code"] for row in list_metrics(conn)}
     day = biz_date.isoformat()
     conn.execute(
@@ -141,6 +143,7 @@ def set_day_value(
     note: str = "校准单元格",
 ) -> None:
     """只改某一天某一个指标，不动其它格子。"""
+    begin_immediate(conn)
     codes = {row["code"] for row in list_metrics(conn)}
     if metric_code not in codes:
         raise ValueError("没有这个指标")
@@ -246,7 +249,7 @@ def stores_reported_in_month(
             SELECT DISTINCT store_id FROM daily_reports
             WHERE biz_date>=? AND biz_date<=? AND store_id IN ({placeholders})
             """,
-            [start, end, *ids],
+            [str(start), str(end), *ids],
         )
     }
 

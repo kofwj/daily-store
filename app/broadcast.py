@@ -63,10 +63,6 @@ def render_broadcast(
     return "\n".join(lines) + "\n"
 
 
-def month_start(biz_date: date) -> date:
-    return biz_date.replace(day=1)
-
-
 def _sum_codes(values: Mapping[str, DayCum], codes: Iterable[str]) -> DayCum:
     day = sum(int((values.get(code) or (0, 0))[0] or 0) for code in codes)
     cum = sum(int((values.get(code) or (0, 0))[1] or 0) for code in codes)
