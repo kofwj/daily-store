@@ -778,12 +778,37 @@ table.bulletin tr.wait td.flag-no { background: #ffedd5; }
 .role-chip.fill { background: #eff8ff; color: #175cd3; }
 .role-chip.view { background: #ecfdf3; color: #067647; }
 .role-chip.city { background: #ffedd5; color: #b54708; }
-.advisor-score-table td { vertical-align: middle; }
-.adv-input { width: 100%; min-width: 64px; height: 32px; padding: 4px 8px; font-size: 13px; }
-.adv-num { text-align: center; }
-.adv-coeff { text-align: center; font-variant-numeric: tabular-nums; }
-.adv-stores summary { cursor: pointer; color: var(--info); white-space: nowrap; }
-.adv-stores ul { margin: 6px 0 0; padding-left: 16px; color: var(--muted); font-size: 12px; }
+.adv-cards { display: grid; gap: 12px; }
+.adv-card { margin-bottom: 0; }
+.adv-card-head {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  margin-bottom: 8px;
+}
+.adv-card-head h2 { margin: 0; font-size: 18px; }
+.adv-card-head p { margin: 4px 0 0; }
+.adv-card-final { text-align: right; }
+.adv-card-final strong { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+.adv-store-lines { margin: 0 0 12px; padding-left: 18px; color: var(--muted); font-size: 13px; }
+.adv-scores {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
+}
+.adv-score {
+  display: grid; gap: 6px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fafafa;
+}
+.adv-score.is-mine { background: #fff; border-color: #111827; }
+.adv-score span { font-size: 12px; color: var(--muted); }
+.adv-score strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+.adv-score input { height: 40px; font-size: 18px; text-align: center; }
+.adv-admin {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px;
+}
+.adv-admin .span-2 { grid-column: 1 / -1; }
+.adv-admin p { margin: 0; }
+@media (max-width: 800px) {
+  .adv-scores, .adv-admin { grid-template-columns: 1fr; }
+  .adv-admin .span-2 { grid-column: auto; }
+}
 .settings-main .narrow { max-width: 360px; }
 .rules-form { max-width: 620px; }
 .rules-form h2 { margin-top: 18px; }

@@ -1,14 +1,23 @@
 {% extends "base.html" %}
-{% block title %}顾问打分{% endblock %}
+{% block title %}{% if self_advisor and not edit_col %}我的打分{% else %}顾问打分{% endif %}{% endblock %}
 {% block body %}
+{% set col_label = {
+  'score_manager': '店长打分',
+  'score_area': '区域经理打分',
+  'score_city': '地市负责人打分',
+  'all': '三方打分'
+} %}
 <div class="page-head">
   <div class="page-title">
-    <h1>顾问打分</h1>
+    <h1>{% if self_advisor and not edit_col %}我的打分{% else %}顾问打分{% endif %}</h1>
     <p class="muted">
-      截至 {{ as_of }}。主推奖惩按当月考核自动汇总（名下店的「罚顾问」合计），
-      奖惩折算 = 主推奖惩 ÷ {{ divisor }}。评分系数 =（店长×0.4 + 区域经理×0.3 + 地市负责人×0.3）÷ 10；
-      最终系数 =（基础系数 + 折算）× 评分系数。三方都打才出系数。
-      {% if edit_col %}你只能填自己那一列，其他列只读。{% else %}填报员只看，不能打分。{% endif %}
+      {% if self_advisor and not edit_col %}
+      {{ month.year }}年{{ month.month }}月，店长 / 区域经理 / 地市负责人给你的分。三方都打才会出系数。
+      {% elif edit_col %}
+      {{ month.year }}年{{ month.month }}月，你填「{{ col_label.get(edit_col, '打分') }}」。0–10 分，留空=未打。
+      {% else %}
+      运营商顾问用自己的姓名登录，可看各岗位给自己的分。
+      {% endif %}
     </p>
   </div>
   <form method="get" class="page-filters">
@@ -23,80 +32,74 @@
 </div>
 
 {% if rows %}
-<form method="post" class="card" style="overflow:auto">
+<form method="post">
   <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
   <input type="hidden" name="month" value="{{ month.strftime('%Y-%m') }}">
-  <table class="data advisor-score-table">
-    <thead>
-      <tr>
-        <th>顾问</th>
-        <th>工作性质</th>
-        <th>基础系数</th>
-        <th>服务门店</th>
-        <th>主推奖惩</th>
-        <th>奖惩折算</th>
-        <th>店长打分</th>
-        <th>区域经理打分</th>
-        <th>地市负责人打分</th>
-        <th>评分系数</th>
-        <th>最终系数</th>
-        {% if is_admin %}<th>备注</th>{% endif %}
-      </tr>
-    </thead>
-    <tbody>
-      {% for r in rows %}
-      {% set i = loop.index0 %}
-      <tr>
-        <td>
-          <input type="hidden" name="advisor_{{ i }}" value="{{ r.advisor_name }}">
-          <strong>{{ r.advisor_name }}</strong>
-          {% if r.updated_at %}<div class="muted">改于 {{ r.updated_at[:16] }}</div>{% endif %}
-        </td>
-        <td>
-          {% if is_admin %}
-          <input name="wt_{{ i }}" value="{{ r.work_type }}" maxlength="20" class="adv-input">
-          {% else %}{{ r.work_type }}{% endif %}
-        </td>
-        <td>
-          {% if is_admin %}
-          <input name="bc_{{ i }}" value="{{ r.base_coeff }}" inputmode="decimal" class="adv-input adv-num">
-          {% else %}{{ r.base_coeff }}{% endif %}
-        </td>
-        <td>
-          <details class="adv-stores">
-            <summary>{{ r.store_labels|length }} 家</summary>
-            <ul>
-              {% for s in r.store_rows %}
-              <li>{{ s.label }} · {{ s.judge_label }} · 罚顾问 {{ s.advisor_penalty or '—' }}</li>
-              {% endfor %}
-            </ul>
-          </details>
-        </td>
-        <td>{{ r.penalty_total }}</td>
-        <td>{{ r.fold_coeff }}</td>
-        <td><input type="number" name="sm_{{ i }}" value="{{ r.score_manager if r.score_manager is not none else '' }}" min="0" max="10" step="1" class="adv-input adv-num" {% if edit_col not in ('all', 'score_manager') %}disabled{% endif %}></td>
-        <td><input type="number" name="sa_{{ i }}" value="{{ r.score_area if r.score_area is not none else '' }}" min="0" max="10" step="1" class="adv-input adv-num" {% if edit_col not in ('all', 'score_area') %}disabled{% endif %}></td>
-        <td><input type="number" name="sc_{{ i }}" value="{{ r.score_city if r.score_city is not none else '' }}" min="0" max="10" step="1" class="adv-input adv-num" {% if edit_col not in ('all', 'score_city') %}disabled{% endif %}></td>
-        <td class="adv-coeff">{{ r.rate if r.rate is not none else '—' }}</td>
-        <td class="adv-coeff"><strong>{{ r.final if r.final is not none else '—' }}</strong></td>
-        {% if is_admin %}<td><input name="note_{{ i }}" value="{{ r.note }}" maxlength="200" class="adv-input"></td>{% endif %}
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="adv-cards">
+    {% for r in rows %}
+    {% set i = loop.index0 %}
+    <article class="card adv-card">
+      <input type="hidden" name="advisor_{{ i }}" value="{{ r.advisor_name }}">
+      <header class="adv-card-head">
+        <div>
+          <h2>{{ r.advisor_name }}</h2>
+          <p class="muted">{{ r.store_labels|join('、') }} · {{ r.store_labels|length }} 家</p>
+        </div>
+        {% if r.rate is not none %}
+        <div class="adv-card-final">
+          <span class="muted">最终系数</span>
+          <strong>{{ r.final }}</strong>
+        </div>
+        {% endif %}
+      </header>
+      <ul class="adv-store-lines">
+        {% for s in r.store_rows %}
+        <li>{{ s.label }} · {{ s.judge_label }}{% if s.advisor_penalty %} · 罚顾问 {{ s.advisor_penalty }}{% endif %}</li>
+        {% endfor %}
+      </ul>
+      <div class="adv-scores">
+        {% for col, key, title in [('score_manager','sm','店长'), ('score_area','sa','区域经理'), ('score_city','sc','地市负责人')] %}
+        {% set val = r[col] %}
+        {% set can = edit_col in ('all', col) %}
+        <label class="adv-score {{ 'is-mine' if can else '' }}">
+          <span>{{ title }}</span>
+          {% if can %}
+          <input type="number" name="{{ key }}_{{ i }}" value="{{ val if val is not none else '' }}" min="0" max="10" step="1" inputmode="numeric" placeholder="未打">
+          {% else %}
+          <strong>{{ val if val is not none else '未打' }}</strong>
+          {% endif %}
+        </label>
+        {% endfor %}
+      </div>
+      {% if is_admin %}
+      <div class="adv-admin">
+        <p><label>工作性质</label><input name="wt_{{ i }}" value="{{ r.work_type }}" maxlength="20"></p>
+        <p><label>基础系数</label><input name="bc_{{ i }}" value="{{ r.base_coeff }}" inputmode="decimal"></p>
+        <p class="span-2"><label>备注</label><input name="note_{{ i }}" value="{{ r.note }}" maxlength="200"></p>
+      </div>
+      <p class="muted">主推奖惩 {{ r.penalty_total }} · 折算 {{ r.fold_coeff }} · 评分系数 {{ r.rate if r.rate is not none else '—' }}</p>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
   {% if edit_col %}
   <div class="toolbar">
     <button type="submit">保存打分</button>
-    <span class="muted">
-      {% if edit_col == 'score_manager' %}你填的是「店长打分」列。{% elif edit_col == 'score_area' %}你填的是「区域经理打分」列。{% elif edit_col == 'score_city' %}你填的是「地市负责人打分」列。{% else %}管理员可改全部列。留空 = 未打。{% endif %}
-    </span>
   </div>
   {% endif %}
 </form>
 {% else %}
 <div class="card empty-state">
+  {% if self_advisor and not edit_col %}
+  <h2>这个月还没有你的打分</h2>
+  <p class="muted">店长、区域经理、地市负责人打完后会出现在这里。</p>
+  {% elif edit_col %}
   <h2>这个月还没有顾问</h2>
   <p class="muted">顾问来自门店档案里的「运营商顾问」。给门店配上顾问后，这里自动出现。</p>
+  {% else %}
+  <h2>没有可看的打分</h2>
+  <p class="muted">运营商顾问用自己的姓名登录，可看各岗位给自己的分。店长 / 区域经理 / 地市负责人在这里给顾问打分。</p>
+  {% endif %}
 </div>
 {% endif %}
 {% endblock %}

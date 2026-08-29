@@ -521,6 +521,20 @@ def advisor_edit_column(user) -> str:
     return ""
 
 
+def named_advisor(conn, user) -> str:
+    """显示名对上某家启用店的运营商顾问，则返回该顾问名。"""
+    name = ""
+    if user is not None:
+        name = (user["display_name"] or "").strip()
+    if not name:
+        return ""
+    row = conn.execute(
+        "SELECT 1 FROM stores WHERE advisor_name=? AND active=1 LIMIT 1",
+        (name,),
+    ).fetchone()
+    return name if row else ""
+
+
 def build_diff(before: Dict[str, int], after: Dict[str, int], names=None) -> str:
     """把 before/after 值差异拼成可读文本，如「手机销量 1→7」"""
     if names is None:

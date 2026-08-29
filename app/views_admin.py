@@ -22,6 +22,7 @@ from .helpers import (
     deal_diff,
     incentive_rules,
     login_required,
+    named_advisor,
     pagination,
     parse_date,
     readonly_required,
@@ -663,9 +664,10 @@ def register_admin(app) -> None:
         month_text = month.strftime("%Y-%m")
         edit_col = advisor_edit_column(g.user)
         with db.get_db() as conn:
+            me = named_advisor(conn, g.user)
             if request.method == "POST":
                 if not edit_col:
-                    flash("填报员不能打分", "error")
+                    flash("没有打分权限", "error")
                 else:
                     try:
                         _save_advisor_scores(conn, month_text, edit_col)
@@ -675,6 +677,11 @@ def register_admin(app) -> None:
                 return redirect(url_for("advisors_page", month=month_text))
             stores = accessible_stores(conn)
             rows = _advisor_table(conn, stores, as_of)
+            if me and not edit_col:
+                rows = [r for r in rows if r["advisor_name"] == me]
+                if not rows:
+                    all_stores = db.list_all_stores(conn)
+                    rows = [r for r in _advisor_table(conn, all_stores, as_of) if r["advisor_name"] == me]
             return render_template(
                 "advisors.html",
                 month=month,
@@ -683,6 +690,7 @@ def register_admin(app) -> None:
                 edit_col=edit_col,
                 divisor=advisor_penalty_divisor(conn),
                 is_admin=g.user["role"] == "admin",
+                self_advisor=me,
             )
 
     @app.route("/advisors.xlsx")

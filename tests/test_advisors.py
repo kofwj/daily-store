@@ -51,7 +51,7 @@ def test_advisors_page_empty_then_appears(app_client):
     _set_advisor()
     page = app_client.get("/advisors").get_data(as_text=True)
     assert "任阳" in page
-    assert "店长×0.4" in page
+    assert "adv-card" in page
 
 
 def test_admin_saves_scores_and_shows_coeff(app_client):
@@ -93,7 +93,7 @@ def test_filler_cannot_score(app_client):
         data={"month": month, "advisor_0": "任阳", "sm_0": "10"},
         follow_redirects=True,
     )
-    assert "填报员不能打分" in resp.get_data(as_text=True)
+    assert "没有打分权限" in resp.get_data(as_text=True)
     with db.get_db() as conn:
         assert db.list_advisor_scores(conn, month) == []
 
@@ -134,6 +134,25 @@ def test_city_scores_only_city_column_and_own_city(app_client):
         follow_redirects=True,
     )
     assert "只能给自己可见范围内的顾问打分" in steal.get_data(as_text=True)
+
+
+def test_advisor_sees_own_three_scores(app_client):
+    _set_advisor("store-alpha", "示例甲店")
+    month = db.today_local().strftime("%Y-%m")
+    with db.get_db() as conn:
+        db.upsert_advisor_score(
+            conn,
+            month,
+            "示例甲店",
+            {"score_manager": 10, "score_area": 9, "score_city": 8},
+            1,
+        )
+    app_client.post("/login", data={"username": "alpha", "pin": "123456"})
+    page = app_client.get("/advisors").get_data(as_text=True)
+    assert "我的打分" in page
+    assert "店长" in page and "区域经理" in page and "地市负责人" in page
+    assert "保存打分" not in page
+    assert "邻市顾问" not in page
 
 
 def test_xlsx_is_admin_only(app_client):
