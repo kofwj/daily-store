@@ -793,6 +793,17 @@ table.bulletin tr.wait td.flag-no { background: #ffedd5; }
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
 }
 .adv-scores.one { grid-template-columns: minmax(0, 220px); }
+body.advisors-page .wrap { padding-bottom: calc(88px + var(--safe-bottom)); }
+body.advisors-page .sticky-save {
+  display: block;
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  padding: 10px 12px calc(10px + var(--safe-bottom));
+  background: rgba(255,255,255,.94);
+  border-top: 1px solid var(--line);
+  z-index: 30;
+}
+body.advisors-page .sticky-save button { width: 100%; height: 46px; font-size: 16px; }
 .adv-score {
   display: grid; gap: 6px; padding: 10px 12px;
   border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fafafa;

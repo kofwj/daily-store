@@ -52,6 +52,7 @@ def test_advisors_page_empty_then_appears(app_client):
     page = app_client.get("/advisors").get_data(as_text=True)
     assert "任阳" in page
     assert "adv-card" in page
+    assert "保存打分" in page
 
 
 def test_admin_saves_scores_and_shows_coeff(app_client):
@@ -119,6 +120,7 @@ def test_city_scores_only_city_column_and_own_city(app_client):
     assert 'name="sc_0"' in page
     assert 'name="sm_0"' not in page
     assert 'name="sa_0"' not in page
+    assert "保存打分" in page
     month = db.today_local().strftime("%Y-%m")
     resp = app_client.post(
         "/advisors",

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{% if self_advisor and not edit_col %}我的打分{% else %}顾问打分{% endif %}{% endblock %}
+{% block body_class %}advisors-page{% endblock %}
 {% block body %}
 {% set col_label = {
   'score_manager': '店长打分',
@@ -14,7 +15,7 @@
       {% if self_advisor and not edit_col %}
       {{ month.year }}年{{ month.month }}月，店长 / 区域经理 / 地市负责人给你的分。三方都打才会出系数。
       {% elif edit_col %}
-      {{ month.year }}年{{ month.month }}月，你填「{{ col_label.get(edit_col, '打分') }}」。0–10 分，留空=未打。
+      {{ month.year }}年{{ month.month }}月，你填「{{ col_label.get(edit_col, '打分') }}」。0–10 分，留空=未打。填完点「保存打分」。
       {% else %}
       运营商顾问用自己的姓名登录，可看各岗位给自己的分。
       {% endif %}
@@ -25,6 +26,9 @@
       <span>月份</span>
       <input type="month" name="month" value="{{ month.strftime('%Y-%m') }}" onchange="this.form.submit()">
     </label>
+    {% if edit_col and rows %}
+    <button class="btn" type="submit" form="advScoreForm">保存打分</button>
+    {% endif %}
     {% if is_admin %}
     <a class="btn ghost" href="{{ url_for('advisors_xlsx', month=month.strftime('%Y-%m')) }}">导出工资系数表</a>
     {% endif %}
@@ -32,7 +36,7 @@
 </div>
 
 {% if rows %}
-<form method="post">
+<form method="post" id="advScoreForm">
   <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
   <input type="hidden" name="month" value="{{ month.strftime('%Y-%m') }}">
   <div class="adv-cards">
@@ -86,7 +90,7 @@
     {% endfor %}
   </div>
   {% if edit_col %}
-  <div class="toolbar">
+  <div class="toolbar sticky-save">
     <button type="submit">保存打分</button>
   </div>
   {% endif %}
