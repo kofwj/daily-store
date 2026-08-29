@@ -57,10 +57,12 @@
         <li>{{ s.label }} · {{ s.judge_label }}{% if s.advisor_penalty %} · 罚顾问 {{ s.advisor_penalty }}{% endif %}</li>
         {% endfor %}
       </ul>
-      <div class="adv-scores">
-        {% for col, key, title in [('score_manager','sm','店长'), ('score_area','sa','区域经理'), ('score_city','sc','地市负责人')] %}
+      {% set score_cols = [('score_manager','sm','店长'), ('score_area','sa','区域经理'), ('score_city','sc','地市负责人')] %}
+      <div class="adv-scores {{ 'one' if edit_col and edit_col != 'all' else '' }}">
+        {% for col, key, title in score_cols %}
         {% set val = r[col] %}
         {% set can = edit_col in ('all', col) %}
+        {% if can or not edit_col %}
         <label class="adv-score {{ 'is-mine' if can else '' }}">
           <span>{{ title }}</span>
           {% if can %}
@@ -69,6 +71,7 @@
           <strong>{{ val if val is not none else '未打' }}</strong>
           {% endif %}
         </label>
+        {% endif %}
         {% endfor %}
       </div>
       {% if is_admin %}

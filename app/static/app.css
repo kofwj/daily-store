@@ -792,6 +792,7 @@ table.bulletin tr.wait td.flag-no { background: #ffedd5; }
 .adv-scores {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
 }
+.adv-scores.one { grid-template-columns: minmax(0, 220px); }
 .adv-score {
   display: grid; gap: 6px; padding: 10px 12px;
   border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fafafa;

@@ -117,6 +117,8 @@ def test_city_scores_only_city_column_and_own_city(app_client):
     assert "任阳" in page
     assert "邻市顾问" not in page
     assert 'name="sc_0"' in page
+    assert 'name="sm_0"' not in page
+    assert 'name="sa_0"' not in page
     month = db.today_local().strftime("%Y-%m")
     resp = app_client.post(
         "/advisors",
