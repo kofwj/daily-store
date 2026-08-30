@@ -3,7 +3,7 @@ import io
 import openpyxl
 
 from app import db
-from app.deal import form_values, render_deal
+from app.deal import form_values, mask_phone, render_deal
 from app.helpers import close_rate, deal_diff, with_close_rate
 
 
@@ -284,15 +284,9 @@ def test_record_deal_post_logs_create_and_update(tmp_db):
         assert json.loads(rows[2]["after_json"]) == {}
 
 
-def test_edits_page_filters_by_kind(tmp_db):
+def test_edits_page_filters_by_kind(tmp_db, admin_client):
     """修改审计里能看到成交播报：按类型筛选 + 全部同时显示。"""
-    from app import db
-    from app.web import create_app
-
-    app = create_app()
-    app.config["TESTING"] = True
-    c = app.test_client()
-    c.post("/login", data={"username": "admin", "pin": "123456"})
+    c = admin_client
     with db.get_db() as conn:
         sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
         uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
@@ -426,3 +420,11 @@ def test_deal_unknown_id_raises_not_overwrite(tmp_db):
                 deal_id=999999,
                 biz_date=db.today_local(),
             )
+
+
+def test_mask_phone_standard_format():
+    """打码统一成 138****0000，短号原样兜底。"""
+    assert mask_phone("13812345678") == "138****5678"
+    assert mask_phone("95") == "95"
+    assert mask_phone("1234") == "****"
+

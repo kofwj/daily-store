@@ -231,8 +231,8 @@ async function makeShot() {
   setHint('正在截图…');
   const canvas = await renderBulletinCanvas();
   const blob = await canvasToBlob(canvas);
-  const url = URL.createObjectURL(blob);
-  showPreview(url);
+  // 预览用 data URL：部分浏览器环境里 blob: 地址会失效导致预览图 0×0 不显示
+  showPreview(canvas.toDataURL("image/png"));
   return blob;
 }
 

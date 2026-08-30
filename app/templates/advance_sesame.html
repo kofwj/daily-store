@@ -12,10 +12,14 @@
 <div class="card">
   <form method="post" action="{{ url_for('advance_sesame_preview') }}" enctype="multipart/form-data">
     <p>
-      <label>选择文件</label>
+      <label>芝麻服务费明细（必传）</label>
       <input type="file" name="sesame_file" accept=".xlsx" required>
     </p>
-    <p class="muted">只支持 .xlsx，不超过 4 MiB。导入后进垫资台账，名称「芝麻服务费」，店员不能改删。导入完可去「芝麻周报」按周贴群。</p>
+    <p>
+      <label>芝麻订单信息（选传，用于按档位分类）</label>
+      <input type="file" name="order_file" accept=".xlsx">
+    </p>
+    <p class="muted">只支持 .xlsx，不超过 4 MiB。明细进垫资台账，名称「芝麻服务费」，店员不能改删。订单信息按订单号匹配档位（小天才直降 / AI手机 / 新用户芝麻直降），不传则档位统计进「未分类」，之后可单独补传。导入完可去「芝麻周报」按周贴群。</p>
     <button type="submit">预览</button>
     <a class="btn ghost" href="{{ url_for('sesame_week_page') }}">芝麻周报</a>
     <a class="btn ghost" href="{{ url_for('advance_page') }}">返回垫资</a>
@@ -27,6 +31,16 @@
     <strong>预览：{{ preview.file_name }}</strong>
     <span class="muted">共 {{ preview.row_count }} 行 · 可导入 <strong>{{ preview.ready_count }}</strong> 笔 · 合计 <strong>{{ '%.2f'|format(preview.ready_total) }}</strong> 元</span>
   </div>
+
+  {% if preview.order_error %}
+  <p class="warn" style="margin-top:10px">{{ preview.order_error }}</p>
+  {% endif %}
+  {% if preview.tier_preview %}
+  <p class="muted" style="margin-top:10px">
+    档位覆盖（{{ preview.order_file_name or '订单信息' }}）：
+    {% for name, n in preview.tier_preview.items() %}<span class="chip">{{ name }} {{ n }} 笔</span> {% endfor %}
+  </p>
+  {% endif %}
 
   {% if preview.ready %}
   <h3 style="margin-top:12px">可导入（{{ preview.ready_count }} 笔，合计 {{ '%.2f'|format(preview.ready_total) }} 元）</h3>

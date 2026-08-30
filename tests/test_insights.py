@@ -1,6 +1,7 @@
 from datetime import date
 
-from app.insights import build_insights, prev_week_span, week_span
+from app import db
+from app.insights import build_deviation_board, build_insights, prev_week_span, week_span
 from app.metrics_seed import effective_month_bisuan
 
 
@@ -126,3 +127,111 @@ def test_insights_page_admin_only(app_client):
     assert "复制文案" not in page
     filtered = app_client.get("/insights?advisor=yes").get_data(as_text=True)
     assert 'value="yes"' in filtered
+
+
+def test_report_ignores_inactive_metric_facts(admin_client):
+    """即使某天留下了停用指标的 day 值，报表也不能崩，应忽略。"""
+    at = date.today().isoformat()
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        # 停用一个指标并故意留下它的历史 day 值
+        conn.execute("UPDATE metrics SET active=0 WHERE code='watch_pack'")
+        conn.execute(
+            "INSERT OR REPLACE INTO daily_facts(biz_date, store_id, metric_code, day_value) VALUES (?,?,?,?)",
+            (at, sid, "watch_pack", 3),
+        )
+        # 再留一个当前活跃指标的 day 值
+        conn.execute(
+            "INSERT OR REPLACE INTO daily_facts(biz_date, store_id, metric_code, day_value) VALUES (?,?,?,?)",
+            (at, sid, "phone_sales", 7),
+        )
+    resp = admin_client.get("/report")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "手机销量" in body
+
+
+def test_week_report_range_clamped(admin_client):
+    """周报区间钳到今天且最大 62 天，恶意大日期不能撑爆内存。"""
+    page = admin_client.get("/report?view=week&start=2000-01-01&end=9999-12-31").get_data(as_text=True)
+    assert "9999" not in page
+    assert "2000-01" not in page
+    # 起点在未来：起点跟着钳后的终点走，不出现倒挂区间
+    page = admin_client.get("/report?view=week&start=9999-12-01&end=9999-12-31").get_data(as_text=True)
+    assert "9999" not in page
+
+
+def test_board_shows_deals_and_exports_xlsx(admin_client):
+    """看板含成交列，点店名进报表，当前视图可导出 Excel。"""
+    from io import BytesIO
+
+    import openpyxl
+
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        db.save_daily(
+            conn,
+            store_id=sid,
+            biz_date=date.today(),
+            values={"ai_contract": 1, "bisuan": 2},
+            user_id=uid,
+        )
+        db.record_deal_post(
+            conn,
+            store_id=sid,
+            user_id=uid,
+            closed=True,
+            model="S60",
+            phone="15500001111",
+            spend="99",
+        )
+    page = admin_client.get("/board").get_data(as_text=True)
+    assert "触客" in page
+    assert "成交/触客" in page
+    assert "示例甲店" in page
+    assert "/report?" in page
+    r = admin_client.get("/board.xlsx?view=today")
+    assert r.status_code == 200
+    assert r.mimetype == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert "filename=board_today_" in r.headers.get("Content-Disposition", "")
+    wb = openpyxl.load_workbook(BytesIO(r.get_data()))
+    header = [cell.value for cell in wb.active[1]]
+    assert header[:3] == ["排名", "门店", "地市"]
+    assert "触客" in header and "成功率" in header
+
+
+def test_build_deviation_board_sorts_and_signs():
+    """偏差榜：按绝对值降序，少报=正、多报=负，无移动的店排除。"""
+    stores = [
+        {"id": 1, "short_name": "甲店", "name": "甲店", "city": "南通"},
+        {"id": 2, "short_name": "乙店", "name": "乙店", "city": "泰州"},
+        {"id": 3, "short_name": "丙店", "name": "丙店", "city": ""},
+    ]
+    facts = {
+        1: {"bisuan": 100, "bisuan_high": 20},  # 填报120 < 移动150 → +30 少报
+        2: {"bisuan": 200, "bisuan_high": 0},   # 填报200 > 移动150 → -50 多报
+    }
+    mobile = {1: 150, 2: 150}
+    rows = build_deviation_board(stores=stores, month_facts=facts, mobile_bisuan=mobile)
+    assert [r["id"] for r in rows] == [2, 1]  # |−50| 排前
+    by_id = {r["id"]: r for r in rows}
+    assert by_id[1]["diff"] == 30 and by_id[1]["under"] is True
+    assert by_id[2]["diff"] == -50 and by_id[2]["over"] is True
+    assert 3 not in by_id  # 无移动校准数，排除
+
+
+def test_deviation_page_admin_only(admin_client):
+    """偏差路由是管理员专属，且能渲染（单位是个，不是元）。"""
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores LIMIT 1").fetchone()["id"]
+        db.save_bisuan_mobile(
+            conn, store_id=sid, month="2026-08", value_tenths=120, asof=date.today()
+        )
+    r = admin_client.get("/deviation?month=2026-08-01")
+    html = r.get_data(as_text=True)
+    assert r.status_code == 200
+    assert "填报偏差榜" in html
+    assert "温差" in html
+    assert "元" not in html  # 计数单位是个，不是金额
+    assert "少报" in html and "多报" in html

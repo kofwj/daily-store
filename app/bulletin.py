@@ -206,7 +206,6 @@ def build_row(
         "month_bisuan_sys_asof": "" if month_bisuan_sys_asof in (None, "") else fmt_metric("bisuan", month_bisuan_sys_asof),
         "month_bisuan_diff": "",
         "month_bisuan_diff_signed": "",
-        "month_bisuan_diff_color": "",
         "month_bisuan_gap_class": "",
         "day_coin_color": "",
         "day_ai_color": "",
@@ -259,7 +258,6 @@ def apply_scales(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             else:
                 gap_cls = "bisuan-gap-big-up" if diff > 0 else "bisuan-gap-big-down"
             row["month_bisuan_gap_class"] = gap_cls
-            row["month_bisuan_diff_color"] = ""
         if not row.get("submitted"):
             # 未交行不套热力，避免和已交的浅色格子撞在一起
             wait = ""

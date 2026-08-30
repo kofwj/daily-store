@@ -21,7 +21,7 @@ from flask import (
     url_for,
 )
 
-from . import backup, bulletin, db, db_core, incentive, invoice
+from . import backup, bulletin, db, db_core, incentive, invoice, sesame
 from .helpers import (
     admin_required,
     ascii_filename,
@@ -31,6 +31,7 @@ from .helpers import (
     login_required,
     parse_brand_form,
     parse_company_names,
+    parse_int,
     review_template_setting,
     store_label,
 )
@@ -222,10 +223,7 @@ def _render_settings(conn, tab: str):
     elif not raw_sid and stores:
         current_store = stores[0]
     elif stores:
-        try:
-            sid = int(raw_sid)
-        except ValueError:
-            sid = 0
+        sid = parse_int(raw_sid, 0)
         current_store = store_by_id.get(sid)
         store_selection_invalid = current_store is None
     people = []
@@ -299,6 +297,7 @@ def _render_settings(conn, tab: str):
             "泰州市": db.get_setting(conn, "wecom_city_泰州市", ""),
         },
         incentive_rules=incentive_rules(conn),
+        sesame_tier_rules=sesame.tier_rules(conn),
         advisor_penalty_divisor=db.get_setting(conn, "advisor_penalty_divisor", "4000") or "4000",
         brand_form=brand_settings(conn),
         company_form=company_names(conn),
@@ -308,6 +307,483 @@ def _render_settings(conn, tab: str):
         invoice_handler=invoice.invoice_handler(conn),
         backups=backup.list_backups() if g.user["role"] == "admin" else [],
     )
+
+
+def _settings_post(conn, tab: str):
+    """POST /settings：change_pin 谁都能改；其余 action 需管理员且已改默认口令。"""
+    action = request.form.get("action")
+    try:
+        if action == "change_pin":
+            _change_own_pin()
+            flash("口令已改，下次用新口令登录", "ok")
+            return redirect(url_for("settings", tab="account"))
+        if int(g.user["must_change_pin"] or 0):
+            raise ValueError("请先改掉默认口令")
+        if g.user["role"] != "admin":
+            raise ValueError("需要管理员权限")
+        handler = _SETTINGS_ACTIONS.get(action)
+        if handler is None:
+            flash("未知操作", "error")
+        else:
+            resp = handler(conn)
+            if resp is not None:
+                return resp
+    except ValueError as exc:  # 表单校验/备份恢复的预期错误，原文可给用户看
+        flash(str(exc), "error")
+    except Exception:  # noqa: BLE001 — 其余是服务端问题，原文可能带表名/路径，不外露
+        current_app.logger.exception("settings action failed: %s", action)
+        flash("操作失败，请稍后重试；若反复出现请联系管理员查看日志。", "error")
+    return redirect(url_for("settings", tab=tab))
+
+
+def _do_add_store(conn):
+    name = (request.form.get("store_name") or "").strip()
+    short_name = (request.form.get("short_name") or "").strip()
+    if not name or not short_name:
+        raise ValueError("店名和简称都要填")
+    new_store_id = db.create_store(
+        conn,
+        name,
+        mobile_code=request.form.get("mobile_code") or "",
+        area_manager=request.form.get("area_manager") or "",
+        store_manager=request.form.get("store_manager") or "",
+        advisor_name=request.form.get("advisor_name") or "",
+        short_name=short_name,
+        region_group=request.form.get("region_group") or "通泰",
+        city=request.form.get("city") or "南通市",
+        store_grade=request.form.get("store_grade") or "A",
+        ai_target=int(request.form.get("ai_target") or 10),
+        invoice_name=request.form.get("invoice_name") or "",
+        lease_area=request.form.get("lease_area") or "",
+        lease_address=request.form.get("lease_address") or "",
+        lease_period=request.form.get("lease_period") or "",
+    )
+    flash("门店已加", "ok")
+    return redirect(url_for("settings", tab="stores", store_id=new_store_id))
+
+
+def _do_edit_store(conn):
+    sid = int(request.form.get("store_id") or 0)
+    if db.get_store(conn, sid) is None:
+        raise ValueError("没有这家店")
+    db.update_store_profile(
+        conn,
+        sid,
+        mobile_code=request.form.get("mobile_code") or "",
+        area_manager=request.form.get("area_manager") or "",
+        store_manager=request.form.get("store_manager") or "",
+        advisor_name=request.form.get("advisor_name") or "",
+        region_group=request.form.get("region_group") or "",
+        city=request.form.get("city") or "",
+        store_grade=request.form.get("store_grade") or "A",
+        ai_target=int(request.form.get("ai_target") or 10),
+        invoice_name=request.form.get("invoice_name") or "",
+        lease_area=request.form.get("lease_area") or "",
+        lease_address=request.form.get("lease_address") or "",
+        lease_period=request.form.get("lease_period") or "",
+    )
+    flash("门店档案已改", "ok")
+    return redirect(url_for("settings", tab="stores", store_id=sid))
+
+
+def _do_toggle_store(conn):
+    sid = int(request.form.get("store_id") or 0)
+    store = db.get_store(conn, sid) if sid else None
+    if store is None:
+        raise ValueError("没有这家店")
+    on = not int(store["active"] or 0)
+    db.set_store_active(conn, sid, on)
+    flash("门店已启用" if on else "门店已停用", "ok")
+    return redirect(url_for("settings", tab="stores", store_id=sid))
+
+
+def _do_delete_store(conn):
+    sid = int(request.form.get("store_id") or 0)
+    db.delete_store(conn, sid)
+    flash("门店已删除", "ok")
+    return redirect(url_for("settings", tab="stores"))
+
+
+def _do_save_profiles(conn):
+    for store in db.list_all_stores(conn):
+        sid = store["id"]
+        db.update_store_profile(
+            conn,
+            sid,
+            mobile_code=request.form.get(f"mobile_code_{sid}") or "",
+            area_manager=request.form.get(f"area_manager_{sid}") or "",
+            store_manager=request.form.get(f"store_manager_{sid}") or "",
+            advisor_name=request.form.get(f"advisor_name_{sid}") or "",
+            region_group=request.form.get(f"region_group_{sid}") or store["region_group"],
+            city=request.form.get(f"city_{sid}") or store["city"],
+        )
+    flash("门店档案已保存", "ok")
+
+
+def _do_add_user(conn):
+    username = (request.form.get("username") or "").strip()
+    display = (request.form.get("display_name") or "").strip()
+    pin = request.form.get("pin") or ""
+    kind = request.form.get("role") or "filler"
+    if kind not in ("filler", "readonly", "manager", "area", "city"):
+        raise ValueError("只支持填报员或只读账号")
+    valid_cities = {
+        (s["city"] or "").strip()
+        for s in db.list_all_stores(conn)
+        if s["active"] and (s["city"] or "").strip()
+    }
+    if kind == "area":
+        role = "readonly"
+        scope = (request.form.get("scope") or "").strip()
+        if not scope:
+            raise ValueError("区域经理没填区域经理姓名")
+        store_ids = []
+    elif kind == "city":
+        role = "city"
+        scope = (request.form.get("scope") or "").strip()
+        if scope not in valid_cities:
+            raise ValueError("地市负责人要选一个有效地市")
+        store_ids = []
+    elif kind in ("readonly", "manager"):
+        role = "readonly"
+        scope = ""
+        store_ids = [
+            int(x)
+            for x in request.form.getlist("store_ids")
+            if str(x).strip().isdigit()
+        ]
+        active_ids = {
+            int(row["id"])
+            for row in conn.execute("SELECT id FROM stores WHERE active=1")
+        }
+        if any(store_id not in active_ids for store_id in store_ids):
+            raise ValueError("只能绑定已启用的门店")
+        if not store_ids:
+            raise ValueError("店长要选一家店")
+    else:
+        role = "filler"
+        scope = ""
+        store_ids = [
+            int(x)
+            for x in request.form.getlist("store_ids")
+            if str(x).strip().isdigit()
+        ]
+        active_ids = {
+            int(row["id"])
+            for row in conn.execute("SELECT id FROM stores WHERE active=1")
+        }
+        if any(store_id not in active_ids for store_id in store_ids):
+            raise ValueError("只能绑定已启用的门店")
+    if not username or not display or not pin:
+        raise ValueError("账号、姓名、口令都要填")
+    pin_err = db.new_pin_error(pin)
+    if pin_err:
+        raise ValueError(pin_err)
+    db.create_user(
+        conn,
+        username=username,
+        display_name=display,
+        pin=pin,
+        role=role,
+        store_ids=store_ids,
+        scope=scope,
+    )
+    flash("账号已加", "ok")
+    return _people_redirect()
+
+
+def _do_reset_pin(conn):
+    uid = int(request.form.get("user_id") or 0)
+    target = conn.execute(
+        "SELECT id, role, display_name FROM users WHERE id=?", (uid,)
+    ).fetchone()
+    if target is None:
+        raise ValueError("查无此人")
+    pin = (
+        db.DEFAULT_ADMIN_PIN
+        if target["role"] == "admin"
+        else db.DEFAULT_FILLER_PIN
+    )
+    epoch = db.update_user_pin(conn, uid, pin)
+    # 被重置人的旧会话随纪元自增一并失效；管理员重置自己则刷新当前会话
+    if uid == int(g.user["id"]):
+        session["session_epoch"] = epoch
+    name = target["display_name"] or target["id"]
+    flash(
+        f"已把 {name} 的口令重置为默认 {pin}，下次登录必须改掉。",
+        "ok",
+    )
+    if (request.form.get("tab") or "") in ("people", "stores"):
+        return _people_redirect()
+    return None
+
+
+def _do_set_stores(conn):
+    uid = int(request.form.get("user_id") or 0)
+    target = conn.execute("SELECT role, scope FROM users WHERE id=?", (uid,)).fetchone()
+    if target is None:
+        raise ValueError("查无此人")
+    if target["role"] == "admin":
+        raise ValueError("管理员无需分配门店")
+    valid_cities = {
+        (s["city"] or "").strip()
+        for s in db.list_all_stores(conn)
+        if s["active"] and (s["city"] or "").strip()
+    }
+    if target["role"] == "city":
+        scope = (request.form.get("scope") or "").strip()
+        if scope not in valid_cities:
+            raise ValueError("地市负责人要选一个有效地市")
+        db.set_user_scope(conn, uid, scope)
+        db.set_user_stores(conn, uid, [])
+        flash("地市范围已改", "ok")
+        if (request.form.get("tab") or "") in ("people", "stores"):
+            return _people_redirect()
+    elif target["role"] == "readonly" and request.form.get("bind") == "area":
+        scope = (request.form.get("scope") or "").strip()
+        if not scope:
+            raise ValueError("区域经理没填区域经理姓名")
+        # 姓名必须能对上某家启用店的区域经理，不然账号会静默变成零门店
+        known_managers = {
+            (s["area_manager"] or "").strip()
+            for s in conn.execute("SELECT area_manager FROM stores WHERE active=1")
+            if (s["area_manager"] or "").strip()
+        }
+        if scope not in known_managers:
+            raise ValueError("区域经理姓名要对得上门店档案里的区域经理")
+        db.set_user_scope(conn, uid, scope)
+        db.set_user_stores(conn, uid, [])
+    else:
+        submitted_ids = [
+            int(x)
+            for x in request.form.getlist("store_ids")
+            if str(x).strip().isdigit()
+        ]
+        active_ids = {
+            int(row["id"])
+            for row in conn.execute("SELECT id FROM stores WHERE active=1")
+        }
+        if any(store_id not in active_ids for store_id in submitted_ids):
+            raise ValueError("只能绑定已启用的门店")
+        if target["role"] == "readonly" and not target["scope"] and not submitted_ids:
+            raise ValueError("店长至少保留一家已启用门店")
+        db.set_user_stores(conn, uid, submitted_ids)
+        if target["role"] == "readonly":
+            db.set_user_scope(conn, uid, "")
+    flash("门店权限已改", "ok")
+    if (request.form.get("tab") or "") in ("people", "stores"):
+        return _people_redirect()
+    return None
+
+
+def _do_toggle_user(conn):
+    uid = int(request.form.get("user_id") or 0)
+    active = request.form.get("active") == "1"
+    if uid == g.user["id"] and not active:
+        raise ValueError("不能停用自己")
+    db.set_user_active(conn, uid, active)
+    flash("账号状态已改", "ok")
+    if (request.form.get("tab") or "") in ("people", "stores"):
+        return _people_redirect()
+    return None
+
+
+def _do_set_targets(conn):
+    targets = {}
+    for code, name, _note in KPI_TARGETS:
+        raw = request.form.get(f"t_{code}", "0")
+        try:
+            value = int(raw or 0)
+        except ValueError as exc:
+            raise ValueError(f"{name}必须是整数") from exc
+        if value < 0:
+            raise ValueError(f"{name}不能为负数")
+        targets[code] = value
+    for code, value in targets.items():
+        db.set_kpi_target(conn, code, value)
+    flash("月目标已保存", "ok")
+
+
+def _do_save_permissions(conn):
+    filler_month = "1" if request.form.get("filler_edit_month") == "1" else "0"
+    db.set_setting(conn, "filler_edit_month", filler_month)
+    db.set_policy_require_read(conn, request.form.get("policy_require_read") == "1")
+    flash("权限设置已保存", "ok")
+
+
+def _do_save_policy(conn):
+    raw_id = (request.form.get("policy_id") or "").strip()
+    pid = int(raw_id) if raw_id.isdigit() else None
+    db.save_policy(
+        conn,
+        title=request.form.get("title") or "",
+        body=request.form.get("body") or "",
+        sort_order=int(request.form.get("sort_order") or 0),
+        active=request.form.get("active") == "1",
+        user_id=g.user["id"],
+        policy_id=pid,
+    )
+    flash("政策已保存", "ok")
+    return redirect(url_for("settings", tab="policies"))
+
+
+def _do_toggle_policy(conn):
+    pid = int(request.form.get("policy_id") or 0)
+    db.set_policy_active(conn, pid, request.form.get("active") == "1")
+    flash("政策状态已改", "ok")
+    return redirect(url_for("settings", tab="policies"))
+
+
+def _do_delete_policy(conn):
+    pid = int(request.form.get("policy_id") or 0)
+    db.delete_policy(conn, pid)
+    flash("政策已删除", "ok")
+    return redirect(url_for("settings", tab="policies"))
+
+
+def _do_restore_policy(conn):
+    pid = int(request.form.get("policy_id") or 0)
+    ver = int(request.form.get("version") or 0)
+    db.restore_policy_revision(conn, pid, ver, user_id=g.user["id"])
+    flash(f"已恢复为第 {ver} 版，现内容会再记一版", "ok")
+    return redirect(url_for("settings", tab="policies", policy_id=pid))
+
+
+def _do_save_brand(conn):
+    brand = parse_brand_form(request.form)
+    for key, value in brand.items():
+        db.set_setting(conn, f"brand_{key}", value)
+    flash("登录页标题已保存", "ok")
+
+
+def _do_save_review(conn):
+    names = parse_company_names(request.form)
+    for key, value in names.items():
+        db.set_setting(conn, f"org_name_{key}", value)
+    body = (request.form.get("review_template") or "").rstrip()
+    db.set_setting(conn, "review_template", body)
+    db.set_setting(conn, "review_preset", "custom" if body.strip() else "")
+    flash("复盘模板和公司名已保存", "ok")
+
+
+def _do_save_invoice(conn):
+    invoice.save_invoice_settings(conn, request.form)
+    flash("开票主体已保存", "ok")
+
+
+def _do_save_broadcast(conn):
+    compact = "1" if request.form.get("broadcast_compact") == "1" else "0"
+    family = "1" if request.form.get("broadcast_compact_family") == "1" else "0"
+    db.set_setting(conn, "broadcast_compact", compact)
+    db.set_setting(conn, "broadcast_compact_family", family)
+    flash("播报设置已保存", "ok")
+
+
+def _do_save_wecom(conn):
+    db.set_setting(conn, "wecom_global", (request.form.get("wecom_global") or "").strip())
+    for city in ("南通市", "泰州市"):
+        db.set_setting(conn, f"wecom_city_{city}", (request.form.get(f"wecom_city_{city}") or "").strip())
+    flash("企业微信群机器人已保存", "ok")
+
+
+def _do_test_wecom(conn):
+    from . import wecom
+
+    url = (request.form.get("test_url") or "").strip()
+    ok, msg = wecom.send_test(conn, url)
+    flash(msg, "ok" if ok else "error")
+
+
+def _do_make_backup(conn):
+    path = backup.snapshot("manual")
+    flash(f"已备份 {path.name}", "ok")
+    return redirect(url_for("settings", tab="backup"))
+
+
+def _do_restore_named(conn):
+    confirm = request.form.get("confirm_pin") or ""
+    if not db.verify_pin(confirm, g.user["pin_hash"]):
+        raise ValueError("恢复前请输入当前口令确认")
+    name = (request.form.get("backup_name") or "").strip()
+    safety = backup.restore_named(name)
+    admins = "、".join(backup.restored_admin_names()) or "（无）"
+    db.abandon_request_conn()
+    session.clear()
+    flash(
+        f"已用 {name} 恢复，请重新登录。库中管理员：{admins}。恢复前现场另存为 {safety.name}",
+        "ok",
+    )
+    return redirect(url_for("login"))
+
+
+def _do_restore_upload(conn):
+    confirm = request.form.get("confirm_pin") or ""
+    if not db.verify_pin(confirm, g.user["pin_hash"]):
+        raise ValueError("恢复前请输入当前口令确认")
+    uploaded = request.files.get("backup_file")
+    if uploaded is None or not uploaded.filename:
+        raise ValueError("请先选择备份文件")
+    data = uploaded.read()
+    safety = backup.restore_bytes(data)
+    admins = "、".join(backup.restored_admin_names()) or "（无）"
+    db.abandon_request_conn()
+    session.clear()
+    flash(
+        f"已用上传文件恢复，请重新登录。库中管理员：{admins}。恢复前现场另存为 {safety.name}",
+        "ok",
+    )
+    return redirect(url_for("login"))
+
+
+def _do_save_rules(conn):
+    defaults = incentive.DEFAULTS
+    rules = {}
+    for key in defaults:
+        raw = request.form.get(f"r_{key}", "").strip()
+        rules[key] = max(0, parse_int(raw, defaults[key]))
+    db.set_setting(conn, "incentive_rules", json.dumps(rules, ensure_ascii=False))
+    divisor = max(1, parse_int(request.form.get("advisor_penalty_divisor"), 4000))
+    db.set_setting(conn, "advisor_penalty_divisor", str(divisor))
+    # 芝麻档位：小天才 / AI 两个阈值，相等或非法视为没改用默认
+    try:
+        tier_xtc = int(request.form.get("r_tier_xtc") or sesame.TIER_DEFAULT_RULES["xtc"])
+        tier_ai = int(request.form.get("r_tier_ai") or sesame.TIER_DEFAULT_RULES["ai"])
+        if tier_xtc < 1 or tier_ai < 1 or tier_xtc == tier_ai:
+            raise ValueError
+        db.set_setting(conn, "sesame_tier_rules", json.dumps(
+            {"xtc": tier_xtc, "ai": tier_ai}, ensure_ascii=False))
+    except ValueError:
+        flash("芝麻档位没改：需要两个不同的正整数。", "error")
+    flash("考核规则已保存，立即生效", "ok")
+
+
+_SETTINGS_ACTIONS = {
+    "add_store": _do_add_store,
+    "edit_store": _do_edit_store,
+    "toggle_store": _do_toggle_store,
+    "delete_store": _do_delete_store,
+    "save_profiles": _do_save_profiles,
+    "add_user": _do_add_user,
+    "reset_pin": _do_reset_pin,
+    "set_stores": _do_set_stores,
+    "toggle_user": _do_toggle_user,
+    "set_targets": _do_set_targets,
+    "save_permissions": _do_save_permissions,
+    "save_policy": _do_save_policy,
+    "toggle_policy": _do_toggle_policy,
+    "delete_policy": _do_delete_policy,
+    "restore_policy": _do_restore_policy,
+    "save_brand": _do_save_brand,
+    "save_review": _do_save_review,
+    "save_invoice": _do_save_invoice,
+    "save_broadcast": _do_save_broadcast,
+    "save_wecom": _do_save_wecom,
+    "test_wecom": _do_test_wecom,
+    "make_backup": _do_make_backup,
+    "restore_named": _do_restore_named,
+    "restore_upload": _do_restore_upload,
+    "save_rules": _do_save_rules,
+}
 
 
 def register_settings(app) -> None:
@@ -375,387 +851,5 @@ def register_settings(app) -> None:
         tab = _settings_tab()
         with db.get_db() as conn:
             if request.method == "POST":
-                action = request.form.get("action")
-                tab = _settings_tab()
-                try:
-                    if action == "change_pin":
-                        _change_own_pin()
-                        flash("口令已改，下次用新口令登录", "ok")
-                        return redirect(url_for("settings", tab="account"))
-                    if int(g.user["must_change_pin"] or 0):
-                        raise ValueError("请先改掉默认口令")
-                    if g.user["role"] != "admin":
-                        raise ValueError("需要管理员权限")
-                    if action == "add_store":
-                        name = (request.form.get("store_name") or "").strip()
-                        short_name = (request.form.get("short_name") or "").strip()
-                        if not name or not short_name:
-                            raise ValueError("店名和简称都要填")
-                        new_store_id = db.create_store(
-                            conn,
-                            name,
-                            mobile_code=request.form.get("mobile_code") or "",
-                            area_manager=request.form.get("area_manager") or "",
-                            store_manager=request.form.get("store_manager") or "",
-                            advisor_name=request.form.get("advisor_name") or "",
-                            short_name=short_name,
-                            region_group=request.form.get("region_group") or "通泰",
-                            city=request.form.get("city") or "南通市",
-                            store_grade=request.form.get("store_grade") or "A",
-                            ai_target=int(request.form.get("ai_target") or 10),
-                            invoice_name=request.form.get("invoice_name") or "",
-                            lease_area=request.form.get("lease_area") or "",
-                            lease_address=request.form.get("lease_address") or "",
-                            lease_period=request.form.get("lease_period") or "",
-                        )
-                        flash("门店已加", "ok")
-                        return redirect(url_for("settings", tab="stores", store_id=new_store_id))
-                    elif action == "edit_store":
-                        sid = int(request.form.get("store_id") or 0)
-                        if db.get_store(conn, sid) is None:
-                            raise ValueError("没有这家店")
-                        db.update_store_profile(
-                            conn,
-                            sid,
-                            mobile_code=request.form.get("mobile_code") or "",
-                            area_manager=request.form.get("area_manager") or "",
-                            store_manager=request.form.get("store_manager") or "",
-                            advisor_name=request.form.get("advisor_name") or "",
-                            region_group=request.form.get("region_group") or "",
-                            city=request.form.get("city") or "",
-                            store_grade=request.form.get("store_grade") or "A",
-                            ai_target=int(request.form.get("ai_target") or 10),
-                            invoice_name=request.form.get("invoice_name") or "",
-                            lease_area=request.form.get("lease_area") or "",
-                            lease_address=request.form.get("lease_address") or "",
-                            lease_period=request.form.get("lease_period") or "",
-                        )
-                        flash("门店档案已改", "ok")
-                        return redirect(url_for("settings", tab="stores", store_id=sid))
-                    elif action == "toggle_store":
-                        sid = int(request.form.get("store_id") or 0)
-                        store = db.get_store(conn, sid) if sid else None
-                        if store is None:
-                            raise ValueError("没有这家店")
-                        on = not int(store["active"] or 0)
-                        db.set_store_active(conn, sid, on)
-                        flash("门店已启用" if on else "门店已停用", "ok")
-                        return redirect(url_for("settings", tab="stores", store_id=sid))
-                    elif action == "delete_store":
-                        sid = int(request.form.get("store_id") or 0)
-                        db.delete_store(conn, sid)
-                        flash("门店已删除", "ok")
-                        return redirect(url_for("settings", tab="stores"))
-                    elif action == "save_profiles":
-                        for store in db.list_all_stores(conn):
-                            sid = store["id"]
-                            db.update_store_profile(
-                                conn,
-                                sid,
-                                mobile_code=request.form.get(f"mobile_code_{sid}") or "",
-                                area_manager=request.form.get(f"area_manager_{sid}") or "",
-                                store_manager=request.form.get(f"store_manager_{sid}") or "",
-                                advisor_name=request.form.get(f"advisor_name_{sid}") or "",
-                                region_group=request.form.get(f"region_group_{sid}") or store["region_group"],
-                                city=request.form.get(f"city_{sid}") or store["city"],
-                            )
-                        flash("门店档案已保存", "ok")
-                    elif action == "add_user":
-                        username = (request.form.get("username") or "").strip()
-                        display = (request.form.get("display_name") or "").strip()
-                        pin = request.form.get("pin") or ""
-                        kind = request.form.get("role") or "filler"
-                        if kind not in ("filler", "readonly", "manager", "area", "city"):
-                            raise ValueError("只支持填报员或只读账号")
-                        valid_cities = {
-                            (s["city"] or "").strip()
-                            for s in db.list_all_stores(conn)
-                            if s["active"] and (s["city"] or "").strip()
-                        }
-                        if kind == "area":
-                            role = "readonly"
-                            scope = (request.form.get("scope") or "").strip()
-                            if not scope:
-                                raise ValueError("区域经理没填区域经理姓名")
-                            store_ids = []
-                        elif kind == "city":
-                            role = "city"
-                            scope = (request.form.get("scope") or "").strip()
-                            if scope not in valid_cities:
-                                raise ValueError("地市负责人要选一个有效地市")
-                            store_ids = []
-                        elif kind in ("readonly", "manager"):
-                            role = "readonly"
-                            scope = ""
-                            store_ids = [
-                                int(x)
-                                for x in request.form.getlist("store_ids")
-                                if str(x).strip().isdigit()
-                            ]
-                            active_ids = {
-                                int(row["id"])
-                                for row in conn.execute("SELECT id FROM stores WHERE active=1")
-                            }
-                            if any(store_id not in active_ids for store_id in store_ids):
-                                raise ValueError("只能绑定已启用的门店")
-                            if not store_ids:
-                                raise ValueError("店长要选一家店")
-                        else:
-                            role = "filler"
-                            scope = ""
-                            store_ids = [
-                                int(x)
-                                for x in request.form.getlist("store_ids")
-                                if str(x).strip().isdigit()
-                            ]
-                            active_ids = {
-                                int(row["id"])
-                                for row in conn.execute("SELECT id FROM stores WHERE active=1")
-                            }
-                            if any(store_id not in active_ids for store_id in store_ids):
-                                raise ValueError("只能绑定已启用的门店")
-                        if not username or not display or not pin:
-                            raise ValueError("账号、姓名、口令都要填")
-                        pin_err = db.new_pin_error(pin)
-                        if pin_err:
-                            raise ValueError(pin_err)
-                        db.create_user(
-                            conn,
-                            username=username,
-                            display_name=display,
-                            pin=pin,
-                            role=role,
-                            store_ids=store_ids,
-                            scope=scope,
-                        )
-                        flash("账号已加", "ok")
-                        return _people_redirect()
-                    elif action == "reset_pin":
-                        uid = int(request.form.get("user_id") or 0)
-                        target = conn.execute(
-                            "SELECT id, role, display_name FROM users WHERE id=?", (uid,)
-                        ).fetchone()
-                        if target is None:
-                            raise ValueError("查无此人")
-                        pin = (
-                            db.DEFAULT_ADMIN_PIN
-                            if target["role"] == "admin"
-                            else db.DEFAULT_FILLER_PIN
-                        )
-                        epoch = db.update_user_pin(conn, uid, pin)
-                        # 被重置人的旧会话随纪元自增一并失效；管理员重置自己则刷新当前会话
-                        if uid == int(g.user["id"]):
-                            session["session_epoch"] = epoch
-                        name = target["display_name"] or target["id"]
-                        flash(
-                            f"已把 {name} 的口令重置为默认 {pin}，下次登录必须改掉。",
-                            "ok",
-                        )
-                        if (request.form.get("tab") or "") in ("people", "stores"):
-                            return _people_redirect()
-                    elif action == "set_stores":
-                        uid = int(request.form.get("user_id") or 0)
-                        target = conn.execute("SELECT role, scope FROM users WHERE id=?", (uid,)).fetchone()
-                        if target is None:
-                            raise ValueError("查无此人")
-                        if target["role"] == "admin":
-                            raise ValueError("管理员无需分配门店")
-                        valid_cities = {
-                            (s["city"] or "").strip()
-                            for s in db.list_all_stores(conn)
-                            if s["active"] and (s["city"] or "").strip()
-                        }
-                        if target["role"] == "city":
-                            scope = (request.form.get("scope") or "").strip()
-                            if scope not in valid_cities:
-                                raise ValueError("地市负责人要选一个有效地市")
-                            db.set_user_scope(conn, uid, scope)
-                            db.set_user_stores(conn, uid, [])
-                            flash("地市范围已改", "ok")
-                            if (request.form.get("tab") or "") in ("people", "stores"):
-                                return _people_redirect()
-                        elif target["role"] == "readonly" and request.form.get("bind") == "area":
-                            scope = (request.form.get("scope") or "").strip()
-                            if not scope:
-                                raise ValueError("区域经理没填区域经理姓名")
-                            # 姓名必须能对上某家启用店的区域经理，不然账号会静默变成零门店
-                            known_managers = {
-                                (s["area_manager"] or "").strip()
-                                for s in conn.execute("SELECT area_manager FROM stores WHERE active=1")
-                                if (s["area_manager"] or "").strip()
-                            }
-                            if scope not in known_managers:
-                                raise ValueError("区域经理姓名要对得上门店档案里的区域经理")
-                            db.set_user_scope(conn, uid, scope)
-                            db.set_user_stores(conn, uid, [])
-                        else:
-                            submitted_ids = [
-                                int(x)
-                                for x in request.form.getlist("store_ids")
-                                if str(x).strip().isdigit()
-                            ]
-                            active_ids = {
-                                int(row["id"])
-                                for row in conn.execute("SELECT id FROM stores WHERE active=1")
-                            }
-                            if any(store_id not in active_ids for store_id in submitted_ids):
-                                raise ValueError("只能绑定已启用的门店")
-                            if target["role"] == "readonly" and not target["scope"] and not submitted_ids:
-                                raise ValueError("店长至少保留一家已启用门店")
-                            db.set_user_stores(conn, uid, submitted_ids)
-                            if target["role"] == "readonly":
-                                db.set_user_scope(conn, uid, "")
-                        flash("门店权限已改", "ok")
-                        if (request.form.get("tab") or "") in ("people", "stores"):
-                            return _people_redirect()
-                    elif action == "toggle_user":
-                        uid = int(request.form.get("user_id") or 0)
-                        active = request.form.get("active") == "1"
-                        if uid == g.user["id"] and not active:
-                            raise ValueError("不能停用自己")
-                        db.set_user_active(conn, uid, active)
-                        flash("账号状态已改", "ok")
-                        if (request.form.get("tab") or "") in ("people", "stores"):
-                            return _people_redirect()
-                    elif action == "set_targets":
-                        targets = {}
-                        for code, name, _note in KPI_TARGETS:
-                            raw = request.form.get(f"t_{code}", "0")
-                            try:
-                                value = int(raw or 0)
-                            except ValueError as exc:
-                                raise ValueError(f"{name}必须是整数") from exc
-                            if value < 0:
-                                raise ValueError(f"{name}不能为负数")
-                            targets[code] = value
-                        for code, value in targets.items():
-                            db.set_kpi_target(conn, code, value)
-                        flash("月目标已保存", "ok")
-                    elif action == "save_permissions":
-                        filler_month = "1" if request.form.get("filler_edit_month") == "1" else "0"
-                        db.set_setting(conn, "filler_edit_month", filler_month)
-                        db.set_policy_require_read(conn, request.form.get("policy_require_read") == "1")
-                        flash("权限设置已保存", "ok")
-                    elif action == "save_policy":
-                        raw_id = (request.form.get("policy_id") or "").strip()
-                        pid = int(raw_id) if raw_id.isdigit() else None
-                        db.save_policy(
-                            conn,
-                            title=request.form.get("title") or "",
-                            body=request.form.get("body") or "",
-                            sort_order=int(request.form.get("sort_order") or 0),
-                            active=request.form.get("active") == "1",
-                            user_id=g.user["id"],
-                            policy_id=pid,
-                        )
-                        flash("政策已保存", "ok")
-                        return redirect(url_for("settings", tab="policies"))
-                    elif action == "toggle_policy":
-                        pid = int(request.form.get("policy_id") or 0)
-                        db.set_policy_active(conn, pid, request.form.get("active") == "1")
-                        flash("政策状态已改", "ok")
-                        return redirect(url_for("settings", tab="policies"))
-                    elif action == "delete_policy":
-                        pid = int(request.form.get("policy_id") or 0)
-                        db.delete_policy(conn, pid)
-                        flash("政策已删除", "ok")
-                        return redirect(url_for("settings", tab="policies"))
-                    elif action == "restore_policy":
-                        pid = int(request.form.get("policy_id") or 0)
-                        ver = int(request.form.get("version") or 0)
-                        db.restore_policy_revision(conn, pid, ver, user_id=g.user["id"])
-                        flash(f"已恢复为第 {ver} 版，现内容会再记一版", "ok")
-                        return redirect(url_for("settings", tab="policies", policy_id=pid))
-                    elif action == "save_brand":
-                        brand = parse_brand_form(request.form)
-                        for key, value in brand.items():
-                            db.set_setting(conn, f"brand_{key}", value)
-                        flash("登录页标题已保存", "ok")
-                    elif action == "save_review":
-                        names = parse_company_names(request.form)
-                        for key, value in names.items():
-                            db.set_setting(conn, f"org_name_{key}", value)
-                        body = (request.form.get("review_template") or "").rstrip()
-                        db.set_setting(conn, "review_template", body)
-                        db.set_setting(conn, "review_preset", "custom" if body.strip() else "")
-                        flash("复盘模板和公司名已保存", "ok")
-                    elif action == "save_invoice":
-                        invoice.save_invoice_settings(conn, request.form)
-                        flash("开票主体已保存", "ok")
-                    elif action == "save_broadcast":
-                        compact = "1" if request.form.get("broadcast_compact") == "1" else "0"
-                        family = "1" if request.form.get("broadcast_compact_family") == "1" else "0"
-                        db.set_setting(conn, "broadcast_compact", compact)
-                        db.set_setting(conn, "broadcast_compact_family", family)
-                        flash("播报设置已保存", "ok")
-                    elif action == "save_wecom":
-                        db.set_setting(conn, "wecom_global", (request.form.get("wecom_global") or "").strip())
-                        for city in ("南通市", "泰州市"):
-                            db.set_setting(conn, f"wecom_city_{city}", (request.form.get(f"wecom_city_{city}") or "").strip())
-                        flash("企业微信群机器人已保存", "ok")
-                    elif action == "test_wecom":
-                        from . import wecom
-                        url = (request.form.get("test_url") or "").strip()
-                        ok, msg = wecom.send_test(conn, url)
-                        flash(msg, "ok" if ok else "error")
-                    elif action == "make_backup":
-                        path = backup.snapshot("manual")
-                        flash(f"已备份 {path.name}", "ok")
-                        return redirect(url_for("settings", tab="backup"))
-                    elif action == "restore_named":
-                        confirm = request.form.get("confirm_pin") or ""
-                        if not db.verify_pin(confirm, g.user["pin_hash"]):
-                            raise ValueError("恢复前请输入当前口令确认")
-                        name = (request.form.get("backup_name") or "").strip()
-                        safety = backup.restore_named(name)
-                        admins = "、".join(backup.restored_admin_names()) or "（无）"
-                        db.abandon_request_conn()
-                        session.clear()
-                        flash(
-                            f"已用 {name} 恢复，请重新登录。库中管理员：{admins}。恢复前现场另存为 {safety.name}",
-                            "ok",
-                        )
-                        return redirect(url_for("login"))
-                    elif action == "restore_upload":
-                        confirm = request.form.get("confirm_pin") or ""
-                        if not db.verify_pin(confirm, g.user["pin_hash"]):
-                            raise ValueError("恢复前请输入当前口令确认")
-                        uploaded = request.files.get("backup_file")
-                        if uploaded is None or not uploaded.filename:
-                            raise ValueError("请先选择备份文件")
-                        data = uploaded.read()
-                        safety = backup.restore_bytes(data)
-                        admins = "、".join(backup.restored_admin_names()) or "（无）"
-                        db.abandon_request_conn()
-                        session.clear()
-                        flash(
-                            f"已用上传文件恢复，请重新登录。库中管理员：{admins}。恢复前现场另存为 {safety.name}",
-                            "ok",
-                        )
-                        return redirect(url_for("login"))
-                    elif action == "save_rules":
-                        defaults = incentive.DEFAULTS
-                        rules = {}
-                        for key in defaults:
-                            raw = request.form.get(f"r_{key}", "").strip()
-                            try:
-                                rules[key] = max(0, int(raw or defaults[key]))
-                            except ValueError:
-                                rules[key] = defaults[key]
-                        db.set_setting(conn, "incentive_rules", json.dumps(rules, ensure_ascii=False))
-                        try:
-                            divisor = max(1, int(request.form.get("advisor_penalty_divisor") or 4000))
-                        except ValueError:
-                            divisor = 4000
-                        db.set_setting(conn, "advisor_penalty_divisor", str(divisor))
-                        flash("考核规则已保存，立即生效", "ok")
-                    else:
-                        flash("未知操作", "error")
-                except ValueError as exc:  # 表单校验/备份恢复的预期错误，原文可给用户看
-                    flash(str(exc), "error")
-                except Exception:  # noqa: BLE001 — 其余是服务端问题，原文可能带表名/路径，不外露
-                    current_app.logger.exception("settings action failed: %s", action)
-                    flash("操作失败，请稍后重试；若反复出现请联系管理员查看日志。", "error")
-                return redirect(url_for("settings", tab=tab))
-
+                return _settings_post(conn, tab)
             return _render_settings(conn, tab)

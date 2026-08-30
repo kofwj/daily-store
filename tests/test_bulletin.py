@@ -396,3 +396,112 @@ def test_build_row_short_name_from_row(tmp_db):
         submitted=False,
     )
     assert out["short_name"] == "示例甲店"
+
+
+def test_bulletin_skips_stores_without_mobile_code(admin_client):
+    """没有移动编码的店不出现在通报表里。"""
+    with db.get_db() as conn:
+        # 加两家店：一个没编码，一个有编码
+        db.create_store(
+            conn,
+            "TZ测试没编码店",
+            mobile_code="",
+            short_name="没编码店",
+            area_manager="测试",
+        )
+        db.create_store(
+            conn,
+            "TZ测试有编码店",
+            mobile_code="20999999",
+            short_name="有编码店",
+            area_manager="测试",
+        )
+    page = admin_client.get("/bulletin").get_data(as_text=True).replace("\ufeff", "")
+    # 有编码的店保留（南通通报表默认视图，两店都默认南通）
+    assert "测试有编码店" in page
+    # 没有编码的店不出现
+    assert "测试没编码店" not in page
+    assert "没编码店" not in page
+    # 没编码的泰州新店不该把「泰州市」带进下拉
+    assert 'value="泰州市"' not in page
+    empty = admin_client.get("/bulletin?city=泰州市").get_data(as_text=True).replace("\ufeff", "")
+    assert "测试有编码店" in empty  # 非法地市回退到南通
+    assert "示例戊店" not in empty
+
+
+def test_bisuan_accepts_one_decimal_and_month_calibrates(admin_client):
+    """笔算支持一位小数；移动校准只存对照数，不改填报。"""
+    from datetime import timedelta
+
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+    day = date.today()
+    saved = admin_client.post(
+        "/today",
+        data={"store_id": str(sid), "date": day.isoformat(), "m_bisuan": "1.5", "m_phone_sales": "1"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "已保存" in saved
+    today_page = admin_client.get(f"/today?store_id={sid}&date={day.isoformat()}").get_data(as_text=True)
+    assert 'value="1.5"' in today_page or "1.5" in today_page
+    with db.get_db() as conn:
+        stored = conn.execute(
+            "SELECT day_value FROM daily_facts WHERE store_id=? AND biz_date=? AND metric_code='bisuan'",
+            (sid, day.isoformat()),
+        ).fetchone()["day_value"]
+        assert stored == 15
+    # 移动取数只存对照，不改填报 daily_facts
+    asof = day - timedelta(days=1)
+    if asof.month != day.month:
+        asof = day  # 月初只能落到当天
+    # 截止日那天先有 1.5；录移 2.0 后填报仍应是 1.5
+    admin_client.post(
+        "/today",
+        data={"store_id": str(sid), "date": asof.isoformat(), "m_bisuan": "1.5", "m_phone_sales": "1"},
+        follow_redirects=True,
+    )
+    with db.get_db() as conn:
+        before_total = conn.execute(
+            "SELECT COALESCE(SUM(day_value),0) AS n FROM daily_facts "
+            "WHERE store_id=? AND biz_date>=? AND biz_date<=? AND metric_code IN ('bisuan','bisuan_high')",
+            (sid, day.replace(day=1).isoformat(), asof.isoformat()),
+        ).fetchone()["n"]
+    calibrated = admin_client.post(
+        "/bulletin/bisuan-mobile",
+        data={
+            "store_id": str(sid),
+            "date": day.isoformat(),
+            "asof": asof.isoformat(),
+            "mobile": "2.0",
+            "city": "",
+        },
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "已录移" in calibrated or "移" in calibrated
+    assert "填报未改" in calibrated
+    with db.get_db() as conn:
+        month_start = day.replace(day=1).isoformat()
+        asof_total = conn.execute(
+            "SELECT COALESCE(SUM(day_value),0) AS n FROM daily_facts "
+            "WHERE store_id=? AND biz_date>=? AND biz_date<=? AND metric_code IN ('bisuan','bisuan_high')",
+            (sid, month_start, asof.isoformat()),
+        ).fetchone()["n"]
+        assert asof_total == before_total == 15  # 填报 1.5 不变
+        # 移动校准数现在落在 bisuan_mobile 表（整数 0.1 精度），并留审计
+        row = db.get_bisuan_mobile(conn, sid, day.strftime("%Y-%m"))
+        assert row and row["value_tenths"] == 20
+        assert row["asof"] == asof.isoformat()
+        edits = db.list_bisuan_mobile_edits(conn, month=day.strftime("%Y-%m"), store_id=sid)
+        assert edits and edits[0]["after"]["value_tenths"] == 20
+    page = admin_client.get(f"/bulletin?date={day.isoformat()}").get_data(as_text=True)
+    assert "移2.0" in page
+    # 今天没更新移数（截止日早于通报表日）=> 复盘不带分店对照
+    if asof < day:
+        assert "分店对照" not in page
+        assert "移动数据更新至" in page  # 表头仍标截止日
+    else:
+        assert "笔算移取" in page or "分店对照" in page
+    # 表单默认截止日前一天
+    if day.day > 1:
+        assert f'name="asof" value="{asof.isoformat()}"' in page or asof.isoformat() in page
+

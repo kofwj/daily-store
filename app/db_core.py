@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
@@ -17,8 +18,6 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tupl
 from zoneinfo import ZoneInfo
 
 from .metrics_seed import KPI_TARGETS, all_metrics
-from .stores_seed import NINGHAI_CODE as SAMPLE_NINGHAI_CODE
-from .stores_seed import STORES as SAMPLE_STORES
 
 
 def _catalog():
@@ -40,15 +39,6 @@ def _catalog_stores():
 
 def _catalog_fillers():
     return _catalog()[1]()
-
-
-def _catalog_ninghai_code() -> str:
-    return _catalog()[2]
-
-
-# 兼容旧引用：模块加载时默认示例目录；真正建库走 _catalog()
-STORES = SAMPLE_STORES
-NINGHAI_CODE = SAMPLE_NINGHAI_CODE
 
 
 def filler_accounts():
@@ -315,6 +305,7 @@ def init_db() -> None:
         _ensure_deal_edits(conn)
         _ensure_advance_posts(conn)
         _ensure_advance_sesame(conn)
+        _ensure_sesame_orders(conn)
         _ensure_advance_edits(conn)
         _ensure_app_meta(conn)
         _ensure_login_attempts(conn)
@@ -635,6 +626,109 @@ def _ensure_advance_sesame(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_advance_posts_ext_id ON advance_posts(ext_id) WHERE ext_id != ''"
     )
+
+
+def _ensure_sesame_orders(conn: sqlite3.Connection) -> None:
+    """芝麻订单信息（用于按档位分类）。只存业务字段，姓名/手机号/身份证等隐私列不落库。"""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sesame_orders (
+            order_no TEXT PRIMARY KEY,
+            store_code TEXT NOT NULL DEFAULT '',
+            frozen REAL NOT NULL DEFAULT 0,
+            terms INTEGER NOT NULL DEFAULT 0,
+            tier TEXT NOT NULL DEFAULT '',
+            category TEXT NOT NULL DEFAULT '',
+            order_title TEXT NOT NULL DEFAULT '',
+            imported_at TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    # 早期导入的行可能没提档位，从订单标题回填（幂等，每次启动跑一遍）
+    rows = conn.execute(
+        "SELECT order_no, order_title FROM sesame_orders WHERE tier='' OR tier IS NULL"
+    ).fetchall()
+    for order_no, title in rows:
+        m = re.search(r"(\d+)\s*档", str(title or ""))
+        if m:
+            conn.execute(
+                "UPDATE sesame_orders SET tier=? WHERE order_no=?", (m.group(1), order_no)
+            )
+
+
+def sesame_orders_upsert(conn: sqlite3.Connection, orders: Sequence[Dict[str, Any]], imported_at: str) -> int:
+    """按订单号覆盖写入订单信息，返回写入行数。"""
+    n = 0
+    for o in orders:
+        conn.execute(
+            """
+            INSERT INTO sesame_orders(order_no, store_code, frozen, terms, tier, category, order_title, imported_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(order_no) DO UPDATE SET
+                store_code=excluded.store_code,
+                frozen=excluded.frozen,
+                terms=excluded.terms,
+                tier=excluded.tier,
+                category=excluded.category,
+                order_title=excluded.order_title,
+                imported_at=excluded.imported_at
+            """,
+            (
+                str(o.get("order_no") or "")[:40],
+                str(o.get("store_code") or "")[:40],
+                float(o.get("frozen") or 0),
+                int(o.get("terms") or 0),
+                str(o.get("tier") or "")[:20],
+                str(o.get("category") or "")[:20],
+                str(o.get("order_title") or "")[:120],
+                imported_at,
+            ),
+        )
+        n += 1
+    return n
+
+
+def sesame_tier_rows(conn: sqlite3.Connection, start: str, end: str) -> List[Dict[str, Any]]:
+    """芝麻流水按（档位类别, 原始档位, 门店）的小计，供档位统计。
+
+    退款回联原单类别/档位；未匹配订单的记「未分类」、档位空。
+    """
+    rows = conn.execute(
+        """
+        SELECT COALESCE(NULLIF(o.category, ''), '未分类') AS cat,
+               COALESCE(NULLIF(o.tier, ''), '') AS tier,
+               a.store_id AS store_id,
+               COUNT(*) AS n,
+               SUM(CASE WHEN a.sesame > 0 THEN 1 ELSE 0 END) AS charge_n,
+               SUM(CASE WHEN a.sesame < 0 THEN 1 ELSE 0 END) AS refund_n,
+               ROUND(SUM(CASE WHEN a.sesame > 0 THEN a.sesame ELSE 0 END) / 100.0, 2) AS charge,
+               ROUND(SUM(CASE WHEN a.sesame < 0 THEN a.sesame ELSE 0 END) / 100.0, 2) AS refund,
+               ROUND(SUM(a.sesame) / 100.0, 2) AS net
+        FROM advance_posts a
+        LEFT JOIN sesame_orders o
+          ON o.order_no = CASE WHEN substr(a.ext_id, -2) = '_R'
+               THEN substr(a.ext_id, 1, length(a.ext_id) - 2) ELSE a.ext_id END
+        WHERE a.source = 'sesame' AND a.biz_date >= ? AND a.biz_date <= ?
+        GROUP BY cat, tier, a.store_id
+        """,
+        (start, end),
+    )
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        out.append(
+            {
+                "cat": row["cat"],
+                "tier": row["tier"] or "",
+                "store_id": int(row["store_id"]),
+                "n": int(row["n"] or 0),
+                "charge_n": int(row["charge_n"] or 0),
+                "refund_n": int(row["refund_n"] or 0),
+                "charge": float(row["charge"] or 0),
+                "refund": float(row["refund"] or 0),
+                "net": float(row["net"] or 0),
+            }
+        )
+    return out
 
 
 def _mark_sesame_paid(conn: sqlite3.Connection) -> None:
@@ -1835,7 +1929,4 @@ def delete_store(conn: sqlite3.Connection, store_id: int) -> None:
         raise ValueError("这家店已有填报/触客/垫资，不能删，只能停用")
     conn.execute("DELETE FROM user_stores WHERE store_id=?", (sid,))
     conn.execute("DELETE FROM stores WHERE id=?", (sid,))
-
-def set_metric_target(conn: sqlite3.Connection, code: str, target: int) -> None:
-    conn.execute("UPDATE metrics SET monthly_target=? WHERE code=?", (max(0, int(target)), code))
 

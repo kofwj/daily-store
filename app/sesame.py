@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
@@ -12,6 +13,97 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 from openpyxl import load_workbook
 
 from . import db_advances, db_core
+
+# 档位分类：可从设置页改（app_meta: sesame_tier_rules），缺省 500=小天才、1000=AI手机
+TIER_UNMATCHED = "未分类"
+TIER_DEFAULT_RULES = {"xtc": 500, "ai": 1000}
+
+
+def tier_rules(conn) -> Dict[str, int]:
+    raw = db_core.get_setting(conn, "sesame_tier_rules", "")
+    rules = dict(TIER_DEFAULT_RULES)
+    if raw:
+        try:
+            data = json.loads(raw)
+            for key in ("xtc", "ai"):
+                v = int(data.get(key, rules[key]))
+                if v > 0:
+                    rules[key] = v
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    if rules["xtc"] == rules["ai"]:
+        rules = dict(TIER_DEFAULT_RULES)
+    return rules
+
+
+def tier_category(title: str, rules: Mapping[str, int]) -> str:
+    """从订单标题提取档位并归类：500=小天才、1000=AI手机、其余=新用户芝麻直降。"""
+    m = re.search(r"(\d+)\s*档", str(title or ""))
+    if not m:
+        return TIER_UNMATCHED
+    n = int(m.group(1))
+    if n == int(rules["xtc"]):
+        return "小天才直降"
+    if n == int(rules["ai"]):
+        return "AI手机"
+    return "新用户芝麻直降"
+
+
+def parse_orders_xlsx(data: bytes) -> List[Dict[str, Any]]:
+    """解析芝麻订单信息 xlsx：订单号 + 档位类别，不碰姓名/手机号/身份证等隐私列。"""
+    if not data:
+        raise ValueError("没有文件")
+    if len(data) > MAX_IMPORT_BYTES:
+        raise ValueError("文件不能超过 4 MiB")
+    try:
+        wb = load_workbook(BytesIO(data), data_only=True, read_only=False)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError("打不开这份订单信息 Excel") from exc
+    try:
+        ws = wb.active
+        rows = list(ws.iter_rows(min_row=1, max_row=max(ws.max_row or 1, 20), max_col=25, values_only=True))
+    finally:
+        wb.close()
+    header_idx = None
+    for i, r in enumerate(rows[:10]):
+        labels = [str(v or "").strip() for v in r]
+        if "订单号" in labels and "订单标题" in labels:
+            header_idx = i
+            break
+    if header_idx is None:
+        raise ValueError("不是芝麻订单信息（缺订单号 / 订单标题）")
+    header = [str(v or "").strip() for v in rows[header_idx]]
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for r in rows[header_idx + 1 :]:
+        rec = dict(zip(header, r))
+        order_no = str(rec.get("订单号") or "").strip()
+        if not order_no or order_no in seen:
+            continue
+        seen.add(order_no)
+        title = str(rec.get("订单标题") or "").strip()
+        frozen_raw = rec.get("冻结金额")
+        try:
+            frozen = round(float(frozen_raw or 0), 2)
+        except (TypeError, ValueError):
+            frozen = 0.0
+        try:
+            terms = int(rec.get("期数") or 0)
+        except (TypeError, ValueError):
+            terms = 0
+        out.append(
+            {
+                "order_no": order_no[:40],
+                "store_code": str(rec.get("门店编码") or "").strip()[:40],
+                "frozen": frozen,
+                "terms": terms,
+                "order_title": title[:120],
+                "tier": (re.search(r"(\d+)\s*档", title).group(1) if re.search(r"(\d+)\s*档", title) else ""),
+            }
+        )
+    if not out:
+        raise ValueError("订单信息里没有数据行")
+    return out
 
 MAX_IMPORT_BYTES = 4 * 1024 * 1024
 
@@ -261,6 +353,56 @@ def week_span(day: date) -> tuple[date, date]:
     return start, start + timedelta(days=6)
 
 
+def month_span(day: date) -> tuple[date, date]:
+    """自然月：1 号到最后一天。"""
+    start = day.replace(day=1)
+    nxt = date(start.year + (start.month == 12), start.month % 12 + 1, 1)
+    return start, nxt - timedelta(days=1)
+
+
+def month_label(start: date, end: date) -> str:
+    """月报标签：跨年用完整日期，同月用「2026年8月」。"""
+    if start.year == end.year and start.month == end.month:
+        return f"{start.year}年{start.month}月"
+    return week_label(start, end)
+
+
+def period_label(start: date, end: date, mode: str = "week") -> str:
+    return month_label(start, end) if mode == "month" else week_label(start, end)
+
+
+def sesame_tier_breakdown(conn, store_ids, start: date, end: date):
+    """每店的档位办理统计，供通报表列。
+
+    返回 (breakdown, tier_cols)：
+    - breakdown: {store_id: {"cats": {类别: 办理笔数}, "tiers": {档位: 办理笔数},
+                             "tiers_net": {档位: 净额}}}
+      办理笔数按净数（扣费 − 退款，实际办理）；tiers 只含「新用户芝麻直降」的原始档位。
+    - tier_cols: 本期出现过的直降档位，按数值升序，用作通报表列。
+    """
+    ids = {int(i) for i in store_ids}
+    breakdown: Dict[int, Dict[str, Dict[str, Any]]] = {}
+    tiers_all: set = set()
+    if not ids:
+        return breakdown, []
+    for row in db_core.sesame_tier_rows(conn, start.isoformat(), end.isoformat()):
+        if row["store_id"] not in ids:
+            continue
+        d = breakdown.setdefault(
+            row["store_id"], {"cats": {}, "tiers": {}, "tiers_net": {}}
+        )
+        net_n = row["charge_n"] - row["refund_n"]
+        d["cats"][row["cat"]] = d["cats"].get(row["cat"], 0) + net_n
+        if row["cat"] == "新用户芝麻直降" and row["tier"]:
+            d["tiers"][row["tier"]] = d["tiers"].get(row["tier"], 0) + net_n
+            d["tiers_net"][row["tier"]] = round(
+                d["tiers_net"].get(row["tier"], 0.0) + row["net"], 2
+            )
+            tiers_all.add(row["tier"])
+    tier_cols = sorted(tiers_all, key=lambda t: int(t) if str(t).isdigit() else 9999)
+    return breakdown, tier_cols
+
+
 def week_label(start: date, end: date) -> str:
     if start.year == end.year and start.month == end.month:
         return f"{start.month}月{start.day}日–{end.day}日"
@@ -282,7 +424,7 @@ def sesame_week_rows(
     rows = conn.execute(
         f"""
         SELECT a.store_id AS store_id,
-               COALESCE(st.short_name, st.name, '') AS name,
+               st.name AS name,
                COALESCE(st.city, '') AS city,
                COUNT(*) AS n,
                SUM(CASE WHEN a.sesame > 0 THEN 1 ELSE 0 END) AS charge_n,
@@ -302,14 +444,17 @@ def sesame_week_rows(
     for row in rows:
         charge = float(row["charge"] or 0)
         refund = float(row["refund"] or 0)
+        charge_n = int(row["charge_n"] or 0)
+        refund_n = int(row["refund_n"] or 0)
         out.append(
             {
                 "store_id": int(row["store_id"]),
                 "name": row["name"] or "",
                 "city": row["city"] or "",
-                "n": int(row["n"] or 0),
-                "charge_n": int(row["charge_n"] or 0),
-                "refund_n": int(row["refund_n"] or 0),
+                # 总笔数 = 扣费 − 退款（净笔数）；跨期退款会为负
+                "n": charge_n - refund_n,
+                "charge_n": charge_n,
+                "refund_n": refund_n,
                 "charge": charge,
                 "refund": refund,
                 "refund_abs": round(abs(refund), 2),
@@ -340,25 +485,26 @@ def sesame_week_totals(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "stores": len(rows),
     }
 
-
 def render_week_text(
     rows: Sequence[Mapping[str, Any]],
     totals: Mapping[str, Any],
     start: date,
     end: date,
     city: str = "",
+    mode: str = "week",
 ) -> str:
     city_bit = (city or "").replace("市", "") or "全店"
+    title = "芝麻直降办理月报" if mode == "month" else "芝麻直降办理周报"
     lines = [
-        f"【芝麻服务费】{week_label(start, end)} · {city_bit}",
-        f"净 {float(totals.get('net') or 0):.2f} 元 · 扣费 {int(totals.get('charge_n') or 0)} 笔 · 退款 {int(totals.get('refund_n') or 0)} 笔",
+        f"【{title}】{period_label(start, end, mode)} · {city_bit}",
+        f"净 {float(totals.get('net') or 0):.2f} 元 · 净办理 {int(totals.get('n') or 0)} 笔",
         "",
     ]
     if not rows:
-        lines.append("本周还没有已导入的芝麻流水。")
+        lines.append("这一期还没有已导入的芝麻流水。")
         return "\n".join(lines) + "\n"
     for i, row in enumerate(rows, 1):
         lines.append(
-            f"{i} {row.get('name') or '门店'}  {int(row.get('n') or 0)}笔  净{float(row.get('net') or 0):.2f}"
+            f"{i} {row.get('name') or '门店'}  净办理{int(row.get('n') or 0)}笔  净{float(row.get('net') or 0):.2f}"
         )
     return "\n".join(lines) + "\n"

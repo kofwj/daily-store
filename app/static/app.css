@@ -669,9 +669,37 @@ table.bulletin tr.wait td.name { color: #9a3412; }
 table.bulletin tr.wait td.scale { background: #fff7ed !important; color: #9a3412 !important; }
 table.bulletin tr.wait td.flag-yes,
 table.bulletin tr.wait td.flag-no { background: #ffedd5; }
-table.bulletin.sesame-week { min-width: 640px; }
+table.bulletin.sesame-week {
+  min-width: 0;
+  width: 100%;
+  font-size: 12.5px;
+  margin-top: 2px;
+}
+table.bulletin.sesame-week th,
+table.bulletin.sesame-week td { padding: 7px 8px; }
 table.bulletin.sesame-week th.left,
-table.bulletin.sesame-week td.name { text-align: left; }
+table.bulletin.sesame-week td.name { text-align: left; padding-left: 10px; }
+
+/* 芝麻周报/月报的分类统计（按地市 / 按区域经理），随截图一起出图 */
+.sesame-cats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.sesame-cat-title {
+  font-size: 12px; font-weight: 650; color: var(--muted);
+  letter-spacing: .05em; margin-bottom: 6px;
+}
+table.bulletin.sesame-cat-table { min-width: 0; width: 100%; font-size: 12px; }
+table.bulletin.sesame-cat-table th.left,
+table.bulletin.sesame-cat-table td.name { text-align: left; }
+.sesame-mode { display: inline-flex; margin: 0; }
+@media (max-width: 720px) {
+  .sesame-cats { grid-template-columns: 1fr; }
+}
 .miss-tag {
   display: inline-block; margin-left: 5px; padding: 0 4px;
   font-size: 10px; font-weight: 600; letter-spacing: 0; line-height: 16px;

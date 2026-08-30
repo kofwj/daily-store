@@ -5,20 +5,7 @@ from datetime import date, timedelta
 
 from app import db
 from app.db_core import _expand_user_roles_city
-from tests.conftest import login
-
-
-def _make_city_user(username="cityboss", scope="示例市", pin="654321"):
-    with db.get_db() as conn:
-        return db.create_user(
-            conn,
-            username=username,
-            display_name="地市负责",
-            pin=pin,
-            role="city",
-            store_ids=[],
-            scope=scope,
-        )
+from tests.conftest import login, make_city_user
 
 
 def _stores():
@@ -67,10 +54,8 @@ def test_expand_user_roles_city_migrates_old_table(tmp_path):
     _expand_user_roles_city(conn)
 
 
-def test_city_scope_limits_visible_stores(app_client):
+def test_city_scope_limits_visible_stores(city_client):
     """可见范围 = 本地市启用门店；他市店无权。"""
-    _make_city_user()
-    login(app_client, "cityboss", "654321")
     stores = _stores()
     nt = [s for s in stores if s["city"] == "示例市"]
     other = [s for s in stores if s["city"] != "示例市"]
@@ -82,15 +67,13 @@ def test_city_scope_limits_visible_stores(app_client):
         assert all(db.user_can_access_store(conn, user, s["id"]) for s in nt)
 
 
-def test_city_edits_any_day_this_month(app_client):
+def test_city_edits_any_day_this_month(city_client):
     """不开「本月可改」，地市负责人也能改本市店里本月任意过去日。"""
-    _make_city_user()
-    login(app_client, "cityboss", "654321")
     stores = _stores()
     sid = stores[0]["id"]  # 示例市 alpha 店
     yesterday = date.today() - timedelta(days=1)
     assert yesterday.month == date.today().month or True  # 月初时昨天可能跨月，跨月分支另有用例
-    resp = app_client.post(
+    resp = city_client.post(
         "/today",
         data={
             "store_id": str(sid),
@@ -108,21 +91,19 @@ def test_city_edits_any_day_this_month(app_client):
             assert row is not None
 
 
-def test_city_rejects_cross_month_and_future(app_client):
+def test_city_rejects_cross_month_and_future(city_client):
     """跨月与未来日期仍拒绝。"""
-    _make_city_user()
-    login(app_client, "cityboss", "654321")
     sid = _stores()[0]["id"]
     today = date.today()
     last_month = today.replace(day=1) - timedelta(days=1)
-    resp = app_client.post(
+    resp = city_client.post(
         "/today",
         data={"store_id": str(sid), "date": last_month.isoformat(), "m_phone_sales": "1"},
         follow_redirects=True,
     )
     assert "只能改本月的日报" in resp.get_data(as_text=True)
     future = today + timedelta(days=3)
-    resp = app_client.post(
+    resp = city_client.post(
         "/today",
         data={"store_id": str(sid), "date": future.isoformat(), "m_phone_sales": "1"},
         follow_redirects=True,
@@ -141,7 +122,7 @@ def test_city_can_overwrite_other_submission(app_client):
         follow_redirects=True,
     )
     app_client.post("/logout")
-    _make_city_user()
+    make_city_user()
     login(app_client, "cityboss", "654321")
     resp = app_client.post(
         "/today",
@@ -153,14 +134,12 @@ def test_city_can_overwrite_other_submission(app_client):
     assert "已保存" in page
 
 
-def test_city_advance_is_readonly(app_client):
+def test_city_advance_is_readonly(city_client):
     """垫资：可看页面，提交与删除都被拒。"""
-    _make_city_user()
-    login(app_client, "cityboss", "654321")
     sid = _stores()[0]["id"]
-    page = app_client.get("/advance", query_string={"store_id": sid}).get_data(as_text=True)
+    page = city_client.get("/advance", query_string={"store_id": sid}).get_data(as_text=True)
     assert "垫资" in page
-    resp = app_client.post(
+    resp = city_client.post(
         "/advance",
         data={
             "store_id": str(sid),
@@ -174,7 +153,7 @@ def test_city_advance_is_readonly(app_client):
     with db.get_db() as conn:
         n = conn.execute("SELECT COUNT(*) FROM advance_posts WHERE store_id=?", (sid,)).fetchone()[0]
     assert n == 0
-    resp = app_client.post(
+    resp = city_client.post(
         "/advance/delete",
         data={"store_id": str(sid), "advance_id": "1"},
         follow_redirects=True,
@@ -182,12 +161,10 @@ def test_city_advance_is_readonly(app_client):
     assert "只读账号不能填写或修改数据" in resp.get_data(as_text=True)
 
 
-def test_city_deal_post_rejected(app_client):
+def test_city_deal_post_rejected(city_client):
     """成交播报对地市负责人只读。"""
-    _make_city_user()
-    login(app_client, "cityboss", "654321")
     sid = _stores()[0]["id"]
-    resp = app_client.post(
+    resp = city_client.post(
         "/deal",
         data={"store_id": str(sid)},
         follow_redirects=True,
@@ -195,10 +172,9 @@ def test_city_deal_post_rejected(app_client):
     assert "只读账号不能填触客播报" in resp.get_data(as_text=True)
 
 
-def test_settings_add_and_rescope_city_user(app_client):
+def test_settings_add_and_rescope_city_user(admin_client):
     """设置页：添加地市负责人、改负责地市、无效地市报错。"""
-    login(app_client, "admin")
-    resp = app_client.post(
+    resp = admin_client.post(
         "/settings",
         data={
             "action": "add_user",
@@ -213,13 +189,13 @@ def test_settings_add_and_rescope_city_user(app_client):
         follow_redirects=True,
     )
     assert "账号已加" in resp.get_data(as_text=True)
-    page = app_client.get("/settings?tab=people").get_data(as_text=True)
+    page = admin_client.get("/settings?tab=people").get_data(as_text=True)
     assert "地市负责人" in page
     with db.get_db() as conn:
         uid = conn.execute("SELECT id FROM users WHERE username='citylead'").fetchone()["id"]
         assert conn.execute("SELECT scope FROM users WHERE id=?", (uid,)).fetchone()["scope"] == "邻市"
     # 改负责地市
-    resp = app_client.post(
+    resp = admin_client.post(
         "/settings",
         data={
             "action": "set_stores",
@@ -232,7 +208,7 @@ def test_settings_add_and_rescope_city_user(app_client):
     )
     assert "地市范围已改" in resp.get_data(as_text=True)
     # 无效地市
-    resp = app_client.post(
+    resp = admin_client.post(
         "/settings",
         data={
             "action": "set_stores",
@@ -245,7 +221,7 @@ def test_settings_add_and_rescope_city_user(app_client):
     )
     assert "要选一个有效地市" in resp.get_data(as_text=True)
     # add_user 用无效地市
-    resp = app_client.post(
+    resp = admin_client.post(
         "/settings",
         data={
             "action": "add_user",

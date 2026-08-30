@@ -1,5 +1,6 @@
 from datetime import date
 
+from app import db
 from app.broadcast import add_day_to_prev, render_broadcast
 from app.metrics_seed import metric_codes
 
@@ -139,3 +140,31 @@ def test_broadcast_rolls_coin_cut_parts_into_one_line():
     assert "芝麻免充" not in text
     assert "全品类" not in text
     assert "小天才直降" not in text
+
+
+def test_broadcast_compact_is_admin_setting(admin_client):
+    """群消息压缩是管理员设置：默认剔除「日=0 且累=0」的行。"""
+    from datetime import date as _date
+
+    today_html = admin_client.get("/today").get_data(as_text=True)
+    assert "数字化里日=0" not in today_html
+    settings = admin_client.get("/settings?tab=broadcast").get_data(as_text=True)
+    assert "数字化里日=0 且累=0 的行不进群消息" in settings
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+    day = _date.today().isoformat()
+    saved = admin_client.post(
+        "/today",
+        data={"store_id": str(sid), "date": day, "m_cloud_disk": "0", "m_phone_sales": "1"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "云盘：日0，累0" not in saved
+    admin_client.post("/settings", data={"action": "save_broadcast", "tab": "broadcast"}, follow_redirects=True)
+    with db.get_db() as conn:
+        assert db.get_setting(conn, "broadcast_compact", "1") == "0"
+    again = admin_client.post(
+        "/today",
+        data={"store_id": str(sid), "date": day, "m_cloud_disk": "0", "m_phone_sales": "1"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "云盘：日0，累0" in again

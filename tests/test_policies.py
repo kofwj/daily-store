@@ -176,3 +176,94 @@ def test_unread_gate_blocks_readonly_pages(client):
     client.post("/policies/ack", data={"policy_id": str(pid)}, follow_redirects=True)
     ok = client.get("/report", follow_redirects=True)
     assert ok.request.path == "/report"
+
+
+def test_policy_read_status_counts_unread(tmp_db):
+    """已读统计：只有确认当前版本的用户才算已读。"""
+    with db.get_db() as conn:
+        admin = conn.execute(
+            "SELECT id, display_name FROM users WHERE username='admin'"
+        ).fetchone()
+        fillers = [
+            r
+            for r in conn.execute(
+                "SELECT id, display_name, active, username FROM users WHERE role='filler'"
+            )
+        ]
+        assert len(fillers) >= 2
+        u1 = fillers[0]["id"]
+        pid = db.save_policy(conn, title="考勤", body="第一版", user_id=admin["id"])
+        # 只有 u1 已读
+        db.mark_policy_read(conn, u1, pid)
+        rows = db.policy_read_status(conn)
+    target = next(r for r in rows if r["id"] == pid)
+    assert target["title"] == "考勤"
+    assert target["read"] == 1
+    assert len(target["unread"]) == target["total"] - 1
+    # 升版后已读作废
+    with db.get_db() as conn:
+        db.save_policy(
+            conn, title="考勤", body="第二版", user_id=admin["id"], policy_id=pid
+        )
+        rows2 = db.policy_read_status(conn)
+    t2 = next(r for r in rows2 if r["id"] == pid)
+    assert t2["read"] == 0  # 版本号追上，之前读了也不算
+
+
+def test_policy_image_upload_and_serve(admin_client):
+    """政策插图：管理员可传 PNG，非图片被拒，非管理员被拦。"""
+    from PIL import Image
+
+    buf = __import__("io").BytesIO()
+    Image.new("RGB", (2, 2), (16, 120, 72)).save(buf, format="PNG")
+    png = buf.getvalue()
+    r = admin_client.post(
+        "/settings/policy-image",
+        data={"file-0": (__import__("io").BytesIO(png), "口径.png")},
+        content_type="multipart/form-data",
+    )
+    assert r.status_code == 200
+    url = r.get_json()["result"][0]["url"]
+    assert url.startswith("/uploads/policy/")
+    # 能取回
+    got = admin_client.get(url)
+    assert got.status_code == 200 and got.data[:8] == b"\x89PNG\r\n\x1a\n"
+    # 非图片被拒
+    bad = admin_client.post(
+        "/settings/policy-image",
+        data={"file-0": (__import__("io").BytesIO(b"not an image"), "x.png")},
+        content_type="multipart/form-data",
+    )
+    assert bad.status_code == 400
+    # 非管理员被拦
+    c2 = admin_client.application.test_client()
+    c2.post("/login", data={"username": "alpha", "pin": "123456"})
+    r2 = c2.post(
+        "/settings/policy-image",
+        data={"file-0": (__import__("io").BytesIO(png), "a.png")},
+        content_type="multipart/form-data",
+    )
+    assert r2.status_code in (302, 403)
+
+
+def test_policy_image_upload_is_resized_down(admin_client):
+    """政策插图上传后服务端把超大图缩到长边 <= 1600。"""
+    from io import BytesIO
+
+    from PIL import Image
+
+    big = BytesIO()
+    Image.new("RGB", (4000, 2000), (200, 100, 50)).save(big, "PNG")
+    big.seek(0)
+    r = admin_client.post(
+        "/settings/policy-image",
+        data={"file-0": (big, "big.png")},
+        content_type="multipart/form-data",
+    )
+    assert r.status_code == 200
+    url = r.get_json()["result"][0]["url"]
+    saved = admin_client.get(url)
+    assert saved.status_code == 200
+    im = Image.open(BytesIO(saved.data))
+    assert max(im.width, im.height) <= 1600, (im.width, im.height)
+

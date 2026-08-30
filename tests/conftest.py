@@ -59,3 +59,46 @@ def login(client, username="alpha", pin="123456"):
     return client.post(
         "/login", data={"username": username, "pin": pin}, follow_redirects=True
     )
+
+
+@pytest.fixture()
+def admin_client(app_client):
+    """已登录管理员（admin/123456）的测试客户端。"""
+    login(app_client, "admin", "123456")
+    return app_client
+
+
+@pytest.fixture()
+def filler_client(app_client):
+    """已登录店员（alpha/123456）的测试客户端。"""
+    login(app_client, "alpha", "123456")
+    return app_client
+
+
+@pytest.fixture()
+def city_client(app_client):
+    """已登录示例市地市负责人（cityboss/654321）的测试客户端。"""
+    make_city_user()
+    login(app_client, "cityboss", "654321")
+    return app_client
+
+
+def make_city_user(username="cityboss", scope="示例市", pin="654321"):
+    """建一个地市负责人账号（默认示例市）。"""
+    with db.get_db() as conn:
+        return db.create_user(
+            conn,
+            username=username,
+            display_name="地市负责",
+            pin=pin,
+            role="city",
+            store_ids=[],
+            scope=scope,
+        )
+
+
+def store_id(code="store-alpha"):
+    """按门店 code 查 id（种子目录里的店都能查到）。"""
+    with db.get_db() as conn:
+        return conn.execute("SELECT id FROM stores WHERE code=?", (code,)).fetchone()["id"]
+

@@ -11,7 +11,9 @@ from . import db
 from .helpers import (
     admin_required,
     login_required,
+    month_end,
     parse_date,
+    parse_int,
     pick_store,
     xlsx_bytes,
     xlsx_response,
@@ -56,10 +58,7 @@ def register_report(app) -> None:
             else:
                 view = "month"
                 start = parse_date(request.args.get("start"), today_d.replace(day=1))
-                if start.month == 12:
-                    end = date(start.year + 1, 1, 1) - timedelta(days=1)
-                else:
-                    end = date(start.year, start.month + 1, 1) - timedelta(days=1)
+                end = month_end(start)
                 end = min(end, today_d)
 
             facts = db.facts_in_range(conn, store["id"], start, end)
@@ -221,10 +220,10 @@ def register_report(app) -> None:
         """删除某店某一天的日报（连事实一起删）。锁定时间内管理员可删。"""
         store_id = request.form.get("store_id") or request.args.get("store_id")
         day = request.form.get("date") or request.args.get("date")
+        sid = parse_int(store_id, 0)
         try:
-            sid = int(store_id or 0)
             biz_date = date.fromisoformat(day) if day else None
-        except (ValueError, TypeError):
+        except ValueError:
             biz_date = None
         if sid <= 0 or biz_date is None:
             return Response("bad request", status=400)

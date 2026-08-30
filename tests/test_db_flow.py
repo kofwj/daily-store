@@ -2,11 +2,11 @@ from datetime import date
 from io import BytesIO
 
 import openpyxl
+import pytest
 
 from app import db, db_core
 from app.broadcast import render_broadcast
 from app.stores_seed import NINGHAI_CODE, STORES, filler_accounts
-from app.web import create_app
 
 
 def test_catalog_has_eleven_official_stores(tmp_db):
@@ -180,10 +180,7 @@ def test_save_and_month_cum(tmp_db):
         assert through["phone_sales"] == 6
 
 
-def test_health_is_public(tmp_db):
-    app = create_app()
-    app.config["TESTING"] = True
-    client = app.test_client()
+def test_health_is_public(client):
     resp = client.get("/health")
     assert resp.status_code == 200
     payload = resp.get_json()
@@ -192,10 +189,7 @@ def test_health_is_public(tmp_db):
     assert payload.get("version")
 
 
-def test_login_and_save_roundtrip(tmp_db):
-    app = create_app()
-    app.config["TESTING"] = True
-    client = app.test_client()
+def test_login_and_save_roundtrip(client):
     assert client.get("/today").status_code == 302
     page = client.post("/login", data={"username": "epsilon", "pin": "123456"}, follow_redirects=True)
     assert page.status_code == 200
@@ -407,3 +401,90 @@ def test_bisuan_tenths_migration_is_idempotent(tmp_db):
     assert before == 15
     assert after == 15
     assert marker is not None
+
+
+def test_seed_does_not_overwrite_admin_edits(tmp_db):
+    """重启（再次 init_db）不应把管理员的档案/账号改动冲掉。"""
+    with db.get_db() as conn:
+        store = conn.execute("SELECT * FROM stores LIMIT 1").fetchone()
+        conn.execute(
+            "UPDATE stores SET active=0, store_manager='管理员手改', area_manager='手改A' WHERE id=?",
+            (store["id"],),
+        )
+        uid = conn.execute("SELECT id FROM users WHERE username='alpha'").fetchone()["id"]
+        db.set_user_active(conn, uid, False)
+        other = conn.execute("SELECT id FROM stores ORDER BY id DESC LIMIT 1").fetchone()["id"]
+        db.set_user_stores(conn, uid, [other])
+    db.init_db()
+    with db.get_db() as conn:
+        s = conn.execute("SELECT * FROM stores WHERE id=?", (store["id"],)).fetchone()
+        assert s["active"] == 0
+        assert s["store_manager"] == "管理员手改"
+        assert s["area_manager"] == "手改A"
+        u = conn.execute("SELECT active FROM users WHERE username='alpha'").fetchone()
+        assert u["active"] == 0
+        uid2 = conn.execute("SELECT id FROM users WHERE username='alpha'").fetchone()["id"]
+        assert db.user_store_ids(conn, uid2) == [other]
+    # 管理员把店清空后重启，也不该被种子偷偷补回目录默认店
+    with db.get_db() as conn:
+        db.set_user_stores(conn, uid, [])
+    db.init_db()
+    with db.get_db() as conn:
+        assert db.user_store_ids(conn, uid) == []
+
+
+def test_bisuan_mobile_migrates_from_old_settings(tmp_db):
+    """旧 app_meta 键要能搬进新表，且截止日按店保留。"""
+    from app.db_bisuan_mobile import _migrate_bisuan_mobile_from_settings
+
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores LIMIT 1").fetchone()["id"]
+        db.set_setting(conn, f"bisuan_mobile_{sid}_2026-07", "12.5")
+        db.set_setting(conn, "bisuan_mobile_asof_2026-07", "2026-07-20")
+        _migrate_bisuan_mobile_from_settings(conn)
+        row = db.get_bisuan_mobile(conn, sid, "2026-07")
+        assert row["value_tenths"] == 125
+        assert row["asof"] == "2026-07-20"
+        # 旧键已清掉，重复迁移不会翻倍
+        _migrate_bisuan_mobile_from_settings(conn)
+        assert db.get_bisuan_mobile(conn, sid, "2026-07")["value_tenths"] == 125
+        assert db.get_setting(conn, f"bisuan_mobile_{sid}_2026-07", "") == ""
+
+
+def test_bisuan_mobile_rejects_negative(tmp_db):
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores LIMIT 1").fetchone()["id"]
+        with pytest.raises(ValueError):
+            db.save_bisuan_mobile(
+                conn, store_id=sid, month="2026-08", value_tenths=-5, asof=date(2026, 8, 20)
+            )
+
+
+def test_month_cum_through_many_matches_single(tmp_db):
+    """批量月累计与逐店单查口径一致。"""
+    today = date.today()
+    with db.get_db() as conn:
+        sid_a = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        sid_b = db.create_store(conn, "批量对照店", short_name="批量对照店")
+        admin_id = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        db.save_daily(conn, store_id=sid_a, biz_date=today, user_id=admin_id, values={"phone_sales": 3})
+        db.save_daily(conn, store_id=sid_b, biz_date=today, user_id=admin_id, values={"phone_sales": 7})
+        many = db.month_cum_through_many(conn, [sid_a, sid_b, 999999], today)
+        single_a = db.month_cum_through(conn, sid_a, today)
+        single_b = db.month_cum_through(conn, sid_b, today)
+    assert many[sid_a]["phone_sales"] == single_a["phone_sales"] == 3
+    assert many[sid_b]["phone_sales"] == single_b["phone_sales"] == 7
+    assert 999999 not in many
+
+
+def test_comma_input_strict(tmp_db):
+    """千分位正常剥；「12,5」这类小数逗号不再放大十倍。"""
+    from app.db_advances import parse_money
+    from app.metrics_seed import to_stored
+
+    assert to_stored("phone_sales", "1,234") == 1234
+    assert to_stored("bisuan_new", "12,5") == 0
+    assert parse_money("1,234.5") == 1234.5
+    with pytest.raises(ValueError):
+        parse_money("12,5")
+

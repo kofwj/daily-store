@@ -1,3 +1,4 @@
+from datetime import date
 from io import BytesIO
 
 import openpyxl
@@ -89,13 +90,8 @@ def test_filler_saves_and_admin_pays(client):
         assert int(row["rebate"]) == 10000
 
 
-def test_admin_can_save_without_phone_and_fills_settlement(tmp_db):
-    from app.web import create_app
-
-    app = create_app()
-    app.config["TESTING"] = True
-    c = app.test_client()
-    c.post("/login", data={"username": "admin", "pin": "123456"})
+def test_admin_can_save_without_phone_and_fills_settlement(tmp_db, admin_client):
+    c = admin_client
     with db.get_db() as conn:
         sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
     today = db.today_local()
@@ -385,3 +381,41 @@ def test_advance_old_real_whole_yuan_converted(tmp_path):
     marker = conn.execute("SELECT value FROM app_meta WHERE key='advance_cents_marker'").fetchone()
     assert marker[0] == "1"
     conn.close()
+
+
+def test_advance_form_keeps_input_on_error(filler_client):
+    """垫资校验失败要回显已填内容，不能让店员重敲一遍。"""
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+    resp = filler_client.post(
+        "/advance",
+        data={
+            "store_id": str(sid),
+            "biz_date": date.today().isoformat(),
+            "phone": "13800138000",
+            "broadband": "abc",
+            "note": "宽带垫资备注",
+        },
+    )
+    page = resp.get_data(as_text=True)
+    assert "金额请填数字" in page
+    assert "13800138000" in page
+    assert "宽带垫资备注" in page
+
+
+def test_advance_phone_masked_for_filler(filler_client):
+    """垫资记录对店员打码，管理员保留完整号码（兑付对账用）。"""
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        admin_id = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        db.record_advance(
+            conn, store_id=sid, user_id=admin_id, biz_date=date.today(),
+            phone="13812345678", broadband=100,
+        )
+    filler_page = filler_client.get("/advance").get_data(as_text=True)
+    assert "138****5678" in filler_page
+    assert "13812345678" not in filler_page
+    filler_client.post("/logout")
+    filler_client.post("/login", data={"username": "admin", "pin": "123456"})
+    admin_page = filler_client.get("/advance").get_data(as_text=True)
+    assert "13812345678" in admin_page

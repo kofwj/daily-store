@@ -1,27 +1,17 @@
 """纠错功能回归测试：店员只改当天 / 锁定时间 / 审计记录 / 删除日报。"""
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from app import db
-from app.web import create_app
+from tests.conftest import store_id
 
 
-def _login(client, username, pin):
-    return client.post("/login", data={"username": username, "pin": pin}, follow_redirects=True)
-
-
-def _store_id(conn, code="store-alpha"):
-    return conn.execute("SELECT id FROM stores WHERE code=?", (code,)).fetchone()["id"]
-
-
-def test_filler_cannot_save_past_date(tmp_db, monkeypatch):
-    client = _client_auth()
+def test_filler_cannot_save_past_date(filler_client):
     today_d = date.today()
-    past = today_d - __import__("datetime").timedelta(days=2)
-    with db.get_db() as conn:
-        sid = _store_id(conn)
+    past = today_d - timedelta(days=2)
+    sid = store_id()
     # 伪造：店员 POST 改历史日期，应被拒
-    resp = client.post(
+    resp = filler_client.post(
         "/today",
         data={"store_id": str(sid), "date": past.isoformat(), "m_phone_sales": "5"},
         follow_redirects=True,
@@ -31,13 +21,11 @@ def test_filler_cannot_save_past_date(tmp_db, monkeypatch):
         assert db.get_report(conn, sid, past) is None
 
 
-def test_filler_month_switch_off_blocks_this_month_past(tmp_db, monkeypatch):
-    client = _client_auth()
-    with db.get_db() as conn:
-        sid = _store_id(conn)
+def test_filler_month_switch_off_blocks_this_month_past(filler_client):
+    sid = store_id()
     # 本月 1 号（非当天），开关默认关 → 拒绝
     past = date.today().replace(day=1)
-    resp = client.post(
+    resp = filler_client.post(
         "/today",
         data={"store_id": str(sid), "date": past.isoformat(), "m_phone_sales": "5"},
         follow_redirects=True,
@@ -47,21 +35,20 @@ def test_filler_month_switch_off_blocks_this_month_past(tmp_db, monkeypatch):
         assert db.get_report(conn, sid, past) is None
 
 
-def test_filler_month_switch_still_rejects_future_date(tmp_db):
-    client = _client_auth(username="admin", pin="123456")
+def test_filler_month_switch_still_rejects_future_date(client):
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     client.post("/settings", data={"action": "save_permissions", "tab": "permissions", "filler_edit_month": "1"})
     client.post("/logout")
     client.post("/login", data={"username": "alpha", "pin": "123456"})
-    with db.get_db() as conn:
-        sid = _store_id(conn)
-    future = date.today() + __import__("datetime").timedelta(days=1)
+    sid = store_id()
+    future = date.today() + timedelta(days=1)
     response = client.post("/today", data={"store_id": sid, "date": future.isoformat(), "m_phone_sales": "1"}, follow_redirects=True)
     assert "未来日期" in response.get_data(as_text=True)
 
 
-def test_filler_month_switch_on_allows_this_month(tmp_db, monkeypatch):
-    client = _client_auth(username="admin", pin="123456")
+def test_filler_month_switch_on_allows_this_month(client):
     # 管理员开开关
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     resp = client.post(
         "/settings",
         data={"action": "save_permissions", "tab": "permissions", "filler_edit_month": "1"},
@@ -73,8 +60,7 @@ def test_filler_month_switch_on_allows_this_month(tmp_db, monkeypatch):
     # 店员登出、登录
     client.post("/logout")
     client.post("/login", data={"username": "alpha", "pin": "123456"})
-    with db.get_db() as conn:
-        sid = _store_id(conn)
+    sid = store_id()
     past = date.today().replace(day=1)
     resp = client.post(
         "/today",
@@ -86,13 +72,11 @@ def test_filler_month_switch_on_allows_this_month(tmp_db, monkeypatch):
         assert db.get_report(conn, sid, past) is not None
 
 
-def test_admin_can_save_past_date(tmp_db, monkeypatch):
-    client = _client_auth(username="admin", pin="123456")
+def test_admin_can_save_past_date(admin_client):
     today_d = date.today()
-    past = today_d - __import__("datetime").timedelta(days=1)
-    with db.get_db() as conn:
-        sid = _store_id(conn)
-    resp = client.post(
+    past = today_d - timedelta(days=1)
+    sid = store_id()
+    resp = admin_client.post(
         "/today",
         data={"store_id": str(sid), "date": past.isoformat(), "m_phone_sales": "3"},
         follow_redirects=True,
@@ -102,16 +86,14 @@ def test_admin_can_save_past_date(tmp_db, monkeypatch):
         assert db.get_report(conn, sid, past) is not None
 
 
-def test_locked_today_blocked_but_admin_ok(tmp_db, monkeypatch):
-    client = _client_auth()
+def test_locked_today_blocked_but_admin_ok(filler_client, monkeypatch):
     today_d = date.today()
     # 模拟锁定时间后的 now
     monkeypatch.setattr(
         db, "is_locked", lambda biz_date, now=None: biz_date == today_d
     )
-    with db.get_db() as conn:
-        sid = _store_id(conn)
-    resp = client.post(
+    sid = store_id()
+    resp = filler_client.post(
         "/today",
         data={"store_id": str(sid), "date": today_d.isoformat(), "m_phone_sales": "1"},
         follow_redirects=True,
@@ -121,13 +103,11 @@ def test_locked_today_blocked_but_admin_ok(tmp_db, monkeypatch):
         assert db.get_report(conn, sid, today_d) is None
 
 
-def test_admin_override_lock(tmp_db, monkeypatch):
-    client = _client_auth(username="admin", pin="123456")
+def test_admin_override_lock(admin_client, monkeypatch):
     today_d = date.today()
     monkeypatch.setattr(db, "is_locked", lambda biz_date, now=None: biz_date == today_d)
-    with db.get_db() as conn:
-        sid = _store_id(conn)
-    resp = client.post(
+    sid = store_id()
+    resp = admin_client.post(
         "/today",
         data={"store_id": str(sid), "date": today_d.isoformat(), "m_phone_sales": "2"},
         follow_redirects=True,
@@ -137,19 +117,17 @@ def test_admin_override_lock(tmp_db, monkeypatch):
         assert db.get_report(conn, sid, today_d) is not None
 
 
-def test_overwrite_records_audit(tmp_db, monkeypatch):
-    client = _client_auth()
+def test_overwrite_records_audit(filler_client):
     today_d = date.today()
-    with db.get_db() as conn:
-        sid = _store_id(conn)
+    sid = store_id()
     # 第一次保存
-    client.post(
+    filler_client.post(
         "/today",
         data={"store_id": str(sid), "date": today_d.isoformat(), "m_phone_sales": "1"},
         follow_redirects=True,
     )
     # 覆盖保存
-    resp = client.post(
+    resp = filler_client.post(
         "/today",
         data={"store_id": str(sid), "date": today_d.isoformat(), "m_phone_sales": "7"},
         follow_redirects=True,
@@ -161,17 +139,15 @@ def test_overwrite_records_audit(tmp_db, monkeypatch):
         assert edits[0]["note"] == "覆盖保存"
 
 
-def test_delete_report_records_audit(tmp_db, monkeypatch):
-    client = _client_auth(username="admin", pin="123456")
+def test_delete_report_records_audit(admin_client):
     today_d = date.today()
-    with db.get_db() as conn:
-        sid = _store_id(conn)
-    client.post(
+    sid = store_id()
+    admin_client.post(
         "/today",
         data={"store_id": str(sid), "date": today_d.isoformat(), "m_phone_sales": "4"},
         follow_redirects=True,
     )
-    resp = client.post(
+    resp = admin_client.post(
         "/report/delete",
         data={"store_id": str(sid), "date": today_d.isoformat()},
         follow_redirects=True,
@@ -187,7 +163,7 @@ def test_delete_report_records_audit(tmp_db, monkeypatch):
 def test_locked_helper():
     today_d = date.today()
     # 非当天永不锁
-    assert db.is_locked(today_d - __import__("datetime").timedelta(days=1)) is False
+    assert db.is_locked(today_d - timedelta(days=1)) is False
     # 当天在锁定前不锁
     assert db.is_locked(today_d, now=datetime(2026, 8, 14, 22, 59)) is False
     # 当天在锁定后锁
@@ -195,9 +171,9 @@ def test_locked_helper():
     assert db.is_locked(today_d, now=datetime(2026, 8, 14, 23, 30)) is True
 
 
-def test_month_switch_does_not_unlock_today(tmp_db, monkeypatch):
+def test_month_switch_does_not_unlock_today(client, monkeypatch):
     """开启「本月可改」后，店员也不能改『今天』锁定后的数据——本月可改只放开本月过去日。"""
-    client = _client_auth(username="admin", pin="123456")
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     resp = client.post(
         "/settings",
         data={"action": "save_permissions", "tab": "permissions", "filler_edit_month": "1"},
@@ -211,8 +187,7 @@ def test_month_switch_does_not_unlock_today(tmp_db, monkeypatch):
     today_d = date.today()
     # 锁定今天
     monkeypatch.setattr(db, "is_locked", lambda biz_date, now=None: biz_date == today_d)
-    with db.get_db() as conn:
-        sid = _store_id(conn)
+    sid = store_id()
     resp = client.post(
         "/today",
         data={"store_id": str(sid), "date": today_d.isoformat(), "m_phone_sales": "9"},
@@ -223,17 +198,15 @@ def test_month_switch_does_not_unlock_today(tmp_db, monkeypatch):
         assert db.get_report(conn, sid, today_d) is None
 
 
-def test_admin_can_fix_one_cell(tmp_db, monkeypatch):
-    client = _client_auth(username="admin", pin="123456")
+def test_admin_can_fix_one_cell(admin_client):
     today_d = date.today()
-    with db.get_db() as conn:
-        sid = _store_id(conn)
-    client.post(
+    sid = store_id()
+    admin_client.post(
         "/today",
         data={"store_id": str(sid), "date": today_d.isoformat(), "m_phone_sales": "4", "m_ai_contract": "2"},
         follow_redirects=True,
     )
-    resp = client.post(
+    resp = admin_client.post(
         "/report/cell",
         data={
             "store_id": str(sid),
@@ -253,17 +226,15 @@ def test_admin_can_fix_one_cell(tmp_db, monkeypatch):
         assert any(row["note"] == "校准单元格" for row in edits)
 
 
-def test_filler_cannot_fix_cell(tmp_db, monkeypatch):
-    client = _client_auth()
+def test_filler_cannot_fix_cell(filler_client):
     today_d = date.today()
-    with db.get_db() as conn:
-        sid = _store_id(conn)
-    client.post(
+    sid = store_id()
+    filler_client.post(
         "/today",
         data={"store_id": str(sid), "date": today_d.isoformat(), "m_phone_sales": "4"},
         follow_redirects=True,
     )
-    resp = client.post(
+    resp = filler_client.post(
         "/report/cell",
         data={
             "store_id": str(sid),
@@ -292,9 +263,7 @@ def test_now_is_beijing_time():
     assert abs((db.today_local() - utc.date()).days) <= 1
 
 
-def _client_auth(username="alpha", pin="123456"):
-    app = create_app()
-    app.config["TESTING"] = True
-    client = app.test_client()
-    client.post("/login", data={"username": username, "pin": pin})
-    return client
+def test_pick_store_invalid_id_prompts(admin_client):
+    """/today 带非法 store_id 时给明确提示，而不是 500。"""
+    page = admin_client.get("/today?store_id=zzz")
+    assert "店号无效" in page.get_data(as_text=True)

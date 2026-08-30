@@ -2,39 +2,37 @@
 
 from unittest.mock import patch
 
+import pytest
+
 from app import db, db_core
 from app.wecom import get_webhook, send_test, send_text
 
 
-def test_no_webhook_returns_empty(tmp_db):
+@pytest.mark.parametrize(
+    "settings,expected",
+    [
+        ({}, ""),
+        (
+            {"wecom_global": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc123"},
+            "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc123",
+        ),
+        (
+            {
+                "wecom_global": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=global",
+                "wecom_city_示例市": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=city",
+            },
+            "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=city",
+        ),
+        ({"wecom_global": "https://example.com/not-valid"}, ""),
+    ],
+)
+def test_get_webhook_selection(tmp_db, settings, expected):
+    """webhook 取值：无配置为空 → 全局 → 地市覆盖全局；无效地址忽略。"""
     with db.get_db() as conn:
+        for key, value in settings.items():
+            db_core.set_setting(conn, key, value)
         store = conn.execute("SELECT * FROM stores WHERE code='store-alpha'").fetchone()
-        assert get_webhook(conn, store) == ""
-
-
-def test_global_webhook_used(tmp_db):
-    url = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc123"
-    with db.get_db() as conn:
-        db_core.set_setting(conn, "wecom_global", url)
-        store = conn.execute("SELECT * FROM stores WHERE code='store-alpha'").fetchone()
-        assert get_webhook(conn, store) == url
-
-
-def test_city_webhook_overrides_global(tmp_db):
-    global_url = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=global"
-    city_url = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=city"
-    with db.get_db() as conn:
-        db_core.set_setting(conn, "wecom_global", global_url)
-        db_core.set_setting(conn, "wecom_city_示例市", city_url)
-        store = conn.execute("SELECT * FROM stores WHERE code='store-alpha'").fetchone()
-        assert get_webhook(conn, store) == city_url
-
-
-def test_invalid_webhook_ignored(tmp_db):
-    with db.get_db() as conn:
-        db_core.set_setting(conn, "wecom_global", "https://example.com/not-valid")
-        store = conn.execute("SELECT * FROM stores WHERE code='store-alpha'").fetchone()
-        assert get_webhook(conn, store) == ""
+        assert get_webhook(conn, store) == expected
 
 
 def test_send_failure_does_not_raise(tmp_db):
@@ -96,3 +94,21 @@ def test_long_chinese_content_truncated_by_bytes(tmp_db):
     content = payload["text"]["content"]
     assert len(content.encode("utf-8")) <= MAX_CONTENT
     assert content.endswith("...")
+
+
+def test_broadcast_error_keeps_daily_saved(filler_client):
+    """企微播报出问题也不能丢已保存的日报：先提交放锁，再播报。"""
+    from datetime import date
+
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        db_core.set_setting(conn, "wecom_global", "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc")
+    with patch("app.wecom.send_text", side_effect=RuntimeError("网络炸了")):
+        resp = filler_client.post(
+            "/today",
+            data={"store_id": str(sid), "date": date.today().isoformat(), "m_phone_sales": "5"},
+            follow_redirects=True,
+        )
+    assert resp.status_code == 200
+    with db.get_db() as conn:
+        assert db.get_report(conn, sid, date.today()) is not None

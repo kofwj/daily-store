@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 # 播报分组：与现有微信群格式对齐
 # header 为 None 表示基础项，直接跟在店名后面
@@ -111,13 +111,6 @@ def metric_name_map() -> Dict[str, str]:
 
 def metric_codes() -> List[str]:
     return [code for code, _name, _section, _sort in all_metrics()]
-
-
-def section_by_code(code: str) -> Dict:
-    for section in SECTIONS:
-        if section["code"] == code:
-            return section
-    raise KeyError(code)
 
 
 COIN_NEW_PARTS = (
@@ -246,22 +239,3 @@ def rollup_amount(values: Mapping[str, int], key: str) -> int:
     spec = ROLLUPS[key]
     return sum(int(values.get(code, 0) or 0) for code in [*spec["parts"], *spec["legacy"]])
 
-
-def display_rollup(values: Mapping[str, int], key: str) -> float:
-    stored = rollup_amount(values, key)
-    if key == "bisuan_total" or any(is_decimal_metric(code) for code in ROLLUPS[key]["parts"]):
-        return round(stored / METRIC_SCALE, 1)
-    return float(stored)
-
-
-def format_rollup(values: Mapping[str, int], key: str) -> str:
-    value = display_rollup(values, key)
-    if key == "bisuan_total" or any(is_decimal_metric(code) for code in ROLLUPS[key]["parts"]):
-        return f"{value:.1f}"
-    if abs(value - round(value)) < 1e-9:
-        return str(int(round(value)))
-    return str(value)
-
-
-def sum_stored(codes: Iterable[str], values: Mapping[str, int]) -> int:
-    return sum(int(values.get(code, 0) or 0) for code in codes)

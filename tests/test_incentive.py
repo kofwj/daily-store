@@ -125,17 +125,12 @@ def test_settlement_invoice_uses_previous_month():
     assert prev_month_start(date(2026, 1, 5)) == date(2025, 12, 1)
 
 
-def test_incentive_xlsx_exports_draft(tmp_db):
+def test_incentive_xlsx_exports_draft(tmp_db, admin_client):
     from io import BytesIO
 
     import openpyxl
 
-    from app.web import create_app
-
-    app = create_app()
-    app.config["TESTING"] = True
-    c = app.test_client()
-    c.post("/login", data={"username": "admin", "pin": "123456"})
+    c = admin_client
     r = c.get("/incentive.xlsx")
     assert r.status_code == 200
     assert "filename=settlement_" in r.headers.get("Content-Disposition", "")
@@ -154,18 +149,13 @@ def test_incentive_xlsx_exports_draft(tmp_db):
     assert "口径" in wb.sheetnames
 
 
-def test_unreported_store_is_not_penalized(tmp_db):
+def test_unreported_store_is_not_penalized(tmp_db, admin_client):
     """本月没交过日报的店不参与考核，奖惩记 0。"""
     from datetime import date
 
     from app import db as _db
     from app.helpers import store_forecast
-    from app.web import create_app
-
-    app = create_app()
-    app.config["TESTING"] = True
-    c = app.test_client()
-    c.post("/login", data={"username": "admin", "pin": "123456"})
+    c = admin_client
     with _db.get_db() as conn:
         store = conn.execute("SELECT * FROM stores WHERE code='store-epsilon'").fetchone()
         judged = store_forecast(conn, store, date.today())
@@ -176,3 +166,11 @@ def test_unreported_store_is_not_penalized(tmp_db):
     page = c.get("/incentive").get_data(as_text=True)
     assert "本月未交" in page
     assert "邻市戊路vivo体验店" in page
+
+
+def test_without_advisor_uses_gt_zero_not_ai_pass():
+    rules = dict(DEFAULTS)
+    rules["ai_pass"] = 10_000  # 管理员调高的 ai_pass 不应影响“破 0”口径
+    row = judge_without_advisor(50, 50, rules)
+    assert row["store_reward"] == DEFAULTS["reward_no_advisor"]
+

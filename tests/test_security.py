@@ -348,3 +348,55 @@ def test_wsgi_refuses_testing_env(monkeypatch):
     sys.modules.pop("wsgi", None)
     with pytest.raises(RuntimeError, match="STORE_DAILY_TESTING"):
         importlib.import_module("wsgi")
+
+
+def test_open_redirect_blocked(app_client):
+    """/login?next= 协议相对的站外地址必须丢弃，回到 /today。"""
+    resp = app_client.post(
+        "/login?next=//evil.com",
+        data={"username": "admin", "pin": "123456"},
+        follow_redirects=True,
+    )
+    assert resp.request.path == "/today"
+
+
+def test_reset_pin_kicks_old_session(tmp_db):
+    """管理员重置口令后，被重置人的旧会话立即失效。"""
+    victim = create_app(testing=True).test_client()
+    victim.post("/login", data={"username": "alpha", "pin": "123456"})
+    assert victim.get("/today", follow_redirects=False).status_code == 200
+    admin_client = create_app(testing=True).test_client()
+    admin_client.post("/login", data={"username": "admin", "pin": "123456"})
+    with db.get_db() as conn:
+        uid = conn.execute("SELECT id FROM users WHERE username='alpha'").fetchone()["id"]
+    admin_client.post(
+        "/settings",
+        data={"action": "reset_pin", "tab": "people", "user_id": str(uid)},
+        follow_redirects=True,
+    )
+    resp = victim.get("/today", follow_redirects=False)
+    assert resp.status_code == 302 and "/login" in resp.headers["Location"]
+    # 重置后的默认口令能重新登录（要求先改密，跳到账号页）
+    victim.post("/login", data={"username": "alpha", "pin": "123456"})
+    resp2 = victim.get("/today", follow_redirects=False)
+    assert resp2.status_code == 302 and "/settings" in resp2.headers["Location"]
+
+
+def test_csrf_referrer_follows_same_site_absolute_url(tmp_db):
+    # Referer 几乎总是绝对 URL：同源的必须转成站内路径跳回原页，
+    # 外站/协议相对的一律丢弃回 today（防开放重定向）。
+    app = create_app()
+    app.config["TESTING"] = False  # 开启 CSRF 校验
+    client = app.test_client()
+    client.get("/login")
+    same_site = "http://localhost/settings?tab=backup"  # Flask 测试客户端默认 host
+    r = client.post("/settings", data={"action": "bogus"}, headers={"Referer": same_site})
+    assert r.status_code == 302
+    assert r.headers["Location"] == "/settings?tab=backup"
+
+    for evil in ("https://evil.example/x", "//evil.example/x", "http://localhost.evil.example/"):
+        r = client.post("/settings", data={"action": "bogus"}, headers={"Referer": evil})
+        assert r.status_code == 302
+        loc = r.headers["Location"]
+        assert loc.startswith("/") and not loc.startswith("//"), loc
+

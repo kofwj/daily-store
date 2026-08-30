@@ -7,14 +7,25 @@
     <p class="muted">按已导入的官方芝麻服务费出周报。每周上传明细后，这里按周一到周日汇总，可贴群。</p>
   </div>
   <form method="get" class="page-filters">
+    <div class="sp-groupby sesame-mode" role="tablist" aria-label="周期">
+      <a class="sp-gb {{ 'is-on' if mode == 'week' else '' }}" href="{{ url_for('sesame_week_page', mode='week', start=start.isoformat(), city=city) }}">周报</a>
+      <a class="sp-gb {{ 'is-on' if mode == 'month' else '' }}" href="{{ url_for('sesame_week_page', mode='month', start=start.isoformat(), city=city) }}">月报</a>
+    </div>
     <label class="filter">
-      <span>开始</span>
+      <span>{{ '月份' if mode == 'month' else '开始' }}</span>
+      {% if mode == 'month' %}
+      <input type="month" name="start" value="{{ start.isoformat()[:7] }}" onchange="this.form.submit()">
+      {% else %}
       <input type="date" name="start" value="{{ start.isoformat() }}" onchange="this.form.submit()">
+      {% endif %}
     </label>
+    {% if mode == 'week' %}
     <label class="filter">
       <span>结束</span>
       <input type="date" name="end" value="{{ end.isoformat() }}" onchange="this.form.submit()">
     </label>
+    {% endif %}
+    <input type="hidden" name="mode" value="{{ mode }}">
     {% if cities %}
     <label class="filter">
       <span>地市</span>
@@ -26,11 +37,22 @@
       </select>
     </label>
     {% endif %}
-    <a class="btn ghost" href="{{ url_for('sesame_week_page', start=prev_start.isoformat(), end=prev_end.isoformat(), city=city) }}">上周</a>
-    <a class="btn ghost" href="{{ url_for('sesame_week_page', start=next_start.isoformat(), end=next_end.isoformat(), city=city) }}">下周</a>
+    {% if areas %}
+    <label class="filter">
+      <span>区域经理</span>
+      <select name="area" onchange="this.form.submit()">
+        <option value="">全部</option>
+        {% for a in areas %}
+        <option value="{{ a }}" {% if a == area %}selected{% endif %}>{{ a }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% endif %}
+    <a class="btn ghost" href="{{ url_for('sesame_week_page', mode=mode, start=prev_start.isoformat(), city=city) }}">{{ '上月' if mode == 'month' else '上周' }}</a>
+    <a class="btn ghost" href="{{ url_for('sesame_week_page', mode=mode, start=next_start.isoformat(), city=city) }}">{{ '下月' if mode == 'month' else '下周' }}</a>
     <button type="button" id="btnCopyShot" onclick="copyBulletinImage()">复制图片</button>
     <button type="button" id="btnDownShot" class="ghost" onclick="downloadBulletinImage()">下载图片</button>
-    <a class="btn ghost" href="{{ url_for('sesame_week_xlsx', start=start.isoformat(), end=end.isoformat(), city=city) }}">导出 Excel</a>
+    <a class="btn ghost" href="{{ url_for('sesame_week_xlsx', mode=mode, start=start.isoformat(), end=end.isoformat(), city=city) }}">导出 Excel</a>
     {% if is_admin %}
     <a class="btn ghost" href="{{ url_for('advance_sesame_page') }}">导入明细</a>
     {% endif %}
@@ -39,9 +61,8 @@
 </div>
 
 <div class="kpi-row">
-  <div class="kpi"><div class="muted">净服务费</div><div class="kpi-num">{{ '%.2f'|format(totals.net) }}</div></div>
-  <div class="kpi"><div class="muted">扣费</div><div class="kpi-num">{{ totals.charge_n }} 笔</div><div class="muted">{{ '%.2f'|format(totals.charge) }} 元</div></div>
-  <div class="kpi"><div class="muted">退款</div><div class="kpi-num">{{ totals.refund_n }} 笔</div><div class="muted">{{ '%.2f'|format(totals.refund_abs) }} 元</div></div>
+  <div class="kpi"><div class="muted">服务费净额</div><div class="kpi-num">{{ '%.2f'|format(totals.net) }}</div></div>
+  <div class="kpi"><div class="muted">净办理笔数</div><div class="kpi-num">{{ totals.n }}</div></div>
   <div class="kpi"><div class="muted">有数门店</div><div class="kpi-num">{{ totals.stores }}</div></div>
 </div>
 
@@ -50,29 +71,30 @@
   <div class="bulletin-review-head">
     <div>
       <strong>贴群文案</strong>
-      <span class="muted">{{ week_label }}{% if city %} · {{ city }}{% endif %}</span>
+      <span class="muted">{{ period_label }}{% if city %} · {{ city }}{% endif %}</span>
     </div>
     <button type="button" class="ghost" onclick="copyReviewText()">复制文案</button>
   </div>
-  <textarea id="reviewText" class="bulletin-review-text" readonly rows="8">{{ copy_text }}</textarea>
+  <textarea id="reviewText" class="bulletin-review-text" readonly rows="12">{{ copy_text }}</textarea>
 </div>
 {% endif %}
 
 <div class="card">
   <div class="bulletin-wrap">
   <div class="bulletin-shot" id="bulletinShot">
-    <div class="bulletin-shot-title">芝麻服务费周报{% if city %} · {{ city }}{% endif %}</div>
-    <div class="bulletin-shot-date">{{ week_label }} · 净 {{ '%.2f'|format(totals.net) }} 元</div>
+    <div class="bulletin-shot-title">芝麻直降办理{{ '月报' if mode == 'month' else '周报' }}{% if city %} · {{ city }}{% endif %}{% if area %} · {{ area }}{% endif %}</div>
+    <div class="bulletin-shot-date">{{ period_label }} · 净 {{ '%.2f'|format(totals.net) }} 元 · 净办理 {{ totals.n }} 笔</div>
     {% if rows %}
     <table class="bulletin sesame-week">
       <thead>
         <tr>
           <th class="g-profile">#</th>
           <th class="g-profile left">门店</th>
-          <th class="g-month">笔数</th>
-          <th class="g-month">扣费</th>
-          <th class="g-day">退款</th>
-          <th class="g-day">净额</th>
+          <th class="g-month">小天才</th>
+          <th class="g-month">AI手机</th>
+          {% for t in tier_cols %}<th class="g-day">{{ t }}档</th>{% endfor %}
+          <th class="g-month">净办理笔数</th>
+          <th class="g-day">服务费净额</th>
         </tr>
       </thead>
       <tbody>
@@ -80,9 +102,10 @@
         <tr>
           <td>{{ loop.index }}</td>
           <td class="name">{{ r.name }}</td>
+          <td>{{ r.cat_charges.get('小天才直降') or '-' }}</td>
+          <td>{{ r.cat_charges.get('AI手机') or '-' }}</td>
+          {% for t in tier_cols %}<td>{{ r.tier_charges.get(t) or '-' }}</td>{% endfor %}
           <td>{{ r.n }}</td>
-          <td>{{ r.charge_n }} / {{ '%.2f'|format(r.charge) }}</td>
-          <td>{{ r.refund_n }}{% if r.refund_n %} / {{ '%.2f'|format(r.refund_abs) }}{% endif %}</td>
           <td class="total-num">{{ '%.2f'|format(r.net) }}</td>
         </tr>
         {% endfor %}
@@ -90,15 +113,16 @@
       <tfoot>
         <tr class="total">
           <td colspan="2" class="name">合计 {{ totals.stores }} 家</td>
+          <td>{{ cat_totals['小天才直降'] or '-' }}</td>
+          <td>{{ cat_totals['AI手机'] or '-' }}</td>
+          {% for t in tier_cols %}<td>{{ tier_totals[t] or '-' }}</td>{% endfor %}
           <td>{{ totals.n }}</td>
-          <td>{{ totals.charge_n }} / {{ '%.2f'|format(totals.charge) }}</td>
-          <td>{{ totals.refund_n }} / {{ '%.2f'|format(totals.refund_abs) }}</td>
           <td class="total-num">{{ '%.2f'|format(totals.net) }}</td>
         </tr>
       </tfoot>
     </table>
     {% else %}
-    <p class="muted">这一周还没有已导入的芝麻流水。{% if is_admin %}先在「导入明细」上传官方 xlsx。{% endif %}</p>
+    <p class="muted">这一期还没有已导入的芝麻流水。{% if is_admin %}先在「导入明细」上传官方 xlsx。{% endif %}</p>
     {% endif %}
   </div>
   </div>
@@ -130,11 +154,28 @@ function showPreview(url) {
   catch (e) { card.scrollIntoView(true); }
 }
 
+// 截图失败也要把预览卡弹出来写明原因，不能只在角落的提示 chip 里说一句
+function showShotError(msg) {
+  const card = document.getElementById('shotPreviewCard');
+  if (card) {
+    const note = card.querySelector('p');
+    if (note) note.textContent = '截图失败：' + msg;
+    card.hidden = false;
+    try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    catch (e) { card.scrollIntoView(true); }
+  }
+  setCopyHint('截图失败：' + msg);
+}
+
 function renderBulletinCanvas() {
   const el = document.getElementById('bulletinShot');
   if (!el) return Promise.reject(new Error('找不到周报'));
-  if (typeof html2canvas !== 'function') return Promise.reject(new Error('截图组件未加载'));
-  const scale = Math.min(IS_MOBILE ? 1.5 : 2, window.devicePixelRatio || 2);
+  if (typeof html2canvas !== 'function') return Promise.reject(new Error('截图组件未加载，请刷新页面重试'));
+  let scale = Math.min(IS_MOBILE ? 1.5 : 2, window.devicePixelRatio || 2);
+  // 大表在手机浏览器会超 canvas 面积上限，按上限压 scale
+  const area = Math.max(1, el.scrollWidth) * Math.max(1, el.scrollHeight);
+  const cap = IS_MOBILE ? 5e6 : 2e7;
+  if (area * scale * scale > cap) scale = Math.max(1, Math.sqrt(cap / area));
   return html2canvas(el, {
     backgroundColor: '#ffffff',
     scale: scale,
@@ -143,6 +184,9 @@ function renderBulletinCanvas() {
     scrollX: 0,
     scrollY: -window.scrollY,
     windowWidth: document.documentElement.clientWidth,
+  }).then(function (canvas) {
+    if (!canvas || !canvas.width || !canvas.height) throw new Error('画布为空');
+    return canvas;
   });
 }
 
@@ -185,7 +229,8 @@ async function makeShot() {
   setCopyHint('正在截图…');
   const canvas = await renderBulletinCanvas();
   const blob = await canvasToBlob(canvas);
-  showPreview(URL.createObjectURL(blob));
+  // 预览用 data URL：部分浏览器环境里 blob: 地址会失效导致预览图 0×0 不显示
+  showPreview(canvas.toDataURL("image/png"));
   return blob;
 }
 
@@ -210,7 +255,7 @@ async function copyBulletinImage() {
     setCopyHint('当前浏览器不能复制图片，已下载；也可长按下方预览');
   } catch (err) {
     const msg = (err && err.message) ? err.message : '请再试';
-    setCopyHint('截图失败：' + msg);
+    showShotError(msg);
   } finally {
     window.__shotBusy = false;
     setBusy(false);
@@ -231,7 +276,7 @@ async function downloadBulletinImage() {
     setCopyHint('已下载图片');
   } catch (err) {
     const msg = (err && err.message) ? err.message : '请再试';
-    setCopyHint('截图失败：' + msg);
+    showShotError(msg);
   } finally {
     window.__shotBusy = false;
     setBusy(false);

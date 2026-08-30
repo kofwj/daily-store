@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date, timedelta
 from io import BytesIO
 from typing import Any, Dict, List
@@ -20,6 +20,7 @@ from .helpers import (
     login_required,
     pagination,
     parse_date,
+    parse_int,
     pick_store,
     readonly_required,
     request_scope,
@@ -27,12 +28,9 @@ from .helpers import (
     xlsx_bytes,
     xlsx_response,
 )
-
-
-def _month_end(month: date) -> date:
-    if month.month == 12:
-        return date(month.year + 1, 1, 1) - timedelta(days=1)
-    return date(month.year, month.month + 1, 1) - timedelta(days=1)
+from .helpers import (
+    month_end as _month_end,
+)
 
 
 def _form_from_row(row) -> Dict[str, str]:
@@ -122,10 +120,7 @@ def register_advance(app) -> None:
             form = _empty_form(today_d)
             if request.method == "GET":
                 raw_id = request.args.get("advance_id") or ""
-                try:
-                    aid = int(raw_id) if raw_id else None
-                except ValueError:
-                    aid = None
+                aid = parse_int(raw_id, None)
                 if aid:
                     row = db.get_advance(conn, aid, store["id"])
                     if row:
@@ -135,10 +130,7 @@ def register_advance(app) -> None:
                     flash("只读账号不能填垫资，联系管理员。", "error")
                     return redirect(url_for("advance_page", store_id=store["id"]))
                 raw_id = request.form.get("advance_id") or ""
-                try:
-                    aid = int(raw_id) if raw_id else None
-                except ValueError:
-                    aid = None
+                aid = parse_int(raw_id, None)
                 biz_date = parse_date(request.form.get("biz_date"), today_d)
                 phone = (request.form.get("phone") or "").strip()
                 note = (request.form.get("note") or "").strip()
@@ -331,22 +323,62 @@ def register_advance(app) -> None:
             end = start + timedelta(days=6)
         return start, end
 
+    def _sesame_period():
+        """周/月双模式取数窗口。月报锁定自然月（当月截止今天），周报周一到周日。"""
+        today_d = db.today_local()
+        mode = request.args.get("mode", "week")
+        if mode not in ("week", "month"):
+            mode = "week"
+        if mode == "month":
+            anchor = parse_date(request.args.get("start"), today_d).replace(day=1)
+            last = sesame.month_span(anchor)[1]
+            end = min(last, today_d)
+            start = anchor
+            prev_start = sesame.month_span(anchor - timedelta(days=1))[0]
+            prev_end = sesame.month_span(prev_start)[1]
+            next_start = last + timedelta(days=1)
+            next_end = sesame.month_span(next_start)[1]
+        else:
+            start, end = _sesame_week_range()
+            prev_start, prev_end = start - timedelta(days=7), end - timedelta(days=7)
+            next_start, next_end = start + timedelta(days=7), end + timedelta(days=7)
+        return start, end, prev_start, prev_end, next_start, next_end, mode
+
     @app.route("/advance/sesame/week")
     @readonly_required
     def sesame_week_page():
-        start, end = _sesame_week_range()
-        prev_start, prev_end = start - timedelta(days=7), end - timedelta(days=7)
-        next_start, next_end = start + timedelta(days=7), end + timedelta(days=7)
+        start, end, prev_start, prev_end, next_start, next_end, mode = _sesame_period()
         with db.get_db() as conn:
             stores = accessible_stores(conn)
             cities = sorted({(s["city"] or "").strip() or "未分地市" for s in stores})
+            areas = sorted({(s["area_manager"] or "").strip() for s in stores if (s["area_manager"] or "").strip()})
             city = (request.args.get("city") or "").strip()
             if city and city not in cities:
                 city = ""
+            area = (request.args.get("area") or "").strip()
+            if area and area not in areas:
+                area = ""
             scoped = [s for s in stores if ((s["city"] or "").strip() or "未分地市") == city] if city else stores
-            rows = sesame.sesame_week_rows(conn, [int(s["id"]) for s in scoped], start, end)
+            if area:
+                scoped = [s for s in scoped if (s["area_manager"] or "").strip() == area]
+            scoped_ids = [int(s["id"]) for s in scoped]
+            rows = sesame.sesame_week_rows(conn, scoped_ids, start, end)
             totals = sesame.sesame_week_totals(rows)
-            copy_text = sesame.render_week_text(rows, totals, start, end, city)
+            # 通报表列：小天才 / AI手机 按类别，直降按原始档位；办理笔数按净数（扣费−退款）
+            breakdown, tier_cols = sesame.sesame_tier_breakdown(conn, scoped_ids, start, end)
+            for r in rows:
+                b = breakdown.get(r["store_id"], {})
+                r["cat_charges"] = b.get("cats", {})
+                r["tier_charges"] = b.get("tiers", {})
+            cat_totals = {
+                "小天才直降": sum(int(r["cat_charges"].get("小天才直降") or 0) for r in rows),
+                "AI手机": sum(int(r["cat_charges"].get("AI手机") or 0) for r in rows),
+            }
+            # 各类办理笔数已是净数（扣费−退款），合计直接相加
+            tier_totals = {
+                t: sum(int(r["tier_charges"].get(t) or 0) for r in rows) for t in tier_cols
+            }
+            copy_text = sesame.render_week_text(rows, totals, start, end, city, mode=mode)
             return render_template(
                 "sesame_week.html",
                 start=start,
@@ -357,33 +389,68 @@ def register_advance(app) -> None:
                 next_end=next_end,
                 city=city,
                 cities=cities,
+                area=area,
+                areas=areas,
                 rows=rows,
                 totals=totals,
+                tier_cols=tier_cols,
+                cat_totals=cat_totals,
+                tier_totals=tier_totals,
                 copy_text=copy_text,
-                week_label=sesame.week_label(start, end),
+                period_label=sesame.period_label(start, end, mode),
+                mode=mode,
                 is_admin=g.user["role"] == "admin",
             )
 
     @app.route("/advance/sesame/week.xlsx")
     @readonly_required
     def sesame_week_xlsx():
-        start, end = _sesame_week_range()
+        start, end, _ps, _pe, _ns, _ne, mode = _sesame_period()
         with db.get_db() as conn:
             stores = accessible_stores(conn)
             city = (request.args.get("city") or "").strip()
             cities = sorted({(s["city"] or "").strip() or "未分地市" for s in stores})
             if city and city not in cities:
                 city = ""
+            area = (request.args.get("area") or "").strip()
+            areas = sorted({(s["area_manager"] or "").strip() for s in stores if (s["area_manager"] or "").strip()})
+            if area and area not in areas:
+                area = ""
             scoped = [s for s in stores if ((s["city"] or "").strip() or "未分地市") == city] if city else stores
-            rows = sesame.sesame_week_rows(conn, [int(s["id"]) for s in scoped], start, end)
-        header = ["门店", "地市", "笔数", "扣费笔数", "扣费金额", "退款笔数", "退款金额", "净额"]
+            if area:
+                scoped = [s for s in scoped if (s["area_manager"] or "").strip() == area]
+            scoped_ids = [int(s["id"]) for s in scoped]
+            rows = sesame.sesame_week_rows(conn, scoped_ids, start, end)
+            breakdown, tier_cols = sesame.sesame_tier_breakdown(conn, scoped_ids, start, end)
+        header = ["门店", "地市", "净笔数", "扣费笔数", "扣费金额", "退款笔数", "退款金额", "净额"]
         data = [
             [r["name"], r["city"], r["n"], r["charge_n"], r["charge"], r["refund_n"], r["refund_abs"], r["net"]]
             for r in rows
         ]
         tag = "".join(ch for ch in city if ch.isalnum()) or "all"
-        filename = f"sesame_week_{start.isoformat()}_{end.isoformat()}_{tag}.xlsx"
-        return xlsx_response(xlsx_bytes(header, data, sheet="芝麻周报"), filename)
+        kind = "month" if mode == "month" else "week"
+        filename = f"sesame_{kind}_{start.isoformat()}_{end.isoformat()}_{tag}.xlsx"
+        book = xlsx_bytes(header, data, sheet="芝麻" + ("月报" if mode == "month" else "周报"))
+        # 按档位 sheet：新用户芝麻直降的分档办理笔数（净数：扣费−退款）
+        import openpyxl
+
+        wb = openpyxl.load_workbook(BytesIO(book))
+        tier_acc: dict = {}
+        for r in rows:
+            b = breakdown.get(r["store_id"], {})
+            for t, n in b.get("tiers", {}).items():
+                acc_t = tier_acc.setdefault(t, {"stores": 0, "n": 0, "net": 0.0})
+                acc_t["stores"] += 1
+                acc_t["n"] += n
+                acc_t["net"] = round(acc_t["net"] + b.get("tiers_net", {}).get(t, 0.0), 2)
+        ws = wb.create_sheet("按档位")
+        ws.append(["档位", "门店数", "净办理笔数", "净额"])
+        for t in tier_cols:
+            acc_t = tier_acc.get(t, {"stores": 0, "n": 0, "net": 0.0})
+            ws.append([f"{t}档", acc_t["stores"], acc_t["n"], acc_t["net"]])
+        buf = BytesIO()
+        wb.save(buf)
+        return xlsx_response(buf.getvalue(), filename)
 
     @app.route("/advance/sesame", methods=["GET"])
     @admin_required
@@ -410,12 +477,37 @@ def register_advance(app) -> None:
         except ValueError as exc:
             flash(f"解析失败：{exc}", "error")
             return redirect(url_for("advance_sesame_page"))
+        # 订单信息（可选）：用于按档位分类；不传则档位统计进「未分类」
+        order_error = ""
+        orders = []
+        order_file = request.files.get("order_file")
+        if order_file is not None and order_file.filename:
+            if not (order_file.filename or "").lower().endswith(".xlsx"):
+                order_error = "订单信息只支持 .xlsx，已忽略。"
+            else:
+                try:
+                    with db.get_db() as conn:
+                        rules = sesame.tier_rules(conn)
+                    orders = sesame.parse_orders_xlsx(order_file.read())
+                    for o in orders:
+                        o["category"] = sesame.tier_category(o.get("order_title"), rules)
+                except ValueError as exc:
+                    order_error = f"订单信息解析失败：{exc}（已忽略，本次导入不分档位）"
         with db.get_db() as conn:
             stores = accessible_stores(conn)
             groups = sesame.classify_sesame_rows(conn, rows, stores)
         total_in = round(sum(r["amount"] for r in groups["ready"]), 2)
         # ready 必须存全量，否则确认时只导入截断的前 200 条，超出部分被静默丢弃。
         # 表格展示单独截前 200，计数/合计/按钮始终用全量。
+        if orders:
+            rules = sesame.tier_rules(conn)
+            cat_by_order = {o["order_no"]: o["category"] for o in orders}
+            tier_preview = Counter(
+                cat_by_order.get(str(r["ext_id"]).removesuffix("_R"), "未分类")
+                for r in groups["ready"]
+            )
+        else:
+            tier_preview = {}
         preview = {
             "ready": groups["ready"],
             "ready_shown": groups["ready"][:200],
@@ -426,6 +518,10 @@ def register_advance(app) -> None:
             "ignored": groups["ignored"][:50],
             "file_name": uploaded.filename,
             "row_count": len(rows),
+            "orders": orders,
+            "order_file_name": (order_file.filename or "") if order_file else "",
+            "order_error": order_error,
+            "tier_preview": dict(tier_preview),
         }
         session["sesame_token"] = sesame.save_preview(preview)
         if not groups["ready"]:
@@ -442,6 +538,7 @@ def register_advance(app) -> None:
             flash("预览已过期，请重新上传。", "error")
             return redirect(url_for("advance_sesame_page"))
         ready = preview["ready"]
+        orders = preview.get("orders") or []
         with db.get_db() as conn:
             db_core.begin_immediate(conn)  # 整批导入=一个长写事务，抢先占写锁防 DEFERRED 升级锁冲突
             # 再次校验未导入，避免并发重复
@@ -450,7 +547,10 @@ def register_advance(app) -> None:
             rows = [{**r, "store_id": int(r["store_id"])} for r in ready if int(r.get("store_id") or 0) in stores_by_id]
             groups = sesame.classify_sesame_rows(conn, rows, stores)
             n = sesame.import_sesame_rows(conn, groups["ready"], user_id=g.user["id"])
-        flash(f"已导入 {n} 笔芝麻服务费。", "ok" if n else "error")
+            if orders:
+                db_core.sesame_orders_upsert(conn, orders, db_core._now())
+        extra = f"订单信息 {len(orders)} 条已更新档位分类。" if orders else ""
+        flash((f"已导入 {n} 笔芝麻服务费。" if n else "没有导入新流水。") + extra, "ok" if n else "error")
         return redirect(url_for("advance_page"))
 
     @app.route("/advance.xlsx")

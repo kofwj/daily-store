@@ -89,18 +89,6 @@ def bonus_formula(actual_cell: str, grade: str) -> str:
     )
 
 
-def _style_range(ws, cells, *, fill=None, font=None, align=CENTER, num=None):
-    for cell in cells:
-        cell.border = THIN
-        cell.alignment = align
-        if fill is not None:
-            cell.fill = fill
-        if font is not None:
-            cell.font = font
-        if num:
-            cell.number_format = num
-
-
 def build_settlement_rows(conn, stores: Iterable[Any], as_of: date) -> List[Dict[str, Any]]:
     from . import db
 

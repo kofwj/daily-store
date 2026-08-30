@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 # 顺序即看板 / 通报 / 下拉顺序。
 STORES: List[Dict] = [
@@ -103,36 +103,6 @@ STORES: List[Dict] = [
 ]
 
 NINGHAI_CODE = "store-epsilon"
-PROFILE_FIELDS = (
-    "region_group",
-    "city",
-    "mobile_code",
-    "area_manager",
-    "store_manager",
-    "follow_ai",
-    "follow_bisuan",
-    "store_grade",
-    "ai_target",
-)
-
-
-def store_by_code(code: str) -> Dict:
-    for item in STORES:
-        if item["code"] == code:
-            return item
-    raise KeyError(code)
-
-
-def store_name(code: str) -> str:
-    return store_by_code(code)["name"]
-
-
-def store_codes() -> List[str]:
-    return [item["code"] for item in STORES]
-
-
-def store_names() -> List[str]:
-    return [item["name"] for item in STORES]
 
 
 def filler_accounts() -> List[Dict]:
@@ -145,12 +115,3 @@ def filler_accounts() -> List[Dict]:
         }
         for item in STORES
     ]
-
-
-def find_store(code: Optional[str] = None, name: Optional[str] = None) -> Optional[Dict]:
-    for item in STORES:
-        if code and item["code"] == code:
-            return item
-        if name and item["name"] == name:
-            return item
-    return None

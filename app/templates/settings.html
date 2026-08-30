@@ -237,6 +237,16 @@
           <p><label>双未破0罚门店</label><input type="number" min="0" name="r_penal_store_none" value="{{ incentive_rules['penal_store_none'] }}"></p>
         </div>
       </div>
+      <div class="card settings-card">
+        <div class="settings-card-head">
+          <h2>芝麻档位分类</h2>
+          <p class="muted">导入「芝麻订单信息」时按订单标题的档位归类：等于小天才档 → 小天才直降；等于 AI 档 → AI手机；其余档位 → 新用户芝麻直降。</p>
+        </div>
+        <div class="rules-grid">
+          <p><label>小天才直降档位</label><input type="number" min="1" name="r_tier_xtc" value="{{ sesame_tier_rules['xtc'] }}"></p>
+          <p><label>AI手机档位</label><input type="number" min="1" name="r_tier_ai" value="{{ sesame_tier_rules['ai'] }}"></p>
+        </div>
+      </div>
       <div class="toolbar"><button type="submit">保存考核规则</button></div>
     </form>
     {% endif %}

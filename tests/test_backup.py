@@ -4,20 +4,18 @@ from pathlib import Path
 from app import backup, db
 
 
-def test_admin_status_page_ok(tmp_db, client):
-    client.post("/login", data={"username": "admin", "pin": "123456"})
-    page = client.get("/settings/status")
+def test_admin_status_page_ok(tmp_db, admin_client):
+    page = admin_client.get("/settings/status")
     assert page.status_code == 200
     body = page.get_data(as_text=True)
     assert "服务器状态" in body
     assert "门店" in body
 
 
-def test_admin_can_backup_download_and_restore(tmp_db, client):
-    client.post("/login", data={"username": "admin", "pin": "123456"})
-    page = client.get("/settings?tab=backup").get_data(as_text=True)
+def test_admin_can_backup_download_and_restore(tmp_db, admin_client):
+    page = admin_client.get("/settings?tab=backup").get_data(as_text=True)
     assert "备份恢复" in page
-    made = client.post(
+    made = admin_client.post(
         "/settings",
         data={"action": "make_backup", "tab": "backup"},
         follow_redirects=True,
@@ -26,7 +24,7 @@ def test_admin_can_backup_download_and_restore(tmp_db, client):
     items = backup.list_backups()
     assert items
     name = items[0]["name"]
-    down = client.get(f"/settings/backup/{name}")
+    down = admin_client.get(f"/settings/backup/{name}")
     assert down.status_code == 200
     assert down.data[:16] == b"SQLite format 3\x00"
     with db.get_db() as conn:
@@ -41,7 +39,7 @@ def test_admin_can_backup_download_and_restore(tmp_db, client):
             rebate=100,
             note="恢复前写入",
         )
-    restored = client.post(
+    restored = admin_client.post(
         "/settings",
         data={
             "action": "restore_named",
@@ -94,13 +92,12 @@ def test_restore_failure_does_not_change_live_db(tmp_db):
         assert conn.execute("SELECT value FROM app_meta WHERE key='live_marker'").fetchone()["value"] == "keep"
 
 
-def test_restore_named_requires_current_pin(tmp_db, client):
-    client.post("/login", data={"username": "admin", "pin": "123456"})
-    client.post("/settings", data={"action": "make_backup", "tab": "backup"})
+def test_restore_named_requires_current_pin(tmp_db, admin_client):
+    admin_client.post("/settings", data={"action": "make_backup", "tab": "backup"})
     name = backup.list_backups()[0]["name"]
     with db.get_db() as conn:
         conn.execute("INSERT INTO app_meta(key, value) VALUES ('restore_guard', 'keep')")
-    denied = client.post(
+    denied = admin_client.post(
         "/settings",
         data={"action": "restore_named", "tab": "backup", "backup_name": name, "confirm_pin": "wrong"},
         follow_redirects=True,
@@ -110,11 +107,10 @@ def test_restore_named_requires_current_pin(tmp_db, client):
         assert conn.execute("SELECT value FROM app_meta WHERE key='restore_guard'").fetchone()["value"] == "keep"
 
 
-def test_filler_cannot_open_backup(client):
-    client.post("/login", data={"username": "alpha", "pin": "123456"})
-    page = client.get("/settings?tab=backup").get_data(as_text=True)
+def test_filler_cannot_open_backup(filler_client):
+    page = filler_client.get("/settings?tab=backup").get_data(as_text=True)
     assert "备份恢复" not in page
-    r = client.get("/settings/backup/store_daily_manual_x.db")
+    r = filler_client.get("/settings/backup/store_daily_manual_x.db")
     assert r.status_code == 302
 
 
@@ -178,3 +174,33 @@ def test_restore_drops_stale_wal(tmp_db):
     with db.get_db() as conn:
         n = int(conn.execute("SELECT COUNT(*) AS n FROM advance_posts").fetchone()["n"])
         assert n == before_n  # 恢复窗口期写入被回滚，没混进新库
+
+
+def test_restore_safe_while_other_connection_open(tmp_db):
+    # 模拟多 worker：另一个连接在恢复期间持着打开的读事务（正跑查询），
+    # 恢复必须安全完成：旧事务继续读旧快照、结束事务后读到恢复后的新数据、
+    # 且能继续写入，全程不出现 malformed/锁死。
+    from app import db_core
+
+    with db.get_db() as conn:
+        conn.execute("INSERT INTO app_meta(key, value) VALUES ('marker', 'before')")
+    snap = backup.snapshot("manual")
+    other = sqlite3.connect(str(db_core.DB_PATH), timeout=30)
+    try:
+        with db.get_db() as conn:  # 备份之后再写一笔，恢复后应被抹掉
+            conn.execute("UPDATE app_meta SET value='after' WHERE key='marker'")
+        other.execute("BEGIN")  # 打开的读事务，横跨整个恢复过程
+        assert other.execute("SELECT value FROM app_meta WHERE key='marker'").fetchall()[0][0] == "after"
+        backup.restore_bytes(snap.read_bytes())
+        # 恢复期间旧事务不受影响，仍读旧快照
+        assert other.execute("SELECT value FROM app_meta WHERE key='marker'").fetchall()[0][0] == "after"
+        other.execute("ROLLBACK")
+        # 事务结束后看到恢复后的数据
+        assert other.execute("SELECT value FROM app_meta WHERE key='marker'").fetchall()[0][0] == "before"
+        other.execute("INSERT INTO app_meta(key, value) VALUES ('other_worker', 'ok')")
+        other.commit()
+        with db.get_db() as conn:
+            assert conn.execute("SELECT value FROM app_meta WHERE key='other_worker'").fetchall()[0][0] == "ok"
+    finally:
+        other.close()
+

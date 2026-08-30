@@ -43,7 +43,6 @@ from .db_core import _now  # noqa: F401 — 测试直接调用 db._now()
 from .db_core import connect as _connect
 from .db_core import get_db as _plain_get_db
 from .db_deals import (  # noqa: F401
-    _deal_payload,
     count_deal_posts,
     deal_counts,
     delete_deal_post,

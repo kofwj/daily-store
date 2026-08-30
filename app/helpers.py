@@ -305,6 +305,31 @@ def parse_date(raw: Optional[str], fallback: Optional[date] = None) -> date:
     return fallback or db.today_local()
 
 
+def parse_int(raw, default=0):
+    """表单整数：空/非法回落 default，不抛异常。"""
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def parse_days(raw, default=7, cap=90):
+    """天数参数：非法回落 default，再钳到 [1, cap]。"""
+    try:
+        return max(1, min(int(raw), cap))
+    except (TypeError, ValueError):
+        return default
+
+
+def month_end(d: date) -> date:
+    """d 所在月的最后一天（12 月跨年）。"""
+    if d.month == 12:
+        return date(d.year + 1, 1, 1) - timedelta(days=1)
+    return date(d.year, d.month + 1, 1) - timedelta(days=1)
+
+
 def close_rate(closed: int, total: int) -> str:
     """触客成功率：已成交 / 全部触客。没填过显示 —。"""
     closed_n = int(closed or 0)
@@ -597,18 +622,12 @@ def advisor_score_month(today: date) -> date:
 
 def advisor_score_open(today: date, month: date) -> bool:
     """month 是被评月月初。窗口 = 次月 1 日到 5 日。"""
-    if month.month == 12:
-        nxt = date(month.year + 1, 1, 1)
-    else:
-        nxt = date(month.year, month.month + 1, 1)
+    nxt = month_end(month) + timedelta(days=1)
     return nxt <= today <= nxt.replace(day=ADVISOR_SCORE_UNTIL)
 
 
 def advisor_score_deadline(month: date) -> date:
-    if month.month == 12:
-        nxt = date(month.year + 1, 1, 1)
-    else:
-        nxt = date(month.year, month.month + 1, 1)
+    nxt = month_end(month) + timedelta(days=1)
     return nxt.replace(day=ADVISOR_SCORE_UNTIL)
 
 

@@ -23,6 +23,8 @@ from .helpers import (
     login_required,
     pagination,
     parse_date,
+    parse_days,
+    parse_int,
     pick_store,
     request_scope,
     store_forecast,
@@ -241,10 +243,7 @@ def register_daily(app) -> None:
             editable = True
             if request.method == "GET":
                 raw_deal_id = request.args.get("deal_id") or ""
-                try:
-                    edit_id = int(raw_deal_id) if raw_deal_id else None
-                except ValueError:
-                    edit_id = None
+                edit_id = parse_int(raw_deal_id, None)
                 if edit_id:
                     row = db.get_deal_post(conn, edit_id, store["id"])
                     if row:
@@ -264,10 +263,7 @@ def register_daily(app) -> None:
                     flash("只读账号不能填触客播报", "error")
                     return redirect(url_for("deal_records", store_id=store["id"]))
                 deal_id = request.form.get("deal_id") or values.get("deal_id") or ""
-                try:
-                    deal_id_int = int(deal_id) if deal_id else None
-                except ValueError:
-                    deal_id_int = None
+                deal_id_int = parse_int(deal_id, None)
                 existing = (
                     db.get_deal_post(conn, deal_id_int, store["id"]) if deal_id_int else None
                 )
@@ -373,10 +369,7 @@ def register_daily(app) -> None:
             scope = request_scope(stores)
             today_d = db.today_local()
             default_days = "1" if all_stores else "7"
-            try:
-                days_int = max(1, min(int(request.args.get("days", default_days)), 90))
-            except ValueError:
-                days_int = 1 if all_stores else 7
+            days_int = parse_days(request.args.get("days", default_days), default=int(default_days))
             start = today_d - timedelta(days=days_int - 1)
             sid = None if all_stores else store["id"]
             scoped_ids = None if (not all_stores or not scope["active"]) else scope["ids"]
@@ -425,10 +418,7 @@ def register_daily(app) -> None:
     def deal_export():
         """管理员导出全部门店指定区间内的成交记录。"""
         today_d = db.today_local()
-        try:
-            days_int = max(1, min(int(request.args.get("days", "7")), 90))
-        except ValueError:
-            days_int = 7
+        days_int = parse_days(request.args.get("days", "7"))
         start = today_d - timedelta(days=days_int - 1)
         with db.get_db() as conn:
             rows = db.list_all_deal_posts(conn, start, today_d)

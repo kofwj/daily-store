@@ -28,6 +28,8 @@ from .helpers import (
     named_advisor,
     pagination,
     parse_date,
+    parse_days,
+    parse_int,
     readonly_required,
     request_scope,
     review_preset_key,
@@ -39,6 +41,9 @@ from .helpers import (
     with_close_rate,
     xlsx_bytes,
     xlsx_response,
+)
+from .helpers import (
+    month_end as _month_end,
 )
 from .metrics_seed import (
     KPI_TARGETS,
@@ -66,6 +71,16 @@ def _clamp_bisuan_mobile_asof(asof: date, biz_date: date) -> date:
     return asof
 
 
+def _mobile_asof(raw: str, biz_date: date) -> date:
+    """移动取数截止日：raw 是 'YYYY-MM-DD…'，非法/为空回落默认（通报表日前一天）。"""
+    if raw:
+        try:
+            return _clamp_bisuan_mobile_asof(date.fromisoformat(raw[:10]), biz_date)
+        except ValueError:
+            pass
+    return _default_bisuan_mobile_asof(biz_date)
+
+
 def _bulletin_rows(conn, stores, biz_date: date):
     month_key = biz_date.strftime("%Y-%m")
     month_start = biz_date.replace(day=1)
@@ -89,12 +104,7 @@ def _bulletin_rows(conn, stores, biz_date: date):
         mobile = mobile_map.get(int(store["id"]))
         # 截止日按店取，没存就用默认（通报表日前一天）
         raw_asof = (asof_map.get(int(store["id"])) or "").strip()
-        store_asof = _default_bisuan_mobile_asof(biz_date)
-        if raw_asof:
-            try:
-                store_asof = _clamp_bisuan_mobile_asof(date.fromisoformat(raw_asof[:10]), biz_date)
-            except ValueError:
-                pass
+        store_asof = _mobile_asof(raw_asof, biz_date)
         sys_asof = None
         if mobile is not None:
             # 对照用截止日同期上报数，不是通报表选中日的整月
@@ -270,6 +280,54 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
     }
 
 
+_AUDIT_SOURCES = (
+    # (kind, 表别名, 审计表, 日期列, 是否有 action 列)
+    ("daily", "rn", "report_edits", "rn.biz_date", False),
+    ("deal", "dn", "deal_edits", "dn.biz_date", True),
+    ("advance", "an", "advance_edits", "an.biz_date", True),
+    ("invoice", "inv", "invoice_edits", "inv.month", True),
+    ("mobile", "bm", "bisuan_mobile_edits", "bm.month", True),
+)
+
+
+def _audit_union_sources(kind: str):
+    """审计 UNION 的数据源：kind=all 全部，否则只取对应表。"""
+    return [row for row in _AUDIT_SOURCES if kind in ("all", row[0])]
+
+
+def _audit_diff(r, before, after, names) -> str:
+    """把审计行的 before/after 翻译成一句话 diff（按 kind 分派）。"""
+    kind = r["kind"]
+    action = r.get("action")
+    if kind == "deal":
+        prefix = {"create": "新增触客：", "delete": "删除触客："}.get(action, "覆盖：")
+        return prefix + deal_diff(before, after)
+    if kind == "advance":
+        head = {
+            "create": "新增垫资：", "update": "覆盖垫资：", "delete": "删除垫资：",
+            "pay": "兑付：", "unpay": "取消兑付：",
+        }.get(action, "垫资：")
+        return head + json.dumps({"before": before, "after": after}, ensure_ascii=False, default=str)
+    if kind == "invoice":
+        head = {"create": "新增开票：", "update": "改开票：", "delete": "删除开票："}.get(action, "开票：")
+        return head + db.invoice_diff(before, after)
+    if kind == "mobile":
+        from .metrics_seed import format_stored as _fs
+
+        b = before.get("value_tenths")
+        a = after.get("value_tenths")
+        head = "新录移动：" if action == "create" else "改移动："
+        if b is None:
+            body = f"{_fs('bisuan', a or 0)}"
+        else:
+            body = f"{_fs('bisuan', b or 0)}→{_fs('bisuan', a or 0)}"
+        asof_txt = (after.get("asof") or "")[:10]
+        if asof_txt:
+            body += f"（至{asof_txt}）"
+        return head + body
+    return build_diff(before, after, names)
+
+
 def register_admin(app) -> None:
     @app.route("/board")
     @admin_required
@@ -351,19 +409,10 @@ def register_admin(app) -> None:
         """
         today_d = db.today_local()
         month = parse_date(request.args.get("month"), today_d.replace(day=1)).replace(day=1)
-        if month.month == 12:
-            month_end = date(month.year + 1, 1, 1) - timedelta(days=1)
-        else:
-            month_end = date(month.year, month.month + 1, 1) - timedelta(days=1)
+        month_end = _month_end(month)
         month_key = month.strftime("%Y-%m")
-        if month.month == 1:
-            prev_month = date(month.year - 1, 12, 1)
-        else:
-            prev_month = date(month.year, month.month - 1, 1)
-        if month.month == 12:
-            next_month = date(month.year + 1, 1, 1)
-        else:
-            next_month = date(month.year, month.month + 1, 1)
+        prev_month = (month - timedelta(days=1)).replace(day=1)
+        next_month = _month_end(month) + timedelta(days=1)
         with db.get_db() as conn:
             stores = accessible_stores(conn)
             store_ids = [int(s["id"]) for s in stores]
@@ -487,14 +536,7 @@ def register_admin(app) -> None:
             asof_values = [
                 v for v in db.bisuan_mobile_asof_map(conn, month_key).values() if (v or "").strip()
             ]
-            mobile_asof = _default_bisuan_mobile_asof(biz_date)
-            if asof_values:
-                try:
-                    mobile_asof = _clamp_bisuan_mobile_asof(
-                        date.fromisoformat(max(asof_values)[:10]), biz_date
-                    )
-                except ValueError:
-                    pass
+            mobile_asof = _mobile_asof(max(asof_values) if asof_values else "", biz_date)
             has_mobile = any(r.get("_month_bisuan_mobile_stored") is not None for r in rows)
             mobile_asof_head = (
                 f"移动数据更新至{mobile_asof.month}/{mobile_asof.day}" if has_mobile else ""
@@ -594,13 +636,7 @@ def register_admin(app) -> None:
     @app.route("/incentive")
     @admin_required
     def incentive_page():
-        today_d = db.today_local()
-        month = parse_date(request.args.get("month"), today_d.replace(day=1)).replace(day=1)
-        if month.month == 12:
-            month_end = date(month.year + 1, 1, 1) - timedelta(days=1)
-        else:
-            month_end = date(month.year, month.month + 1, 1) - timedelta(days=1)
-        as_of = min(month_end, today_d)
+        month, as_of = _incentive_month()
         with db.get_db() as conn:
             stores = accessible_stores(conn)
             rows = []
@@ -641,13 +677,7 @@ def register_admin(app) -> None:
     @admin_required
     def incentive_xlsx():
         """导出当月运营商结算底稿：系统填 AI/直降/奖惩，开票/房补/垫资/搭载率留空。"""
-        today_d = db.today_local()
-        month = parse_date(request.args.get("month"), today_d.replace(day=1)).replace(day=1)
-        if month.month == 12:
-            month_end = date(month.year + 1, 1, 1) - timedelta(days=1)
-        else:
-            month_end = date(month.year, month.month + 1, 1) - timedelta(days=1)
-        as_of = min(month_end, today_d)
+        month, as_of = _incentive_month()
         with db.get_db() as conn:
             stores = accessible_stores(conn)
             data = settlement.build_settlement_xlsx(conn, stores, as_of)
@@ -658,11 +688,7 @@ def register_admin(app) -> None:
         today_d = db.today_local()
         fallback = default or today_d.replace(day=1)
         month = parse_date(request.values.get("month"), fallback).replace(day=1)
-        if month.month == 12:
-            month_end = date(month.year + 1, 1, 1) - timedelta(days=1)
-        else:
-            month_end = date(month.year, month.month + 1, 1) - timedelta(days=1)
-        return month, min(month_end, today_d)
+        return month, min(_month_end(month), today_d)
 
     @app.route("/advisors", methods=["GET", "POST"])
     @login_required
@@ -839,10 +865,7 @@ def register_admin(app) -> None:
         with db.get_db() as conn:
             stores = accessible_stores(conn)
             by_id = {int(s["id"]): s for s in stores}
-            try:
-                sid = int(request.values.get("store_id") or 0)
-            except ValueError:
-                sid = 0
+            sid = parse_int(request.values.get("store_id"), 0)
             store = by_id.get(sid) or (stores[0] if stores else None)
             if store is None:
                 flash("没有可开票的门店", "error")
@@ -880,10 +903,7 @@ def register_admin(app) -> None:
         with db.get_db() as conn:
             stores = accessible_stores(conn)
             by_id = {int(s["id"]): s for s in stores}
-            try:
-                sid = int(request.args.get("store_id") or 0)
-            except ValueError:
-                sid = 0
+            sid = parse_int(request.args.get("store_id"), 0)
             store = by_id.get(sid)
             if store is None:
                 flash("没有这家店", "error")
@@ -912,14 +932,10 @@ def register_admin(app) -> None:
     def edits_page():
         """审计日志：日报 / 成交播报谁在什么时候把哪家店改成了什么。kind=all|daily|deal"""
         store_id = request.args.get("store_id", "")
-        days = request.args.get("days", "7")
         kind = request.args.get("kind", "all")
         if kind not in ("all", "daily", "deal", "advance", "invoice", "mobile"):
             kind = "all"
-        try:
-            days_int = max(1, min(int(days), 90))
-        except ValueError:
-            days_int = 7
+        days_int = parse_days(request.args.get("days", "7"))
         # edited_at 存的是北京时间；用北京时间算窗口边界，避免 SQLite 的 UTC now 差 8 小时
         cutoff = (datetime.now(db.TZ) - timedelta(days=days_int)).strftime("%Y-%m-%d %H:%M:%S")
         sid = int(store_id) if store_id.isdigit() else None
@@ -929,101 +945,30 @@ def register_admin(app) -> None:
             all_stores = accessible_stores(conn)
             city_scope = request_scope(all_stores)
             scoped_ids = city_scope["ids"] if (not sid and city_scope["active"]) else []
-        if kind in ("daily", "all"):
-            w = "rn.edited_at >= ?"
+        for kind_, alias, table, date_col, has_action in _audit_union_sources(kind):
+            w = f"{alias}.edited_at >= ?"
             ps: List[Any] = [cutoff]
             if sid:
-                w += " AND rn.store_id=?"
+                w += f" AND {alias}.store_id=?"
                 ps.append(sid)
             elif scoped_ids:
-                clause, ids = sql_in("rn.store_id", scoped_ids)
+                clause, ids = sql_in(f"{alias}.store_id", scoped_ids)
                 w += f" AND {clause}"
                 ps.extend(ids)
+            action_col = f"{alias}.action" if has_action else "'' AS action"
             parts.append(
-                "SELECT 'daily' AS kind, rn.id, rn.biz_date, rn.edited_at, rn.note, "
-                "rn.before_json, rn.after_json, '' AS action, "
-                "s.name AS store_name, u.username AS user_name "
-                "FROM report_edits rn "
-                "LEFT JOIN stores s ON s.id=rn.store_id "
-                "LEFT JOIN users u ON u.id=rn.user_id "
+                f"SELECT '{kind_}' AS kind, {alias}.id, {date_col} AS biz_date, "
+                f"{alias}.edited_at, {alias}.note, {alias}.before_json, {alias}.after_json, "
+                f"{action_col}, s.name AS store_name, u.username AS user_name "
+                f"FROM {table} {alias} "
+                f"LEFT JOIN stores s ON s.id={alias}.store_id "
+                f"LEFT JOIN users u ON u.id={alias}.user_id "
                 f"WHERE {w}"
             )
             params += ps
-        if kind in ("deal", "all"):
-            w = "dn.edited_at >= ?"
-            ps = [cutoff]
-            if sid:
-                w += " AND dn.store_id=?"
-                ps.append(sid)
-            elif scoped_ids:
-                clause, ids = sql_in("dn.store_id", scoped_ids)
-                w += f" AND {clause}"
-                ps.extend(ids)
-            parts.append(
-                "SELECT 'deal' AS kind, dn.id, dn.biz_date, dn.edited_at, dn.note, "
-                "dn.before_json, dn.after_json, dn.action, "
-                "s.name AS store_name, u.username AS user_name "
-                "FROM deal_edits dn "
-                "LEFT JOIN stores s ON s.id=dn.store_id "
-                "LEFT JOIN users u ON u.id=dn.user_id "
-                f"WHERE {w}"
-            )
-            params += ps
-        if kind in ("advance", "all"):
-            w = "an.edited_at >= ?"
-            ps = [cutoff]
-            if sid:
-                w += " AND an.store_id=?"
-                ps.append(sid)
-            elif scoped_ids:
-                clause, ids = sql_in("an.store_id", scoped_ids)
-                w += f" AND {clause}"
-                ps.extend(ids)
-            parts.append(
-                "SELECT 'advance' AS kind, an.id, an.biz_date, an.edited_at, an.note, "
-                "an.before_json, an.after_json, an.action, s.name AS store_name, u.username AS user_name "
-                "FROM advance_edits an LEFT JOIN stores s ON s.id=an.store_id "
-                "LEFT JOIN users u ON u.id=an.user_id WHERE " + w
-            )
-            params += ps
-        if kind in ("invoice", "all"):
-            w = "inv.edited_at >= ?"
-            ps = [cutoff]
-            if sid:
-                w += " AND inv.store_id=?"
-                ps.append(sid)
-            elif scoped_ids:
-                clause, ids = sql_in("inv.store_id", scoped_ids)
-                w += f" AND {clause}"
-                ps.extend(ids)
-            parts.append(
-                "SELECT 'invoice' AS kind, inv.id, inv.month AS biz_date, inv.edited_at, inv.note, "
-                "inv.before_json, inv.after_json, inv.action, s.name AS store_name, u.username AS user_name "
-                "FROM invoice_edits inv LEFT JOIN stores s ON s.id=inv.store_id "
-                "LEFT JOIN users u ON u.id=inv.user_id WHERE " + w
-            )
-            params += ps
-        if kind in ("mobile", "all"):
-            w = "bm.edited_at >= ?"
-            ps = [cutoff]
-            if sid:
-                w += " AND bm.store_id=?"
-                ps.append(sid)
-            elif scoped_ids:
-                clause, ids = sql_in("bm.store_id", scoped_ids)
-                w += f" AND {clause}"
-                ps.extend(ids)
-            parts.append(
-                "SELECT 'mobile' AS kind, bm.id, bm.month AS biz_date, bm.edited_at, bm.note, "
-                "bm.before_json, bm.after_json, bm.action, s.name AS store_name, u.username AS user_name "
-                "FROM bisuan_mobile_edits bm LEFT JOIN stores s ON s.id=bm.store_id "
-                "LEFT JOIN users u ON u.id=bm.user_id WHERE " + w
-            )
-            params += ps
-        union_sql = " UNION ALL ".join(parts) if parts else \
-            "SELECT 'daily' AS kind, NULL AS id, '' AS biz_date, '' AS edited_at, '' AS note, " \
-            "'{}' AS before_json, '{}' AS after_json, '' AS action, '' AS store_name, '' AS user_name " \
-            "WHERE 0"
+        # kind 已在白名单内，parts 至少一段，无需空兜底
+        union_sql = " UNION ALL ".join(parts)
+
         with db.get_db() as conn:
             total = conn.execute(
                 f"SELECT COUNT(*) FROM ({union_sql})", params
@@ -1049,38 +994,7 @@ def register_admin(app) -> None:
                 after = json.loads(r["after_json"] or "{}")
             except ValueError:
                 before, after = {}, {}
-            if r["kind"] == "deal":
-                if r.get("action") == "create":
-                    prefix = "新增触客："
-                elif r.get("action") == "delete":
-                    prefix = "删除触客："
-                else:
-                    prefix = "覆盖："
-                r["diff"] = prefix + deal_diff(before, after)
-            elif r["kind"] == "advance":
-                action = {"create": "新增垫资：", "update": "覆盖垫资：", "delete": "删除垫资：", "pay": "兑付：", "unpay": "取消兑付："}.get(r.get("action"), "垫资：")
-                r["diff"] = action + json.dumps({"before": before, "after": after}, ensure_ascii=False, default=str)
-            elif r["kind"] == "invoice":
-                action = {"create": "新增开票：", "update": "改开票：", "delete": "删除开票："}.get(
-                    r.get("action"), "开票："
-                )
-                r["diff"] = action + db.invoice_diff(before, after)
-            elif r["kind"] == "mobile":
-                from .metrics_seed import format_stored as _fs
-
-                b = before.get("value_tenths")
-                a = after.get("value_tenths")
-                head = "新录移动：" if r.get("action") == "create" else "改移动："
-                if b is None:
-                    body = f"{_fs('bisuan', a or 0)}"
-                else:
-                    body = f"{_fs('bisuan', b or 0)}→{_fs('bisuan', a or 0)}"
-                asof_txt = (after.get("asof") or "")[:10]
-                if asof_txt:
-                    body += f"（至{asof_txt}）"
-                r["diff"] = head + body
-            else:
-                r["diff"] = build_diff(before, after, names)
+            r["diff"] = _audit_diff(r, before, after, names)
             r["store_name"] = r["store_name"] or "?"
         return render_template(
             "edits.html",
@@ -1141,10 +1055,7 @@ def register_admin(app) -> None:
             action = "all"
         if role not in ("all", "admin", "filler", "readonly", "city"):
             role = "all"
-        try:
-            days_int = max(1, min(int(days), 90))
-        except ValueError:
-            days_int = 7
+        days_int = parse_days(days)
         cutoff = (datetime.now(db.TZ) - timedelta(days=days_int)).strftime("%Y-%m-%d %H:%M:%S")
         with db.get_db() as conn:
             total = db.count_auth_events(

@@ -5,7 +5,7 @@ from __future__ import annotations
 from flask import flash, g, redirect, render_template, request, url_for
 
 from . import db
-from .helpers import login_required
+from .helpers import login_required, parse_int
 
 
 def register_policies(app) -> None:
@@ -19,10 +19,7 @@ def register_policies(app) -> None:
             require = db.policy_require_read(conn)
         current = None
         if items:
-            try:
-                want = int(raw) if raw else 0
-            except ValueError:
-                want = 0
+            want = parse_int(raw, 0)
             current = next((p for p in items if p["id"] == want), items[0])
         unread_ids = {p["id"] for p in items if int(acks.get(p["id"], 0)) < int(p["version"])}
         diff_html = ""

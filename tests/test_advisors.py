@@ -65,22 +65,20 @@ def _in_window(monkeypatch, today=date(2026, 8, 3)):
     return advisor_score_month(today).strftime("%Y-%m")
 
 
-def test_advisors_page_empty_then_appears(app_client):
-    app_client.post("/login", data={"username": "admin", "pin": "123456"})
-    page = app_client.get("/advisors").get_data(as_text=True)
+def test_advisors_page_empty_then_appears(admin_client):
+    page = admin_client.get("/advisors").get_data(as_text=True)
     assert "还没有顾问" in page
     _set_advisor()
-    page = app_client.get("/advisors").get_data(as_text=True)
+    page = admin_client.get("/advisors").get_data(as_text=True)
     assert "任阳" in page
     assert "adv-card" in page
     assert "保存打分" in page
 
 
-def test_admin_saves_scores_and_shows_coeff(app_client):
-    app_client.post("/login", data={"username": "admin", "pin": "123456"})
+def test_admin_saves_scores_and_shows_coeff(admin_client):
     _set_advisor()
     month = db.today_local().strftime("%Y-%m")
-    resp = app_client.post(
+    resp = admin_client.post(
         "/advisors",
         data={
             "month": month,
@@ -97,20 +95,19 @@ def test_admin_saves_scores_and_shows_coeff(app_client):
     assert "顾问打分已保存" in html
     assert "0.97" in html
     assert "1.164" in html
-    xlsx = app_client.get(f"/advisors.xlsx?month={month}")
+    xlsx = admin_client.get(f"/advisors.xlsx?month={month}")
     assert xlsx.status_code == 200
     assert xlsx.headers["Content-Type"].startswith(
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
 
-def test_filler_cannot_score(app_client):
+def test_filler_cannot_score(filler_client):
     _set_advisor()
-    app_client.post("/login", data={"username": "alpha", "pin": "123456"})
-    page = app_client.get("/advisors").get_data(as_text=True)
+    page = filler_client.get("/advisors").get_data(as_text=True)
     assert "保存打分" not in page
     month = db.today_local().strftime("%Y-%m")
-    resp = app_client.post(
+    resp = filler_client.post(
         "/advisors",
         data={"month": month, "advisor_0": "任阳", "sm_0": "10"},
         follow_redirects=True,
@@ -120,25 +117,13 @@ def test_filler_cannot_score(app_client):
         assert db.list_advisor_scores(conn, month) == []
 
 
-def test_city_cannot_score_outside_window(app_client, monkeypatch):
+def test_city_cannot_score_outside_window(city_client, monkeypatch):
     monkeypatch.setattr(db, "today_local", lambda: date(2026, 8, 29))
     _set_advisor("store-alpha", "任阳")
-    with db.get_db() as conn:
-        db.create_user(
-            conn,
-            username="cityboss",
-            display_name="地市负责",
-            pin="654321",
-            role="city",
-            store_ids=[],
-            scope="示例市",
-        )
-        conn.execute("UPDATE users SET must_change_pin=0 WHERE username='cityboss'")
-    app_client.post("/login", data={"username": "cityboss", "pin": "654321"})
-    page = app_client.get("/advisors").get_data(as_text=True)
+    page = city_client.get("/advisors").get_data(as_text=True)
     assert "每月 1–5 日" in page or "次月 1–5 日" in page
     assert "保存打分" not in page
-    resp = app_client.post(
+    resp = city_client.post(
         "/advisors",
         data={"month": "2026-07", "advisor_0": "任阳", "sc_0": "8"},
         follow_redirects=True,
@@ -146,23 +131,11 @@ def test_city_cannot_score_outside_window(app_client, monkeypatch):
     assert "打分窗口已过" in resp.get_data(as_text=True)
 
 
-def test_city_scores_only_city_column_and_own_city(app_client, monkeypatch):
+def test_city_scores_only_city_column_and_own_city(city_client, monkeypatch):
     _set_advisor("store-alpha", "任阳")
     _set_advisor("store-epsilon", "邻市顾问")
-    with db.get_db() as conn:
-        db.create_user(
-            conn,
-            username="cityboss",
-            display_name="地市负责",
-            pin="654321",
-            role="city",
-            store_ids=[],
-            scope="示例市",
-        )
-        conn.execute("UPDATE users SET must_change_pin=0 WHERE username='cityboss'")
     month = _in_window(monkeypatch)
-    app_client.post("/login", data={"username": "cityboss", "pin": "654321"})
-    page = app_client.get("/advisors").get_data(as_text=True)
+    page = city_client.get("/advisors").get_data(as_text=True)
     assert "任阳" in page
     assert "邻市顾问" not in page
     assert 'name="sc_0"' in page
@@ -170,7 +143,7 @@ def test_city_scores_only_city_column_and_own_city(app_client, monkeypatch):
     assert 'name="sa_0"' not in page
     assert "保存打分" in page
     assert "还剩" in page
-    resp = app_client.post(
+    resp = city_client.post(
         "/advisors",
         data={"month": month, "advisor_0": "任阳", "sc_0": "8", "sm_0": "10"},
         follow_redirects=True,
@@ -180,7 +153,7 @@ def test_city_scores_only_city_column_and_own_city(app_client, monkeypatch):
         rec = db.list_advisor_scores(conn, month)[0]
         assert rec["score_city"] == 8
         assert rec["score_manager"] is None
-    steal = app_client.post(
+    steal = city_client.post(
         "/advisors",
         data={"month": month, "advisor_0": "邻市顾问", "sc_0": "1"},
         follow_redirects=True,
@@ -188,7 +161,7 @@ def test_city_scores_only_city_column_and_own_city(app_client, monkeypatch):
     assert "只能给自己可见范围内的顾问打分" in steal.get_data(as_text=True)
 
 
-def test_advisor_sees_own_three_scores(app_client, monkeypatch):
+def test_advisor_sees_own_three_scores(filler_client, monkeypatch):
     month = _in_window(monkeypatch)
     _set_advisor("store-alpha", "示例甲店")
     with db.get_db() as conn:
@@ -199,16 +172,14 @@ def test_advisor_sees_own_three_scores(app_client, monkeypatch):
             {"score_manager": 10, "score_area": 9, "score_city": 8},
             1,
         )
-    app_client.post("/login", data={"username": "alpha", "pin": "123456"})
-    page = app_client.get("/advisors").get_data(as_text=True)
+    page = filler_client.get("/advisors").get_data(as_text=True)
     assert "我的打分" in page
     assert "店长" in page and "区域经理" in page and "地市负责人" in page
     assert "保存打分" not in page
     assert "邻市顾问" not in page
 
 
-def test_xlsx_is_admin_only(app_client):
-    app_client.post("/login", data={"username": "alpha", "pin": "123456"})
-    assert app_client.get("/advisors.xlsx").status_code in (302, 200)
-    page = app_client.get("/advisors.xlsx", follow_redirects=True).get_data(as_text=True)
+def test_xlsx_is_admin_only(filler_client):
+    assert filler_client.get("/advisors.xlsx").status_code in (302, 200)
+    page = filler_client.get("/advisors.xlsx", follow_redirects=True).get_data(as_text=True)
     assert "需要管理员权限" in page
