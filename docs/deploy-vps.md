@@ -31,7 +31,7 @@ chmod +x scripts/sync_to_vps.sh scripts/deploy_vps.sh
 | `VPS_USER` | SSH 用户 |
 | `VPS_DIR` | `/opt/store-daily` |
 | `CADDY_PORT` | `8099` |
-| `CADDY_BIND` | `0.0.0.0`（局域网可访问） |
+| `CADDY_BIND` | 默认 `127.0.0.1`；仅局域网明文 HTTP 才设 `0.0.0.0` |
 | Cookie | TLS/Cloudflare 推荐 `STORE_DAILY_SECURE=1`；LAN HTTP 的 `0` 仅为显式 opt-in |
 
 账号不是 root 时：
@@ -86,7 +86,7 @@ CADDY_BIND=127.0.0.1
 CADDYFILE=./caddy/Caddyfile.tunnel
 ```
 
-预置账号：`admin / 1234`，示例店员见 `app/stores_seed.py`。进去立刻改口令；生产必须使用随机 `STORE_DAILY_SECRET`，且不能使用示例值。
+预置账号：`admin / 123456`，进去立刻改成至少 8 位、非连续/重复数字的口令。示例店员见 `app/stores_seed.py`。生产必须使用随机 `STORE_DAILY_SECRET`，且不能使用示例值。
 
 生产机上自检：
 

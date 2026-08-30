@@ -28,10 +28,11 @@ services:
   caddy:
     image: caddy:2-alpine
     ports:
-      # LAN HTTP is an explicit opt-in; prefer CADDYFILE.tunnel + Cloudflare/TLS.
-      - "${CADDY_BIND:-0.0.0.0}:${CADDY_PORT:-8099}:80"
+      # 默认只绑本机。局域网明文 HTTP 必须显式设 CADDY_BIND=0.0.0.0 且接受口令裸奔风险。
+      # 优先 CADDYFILE=./caddy/Caddyfile.tunnel + Cloudflare/TLS。
+      - "${CADDY_BIND:-127.0.0.1}:${CADDY_PORT:-8099}:80"
     volumes:
-      - ${CADDYFILE:-./caddy/Caddyfile.lan}:/etc/caddy/Caddyfile:ro
+      - ${CADDYFILE:-./caddy/Caddyfile.tunnel}:/etc/caddy/Caddyfile:ro
     depends_on:
       app:
         condition: service_healthy

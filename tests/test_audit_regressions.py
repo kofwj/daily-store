@@ -51,7 +51,9 @@ def test_login_lock_keyed_by_user_and_ip(tmp_db, client):
             for r in conn.execute("SELECT key FROM login_attempts")
         }
         assert keys  # 有记录
-        assert not any(k.startswith("user:") for k in keys)
+        assert any(k.startswith("uip:") for k in keys)
+        assert any(k.startswith("ip:") for k in keys)
+        assert any(k.startswith("u:") for k in keys)
 
 
 def test_csrf_referrer_follows_same_site_absolute_url(tmp_db):

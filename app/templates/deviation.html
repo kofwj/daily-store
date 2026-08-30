@@ -4,7 +4,7 @@
 <div class="page-head">
   <div class="page-title">
     <h1>填报偏差榜 · {{ month.strftime('%Y年%m月') }}</h1>
-    <p class="muted">温差 = 移动校准 − 填报比算，正数少报、负数多报，按温差绝对值排序。</p>
+    <p class="muted">温差 = 移动校准 − 填报比算。正数少报、负数多报，按温差绝对值排序。</p>
   </div>
   <div class="dev-nav">
     <a class="btn ghost" href="{{ url_for('deviation', month=prev_month.strftime('%Y-%m-01')) }}">‹ 上月</a>
@@ -15,29 +15,63 @@
 {% if not has_mobile %}
 <div class="card"><p class="muted">本月尚未填移动校准数，榜为空。先去「通报表」录入移动数。</p></div>
 {% else %}
-<table class="data dev-table">
-  <thead>
-    <tr>
-      <th>地市</th>
-      <th>门店</th>
-      <th>填报比算</th>
-      <th>移动校准</th>
-      <th>温差</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for r in rows %}
-    <tr>
-      <td class="muted">{{ r.city }}</td>
-      <td class="store">{{ r.name }}</td>
-      <td>{{ (r.reported / 10)|round(1) }}</td>
-      <td>{{ (r.mobile / 10)|round(1) }}</td>
-      <td class="{{ 'under' if r.under else ('over' if r.over else '') }}">
-        {{ '+' if r.under else '' }}{{ (r.diff / 10)|round(1) }}
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="dev-summary">
+  <div class="dev-stat">
+    <div class="dev-stat-label">纳入对比</div>
+    <div class="kpi-num">{{ rows|length }}<span class="dev-unit">店</span></div>
+  </div>
+  <div class="dev-stat warn">
+    <div class="dev-stat-label">少报 · 填报低于移动</div>
+    <div class="kpi-num">{{ under_n }}<span class="dev-unit">店</span></div>
+  </div>
+  <div class="dev-stat err">
+    <div class="dev-stat-label">多报 · 填报高于移动</div>
+    <div class="kpi-num">{{ over_n }}<span class="dev-unit">店</span></div>
+  </div>
+  <div class="dev-stat {{ 'warn' if net_diff > 0 else ('err' if net_diff < 0 else 'ok') }}">
+    <div class="dev-stat-label">全月净温差</div>
+    <div class="kpi-num">{{ '+' if net_diff > 0 else '' }}{{ (net_diff / 10)|round(1) }}</div>
+  </div>
+</div>
+
+<div class="card dev-card">
+  <table class="data dev-table">
+    <thead>
+      <tr>
+        <th class="rank">#</th>
+        <th class="store">门店</th>
+        <th>填报比算</th>
+        <th>移动校准</th>
+        <th>温差</th>
+        <th class="dev-bar-col"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td class="rank">{{ loop.index }}</td>
+        <td class="store">
+          <strong>{{ r.name }}</strong>
+          <span class="sub">{{ r.city }}</span>
+        </td>
+        <td class="num">{{ (r.reported / 10)|round(1) }}</td>
+        <td class="num">{{ (r.mobile / 10)|round(1) }}</td>
+        <td>
+          {% if r.under or r.over %}
+          <span class="dev-badge {{ 'under' if r.under else 'over' }}">{{ '+' if r.under else '' }}{{ (r.diff / 10)|round(1) }}</span>
+          {% else %}
+          <span class="dev-badge even">一致</span>
+          {% endif %}
+        </td>
+        <td class="dev-bar-col">
+          {% if r.abs_diff %}
+          <span class="dev-bar-track"><span class="dev-bar {{ 'under' if r.under else 'over' }}" style="width: {{ ((r.abs_diff / max_abs * 100) | round(0) | int) if max_abs else 0 }}%"></span></span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endif %}
 {% endblock %}

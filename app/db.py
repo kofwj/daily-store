@@ -129,7 +129,25 @@ def get_db():
             conn.rollback()
         raise
     else:
-        if depth == 0:
+        if depth == 0 and getattr(g, "_db_conn", None) is conn:
             conn.commit()
     finally:
         g._db_depth = depth
+
+
+def abandon_request_conn() -> None:
+    """备份恢复后活库文件已换：丢掉本请求还开着的旧连接，避免把旧 WAL 提交进去。"""
+    if not has_app_context():
+        return
+    conn = getattr(g, "_db_conn", None)
+    if conn is None:
+        return
+    try:
+        conn.rollback()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        conn.close()
+    except Exception:  # noqa: BLE001
+        pass
+    g._db_conn = None

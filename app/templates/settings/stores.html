@@ -26,7 +26,7 @@
           {% for group in store_groups %}
             {% for s in group.stores %}
             <a class="store-list-item {{ 'active' if current_store and s.id == current_store.id else '' }}{% if not s.active %} is-off{% endif %}" href="{{ url_for('settings', tab='stores', store_id=s.id) }}" data-city="{{ group.city }}" data-manager="{{ (s.area_manager or '')|trim }}" data-text="{{ store_label(s) }} {{ s.name }} {{ s.store_manager }} {{ s.area_manager }} {{ s.city }} {{ s.mobile_code }} {{ s.region_group }}">
-              <span class="store-list-name">{{ store_label(s) }}{% if not s.active %} · 已停用{% endif %}</span>
+              <span class="store-list-name">{{ store_label(s) }}{% if not s.active %} · 已停用{% endif %}{% if s.advisor_name %}<span class="store-list-advisor" title="运营商顾问 {{ s.advisor_name }}">顾</span>{% endif %}</span>
               <span class="muted store-list-people" data-alt-city="{{ s.store_manager or '未设店长' }}{% if s.store_grade %} · {{ s.store_grade }}类{% endif %}" data-alt-mgr="{{ (s.area_manager or '')|trim or '未设经理' }}">{{ s.store_manager or '未设店长' }}{% if s.store_grade %} · {{ s.store_grade }}类{% endif %}</span>
             </a>
             {% endfor %}
@@ -64,74 +64,100 @@
           <input type="hidden" name="action" value="edit_store">
           <input type="hidden" name="tab" value="stores">
           <input type="hidden" name="store_id" value="{{ current_store.id }}">
-          <h3 class="settings-section">归属</h3>
-          <div class="store-editor-grid">
-            <p>
-              <label>大区</label>
-              <input name="region_group" value="{{ current_store.region_group }}" autocomplete="off">
-            </p>
-            <p>
-              <label>地市</label>
-              <input name="city" value="{{ current_store.city }}" autocomplete="off">
-            </p>
-            <p class="span-2">
-              <label>移动编码</label>
-              <input name="mobile_code" value="{{ current_store.mobile_code }}" inputmode="numeric" autocomplete="off">
-            </p>
-          </div>
-          <h3 class="settings-section">人员</h3>
-          <div class="store-editor-grid">
-            <p>
-              <label>区域经理</label>
-              <input name="area_manager" value="{{ current_store.area_manager }}" autocomplete="off">
-            </p>
-            <p>
-              <label>店长</label>
-              <input name="store_manager" value="{{ current_store.store_manager }}" autocomplete="off">
-            </p>
-            <p class="span-2">
-              <label>运营商顾问</label>
-              <input name="advisor_name" value="{{ current_store.advisor_name }}" placeholder="无顾问留空" autocomplete="off">
-            </p>
-          </div>
-          <h3 class="settings-section">考核口径</h3>
-          <div class="store-editor-grid">
-            <p>
-              <label>门店类别</label>
-              <select name="store_grade">
-                <option value="A" {% if current_store.store_grade == 'A' %}selected{% endif %}>A（酬金目标 4000）</option>
-                <option value="B" {% if current_store.store_grade == 'B' %}selected{% endif %}>B（酬金目标 1000）</option>
-              </select>
-            </p>
-            <p>
-              <label>AI 目标</label>
-              <input name="ai_target" type="number" min="0" value="{{ current_store.ai_target or 10 }}" inputmode="numeric">
-            </p>
-          </div>
-          <h3 class="settings-section">开票 / 租赁</h3>
-          <div class="store-editor-grid">
-            <p class="span-2"><label>发票上门店全称</label><input name="invoice_name" value="{{ current_store.invoice_name }}" placeholder="如 TZ南通市海安万达广场vivo体验店"></p>
-            <p><label>租赁面积</label><input name="lease_area" value="{{ current_store.lease_area }}" placeholder="平方米，与合同一致"></p>
-            <p><label>租赁期限</label><input name="lease_period" value="{{ current_store.lease_period }}" placeholder="如 2026-01-01至2026-12-31"></p>
-            <p class="span-2"><label>租赁地址</label><input name="lease_address" value="{{ current_store.lease_address }}" placeholder="市、区/县、街路村乡镇道巷号"></p>
-          </div>
+          <section class="store-section">
+            <div class="store-section-head">
+              <h3>归属</h3>
+              <p class="muted">大区和地市用于筛选、通报分组；有移动编码的店才会进通报表。</p>
+            </div>
+            <div class="store-editor-grid">
+              <p>
+                <label>大区</label>
+                <input name="region_group" value="{{ current_store.region_group }}" autocomplete="off">
+              </p>
+              <p>
+                <label>地市</label>
+                <input name="city" value="{{ current_store.city }}" autocomplete="off">
+              </p>
+              <p class="span-2">
+                <label>移动编码</label>
+                <input name="mobile_code" value="{{ current_store.mobile_code }}" inputmode="numeric" autocomplete="off">
+              </p>
+            </div>
+          </section>
+          <section class="store-section">
+            <div class="store-section-head">
+              <h3>人员</h3>
+              <p class="muted">有顾问的店按「合计」考核；无顾问按「双破 0」。区域经理姓名决定辖区账号能看哪些店。</p>
+            </div>
+            <div class="store-editor-grid">
+              <p>
+                <label>区域经理</label>
+                <input name="area_manager" value="{{ current_store.area_manager }}" autocomplete="off">
+              </p>
+              <p>
+                <label>店长</label>
+                <input name="store_manager" value="{{ current_store.store_manager }}" autocomplete="off">
+              </p>
+              <p class="span-2">
+                <label>运营商顾问</label>
+                <input name="advisor_name" value="{{ current_store.advisor_name }}" placeholder="无顾问留空" autocomplete="off">
+              </p>
+            </div>
+          </section>
+          <section class="store-section">
+            <div class="store-section-head">
+              <h3>考核口径</h3>
+              <p class="muted">类别决定结算表酬金目标（A 4000 / B 1000）；AI 目标不填按 A 10 / B 2 兜底。</p>
+            </div>
+            <div class="store-editor-grid">
+              <p>
+                <label>门店类别</label>
+                <select name="store_grade">
+                  <option value="A" {% if current_store.store_grade == 'A' %}selected{% endif %}>A（酬金目标 4000）</option>
+                  <option value="B" {% if current_store.store_grade == 'B' %}selected{% endif %}>B（酬金目标 1000）</option>
+                </select>
+              </p>
+              <p>
+                <label>AI 目标</label>
+                <input name="ai_target" type="number" min="0" value="{{ current_store.ai_target or 10 }}" inputmode="numeric">
+              </p>
+            </div>
+          </section>
+          <section class="store-section">
+            <div class="store-section-head">
+              <h3>开票 / 租赁</h3>
+              <p class="muted">开票申请按税务样表导出时带出；全称必须和税控一致。</p>
+            </div>
+            <div class="store-editor-grid">
+              <p class="span-2"><label>发票上门店全称</label><input name="invoice_name" value="{{ current_store.invoice_name }}" placeholder="如 TZ南通市海安万达广场vivo体验店"></p>
+              <p><label>租赁面积</label><input name="lease_area" value="{{ current_store.lease_area }}" placeholder="平方米，与合同一致"></p>
+              <p><label>租赁期限</label><input name="lease_period" value="{{ current_store.lease_period }}" placeholder="如 2026-01-01至2026-12-31"></p>
+              <p class="span-2"><label>租赁地址</label><input name="lease_address" value="{{ current_store.lease_address }}" placeholder="市、区/县、街路村乡镇道巷号"></p>
+            </div>
+          </section>
           <div class="toolbar">
             <button type="submit">保存这家店</button>
           </div>
         </form>
-        <div class="toolbar store-danger">
-          <form method="post">
-            <input type="hidden" name="action" value="toggle_store">
-            <input type="hidden" name="tab" value="stores">
-            <input type="hidden" name="store_id" value="{{ current_store.id }}">
-            <button class="ghost" type="submit">{{ '启用' if not current_store.active else '停用' }}</button>
-          </form>
-          <form method="post" onsubmit="return confirm('删除后名单里没有这家店。有填报记录的不能删，只能停用。确定删？');">
-            <input type="hidden" name="action" value="delete_store">
-            <input type="hidden" name="tab" value="stores">
-            <input type="hidden" name="store_id" value="{{ current_store.id }}">
-            <button class="ghost" type="submit">删除</button>
-          </form>
+        <div class="card settings-card settings-danger-zone store-danger-zone">
+          <div class="settings-card-head">
+            <h2>停用 / 删除</h2>
+            <p class="muted">停用后不出现在填报和通报里，随时可启用；有填报记录的店不能删。</p>
+          </div>
+          <div class="store-danger-actions">
+            <form method="post">
+              <input type="hidden" name="action" value="toggle_store">
+              <input type="hidden" name="tab" value="stores">
+              <input type="hidden" name="store_id" value="{{ current_store.id }}">
+              <button class="ghost" type="submit">{{ '启用这家店' if not current_store.active else '停用这家店' }}</button>
+            </form>
+            <form method="post" onsubmit="return confirm('删除后名单里没有这家店。有填报记录的不能删，只能停用。确定删？');">
+              <input type="hidden" name="action" value="delete_store">
+              <input type="hidden" name="tab" value="stores">
+              <input type="hidden" name="store_id" value="{{ current_store.id }}">
+              <button class="ghost danger-ghost" type="submit">删除</button>
+            </form>
+          </div>
         </div>
         {% else %}
         <div class="store-editor-head">

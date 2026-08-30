@@ -5,8 +5,9 @@ from __future__ import annotations
 import html
 import re
 import sqlite3
-from html.parser import HTMLParser
 from typing import Any, Dict, List, Optional
+
+import nh3
 
 from .db_core import _now
 
@@ -17,8 +18,7 @@ ALLOWED_TAGS = {
     "table", "thead", "tbody", "tr", "th", "td",
     "ins", "img", "sub", "sup",
 }
-VOID_TAGS = {"br", "img"}
-TABLE_TAGS = {"table", "thead", "tbody", "tr", "th", "td"}
+_POLICY_ADD_CLASS = {"policy-add", "policy-del"}
 
 # 允许的内联样式属性 → 值校验正则（防 CSS 注入）
 _STYLE_WHITELIST = {
@@ -31,6 +31,21 @@ _STYLE_WHITELIST = {
     "text-indent": re.compile(r"^\d{1,4}(\.\d+)?(px|em|rem|%)$"),
     "width": re.compile(r"^\d{1,4}(\.\d+)?(px|em|rem|%)$"),
     "height": re.compile(r"^\d{1,4}(\.\d+)?(px|em|rem|%)$"),
+}
+_NH3_ATTRIBUTES = {
+    "a": {"href"},
+    "img": {"src", "alt", "width", "height"},
+    "span": {"class", "style"},
+    "p": {"style"},
+    "div": {"style"},
+    "h2": {"style"},
+    "h3": {"style"},
+    "h4": {"style"},
+    "blockquote": {"style"},
+    "li": {"style"},
+    "table": {"style"},
+    "th": {"colspan", "rowspan", "align", "style"},
+    "td": {"colspan", "rowspan", "align", "style"},
 }
 
 
@@ -49,109 +64,55 @@ def _safe_style(raw: str) -> str:
     return "; ".join(kept)
 
 
-class _Sanitizer(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.out: List[str] = []
+def _safe_href(raw: str) -> Optional[str]:
+    value = (raw or "").strip()
+    if not value or "\\" in value or "\n" in value or "\r" in value:
+        return None
+    if value.startswith("//") or value.lower().startswith("javascript:"):
+        return None
+    if value.startswith("https://"):
+        return value
+    if value.startswith("/") and not value.startswith("//"):
+        return value
+    return None
 
-    def handle_starttag(self, tag: str, attrs) -> None:
-        tag = tag.lower()
-        if tag not in ALLOWED_TAGS:
-            return
-        extra = ""
-        if tag == "span":
-            cls = ""
-            style = ""
-            for key, val in attrs:
-                k = key.lower()
-                if k == "class":
-                    cls = val or ""
-                elif k == "style":
-                    style = _safe_style(val or "")
-            keep = [c for c in cls.split() if c in {"policy-add", "policy-del"}]
-            if keep:
-                extra += f' class="{" ".join(keep)}"'
-            if style:
-                extra += f' style="{html.escape(style, quote=True)}"'
-            self.out.append(f"<span{extra}>")
-            return
-        if tag == "a":
-            href = ""
-            for key, val in attrs:
-                if key.lower() == "href" and val:
-                    raw = val.strip()
-                    if raw.startswith(("http://", "https://", "/")):
-                        href = html.escape(raw, quote=True)
-            self.out.append(f'<a href="{href}" target="_blank" rel="noopener">' if href else "<a>")
-            return
-        if tag == "img":
-            src = ""
-            alt = ""
-            width = ""
-            height = ""
-            for key, val in attrs:
-                k = key.lower()
-                v = (val or "").strip()
-                if k == "src" and v.startswith(("/uploads/", "http://", "https://")):
-                    src = html.escape(v, quote=True)
-                elif k == "alt":
-                    alt = html.escape(v, quote=True)
-                elif k in {"width", "height"} and v.isdigit():
-                    if k == "width":
-                        width = v
-                    else:
-                        height = v
-            if not src:
-                return  # 无合法 src 的 img 直接丢弃
-            extra = f' src="{src}"'
-            if alt:
-                extra += f' alt="{alt}"'
-            if width:
-                extra += f' width="{width}"'
-            if height:
-                extra += f' height="{height}"'
-            self.out.append(f"<img{extra}>")  # img 是 void 元素
-            return
-        if tag in ("th", "td"):
-            for key, val in attrs:
-                k = key.lower()
-                if k in {"colspan", "rowspan"} and str(val or "").isdigit():
-                    extra += f' {k}="{int(val)}"'
-                elif k == "align" and str(val or "").lower() in {"left", "center", "right"}:
-                    extra += f' align="{val.lower()}"'
-                elif k == "style":
-                    st = _safe_style(val or "")
-                    if st:
-                        extra += f' style="{html.escape(st, quote=True)}"'
-        else:
-            # p/div/h2-h4/blockquote/li/table 等：只保留安全内联样式
-            for key, val in attrs:
-                if key.lower() == "style":
-                    st = _safe_style(val or "")
-                    if st:
-                        extra += f' style="{html.escape(st, quote=True)}"'
-        self.out.append(f"<{tag}{extra}>")
-        if tag in VOID_TAGS:
-            return
 
-    def handle_endtag(self, tag: str) -> None:
-        tag = tag.lower()
-        if tag in ALLOWED_TAGS and tag not in VOID_TAGS:
-            self.out.append(f"</{tag}>")
+def _safe_img_src(raw: str) -> Optional[str]:
+    value = (raw or "").strip()
+    if not value or ".." in value or "\\" in value:
+        return None
+    if value.startswith("/uploads/policy/") and "//" not in value[1:]:
+        return value
+    if value.startswith("https://"):
+        return value
+    return None
 
-    def handle_data(self, data: str) -> None:
-        self.out.append(html.escape(data))
 
-    def handle_entityref(self, name: str) -> None:
-        self.out.append(f"&{name};")
-
-    def handle_charref(self, name: str) -> None:
-        self.out.append(f"&#{name};")
+def _nh3_attribute_filter(tag: str, attr: str, value: str) -> Optional[str]:
+    tag = (tag or "").lower()
+    attr = (attr or "").lower()
+    if attr == "href":
+        return _safe_href(value)
+    if attr == "src":
+        return _safe_img_src(value)
+    if attr == "style":
+        return _safe_style(value) or None
+    if attr == "class" and tag == "span":
+        keep = [c for c in (value or "").split() if c in _POLICY_ADD_CLASS]
+        return " ".join(keep) or None
+    if attr in {"width", "height", "colspan", "rowspan"}:
+        return value if str(value or "").isdigit() else None
+    if attr == "align":
+        text = (value or "").lower()
+        return text if text in {"left", "center", "right"} else None
+    if attr == "alt":
+        return value
+    return None
 
 
 def _inline_md(text: str) -> str:
     out = html.escape(text)
-    out = re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", r'<a href="\2">\1</a>', out)
+    out = re.sub(r"\[([^\]]+)\]\((https://[^)\s]+)\)", r'<a href="\2">\1</a>', out)
     out = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", out)
     out = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<em>\1</em>", out)
     return out
@@ -216,13 +177,19 @@ def sanitize_policy_html(raw: str) -> str:
         html_out = text
     else:
         html_out = render_policy_markdown(text)
-    parser = _Sanitizer()
     try:
-        parser.feed(html_out)
-        parser.close()
+        out = nh3.clean(
+            html_out,
+            tags=ALLOWED_TAGS,
+            attributes=_NH3_ATTRIBUTES,
+            attribute_filter=_nh3_attribute_filter,
+            url_schemes={"https"},
+            link_rel="noopener noreferrer",
+            strip_comments=True,
+        )
     except Exception:
         return html.escape(re.sub(r"<[^>]+>", "", text)).replace("\n", "<br>")
-    out = "".join(parser.out)
+    out = re.sub(r"<img(?![^>]*\bsrc=)[^>]*>", "", out, flags=re.I)
     return re.sub(r"(?:<br\s*/?>\s*){3,}", "<br><br>", out)
 
 

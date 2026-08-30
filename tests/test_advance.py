@@ -56,7 +56,7 @@ def test_filler_saves_and_admin_pays(client):
     assert "未兑" in saved
     with db.get_db() as conn:
         aid = conn.execute("SELECT id FROM advance_posts WHERE store_id=?", (sid,)).fetchone()["id"]
-    client.get("/logout")
+    client.post("/logout")
     client.post("/login", data={"username": "admin", "pin": "123456"})
     paid = client.post(
         "/advance/pay",
@@ -179,7 +179,7 @@ def test_advance_actions_are_audited(client):
     with db.get_db() as conn:
         aid = conn.execute("SELECT id FROM advance_posts WHERE phone='13900007777'").fetchone()["id"]
     client.post("/advance", data={"store_id": sid, "advance_id": aid, "biz_date": today, "phone": "13900007777", "rebate": "20"})
-    client.get("/logout")
+    client.post("/logout")
     client.post("/login", data={"username": "admin", "pin": "123456"})
     client.post("/advance/pay", data={"action": "pay", "advance_id": [str(aid)]})
     client.post("/advance/pay", data={"action": "unpay", "advance_id": [str(aid)]})
@@ -208,7 +208,7 @@ def test_anonymous_cannot_delete_advance(client):
         aid = conn.execute(
             "SELECT id FROM advance_posts WHERE phone='13900006666'"
         ).fetchone()["id"]
-    client.get("/logout")
+    client.post("/logout")
     resp = client.post(
         "/advance/delete",
         data={"store_id": str(sid), "advance_id": str(aid)},
@@ -239,13 +239,13 @@ def test_admin_advance_defaults_to_all_stores(client):
         "/advance",
         data={"store_id": str(sid_a), "biz_date": today, "phone": "13900009111", "rebate": "10"},
     )
-    client.get("/logout")
+    client.post("/logout")
     client.post("/login", data={"username": "beta", "pin": "123456"})
     client.post(
         "/advance",
         data={"store_id": str(sid_b), "biz_date": today, "phone": "13900009222", "rebate": "20"},
     )
-    client.get("/logout")
+    client.post("/logout")
     client.post("/login", data={"username": "admin", "pin": "123456"})
     page = client.get("/advance").get_data(as_text=True)
     assert "本月全店垫资" in page
@@ -298,7 +298,7 @@ def test_store_sees_month_list_and_admin_sees_today_inbox(client):
     assert "139****3333" in page
     assert "13900003333" not in page
     assert "改" in page and "删" in page
-    client.get("/logout")
+    client.post("/logout")
     client.post("/login", data={"username": "admin", "pin": "123456"})
     inbox = client.get("/advance/pay?scope=today&paid=0").get_data(as_text=True)
     assert "今天待兑" in inbox

@@ -27,7 +27,7 @@ def test_login_brand_is_admin_setting(app_client):
         follow_redirects=True,
     ).get_data(as_text=True)
     assert "登录页标题已保存" in saved
-    app_client.get("/logout")
+    app_client.post("/logout")
     login = app_client.get("/login").get_data(as_text=True)
     assert "示例运营中心" in login
     assert "示例日报" in login
@@ -387,7 +387,7 @@ def test_4_net_includes_advisor_penalty():
     row = judge(True, 0, 10)
     assert row["advisor_penalty"] == 100
     assert row["net"] == -100
-    row = judge(True, 2, 3)
+    row = judge(True, 2, 7)  # 差一点的欠佳档：门店 100 + 顾问 50
     assert row["net"] == -150
     assert judge(False, 0, 0)["net"] == -100
 
@@ -643,7 +643,11 @@ def test_policy_read_status_counts_unread(tmp_db):
 
 def test_policy_image_upload_and_serve(app_client):
     """政策插图：管理员可传 PNG，非图片被拒，非管理员被拦。"""
-    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+    from PIL import Image as _Image
+
+    buf = __import__("io").BytesIO()
+    _Image.new("RGB", (2, 2), (16, 120, 72)).save(buf, format="PNG")
+    png = buf.getvalue()
     app_client.post("/login", data={"username": "admin", "pin": "123456"})
     r = app_client.post(
         "/settings/policy-image",

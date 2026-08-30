@@ -43,16 +43,14 @@ def tmp_db(tmp_path, monkeypatch):
 @pytest.fixture()
 def client(tmp_db):
     """未登录的测试客户端（Test app，TESTING=True）。登录请用 login()。"""
-    app = create_app()
-    app.config["TESTING"] = True
+    app = create_app(testing=True)
     return app.test_client()
 
 
 @pytest.fixture()
 def app_client(tmp_db):
     """未登录的测试客户端（与 client 等价，供不同命名习惯的用例复用）。"""
-    app = create_app()
-    app.config["TESTING"] = True
+    app = create_app(testing=True)
     return app.test_client()
 
 

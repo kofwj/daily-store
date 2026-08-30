@@ -63,8 +63,13 @@ def register_auth(app) -> None:
                 flash("账号或口令不对", "error")
         return render_template("login.html")
 
-    @app.route("/logout")
+    @app.route("/logout", methods=["GET", "POST"])
     def logout():
+        if request.method == "GET":
+            if g.user is None:
+                return redirect(url_for("login"))
+            # GET 不再清会话，避免跨站图片/链接把人登出
+            return redirect(url_for("settings", tab="account"))
         if g.user is not None:
             ip = client_ip()
             with db.get_db() as conn:

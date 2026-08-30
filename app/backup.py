@@ -137,6 +137,7 @@ def restore_bytes(data: bytes) -> Path:
     try:
         probe = sqlite3.connect(str(tmp))
         try:
+            probe.execute("PRAGMA trusted_schema = OFF")
             names = {
                 row[0]
                 for row in probe.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -195,12 +196,25 @@ def restore_bytes(data: bytes) -> Path:
                 db_core._add_must_change_pin(conn)
         # 旧备份可能停在更早的 schema 版本，恢复后再补索引/金额单位
         db_core.migrate()
+        with db_core.get_db() as conn:
+            db_core._ensure_user_columns(conn)
+            db_core._add_must_change_pin(conn)
+            db_core.bump_all_session_epochs(conn)
     finally:
         try:
             tmp.unlink()
         except OSError:
             pass
     return safety
+
+
+def restored_admin_names() -> List[str]:
+    """恢复后活库里的启用中管理员账号，给确认提示用。"""
+    with db_core.get_db() as conn:
+        rows = conn.execute(
+            "SELECT username FROM users WHERE role='admin' AND COALESCE(active,1)=1 ORDER BY id"
+        ).fetchall()
+    return [str(row["username"] or "") for row in rows if row["username"]]
 
 
 def restore_named(name: str) -> Path:

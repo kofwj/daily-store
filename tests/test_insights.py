@@ -112,7 +112,7 @@ def test_insights_page_admin_only(app_client):
     app_client.post("/login", data={"username": "alpha", "pin": "123456"})
     filler = app_client.get("/insights")
     assert filler.status_code in (302, 403)
-    app_client.get("/logout")
+    app_client.post("/logout")
     app_client.post("/login", data={"username": "admin", "pin": "123456"})
     page = app_client.get("/insights").get_data(as_text=True)
     assert "洞察" in page

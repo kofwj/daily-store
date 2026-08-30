@@ -68,14 +68,14 @@
     <div class="card settings-card">
       <div class="settings-card-head">
         <h2>改口令</h2>
-        <p class="muted">{% if g.user['must_change_pin'] %}默认口令必须改掉，也不能改回 123456。{% else %}新口令至少 6 位。{% endif %}</p>
+        <p class="muted">{% if g.user['must_change_pin'] %}默认口令必须改掉，也不能改回 123456、重复数字或连续数字。{% else %}新口令至少 8 位，不要用重复或连续数字。{% endif %}</p>
       </div>
       <form method="post" class="settings-form">
         <input type="hidden" name="action" value="change_pin">
         <input type="hidden" name="tab" value="account">
-        <p><label>当前口令</label><input name="old_pin" type="password" inputmode="numeric" required autocomplete="current-password"></p>
-        <p><label>新口令（至少 6 位）</label><input name="new_pin" type="password" inputmode="numeric" minlength="6" required autocomplete="new-password"></p>
-        <p><label>再输一遍</label><input name="new_pin2" type="password" inputmode="numeric" minlength="6" required autocomplete="new-password"></p>
+        <p><label>当前口令</label><input name="old_pin" type="password" required autocomplete="current-password"></p>
+        <p><label>新口令（至少 8 位）</label><input name="new_pin" type="password" minlength="8" required autocomplete="new-password"></p>
+        <p><label>再输一遍</label><input name="new_pin2" type="password" minlength="8" required autocomplete="new-password"></p>
         <div class="toolbar"><button type="submit">保存口令</button></div>
       </form>
     </div>
@@ -204,21 +204,25 @@
       <div class="card settings-card">
         <div class="settings-card-head">
           <h2>有运营商顾问</h2>
-          <p class="muted">走 AI + 新用户直降总量方案。</p>
+          <p class="muted">走 AI + 新用户直降总量方案。「差一点 / 差得远」接近度分档自 2026 年 9 月起生效，之前月份按旧口径。</p>
         </div>
         <div class="rules-grid">
           <p><label>达标总量 AI+新用户直降 ≥</label><input type="number" min="0" name="r_total_threshold" value="{{ incentive_rules['total_threshold'] }}"></p>
+          <p class="span-2"><label>未达标「差一点」档：总量距达标 ≤</label><input type="number" min="0" name="r_near_miss_gap" value="{{ incentive_rules['near_miss_gap'] }}"></p>
           <p><label>AI≥ 高效线</label><input type="number" min="0" name="r_ai_best" value="{{ incentive_rules['ai_best'] }}"></p>
           <p><label>AI≥ 破0线</label><input type="number" min="0" name="r_ai_pass" value="{{ incentive_rules['ai_pass'] }}"></p>
           <p class="span-2"><label>AI≥ 顾问免责线（未达标时）</label><input type="number" min="0" name="r_ai_5" value="{{ incentive_rules['ai_5'] }}"></p>
           <p><label>高效完成奖门店</label><input type="number" min="0" name="r_reward_best" value="{{ incentive_rules['reward_best'] }}"></p>
           <p><label>总量达标奖门店</label><input type="number" min="0" name="r_reward_pass" value="{{ incentive_rules['reward_pass'] }}"></p>
           <p><label>总量靠直降罚顾问</label><input type="number" min="0" name="r_reward_sesame_penalty" value="{{ incentive_rules['reward_sesame_penalty'] }}"></p>
-          <p><label>顾问免责罚门店</label><input type="number" min="0" name="r_penal_store_ai5" value="{{ incentive_rules['penal_store_ai5'] }}"></p>
-          <p><label>整体欠佳罚门店</label><input type="number" min="0" name="r_penal_store_mid" value="{{ incentive_rules['penal_store_mid'] }}"></p>
+          <p><label>顾问免责罚门店（差一点）</label><input type="number" min="0" name="r_penal_store_ai5_near" value="{{ incentive_rules['penal_store_ai5_near'] }}"></p>
+          <p><label>顾问免责罚门店（差得远）</label><input type="number" min="0" name="r_penal_store_ai5" value="{{ incentive_rules['penal_store_ai5'] }}"></p>
+          <p><label>整体欠佳罚门店（差一点）</label><input type="number" min="0" name="r_penal_store_mid" value="{{ incentive_rules['penal_store_mid'] }}"></p>
+          <p><label>整体欠佳罚门店（差得远）</label><input type="number" min="0" name="r_penal_store_mid_far" value="{{ incentive_rules['penal_store_mid_far'] }}"></p>
           <p><label>整体欠佳罚顾问</label><input type="number" min="0" name="r_penal_advisor_mid" value="{{ incentive_rules['penal_advisor_mid'] }}"></p>
           <p><label>AI挂0罚门店</label><input type="number" min="0" name="r_penal_store_zero" value="{{ incentive_rules['penal_store_zero'] }}"></p>
-          <p><label>AI挂0罚顾问</label><input type="number" min="0" name="r_penal_advisor_zero" value="{{ incentive_rules['penal_advisor_zero'] }}"></p>
+          <p><label>AI挂0罚顾问（差一点）</label><input type="number" min="0" name="r_penal_advisor_zero_near" value="{{ incentive_rules['penal_advisor_zero_near'] }}"></p>
+          <p><label>AI挂0罚顾问（差得远）</label><input type="number" min="0" name="r_penal_advisor_zero" value="{{ incentive_rules['penal_advisor_zero'] }}"></p>
           <p class="span-2"><label>顾问奖惩折算除数（顾问打分页：主推奖惩 ÷ 此数 = 工资折算系数）</label><input type="number" min="1" name="advisor_penalty_divisor" value="{{ advisor_penalty_divisor }}"></p>
         </div>
       </div>

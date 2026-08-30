@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+import time
 from datetime import date, timedelta
 from functools import wraps
 from io import BytesIO
@@ -19,6 +20,9 @@ from . import broadcast, db, incentive
 from .metrics_seed import rollup_amount
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+SESSION_IDLE_SECONDS = 30 * 60
+UNAUTH_MAX_CONTENT = 64 * 1024
 
 DEFAULT_BRAND = {
     "mark": "vivo",
@@ -107,6 +111,15 @@ def load_user() -> None:
     uid = session.get("user_id")
     if not uid:
         return
+    now = time.time()
+    last = session.get("_active_at")
+    try:
+        last_n = float(last) if last is not None else now
+    except (TypeError, ValueError):
+        last_n = now
+    if now - last_n > SESSION_IDLE_SECONDS:
+        session.clear()
+        return
     with db.get_db() as conn:
         row = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (uid,)).fetchone()
         if row is not None and int(session.get("session_epoch", -1)) != int(row["session_epoch"] or 0):
@@ -114,6 +127,17 @@ def load_user() -> None:
             session.clear()
             return
         g.user = row
+        session["_active_at"] = now
+
+
+def limit_unauth_body():
+    """未登录请求体限制在 64KiB，挡住对 /login 的大包拖垮 worker。"""
+    if g.user is not None:
+        return None
+    size = request.content_length or 0
+    if size > UNAUTH_MAX_CONTENT:
+        return Response("payload too large", status=413)
+    return None
 
 
 def pin_change_required():
@@ -445,7 +469,7 @@ def store_forecast(
             "net": 0,
         }
     else:
-        judged = incentive.judge(bool(advisor_name.strip()), ai, new_cut, rules)
+        judged = incentive.judge(bool(advisor_name.strip()), ai, new_cut, rules, as_of=as_of)
     judged.update(
         {
             "store_id": store["id"],

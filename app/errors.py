@@ -17,6 +17,7 @@ from flask import current_app, render_template, request
 
 _COPY = {
     400: ("请求有误", "你这次请求好像有些问题，麻烦回到上一步再试。"),
+    413: ("请求太大", "这次提交的内容超出限制，缩小后再试。"),
     403: ("没有权限", "这个操作需要管理员权限，你可能没有登录或被改了权限。"),
     404: ("页面不存在", "你要找的页面已经搬家了，从导航里重新进吧。"),
     405: ("方法不支持", "这是个只读页面，不能这样提交。"),
@@ -66,6 +67,10 @@ def register_errors(app) -> None:
     @app.errorhandler(405)
     def handle_405(_e):
         return _render(405), 405
+
+    @app.errorhandler(413)
+    def handle_413(_e):
+        return _render(413), 413
 
     # 兜底：给应用日志配一个稳定的 stderr handler，方便 gunicorn/docker logs 里看到
     logger = logging.getLogger("app")

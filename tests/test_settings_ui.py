@@ -46,7 +46,7 @@ def test_add_user_filler_with_multiple_stores(app_client):
             "role": "filler",
             "username": "ceshiduodian",
             "display_name": "测试多店",
-            "pin": "654321",
+            "pin": "48291703",
             "store_ids": [str(stores[0]["id"]), str(stores[1]["id"])],
         },
         follow_redirects=True,

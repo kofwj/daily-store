@@ -58,7 +58,7 @@ def test_default_pin_must_change_before_using_app(client):
         },
         follow_redirects=True,
     )
-    assert "至少 6 位" in reuse.get_data(as_text=True)
+    assert "至少 8 位" in reuse.get_data(as_text=True)
     still_default = client.post(
         "/settings",
         data={
@@ -70,15 +70,27 @@ def test_default_pin_must_change_before_using_app(client):
         },
         follow_redirects=True,
     )
-    assert "不能再用系统默认口令" in still_default.get_data(as_text=True)
+    assert "至少 8 位" in still_default.get_data(as_text=True)
+    sequential = client.post(
+        "/settings",
+        data={
+            "action": "change_pin",
+            "tab": "account",
+            "old_pin": "123456",
+            "new_pin": "12345678",
+            "new_pin2": "12345678",
+        },
+        follow_redirects=True,
+    )
+    assert "口令太弱" in sequential.get_data(as_text=True)
     ok = client.post(
         "/settings",
         data={
             "action": "change_pin",
             "tab": "account",
             "old_pin": "123456",
-            "new_pin": "567890",
-            "new_pin2": "567890",
+            "new_pin": "48291703",
+            "new_pin2": "48291703",
         },
         follow_redirects=True,
     )
@@ -200,7 +212,7 @@ def test_successful_login_and_logout_are_logged(client):
     assert "admin" in page
     assert "settings-nav" in page
     assert "备份恢复" in page
-    client.get("/logout", follow_redirects=True)
+    client.post("/logout", follow_redirects=True)
     with db.get_db() as conn:
         actions = [r["action"] for r in conn.execute("SELECT action FROM auth_events ORDER BY id")]
     assert actions == ["login", "logout"]
@@ -249,3 +261,67 @@ def test_policy_form_csrf_enforced_and_baked_token_works(tmp_db):
     assert "页面停留太久" not in r.get_data(as_text=True)
     with db.get_db() as conn:
         assert "csrf" in [x["title"] for x in conn.execute("SELECT title FROM policies")]
+
+
+def test_security_headers_and_no_store(client):
+    page = client.get("/login")
+    assert page.headers.get("X-Frame-Options") == "DENY"
+    assert page.headers.get("X-Content-Type-Options") == "nosniff"
+    assert page.headers.get("Referrer-Policy") == "same-origin"
+    csp = page.headers.get("Content-Security-Policy") or ""
+    assert "frame-ancestors 'none'" in csp
+    assert "no-store" in (page.headers.get("Cache-Control") or "")
+
+
+def test_get_logout_does_not_clear_session(client):
+    client.post("/login", data={"username": "admin", "pin": "123456"})
+    bounced = client.get("/logout")
+    assert bounced.status_code == 302
+    still_in = client.get("/today")
+    assert still_in.status_code == 200
+    assert still_in.request.path == "/today"
+
+
+def test_idle_session_expires(tmp_db):
+    import time
+
+    from app.helpers import SESSION_IDLE_SECONDS
+    from app.web import create_app
+
+    app = create_app(testing=True)
+    client = app.test_client()
+    client.post("/login", data={"username": "admin", "pin": "123456"})
+    with client.session_transaction() as sess:
+        sess["_active_at"] = time.time() - SESSION_IDLE_SECONDS - 5
+    expired = client.get("/today", follow_redirects=True)
+    assert expired.request.path == "/login"
+
+
+def test_login_locks_account_across_ips(client):
+    for host in range(1, 4):
+        env = {"REMOTE_ADDR": f"203.0.113.{host}"}
+        for _ in range(5):
+            client.post("/login", data={"username": "admin", "pin": "0000"}, environ_base=env)
+    locked = client.post(
+        "/login",
+        data={"username": "admin", "pin": "123456"},
+        environ_base={"REMOTE_ADDR": "203.0.113.50"},
+        follow_redirects=True,
+    )
+    assert "连续输错太多" in locked.get_data(as_text=True)
+    assert locked.request.path == "/login"
+
+
+def test_unauth_rejects_huge_body(client):
+    huge = client.post("/login", data={"username": "admin", "pin": "x", "pad": "a" * (70 * 1024)})
+    assert huge.status_code == 413
+
+
+def test_wsgi_refuses_testing_env(monkeypatch):
+    import importlib
+    import sys
+
+    monkeypatch.setenv("STORE_DAILY_TESTING", "1")
+    sys.modules.pop("wsgi", None)
+    with pytest.raises(RuntimeError, match="STORE_DAILY_TESTING"):
+        importlib.import_module("wsgi")

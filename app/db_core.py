@@ -63,9 +63,9 @@ DB_PATH = Path(os.environ.get("STORE_DAILY_DB", DATA_DIR / "store_daily.db"))
 
 ITERATIONS = 200_000
 
-FILLER_PIN_MIN = 6
+FILLER_PIN_MIN = 8
 
-ADMIN_PIN_MIN = 6
+ADMIN_PIN_MIN = 8
 
 DEFAULT_FILLER_PIN = "123456"
 
@@ -80,6 +80,12 @@ FILLER_PIN_RESET_KEY = "filler_default_pin_v1"
 LOGIN_FAIL_LIMIT = 5
 
 LOGIN_LOCK_SECONDS = 15 * 60
+
+# 账号级锁定：阈值高于单 IP，避免别人拿用户名刷失败把店员锁死；
+# 仍能挡住换 IP 扫 6/8 位数字口令。
+LOGIN_ACCOUNT_FAIL_LIMIT = 15
+
+LOGIN_ACCOUNT_LOCK_SECONDS = 30 * 60
 
 TZ = ZoneInfo("Asia/Shanghai")
 
@@ -907,22 +913,51 @@ def pin_is_default(stored: str) -> bool:
 
 
 def is_weak_new_pin(pin: str) -> bool:
-    return pin in DEFAULT_PINS
+    """新口令：默认值、整串同一字符、连续递增/递减数字，都算弱。"""
+    text = pin or ""
+    if text in DEFAULT_PINS:
+        return True
+    if len(text) < FILLER_PIN_MIN:
+        return False
+    if len(set(text)) == 1:
+        return True
+    if text.isdigit():
+        diffs = [int(text[i + 1]) - int(text[i]) for i in range(len(text) - 1)]
+        if diffs and (all(d == 1 for d in diffs) or all(d == -1 for d in diffs)):
+            return True
+    return False
 
 
-def _login_keys(username: str, ip: str) -> List[str]:
+def new_pin_error(pin: str) -> Optional[str]:
+    """新口令校验失败时返回给用户看的原因；通过则 None。"""
+    if len(pin or "") < FILLER_PIN_MIN:
+        return f"新口令至少 {FILLER_PIN_MIN} 位"
+    if is_weak_new_pin(pin):
+        return "口令太弱：不能用默认口令、重复数字或连续数字"
+    return None
+
+
+def bump_all_session_epochs(conn: sqlite3.Connection) -> None:
+    """整库作废现有登录会话（备份恢复后用）。"""
+    conn.execute("UPDATE users SET session_epoch = COALESCE(session_epoch, 0) + 1")
+
+
+def _login_key_specs(username: str, ip: str) -> List[Tuple[str, str, int, int]]:
+    """(kind, key, fail_limit, lock_seconds)。"""
     name = (username or "").strip().lower() or "-"
     addr = (ip or "").strip() or "-"
-    # 按 (用户名+IP  计数，不再单按用户名：否则任何人拿受害账号刷 5 次失败
-    # 就把人锁 15 分钟（定向锁号）。IP 级仍全局节流防分布式爆破。
-    return [f"uip:{name}|{addr}", f"ip:{addr}"]
+    return [
+        ("uip", f"uip:{name}|{addr}", LOGIN_FAIL_LIMIT, LOGIN_LOCK_SECONDS),
+        ("ip", f"ip:{addr}", LOGIN_FAIL_LIMIT, LOGIN_LOCK_SECONDS),
+        ("u", f"u:{name}", LOGIN_ACCOUNT_FAIL_LIMIT, LOGIN_ACCOUNT_LOCK_SECONDS),
+    ]
 
 
 def login_lock_remaining(conn: sqlite3.Connection, username: str, ip: str) -> int:
     """还在冷却的秒数；0 表示可以继续试。"""
     now = datetime.now(TZ)
     remaining = 0
-    for key in _login_keys(username, ip):
+    for _kind, key, _limit, _lock_for in _login_key_specs(username, ip):
         row = conn.execute(
             "SELECT locked_until FROM login_attempts WHERE key=?", (key,)
         ).fetchone()
@@ -939,14 +974,14 @@ def login_lock_remaining(conn: sqlite3.Connection, username: str, ip: str) -> in
 
 
 def record_login_failure(conn: sqlite3.Connection, username: str, ip: str) -> int:
-    """记一次失败，满 5 次锁 15 分钟。返回剩余冷却秒数。"""
+    """记一次失败。单 IP / 用户+IP 满 5 次锁 15 分钟；账号满 15 次锁 30 分钟。"""
     begin_immediate(conn)
     now = datetime.now(TZ)
     # 顺带清理 7 天没动静的行：键是 (用户名, IP) 组合，被扫的用户名/IP 会永久留行
     stale_cutoff = (now - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute("DELETE FROM login_attempts WHERE updated_at < ?", (stale_cutoff,))
     remaining = 0
-    for key in _login_keys(username, ip):
+    for _kind, key, fail_limit, lock_seconds in _login_key_specs(username, ip):
         row = conn.execute(
             "SELECT fail_count, locked_until FROM login_attempts WHERE key=?", (key,)
         ).fetchone()
@@ -957,13 +992,13 @@ def record_login_failure(conn: sqlite3.Connection, username: str, ip: str) -> in
                 until = datetime.strptime(row["locked_until"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ)
                 if until > now:
                     locked_until = row["locked_until"]
-                    count = max(count, LOGIN_FAIL_LIMIT)
+                    count = max(count, fail_limit)
                 else:
                     count = 1
             except ValueError:
                 pass
-        if count >= LOGIN_FAIL_LIMIT and not locked_until:
-            locked_until = (now + timedelta(seconds=LOGIN_LOCK_SECONDS)).strftime("%Y-%m-%d %H:%M:%S")
+        if count >= fail_limit and not locked_until:
+            locked_until = (now + timedelta(seconds=lock_seconds)).strftime("%Y-%m-%d %H:%M:%S")
         conn.execute(
             """
             INSERT INTO login_attempts(key, fail_count, locked_until, updated_at)
@@ -982,12 +1017,12 @@ def record_login_failure(conn: sqlite3.Connection, username: str, ip: str) -> in
                 if left > remaining:
                     remaining = left
             except ValueError:
-                remaining = max(remaining, LOGIN_LOCK_SECONDS)
+                remaining = max(remaining, lock_seconds)
     return remaining
 
 
 def clear_login_failures(conn: sqlite3.Connection, username: str, ip: str) -> None:
-    keys = _login_keys(username, ip)
+    keys = [spec[1] for spec in _login_key_specs(username, ip)]
     conn.execute(
         f"DELETE FROM login_attempts WHERE key IN ({','.join('?' * len(keys))})",
         keys,

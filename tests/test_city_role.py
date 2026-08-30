@@ -140,7 +140,7 @@ def test_city_can_overwrite_other_submission(app_client):
         data={"store_id": str(sid), "date": day, "m_phone_sales": "1"},
         follow_redirects=True,
     )
-    app_client.get("/logout")
+    app_client.post("/logout")
     _make_city_user()
     login(app_client, "cityboss", "654321")
     resp = app_client.post(
@@ -206,7 +206,7 @@ def test_settings_add_and_rescope_city_user(app_client):
             "role": "city",
             "username": "citylead",
             "display_name": "城市经理",
-            "pin": "654321",
+            "pin": "48291703",
             "scope": "邻市",
             "bind": "city",
         },
@@ -253,7 +253,7 @@ def test_settings_add_and_rescope_city_user(app_client):
             "role": "city",
             "username": "citylead2",
             "display_name": "城市经理二",
-            "pin": "654321",
+            "pin": "48291703",
             "scope": "不存在的市",
             "bind": "city",
         },

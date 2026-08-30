@@ -240,8 +240,10 @@ def test_login_and_save_roundtrip(tmp_db):
     bad = client.post("/settings", data={"action": "change_pin", "old_pin": "9999", "new_pin": "111111", "new_pin2": "111111"}, follow_redirects=True)
     assert "当前口令不对".encode("utf-8") in bad.data
     short = client.post("/settings", data={"action": "change_pin", "old_pin": "123456", "new_pin": "1111", "new_pin2": "1111"}, follow_redirects=True)
-    assert "至少 6 位".encode("utf-8") in short.data
-    ok = client.post("/settings", data={"action": "change_pin", "old_pin": "123456", "new_pin": "111111", "new_pin2": "111111"}, follow_redirects=True)
+    assert "至少 8 位".encode("utf-8") in short.data
+    weak = client.post("/settings", data={"action": "change_pin", "old_pin": "123456", "new_pin": "11111111", "new_pin2": "11111111"}, follow_redirects=True)
+    assert "口令太弱".encode("utf-8") in weak.data
+    ok = client.post("/settings", data={"action": "change_pin", "old_pin": "123456", "new_pin": "48291703", "new_pin2": "48291703"}, follow_redirects=True)
     assert "口令已改".encode("utf-8") in ok.data
 
 

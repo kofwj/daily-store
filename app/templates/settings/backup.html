@@ -16,13 +16,14 @@
         </form>
       </div>
       <div class="backup-grid">
-        <div class="card backup-upload">
+        <div class="card backup-upload settings-danger-zone">
           <h2>从文件恢复</h2>
           <p class="muted">用以前下载的 .db 覆盖当前库。</p>
-          <form method="post" enctype="multipart/form-data" onsubmit="return confirm('用上传的备份覆盖当前库？恢复前会先自动备份现场。')">
+          <form method="post" enctype="multipart/form-data" onsubmit="return confirm('用上传的备份覆盖当前库？恢复前会先自动备份现场。恢复后所有人需重新登录。')">
             <input type="hidden" name="action" value="restore_upload">
             <input type="hidden" name="tab" value="backup">
             <p><label>选择备份文件</label><input type="file" name="backup_file" accept=".db,application/octet-stream" required></p>
+            <p><label>当前口令（确认是你在操作）</label><input type="password" name="confirm_pin" required autocomplete="current-password"></p>
             <button class="ghost" type="submit">上传并恢复</button>
           </form>
         </div>
@@ -41,10 +42,11 @@
               </div>
               <div class="backup-item-actions">
                 <a class="btn ghost" href="{{ url_for('settings_backup_download', name=b.name) }}">下载</a>
-                <form method="post" onsubmit="return confirm('用这份备份覆盖当前库？恢复前会先自动备份现场。')">
+                <form method="post" class="backup-restore-form" onsubmit="return confirm('用这份备份覆盖当前库？恢复前会先自动备份现场。恢复后所有人需重新登录。')">
                   <input type="hidden" name="action" value="restore_named">
                   <input type="hidden" name="tab" value="backup">
                   <input type="hidden" name="backup_name" value="{{ b.name }}">
+                  <input type="password" name="confirm_pin" required autocomplete="current-password" placeholder="当前口令" aria-label="当前口令">
                   <button class="ghost" type="submit">恢复</button>
                 </form>
               </div>

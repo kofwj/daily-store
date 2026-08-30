@@ -140,7 +140,7 @@ def test_imported_rows_locked_from_filler(tmp_db):
     data = _make_sesame_xlsx(_sample_rows()[:1])
     c.post("/advance/sesame/preview", data={"sesame_file": (BytesIO(data), "s.xlsx")})
     c.post("/advance/sesame/confirm", follow_redirects=True)
-    c.get("/logout")
+    c.post("/logout")
     # 店员登录
     c.post("/login", data={"username": "alpha", "pin": "123456"})
     with db.get_db() as conn:
@@ -169,7 +169,7 @@ def test_imported_rows_locked_from_filler(tmp_db):
     ).get_data(as_text=True)
     assert "店员不能删" in deleted
     # 管理员可以删
-    c.get("/logout")
+    c.post("/logout")
     c.post("/login", data={"username": "admin", "pin": "123456"})
     admin_del = c.post(
         "/advance/delete",

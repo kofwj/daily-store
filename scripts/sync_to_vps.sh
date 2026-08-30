@@ -121,10 +121,10 @@ RSYNC=(
 )
 
 SYNC_SOURCES=(./app ./caddy ./scripts ./tests \
-  Dockerfile docker-compose.yml requirements.txt wsgi.py README.md VERSION .env .gitignore)
+  Dockerfile docker-compose.yml docker-entrypoint.sh requirements.txt wsgi.py README.md VERSION .env .gitignore)
 "${RSYNC[@]}" \
   "${SYNC_SOURCES[@]}" \
-  Dockerfile docker-compose.yml requirements.txt wsgi.py README.md VERSION .env .gitignore \
+  Dockerfile docker-compose.yml docker-entrypoint.sh requirements.txt wsgi.py README.md VERSION .env .gitignore \
   "${REMOTE}:${VPS_DIR}/"
 
 if [[ "${SYNC_DB}" == "1" ]]; then

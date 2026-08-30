@@ -114,7 +114,7 @@ def test_deal_post_counts_by_store(client):
     with db.get_db() as conn:
         left = conn.execute("SELECT COUNT(*) AS n FROM deal_posts WHERE store_id=?", (sid,)).fetchone()["n"]
         assert left == 1
-    client.get("/logout")
+    client.post("/logout")
     client.post("/login", data={"username": "beta", "pin": "123456"})
     blocked = client.post(
         "/deal/delete",
@@ -146,7 +146,7 @@ def test_admin_records_page_shows_all_stores_today(client):
     one = client.get(f"/deal/records?store_id={sid_a['id']}").get_data(as_text=True)
     assert "S60全店" in one
     assert "X300全店" not in one
-    client.get("/logout")
+    client.post("/logout")
     client.post("/login", data={"username": "beta", "pin": "123456"})
     filler = client.get("/deal/records").get_data(as_text=True)
     assert "今天全店触客" not in filler
@@ -190,13 +190,13 @@ def test_admin_exports_all_stores_deal_csv(client):
             spend="199", recommend="139", closed=False, opener="李",
         )
     # 非管理员不能导出
-    client.get("/logout")
+    client.post("/logout")
     client.post("/login", data={"username": "beta", "pin": "123456"})
     r = client.get("/deal/export")
     assert r.status_code == 302
     assert "/today" in r.headers.get("Location", "")
     # 管理员导出全部门店
-    client.get("/logout")
+    client.post("/logout")
     client.post("/login", data={"username": "admin", "pin": "123456"})
     r = client.get("/deal/export")
     assert r.status_code == 200

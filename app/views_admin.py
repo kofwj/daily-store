@@ -375,6 +375,10 @@ def register_admin(app) -> None:
                 stores=stores, month_facts=month_facts, mobile_bisuan=mobile
             )
         has_mobile = bool(mobile)
+        under_n = sum(1 for r in rows if r["under"])
+        over_n = sum(1 for r in rows if r["over"])
+        max_abs = max((int(r["abs_diff"]) for r in rows), default=0)
+        net_diff = sum(int(r["diff"]) for r in rows)
         return render_template(
             "deviation.html",
             rows=rows,
@@ -383,6 +387,11 @@ def register_admin(app) -> None:
             prev_month=prev_month,
             next_month=next_month,
             has_mobile=has_mobile,
+            under_n=under_n,
+            over_n=over_n,
+            even_n=len(rows) - under_n - over_n,
+            max_abs=max_abs,
+            net_diff=net_diff,
         )
 
     @app.route("/board.xlsx")

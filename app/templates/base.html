@@ -33,7 +33,10 @@
       {% endif %}
       {% endif %}
       <a href="{{ url_for('settings') }}" class="{{ 'active' if request.endpoint == 'settings' else '' }}">设置</a>
-      <a href="{{ url_for('logout') }}">退出</a>
+      <form method="post" action="{{ url_for('logout') }}" class="logout-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <button type="submit">退出</button>
+      </form>
     </nav>
     <div class="who">{{ g.user['display_name'] }}</div>
   </header>

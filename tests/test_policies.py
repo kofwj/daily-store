@@ -28,12 +28,25 @@ def test_sanitize_keeps_table():
     assert "script" not in html.lower()
 
 
+def test_sanitize_strips_protocol_relative_and_http():
+    html = db.sanitize_policy_html(
+        '<p>链</p><a href="//evil.example/x">外</a>'
+        '<a href="http://evil.example/x">明文</a>'
+        '<img src="//evil.example/x.png">'
+        '<a href="https://example.com/ok">好</a>'
+    )
+    assert "//evil.example" not in html
+    assert "http://evil.example" not in html
+    assert "https://example.com/ok" in html
+
+
 def test_sanitize_keeps_safe_img_strips_bad_src():
     html = db.sanitize_policy_html(
         '<p>图</p><img src="/uploads/policy/a.png" alt="口径" width="300">'
         '<img src="javascript:alert(1)"><img src="data:text/html;x">'
     )
-    assert '<img src="/uploads/policy/a.png" alt="口径" width="300">' in html
+    assert "/uploads/policy/a.png" in html
+    assert "口径" in html
     assert "javascript" not in html.lower()
     assert "data:text" not in html.lower()
     # 无合法 src 的 img 被丢弃，不残留空 img
@@ -96,7 +109,7 @@ def test_unread_gate_blocks_today_when_enabled(client):
         filler = conn.execute("SELECT id FROM users WHERE username='alpha'").fetchone()["id"]
         sid = conn.execute("SELECT id FROM stores ORDER BY id LIMIT 1").fetchone()["id"]
         db.set_user_stores(conn, filler, [sid])
-    client.get("/logout")
+    client.post("/logout")
     client.post("/login", data={"username": "alpha", "pin": "123456"})
     blocked = client.post(
         "/today",
@@ -126,7 +139,7 @@ def test_gate_off_does_not_block(client):
         filler = conn.execute("SELECT id FROM users WHERE username='alpha'").fetchone()["id"]
         sid = conn.execute("SELECT id FROM stores ORDER BY id LIMIT 1").fetchone()["id"]
         db.set_user_stores(conn, filler, [sid])
-    client.get("/logout")
+    client.post("/logout")
     client.post("/login", data={"username": "alpha", "pin": "123456"})
     page = client.post(
         "/today",
@@ -153,7 +166,7 @@ def test_unread_gate_blocks_readonly_pages(client):
             scope="",
         )
         conn.execute("UPDATE users SET must_change_pin=0 WHERE username='dz_policy'")
-    client.get("/logout")
+    client.post("/logout")
     client.post("/login", data={"username": "dz_policy", "pin": "123456"})
     blocked = client.get("/report", follow_redirects=True)
     assert blocked.request.path == "/policies"

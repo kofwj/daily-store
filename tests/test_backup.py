@@ -43,10 +43,18 @@ def test_admin_can_backup_download_and_restore(tmp_db, client):
         )
     restored = client.post(
         "/settings",
-        data={"action": "restore_named", "tab": "backup", "backup_name": name},
+        data={
+            "action": "restore_named",
+            "tab": "backup",
+            "backup_name": name,
+            "confirm_pin": "123456",
+        },
         follow_redirects=True,
-    ).get_data(as_text=True)
-    assert "已用" in restored and "恢复" in restored
+    )
+    body = restored.get_data(as_text=True)
+    assert "已用" in body and "恢复" in body
+    assert restored.request.path == "/login"
+    assert "admin" in body
     with db.get_db() as conn:
         n = conn.execute(
             "SELECT COUNT(*) AS n FROM advance_posts WHERE phone='13900005555'"
@@ -84,6 +92,22 @@ def test_restore_failure_does_not_change_live_db(tmp_db):
         backup.restore_bytes(broken.read_bytes())
     with db.get_db() as conn:
         assert conn.execute("SELECT value FROM app_meta WHERE key='live_marker'").fetchone()["value"] == "keep"
+
+
+def test_restore_named_requires_current_pin(tmp_db, client):
+    client.post("/login", data={"username": "admin", "pin": "123456"})
+    client.post("/settings", data={"action": "make_backup", "tab": "backup"})
+    name = backup.list_backups()[0]["name"]
+    with db.get_db() as conn:
+        conn.execute("INSERT INTO app_meta(key, value) VALUES ('restore_guard', 'keep')")
+    denied = client.post(
+        "/settings",
+        data={"action": "restore_named", "tab": "backup", "backup_name": name, "confirm_pin": "wrong"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "当前口令" in denied
+    with db.get_db() as conn:
+        assert conn.execute("SELECT value FROM app_meta WHERE key='restore_guard'").fetchone()["value"] == "keep"
 
 
 def test_filler_cannot_open_backup(client):

@@ -57,15 +57,16 @@ _POLICY_IMG_JPEG_QUALITY = 85
 
 def _resize_policy_image(data: bytes, ext: str) -> bytes:
     """把上传图片压到长边 <= _POLICY_IMG_MAX_EDGE，重编码去元数据。GIF 动画保持原样。"""
-    if ext == ".gif":
-        return data
     try:
         from PIL import Image
 
+        Image.MAX_IMAGE_PIXELS = 20_000_000
         im: Image.Image = Image.open(BytesIO(data))
         im.load()  # 真正解码，解码失败说明不是有效图片
     except Exception:
-        return data  # 解码不了，退回原始字节交给后面的魔数/扩展名校验收尾
+        raise ValueError("图片无法解码") from None
+    if ext == ".gif":
+        return data
     if im.width > _POLICY_IMG_MAX_EDGE or im.height > _POLICY_IMG_MAX_EDGE:
         im.thumbnail((_POLICY_IMG_MAX_EDGE, _POLICY_IMG_MAX_EDGE), Image.Resampling.LANCZOS)
     fmt = {".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG", ".webp": "WEBP"}.get(ext)
@@ -121,15 +122,13 @@ def _change_own_pin() -> None:
     old = request.form.get("old_pin") or ""
     new = request.form.get("new_pin") or ""
     again = request.form.get("new_pin2") or ""
-    min_len = db.FILLER_PIN_MIN
-    if len(new) < min_len:
-        raise ValueError(f"新口令至少 {min_len} 位")
     if new != again:
         raise ValueError("两次新口令不一致")
-    if db.is_weak_new_pin(new):
-        raise ValueError("新口令不能再用系统默认口令")
     if not db.verify_pin(old, g.user["pin_hash"]):
         raise ValueError("当前口令不对")
+    pin_err = db.new_pin_error(new)
+    if pin_err:
+        raise ValueError(pin_err)
     with db.get_db() as conn:
         epoch = db.update_user_pin(conn, g.user["id"], new)
     # 自己改自己的口令：当前会话刷到新纪元，其他旧会话下线
@@ -329,7 +328,10 @@ def register_settings(app) -> None:
         if not _looks_like_image(data):
             return {"errorMessage": "不是有效图片"}, 400
         # 服务端缩放压缩原图（长边 > 1600 才缩），控制存储体积
-        resized = _resize_policy_image(data, ext)
+        try:
+            resized = _resize_policy_image(data, ext)
+        except ValueError as exc:
+            return {"errorMessage": str(exc)}, 400
         upload_dir = db_core.DATA_DIR / "uploads" / "policy"
         upload_dir.mkdir(parents=True, exist_ok=True)
         name = f"{secrets.token_hex(12)}{ext}"
@@ -355,7 +357,10 @@ def register_settings(app) -> None:
         return Response(
             dest.read_bytes(),
             mimetype="application/octet-stream",
-            headers={"Content-Disposition": f"attachment; filename={ascii_filename(safe)}"},
+            headers={
+                "Content-Disposition": f"attachment; filename={ascii_filename(safe)}",
+                "Cache-Control": "no-store",
+            },
         )
 
     @app.route("/settings/status")
@@ -511,9 +516,9 @@ def register_settings(app) -> None:
                                 raise ValueError("只能绑定已启用的门店")
                         if not username or not display or not pin:
                             raise ValueError("账号、姓名、口令都要填")
-                        min_len = db.FILLER_PIN_MIN
-                        if len(pin) < min_len:
-                            raise ValueError(f"口令至少 {min_len} 位")
+                        pin_err = db.new_pin_error(pin)
+                        if pin_err:
+                            raise ValueError(pin_err)
                         db.create_user(
                             conn,
                             username=username,
@@ -698,18 +703,36 @@ def register_settings(app) -> None:
                         flash(f"已备份 {path.name}", "ok")
                         return redirect(url_for("settings", tab="backup"))
                     elif action == "restore_named":
+                        confirm = request.form.get("confirm_pin") or ""
+                        if not db.verify_pin(confirm, g.user["pin_hash"]):
+                            raise ValueError("恢复前请输入当前口令确认")
                         name = (request.form.get("backup_name") or "").strip()
                         safety = backup.restore_named(name)
-                        flash(f"已用 {name} 恢复。恢复前现场另存为 {safety.name}", "ok")
-                        return redirect(url_for("settings", tab="backup"))
+                        admins = "、".join(backup.restored_admin_names()) or "（无）"
+                        db.abandon_request_conn()
+                        session.clear()
+                        flash(
+                            f"已用 {name} 恢复，请重新登录。库中管理员：{admins}。恢复前现场另存为 {safety.name}",
+                            "ok",
+                        )
+                        return redirect(url_for("login"))
                     elif action == "restore_upload":
+                        confirm = request.form.get("confirm_pin") or ""
+                        if not db.verify_pin(confirm, g.user["pin_hash"]):
+                            raise ValueError("恢复前请输入当前口令确认")
                         uploaded = request.files.get("backup_file")
                         if uploaded is None or not uploaded.filename:
                             raise ValueError("请先选择备份文件")
                         data = uploaded.read()
                         safety = backup.restore_bytes(data)
-                        flash(f"已用上传文件恢复。恢复前现场另存为 {safety.name}", "ok")
-                        return redirect(url_for("settings", tab="backup"))
+                        admins = "、".join(backup.restored_admin_names()) or "（无）"
+                        db.abandon_request_conn()
+                        session.clear()
+                        flash(
+                            f"已用上传文件恢复，请重新登录。库中管理员：{admins}。恢复前现场另存为 {safety.name}",
+                            "ok",
+                        )
+                        return redirect(url_for("login"))
                     elif action == "save_rules":
                         defaults = incentive.DEFAULTS
                         rules = {}

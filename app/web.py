@@ -18,7 +18,7 @@ import os
 import secrets
 from datetime import datetime, timedelta
 
-from flask import Flask, g, session
+from flask import Flask, g, request, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import backup, db
@@ -27,6 +27,7 @@ from .errors import register_errors
 from .helpers import (
     brand_settings,
     csrf_protect,
+    limit_unauth_body,
     load_user,
     pin_change_required,
     policy_read_required,
@@ -40,6 +41,18 @@ from .views_report import register_report
 from .views_settings import register_settings
 
 INSECURE_SECRETS = frozenset({"", "store-daily-dev-change-me", "replace-with-random-secret"})
+
+_SECURITY_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "font-src 'self'; "
+    "connect-src 'self'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'"
+)
 
 
 def create_app(*, testing: bool = False) -> Flask:
@@ -64,6 +77,10 @@ def create_app(*, testing: bool = False) -> Flask:
     app.config["SESSION_COOKIE_SECURE"] = secure
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=24)
     app.config["SESSION_REFRESH_EACH_REQUEST"] = True
+    if not testing and not secure and os.environ.get("STORE_DAILY_TESTING") != "1":
+        app.logger.warning(
+            "STORE_DAILY_SECURE 未开启：登录 Cookie 会走明文 HTTP。生产请走 TLS/Cloudflare，并设 STORE_DAILY_SECURE=1"
+        )
     app.config["PREFERRED_URL_SCHEME"] = "https" if secure else "http"
     # 32MiB 是恢复备份的硬上限；multipart 编码有开销，入口上限放宽一点，恰好 32MiB 的合法备份不被 413
     app.config["MAX_CONTENT_LENGTH"] = 34 * 1024 * 1024
@@ -89,9 +106,21 @@ def create_app(*, testing: bool = False) -> Flask:
                 pass
 
     app.before_request(load_user)
+    app.before_request(limit_unauth_body)
     app.before_request(csrf_protect)
     app.before_request(pin_change_required)
     app.before_request(policy_read_required)
+
+    @app.after_request
+    def _security_headers(resp):
+        resp.headers.setdefault("X-Frame-Options", "DENY")
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers["Referrer-Policy"] = "same-origin"
+        resp.headers["Content-Security-Policy"] = _SECURITY_CSP
+        resp.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        if request.endpoint != "static":
+            resp.headers["Cache-Control"] = "no-store"
+        return resp
 
     @app.context_processor
     def inject_now():
@@ -121,6 +150,6 @@ def create_app(*, testing: bool = False) -> Flask:
     return app
 
 
-# Flask/WSGI imports this symbol; pytest sets STORE_DAILY_TESTING=1 in conftest fixtures.
-# 不用 sys.modules 探测：生产进程若碰巧 import 过 pytest，TESTING=True 会关掉 CSRF。
-app = create_app(testing=os.environ.get("STORE_DAILY_TESTING", "0") == "1")
+# 模块级 app 永远按生产配置装配。测试请 create_app(testing=True)；
+# gunicorn/wsgi 若带 STORE_DAILY_TESTING=1 会在 wsgi.py 直接拒绝启动。
+app = create_app()

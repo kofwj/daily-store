@@ -4,201 +4,206 @@
       <p class="muted">谁能登录、看哪家店。门店档案去「门店」页改。</p>
     </div>
     <div class="card settings-card people-card">
-      <div class="people-toolbar toolbar">
+      <div class="people-toolbar">
         <label class="people-search">
           <span class="sr-only">搜索账号</span>
           <input type="search" id="peopleFilter" placeholder="搜姓名、账号、门店" autocomplete="off">
         </label>
-        <label class="people-filter">
-          <span class="sr-only">按角色筛</span>
-          <select id="peopleRole">
-            <option value="">全部角色</option>
-            <option value="admin">管理员</option>
-            <option value="filler">填报员</option>
-            <option value="manager">店长</option>
-            <option value="area">区域经理</option>
-            <option value="city">地市负责人</option>
-          </select>
-        </label>
+        <select id="peopleRole" aria-label="按角色筛">
+          <option value="">全部角色</option>
+          <option value="admin">管理员</option>
+          <option value="filler">填报员</option>
+          <option value="manager">店长</option>
+          <option value="area">区域经理</option>
+          <option value="city">地市负责人</option>
+        </select>
         <span class="muted" id="peopleCount">{{ people|length + 1 }} 人</span>
+        <button type="button" class="people-add-toggle" id="peopleAddToggle" aria-expanded="false">＋ 添加账号</button>
       </div>
-      <div class="table-wrap">
-        <table class="people-table">
-          <thead>
-            <tr>
-              <th>成员</th>
-              <th>角色</th>
-              <th>可见范围</th>
-              <th>状态</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr class="people-row" data-text="{{ g.user.display_name }} {{ g.user.username }} 管理员" data-role="admin">
-              <td class="people-identity" data-label="成员">
-                <strong>{{ g.user.display_name }}</strong>
-                <span class="people-sub"><code>{{ g.user.username }}</code></span>
-              </td>
-              <td data-label="角色"><span class="role-chip admin">管理员</span></td>
-              <td class="muted" data-label="可见范围">全部门店</td>
-              <td data-label="状态">使用中</td>
-              <td class="muted" data-label="操作">当前登录</td>
-            </tr>
-            {% for p in people %}
-            {% set u = p.user %}
-            {% set kind = u.role if u.role in ('admin', 'city') else ('area' if u.role == 'readonly' and (u.scope or '')|trim else ('manager' if u.role == 'readonly' else u.role)) %}
-            <tr class="people-row {{ 'off' if not u.active else '' }}" data-text="{{ u.display_name }} {{ u.username }} {{ p.store_label }}" data-role="{{ kind }}">
-              <td class="people-identity" data-label="成员">
-                <strong>{{ u.display_name }}</strong>
-                <span class="people-sub"><code>{{ u.username }}</code></span>
-              </td>
-              <td data-label="角色">
-                {% if kind == 'city' %}<span class="role-chip city">地市负责人</span>
-                {% elif kind == 'area' %}<span class="role-chip view">区域经理</span>
-                {% elif kind == 'manager' %}<span class="role-chip view">店长</span>
-                {% else %}<span class="role-chip fill">填报员</span>{% endif %}
-              </td>
-              <td data-label="可见范围">
-                {% if kind == 'area' %}
-                <form method="post" class="inline-store">
-                  <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-                  <input type="hidden" name="action" value="set_stores">
-                  <input type="hidden" name="tab" value="people">
-                  <input type="hidden" name="user_id" value="{{ u.id }}">
-                  <input type="hidden" name="bind" value="area">
-                  <input name="scope" value="{{ u.scope }}" placeholder="区域经理姓名" autocomplete="off" class="area-scope">
-                  <button class="ghost" type="submit">保存</button>
-                </form>
-                {% elif kind == 'city' %}
-                <form method="post" class="inline-store">
-                  <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-                  <input type="hidden" name="action" value="set_stores">
-                  <input type="hidden" name="tab" value="people">
-                  <input type="hidden" name="user_id" value="{{ u.id }}">
-                  <input type="hidden" name="bind" value="city">
-                  <select name="scope" class="area-scope" aria-label="{{ u.display_name }} 负责地市">
-                    {% for c in city_options %}
-                    <option value="{{ c }}" {% if c == (u.scope or '')|trim %}selected{% endif %}>{{ c }}</option>
-                    {% endfor %}
-                  </select>
-                  <button class="ghost" type="submit">保存</button>
-                </form>
-                {% else %}
-                <form method="post" class="inline-store people-store-form">
-                  <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-                  <input type="hidden" name="action" value="set_stores">
-                  <input type="hidden" name="tab" value="people">
-                  <input type="hidden" name="user_id" value="{{ u.id }}">
-                  <details class="store-bind" data-bind>
-                    <summary>
-                      <span class="store-bind-current" data-bind-current>{{ p.store_label }}</span>
-                      <span class="store-bind-count" data-bind-count>{{ p.store_ids|length }} 家</span>
-                    </summary>
-                    <div class="store-bind-panel">
-                      <input type="search" class="store-bind-q" placeholder="搜门店，点名字勾选" autocomplete="off">
-                      <div class="store-bind-list">
-                        {% for s in stores if s.active or s.id in p.store_ids %}
-                        <label class="store-bind-opt{{ ' is-off' if not s.active else '' }}" data-text="{{ store_label(s) }} {{ s.name }} {{ s.city }} {{ s.store_manager }}">
-                          <input type="checkbox" name="store_ids" value="{{ s.id }}" {% if s.id in p.store_ids %}checked{% endif %}{% if not s.active %} disabled{% endif %}>
-                          <span class="store-bind-name">{{ store_label(s) }}{% if not s.active %}（已停用，保存后解除）{% endif %}</span>
-                        </label>
-                        {% endfor %}
-                      </div>
-                      <div class="store-bind-actions"><button class="ghost" type="submit">保存</button></div>
-                    </div>
-                  </details>
-                </form>
-                {% endif %}
-              </td>
-              <td data-label="状态">{% if u.active %}使用中{% else %}已停用{% endif %}</td>
-              <td data-label="操作">
-                <div class="org-person-actions">
-                  <form method="post" class="inline-reset" onsubmit="return confirm('确认把这个账号的口令重置为默认 123456？\n对方下次登录必须改掉。')">
+
+      <div class="people-add-panel" id="peopleAddPanel" hidden>
+        <form method="post" class="org-add-user" id="addUserForm">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="action" value="add_user">
+          <input type="hidden" name="tab" value="people">
+          <div class="add-user-grid">
+            <p>
+              <label>角色</label>
+              <select name="role" id="addRole">
+                <option value="filler">填报员</option>
+                <option value="manager">店长（只读）</option>
+                <option value="area">区域经理（只读）</option>
+                <option value="city">地市负责人（日报可改）</option>
+              </select>
+            </p>
+            <p><label>账号（姓名全拼）</label><input name="username" required placeholder="zhangsan" autocomplete="off"></p>
+            <p><label>显示名</label><input name="display_name" required placeholder="张三" autocomplete="off"></p>
+            <p><label>口令</label><input name="pin" type="password" required minlength="8" placeholder="至少 8 位，不要重复或连续数字"></p>
+          </div>
+          <div id="addStoreField">
+            <details class="store-bind" data-bind data-bind-empty-text="选门店，可多选">
+              <summary>
+                <span class="store-bind-current" data-bind-current>选门店，可多选</span>
+                <span class="store-bind-count" data-bind-count>0 家</span>
+              </summary>
+              <div class="store-bind-panel">
+                <input type="search" class="store-bind-q" placeholder="搜门店，点名字勾选" autocomplete="off">
+                <div class="store-bind-list">
+                  {% for s in stores if s.active %}
+                  <label class="store-bind-opt" data-text="{{ store_label(s) }} {{ s.name }} {{ s.city }} {{ s.store_manager }}">
+                    <input type="checkbox" name="store_ids" value="{{ s.id }}">
+                    <span class="store-bind-name">{{ store_label(s) }}</span>
+                  </label>
+                  {% endfor %}
+                </div>
+              </div>
+            </details>
+          </div>
+          <div id="addAreaField" hidden>
+            <p>
+              <label>区域经理姓名</label>
+              <input name="scope" placeholder="如 张管理、刘经理" autocomplete="off">
+              <input type="hidden" name="bind" value="area">
+            </p>
+          </div>
+          <div id="addCityField" hidden>
+            <p>
+              <label>负责地市</label>
+              <select name="scope" aria-label="负责地市">
+                {% for c in city_options %}
+                <option value="{{ c }}">{{ c }}</option>
+                {% endfor %}
+              </select>
+              <input type="hidden" name="bind" value="city">
+            </p>
+          </div>
+          <div class="toolbar"><button type="submit">添加账号</button></div>
+        </form>
+      </div>
+
+      <ul class="people-list">
+        <li class="people-item" data-text="{{ g.user.display_name }} {{ g.user.username }} 管理员" data-role="admin">
+          <div class="people-row-main">
+            <div class="people-identity">
+              <strong>{{ g.user.display_name }}</strong>
+              <span class="people-sub"><code>{{ g.user.username }}</code></span>
+            </div>
+            <div class="people-meta"><span class="role-chip admin">管理员</span></div>
+            <div class="people-scope">全部门店</div>
+            <div class="people-side"><span class="people-state on">使用中</span></div>
+          </div>
+        </li>
+        {% for p in people %}
+        {% set u = p.user %}
+        {% set kind = u.role if u.role in ('admin', 'city') else ('area' if u.role == 'readonly' and (u.scope or '')|trim else ('manager' if u.role == 'readonly' else u.role)) %}
+        <li class="people-item {{ 'off' if not u.active else '' }}" data-text="{{ u.display_name }} {{ u.username }} {{ p.store_label }}" data-role="{{ kind }}">
+          <div class="people-row-main">
+            <div class="people-identity">
+              <strong>{{ u.display_name }}</strong>
+              <span class="people-sub"><code>{{ u.username }}</code></span>
+            </div>
+            <div class="people-meta">
+              {% if kind == 'city' %}<span class="role-chip city">地市负责人</span>
+              {% elif kind == 'area' %}<span class="role-chip view">区域经理</span>
+              {% elif kind == 'manager' %}<span class="role-chip view">店长</span>
+              {% else %}<span class="role-chip fill">填报员</span>{% endif %}
+            </div>
+            <div class="people-scope">
+              {% if kind == 'area' %}片区：<b>{{ u.scope }}</b>
+              {% elif kind == 'city' %}地市：<b>{{ u.scope }}</b>
+              {% else %}<span class="people-scope-text">{{ p.store_label or '未分配门店' }}</span>
+              <span class="store-bind-count">{{ p.store_ids|length }} 家</span>{% endif %}
+            </div>
+            <div class="people-side">
+              <span class="people-state {{ 'on' if u.active else 'off' }}">{{ '使用中' if u.active else '已停用' }}</span>
+              <button type="button" class="people-edit-toggle ghost" data-edit-toggle aria-expanded="false">编辑范围</button>
+              <details class="people-menu">
+                <summary aria-label="{{ u.display_name }} 的更多操作">⋯</summary>
+                <div class="people-menu-panel">
+                  <form method="post" onsubmit="return confirm('确认把这个账号的口令重置为默认 123456？\n对方下次登录必须改掉。')">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <input type="hidden" name="action" value="reset_pin">
                     <input type="hidden" name="tab" value="people">
                     <input type="hidden" name="user_id" value="{{ u.id }}">
-                    <button class="ghost" type="submit">重置口令</button>
+                    <button type="submit">重置口令</button>
                   </form>
                   {% if u.id != g.user.id %}
                   <form method="post">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                     <input type="hidden" name="action" value="toggle_user">
                     <input type="hidden" name="tab" value="people">
                     <input type="hidden" name="user_id" value="{{ u.id }}">
                     <input type="hidden" name="active" value="{{ 0 if u.active else 1 }}">
-                    <button class="ghost" type="submit">{{ '停用' if u.active else '启用' }}</button>
+                    <button type="submit">{{ '停用账号' if u.active else '启用账号' }}</button>
                   </form>
                   {% endif %}
                 </div>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      <p class="muted" id="peopleEmpty" hidden>没有匹配的账号</p>
-    </div>
-    <div class="card settings-card">
-      <div class="settings-card-head">
-        <h2>添加账号</h2>
-        <p class="muted">账号用姓名全拼。店长看一家店，区域经理按姓名看整片区，地市负责人管一个地市的日报（垫资只看）。</p>
-      </div>
-      <form method="post" class="org-add-user" id="addUserForm">
-        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="action" value="add_user">
-        <input type="hidden" name="tab" value="people">
-        <div class="add-user-grid">
-          <p>
-            <label>角色</label>
-            <select name="role" id="addRole">
-              <option value="filler">填报员</option>
-              <option value="manager">店长（只读）</option>
-              <option value="area">区域经理（只读）</option>
-              <option value="city">地市负责人（日报可改）</option>
-            </select>
-          </p>
-          <p><label>账号（姓名全拼）</label><input name="username" required placeholder="zhangsan" autocomplete="off"></p>
-          <p><label>显示名</label><input name="display_name" required placeholder="张三" autocomplete="off"></p>
-          <p><label>口令</label><input name="pin" type="password" inputmode="numeric" required minlength="6" placeholder="至少 6 位"></p>
-        </div>
-        <div id="addStoreField">
-          <details class="store-bind" data-bind data-bind-empty-text="选门店，可多选">
-            <summary>
-              <span class="store-bind-current" data-bind-current>选门店，可多选</span>
-              <span class="store-bind-count" data-bind-count>0 家</span>
-            </summary>
-            <div class="store-bind-panel">
-              <input type="search" class="store-bind-q" placeholder="搜门店，点名字勾选" autocomplete="off">
-              <div class="store-bind-list">
-                {% for s in stores if s.active %}
-                <label class="store-bind-opt" data-text="{{ store_label(s) }} {{ s.name }} {{ s.city }} {{ s.store_manager }}">
-                  <input type="checkbox" name="store_ids" value="{{ s.id }}">
-                  <span class="store-bind-name">{{ store_label(s) }}</span>
-                </label>
-                {% endfor %}
-              </div>
+              </details>
             </div>
-          </details>
-        </div>
-        <div id="addAreaField" hidden>
-          <p>
-            <label>区域经理姓名</label>
-            <input name="scope" placeholder="如 张管理、刘经理" autocomplete="off">
-            <input type="hidden" name="bind" value="area">
-          </p>
-        </div>
-        <div id="addCityField" hidden>
-          <p>
-            <label>负责地市</label>
-            <select name="scope" aria-label="负责地市">
-              {% for c in city_options %}
-              <option value="{{ c }}">{{ c }}</option>
-              {% endfor %}
-            </select>
-            <input type="hidden" name="bind" value="city">
-          </p>
-        </div>
-        <div class="toolbar"><button type="submit">添加账号</button></div>
-      </form>
+          </div>
+          <div class="people-edit" hidden>
+            {% if kind == 'area' %}
+            <form method="post" class="people-edit-form">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="action" value="set_stores">
+              <input type="hidden" name="tab" value="people">
+              <input type="hidden" name="user_id" value="{{ u.id }}">
+              <input type="hidden" name="bind" value="area">
+              <label>区域经理姓名（按姓名匹配门店档案）</label>
+              <div class="people-edit-row">
+                <input name="scope" value="{{ u.scope }}" placeholder="区域经理姓名" autocomplete="off">
+                <button class="ghost" type="submit">保存</button>
+              </div>
+            </form>
+            {% elif kind == 'city' %}
+            <form method="post" class="people-edit-form">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="action" value="set_stores">
+              <input type="hidden" name="tab" value="people">
+              <input type="hidden" name="user_id" value="{{ u.id }}">
+              <input type="hidden" name="bind" value="city">
+              <label>负责地市（日报可改，垫资只看）</label>
+              <div class="people-edit-row">
+                <select name="scope" aria-label="{{ u.display_name }} 负责地市">
+                  {% for c in city_options %}
+                  <option value="{{ c }}" {% if c == (u.scope or '')|trim %}selected{% endif %}>{{ c }}</option>
+                  {% endfor %}
+                </select>
+                <button class="ghost" type="submit">保存</button>
+              </div>
+            </form>
+            {% else %}
+            <form method="post" class="people-edit-form people-store-form">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="action" value="set_stores">
+              <input type="hidden" name="tab" value="people">
+              <input type="hidden" name="user_id" value="{{ u.id }}">
+              <label>可见门店（可多选，搜名字勾选）</label>
+              <details class="store-bind" data-bind>
+                <summary>
+                  <span class="store-bind-current" data-bind-current>{{ p.store_label }}</span>
+                  <span class="store-bind-count" data-bind-count>{{ p.store_ids|length }} 家</span>
+                </summary>
+                <div class="store-bind-panel">
+                  <input type="search" class="store-bind-q" placeholder="搜门店，点名字勾选" autocomplete="off">
+                  <div class="store-bind-list">
+                    {% for s in stores if s.active or s.id in p.store_ids %}
+                    <label class="store-bind-opt{{ ' is-off' if not s.active else '' }}" data-text="{{ store_label(s) }} {{ s.name }} {{ s.city }} {{ s.store_manager }}">
+                      <input type="checkbox" name="store_ids" value="{{ s.id }}" {% if s.id in p.store_ids %}checked{% endif %}{% if not s.active %} disabled{% endif %}>
+                      <span class="store-bind-name">{{ store_label(s) }}{% if not s.active %}（已停用，保存后解除）{% endif %}</span>
+                    </label>
+                    {% endfor %}
+                  </div>
+                  <div class="store-bind-actions"><button class="ghost" type="submit">保存</button></div>
+                </div>
+              </details>
+            </form>
+            {% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      <p class="muted" id="peopleEmpty" hidden>没有匹配的账号</p>
     </div>
     <script>
     (function () {
@@ -213,7 +218,7 @@
         var text = ((q && q.value) || '').trim().toLowerCase();
         var kind = (role && role.value) || '';
         var shown = 0;
-        document.querySelectorAll('.people-row').forEach(function (row) {
+        document.querySelectorAll('.people-item').forEach(function (row) {
           var hitText = !text || (row.getAttribute('data-text') || '').toLowerCase().indexOf(text) !== -1;
           var hitRole = !kind || row.getAttribute('data-role') === kind;
           var hit = hitText && hitRole;
@@ -225,6 +230,41 @@
       }
       if (q) q.addEventListener('input', syncFilter);
       if (role) role.addEventListener('change', syncFilter);
+
+      // 「添加账号」面板开合
+      var addToggle = document.getElementById('peopleAddToggle');
+      var addPanel = document.getElementById('peopleAddPanel');
+      if (addToggle && addPanel) {
+        addToggle.addEventListener('click', function () {
+          var open = addPanel.hidden;
+          addPanel.hidden = !open;
+          addToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+          addToggle.classList.toggle('active', open);
+          if (open) {
+            var first = addPanel.querySelector('select[name="role"]');
+            if (first) first.focus();
+          }
+        });
+      }
+
+      // 行内「编辑范围」手风琴：展开一个收起其他
+      document.querySelectorAll('.people-edit-toggle').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var item = btn.closest('.people-item');
+          var panel = item.querySelector('.people-edit');
+          if (!panel) return;
+          var willOpen = panel.hidden;
+          document.querySelectorAll('.people-item .people-edit').forEach(function (other) {
+            if (other !== panel) other.hidden = true;
+          });
+          document.querySelectorAll('.people-edit-toggle').forEach(function (other) {
+            if (other !== btn) other.setAttribute('aria-expanded', 'false');
+          });
+          panel.hidden = !willOpen;
+          btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+          btn.textContent = willOpen ? '收起' : '编辑范围';
+        });
+      });
 
       // 门店绑定：点选即中，搜索过滤，summary 显示已选
       function bindOne(root) {
