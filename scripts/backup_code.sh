@@ -78,6 +78,9 @@ prune_bundles() {
 PUSHED=0
 if [[ -n "${LAN_BACKUP_HOST}" ]]; then
   LAN="${LAN_BACKUP_USER:-root}@${LAN_BACKUP_HOST}"
+  # 备份机是手机时，「隐私 MAC」重连后会换 MAC；本机旧 ARP 表项会把包发往失效的
+  # 旧 MAC，表现为长时间连不上。连接前主动清一次 ARP（免 sudo），强制重新解析。
+  arp -d "${LAN_BACKUP_HOST}" >/dev/null 2>&1 || true
   echo "→ 推送到局域网备份机 ${LAN}:${LAN_BACKUP_DIR}/code/ (ssh ${LAN_BACKUP_SSH_PORT:-22})"
   if [[ "${DRY_RUN}" == "1" ]]; then
     echo "  [dry-run] scp ${BUNDLE}" 

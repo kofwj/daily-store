@@ -84,6 +84,11 @@ trap cleanup EXIT
 
 PRIMARY="${PRIMARY_USER}@${PRIMARY_HOST}"
 LAN="${LAN_BACKUP_USER}@${LAN_BACKUP_HOST}"
+# 备份机是手机时，「隐私 MAC」重连后会换 MAC；本机旧 ARP 表项会把包发往失效的
+# 旧 MAC，表现为长时间连不上。连接前主动清一次 ARP（免 sudo），强制重新解析。
+if [[ -n "${LAN_BACKUP_HOST}" ]]; then
+  arp -d "${LAN_BACKUP_HOST}" >/dev/null 2>&1 || true
+fi
 # 规范化远端：允许 REMOTE_BACKUP=user@host 或 host + REMOTE_BACKUP_USER
 REMOTE_TARGET=""
 if [[ -n "${REMOTE_BACKUP}" ]]; then

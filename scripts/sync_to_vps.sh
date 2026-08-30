@@ -146,8 +146,11 @@ fi
 
 "${SSH[@]}" "${REMOTE}" "cd '${VPS_DIR}' && chmod +x scripts/*.sh && ./scripts/deploy_vps.sh"
 echo
-# 部署后把完整 git 历史推送到 offsite 备份机（代码灾备）
-./scripts/backup_code.sh
+# 部署后把完整 git 历史推送到 offsite 备份机（代码灾备）。
+# 备份机（手机）可能休眠/换隐私 MAC 不可达：灾备失败不应拦住后面的 VERSION 自动提交。
+if ! ./scripts/backup_code.sh; then
+  echo "警告: 代码灾备推送未完成（备份机不可达？），部署本身不受影响" >&2
+fi
 
 # 部署成功后自动提交 VERSION 保留痕迹，保持工作区干净。
 # 只提交 VERSION；代码改动仍需你手动提交（部署前）。
