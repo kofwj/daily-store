@@ -27,7 +27,7 @@
 - **政策说明**：开关打开后须先点「已阅读」，未确认不能进其他页（填报员、店长、区域经理都一样）
 - **洞察**：本月进度对时间、本周 vs 上周合计与分店明细；可按地市、区域经理筛
 - **开票申请**：按税务样表导出酬金 / 租赁申请三张表；开票回填结算
-- **多店看板 / 月度考核 / 修改审计 / 登录日志**：仅管理员。日报、触客、垫资、开票的改动和登录/退出都留痕，记真实来源 IP
+- **多店看板 / 月度考核 / 修改审计 / 登录日志**：仅管理员。日报、触客、垫资、开票、移动校准的改动和登录/退出都留痕，记真实来源 IP
 - **企业微信播报**：保存日报 / 触客后自动发群（全局 + 按地市覆盖），失败不挡填报
 - **设置**：管理员管账户、门店、目标、规则、政策、开票主体、备份；其他人只能改自己口令。门店档案可停用 / 删除（有填报的只能停用）
 
@@ -61,6 +61,8 @@ export STORE_DAILY_SECRET='换成一段随机字符串'
 .venv/bin/pytest -q
 ```
 
+`tests/conftest.py` 提供现成夹具，新用例不用手写登录：`tmp_db`（全新库）、`client` / `admin_client` / `filler_client` / `city_client`（对应角色已登录）、`store_id()` 按门店 code 查 id。回归测试写进对应功能文件，不再建 `*_regression` 堆积文件。
+
 门店目录：公开仓库只有示例店 `app/stores_seed.py`。真实店名、人员放 `app/stores_seed_local.py`（不进 git）。生产机有这份文件就会用真实目录；测试设 `STORE_DAILY_SAMPLE_SEED=1` 强制示例店。
 
 ## 生产
@@ -74,7 +76,7 @@ export STORE_DAILY_SECRET='换成一段随机字符串'
 ./scripts/sync_to_vps.sh --no-db
 ```
 
-机外备份读 `scripts/backup.env`（不进 git）。拷库必须用 SQLite backup API，禁止直接 `cp *.db`。
+机外备份读 `scripts/backup.env`（不进 git）。拷库必须用 SQLite backup API，禁止直接 `cp *.db`。代码 bundle 每次部署推一份到两台灾备机，自动只留最新 10 份（`CODE_BUNDLE_KEEP` 可改）；备份机是手机时脚本会先清本机 ARP，避免其「隐私 MAC」重连换地址后长时间连不上。
 
 文档：
 
