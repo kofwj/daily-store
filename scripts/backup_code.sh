@@ -71,7 +71,7 @@ prune_bundles() {
     return 0
   fi
   left="$(ssh_p "${port}" "${target}" \
-    "cd '${dir}/code' && ls -1t store_daily_code_*.bundle 2>/dev/null | tail -n +$((keep + 1)) | while read -r f; do rm -f -- \"\$f\"; done; ls -1 store_daily_code_*.bundle 2>/dev/null | wc -l")"
+    "cd '${dir}/code' && rm -f -- store_daily_code_*.part 2>/dev/null; ls -1t store_daily_code_*.bundle 2>/dev/null | tail -n +$((keep + 1)) | while read -r f; do rm -f -- \"\$f\"; done; ls -1 store_daily_code_*.bundle 2>/dev/null | wc -l")"
   echo "  已清理旧 bundle，现存 ${left} 份（保留最新 ${keep} 份）"
 }
 
@@ -86,7 +86,9 @@ if [[ -n "${LAN_BACKUP_HOST}" ]]; then
     echo "  [dry-run] scp ${BUNDLE}" 
   else
     ssh_p "${LAN_BACKUP_SSH_PORT:-22}" "${LAN}" "mkdir -p '${LAN_BACKUP_DIR}/code'"
-    scp_p "${LAN_BACKUP_SSH_PORT:-22}" "${BUNDLE_PATH}" "${LAN}:${LAN_BACKUP_DIR}/code/${REMOTE_BUNDLE}"
+    # 先传 .part 再改名：scp 中途断线只留 .part，残缺文件不会混进保留清单
+    scp_p "${LAN_BACKUP_SSH_PORT:-22}" "${BUNDLE_PATH}" "${LAN}:${LAN_BACKUP_DIR}/code/${REMOTE_BUNDLE}.part"
+    ssh_p "${LAN_BACKUP_SSH_PORT:-22}" "${LAN}" "mv '${LAN_BACKUP_DIR}/code/${REMOTE_BUNDLE}.part' '${LAN_BACKUP_DIR}/code/${REMOTE_BUNDLE}'"
     PUSHED=1
     prune_bundles "${LAN_BACKUP_SSH_PORT:-22}" "${LAN}" "${LAN_BACKUP_DIR}"
   fi
@@ -109,7 +111,9 @@ if [[ -n "${REMOTE_TARGET}" ]]; then
     echo "  [dry-run] scp ${BUNDLE}"
   else
     ssh_p "${REMOTE_BACKUP_SSH_PORT:-22}" "${REMOTE_TARGET}" "mkdir -p '${REMOTE_BACKUP_DIR}/code'"
-    scp_p "${REMOTE_BACKUP_SSH_PORT:-22}" "${BUNDLE_PATH}" "${REMOTE_TARGET}:${REMOTE_BACKUP_DIR}/code/${REMOTE_BUNDLE}"
+    # 先传 .part 再改名：scp 中途断线只留 .part，残缺文件不会混进保留清单
+    scp_p "${REMOTE_BACKUP_SSH_PORT:-22}" "${BUNDLE_PATH}" "${REMOTE_TARGET}:${REMOTE_BACKUP_DIR}/code/${REMOTE_BUNDLE}.part"
+    ssh_p "${REMOTE_BACKUP_SSH_PORT:-22}" "${REMOTE_TARGET}" "mv '${REMOTE_BACKUP_DIR}/code/${REMOTE_BUNDLE}.part' '${REMOTE_BACKUP_DIR}/code/${REMOTE_BUNDLE}'"
     PUSHED=1
     prune_bundles "${REMOTE_BACKUP_SSH_PORT:-22}" "${REMOTE_TARGET}" "${REMOTE_BACKUP_DIR}"
   fi
