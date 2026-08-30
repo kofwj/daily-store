@@ -330,6 +330,38 @@ def test_advance_stores_cents_and_reads_yuan(client):
     assert int(raw["other"]) == 3999
     assert float(viewed["other"]) == 39.99
     assert float(viewed["total"]) == 39.99
+
+
+def test_advance_range_sums_and_pay_page(client):
+    client.post("/login", data={"username": "admin", "pin": "123456"})
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+    today = db.today_local()
+    client.post(
+        "/advance",
+        data={"store_id": str(sid), "biz_date": today.isoformat(), "phone": "13900009555", "rebate": "10.5"},
+    )
+    client.post(
+        "/advance",
+        data={"store_id": str(sid), "biz_date": today.isoformat(), "phone": "13900009556", "broadband": "20"},
+    )
+    with db.get_db() as conn:
+        aid = conn.execute("SELECT id FROM advance_posts WHERE phone='13900009555'").fetchone()["id"]
+        sums = db.advance_range_sums(conn, start=today, end=today, store_id=sid)
+    assert sums["rebate"] == 10.5
+    assert sums["broadband"] == 20.0
+    assert sums["total"] == 30.5
+    assert sums["unpaid"] == 2
+    client.post("/advance/pay", data={"action": "pay", "advance_id": [str(aid)]})
+    page = client.get("/advance/pay?scope=today").get_data(as_text=True)
+    assert "30.50" in page or "30.5" in page
+    assert "未兑 1 笔" in page
+    with db.get_db() as conn:
+        after = db.advance_range_sums(conn, start=today, end=today, store_id=sid)
+    assert after["unpaid"] == 1
+    assert after["total"] == 30.5
+
+
 def test_advance_old_real_whole_yuan_converted(tmp_path):
     """旧库 REAL 列存的是元——整元（200、500）也必须乘100，不能只靠采样猜。"""
 

@@ -60,12 +60,26 @@ def _display(raw: str) -> str:
     return text
 
 
+_current_memo: tuple | None = None  # (mtime_ns, env, payload)
+
+
 def current() -> dict:
+    """VERSION 文件 + 环境变量很少变，按 mtime 缓存，免每个 HTML 请求读盘。"""
+    global _current_memo
+    env = _from_env()
+    path = _version_file()
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        mtime = -1
+    if _current_memo is not None and _current_memo[0] == mtime and _current_memo[1] == env:
+        return dict(_current_memo[2])
     file_ver, built, summary = _from_file()
-    version = _display(_from_env() or file_ver or "V0.0.0")
-    return {
-        "version": version,
+    payload = {
+        "version": _display(env or file_ver or "V0.0.0"),
         "git": _from_git(),
         "built_at": built,
         "summary": summary,
     }
+    _current_memo = (mtime, env, payload)
+    return dict(payload)

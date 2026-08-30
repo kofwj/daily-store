@@ -364,6 +364,51 @@ def advance_today_inbox(conn: sqlite3.Connection, day: date) -> List[sqlite3.Row
     )
 
 
+def advance_range_sums(
+    conn: sqlite3.Connection,
+    *,
+    start: date,
+    end: date,
+    store_id: Optional[int] = None,
+    store_ids: Optional[Sequence[int]] = None,
+) -> Dict[str, float]:
+    """区间垫资合计 + 未兑笔数，一条 SQL。给兑付页顶栏用，避免把全月行拉进 Python。"""
+    where = ["biz_date>=?", "biz_date<=?"]
+    params: List[Any] = [start.isoformat(), end.isoformat()]
+    if store_id:
+        where.append("store_id=?")
+        params.append(int(store_id))
+    elif store_ids is not None:
+        clause, ids = _store_in("store_id", store_ids)
+        where.append(clause)
+        params.extend(ids)
+    row = conn.execute(
+        f"""
+        SELECT
+            ROUND(SUM(broadband) / 100.0, 2) AS broadband,
+            ROUND(SUM(rebate) / 100.0, 2) AS rebate,
+            ROUND(SUM(other) / 100.0, 2) AS other,
+            ROUND(SUM(sesame) / 100.0, 2) AS sesame,
+            SUM(CASE WHEN IFNULL(paid, 0)=0 THEN 1 ELSE 0 END) AS unpaid
+        FROM advance_posts
+        WHERE {' AND '.join(where)}
+        """,
+        params,
+    ).fetchone()
+    broadband = float(row["broadband"] or 0)
+    rebate = float(row["rebate"] or 0)
+    other = float(row["other"] or 0)
+    sesame = float(row["sesame"] or 0)
+    return {
+        "broadband": broadband,
+        "rebate": rebate,
+        "other": other,
+        "sesame": sesame,
+        "total": round(broadband + rebate + other + sesame, 2),
+        "unpaid": int(row["unpaid"] or 0),
+    }
+
+
 def advance_month_totals(
     conn: sqlite3.Connection, store_ids: Iterable[int], as_of: date
 ) -> Dict[int, Dict[str, float]]:

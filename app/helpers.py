@@ -44,8 +44,9 @@ def brand_settings(conn=None) -> Dict[str, str]:
     if conn is None:
         with db.get_db() as owned:
             return brand_settings(owned)
+    hot = db.hot_settings(conn)
     return {
-        key: _clean_brand(db.get_setting(conn, f"brand_{key}", ""), default=default, limit=BRAND_LIMITS[key])
+        key: _clean_brand(hot.get(f"brand_{key}", ""), default=default, limit=BRAND_LIMITS[key])
         for key, default in DEFAULT_BRAND.items()
     }
 

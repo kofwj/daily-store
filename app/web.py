@@ -69,7 +69,7 @@ def create_app(*, testing: bool = False) -> Flask:
         secret = secrets.token_urlsafe(32)
     app.config["SECRET_KEY"] = secret
     app.config["TESTING"] = testing
-    app.config["TEMPLATES_AUTO_RELOAD"] = True
+    app.config["TEMPLATES_AUTO_RELOAD"] = bool(testing)
     # 公网 / Cloudflare 后必须开 Secure，否则口令 Cookie 会明文落到 HTTP
     secure = os.environ.get("STORE_DAILY_SECURE", "0") == "1"
     app.config["SESSION_COOKIE_HTTPONLY"] = True

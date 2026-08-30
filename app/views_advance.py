@@ -276,21 +276,9 @@ def register_advance(app) -> None:
                 offset=(page - 1) * 50,
                 store_ids=scoped_ids,
             )
-            sums = {"broadband": 0.0, "rebate": 0.0, "other": 0.0, "sesame": 0.0, "total": 0.0, "unpaid": 0}
-            all_rows = db.list_all_advances(conn, start, end)
-            allow = set(scoped_ids) if scoped_ids is not None else None
-            for r in all_rows:
-                if sid and int(r["store_id"]) != sid:
-                    continue
-                if allow is not None and int(r["store_id"]) not in allow:
-                    continue
-                sums["broadband"] += float(r["broadband"] or 0)
-                sums["rebate"] += float(r["rebate"] or 0)
-                sums["other"] += float(r["other"] or 0)
-                sums["sesame"] += float(r["sesame"] or 0)
-                sums["total"] += float(r["total"] or 0)
-                if not int(r["paid"] or 0):
-                    sums["unpaid"] += 1
+            sums = db.advance_range_sums(
+                conn, start=start, end=end, store_id=sid, store_ids=scoped_ids
+            )
             return render_template(
                 "advance_pay.html",
                 stores=stores,

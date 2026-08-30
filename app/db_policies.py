@@ -344,9 +344,9 @@ def _ensure_policy_tables(conn: sqlite3.Connection) -> None:
 
 
 def policy_require_read(conn: sqlite3.Connection) -> bool:
-    from .db_core import get_setting
+    from .db_core import hot_settings
 
-    return get_setting(conn, POLICY_REQUIRE_KEY, "0") == "1"
+    return (hot_settings(conn).get(POLICY_REQUIRE_KEY) or "0") == "1"
 
 
 def set_policy_require_read(conn: sqlite3.Connection, on: bool) -> None:

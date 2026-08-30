@@ -17,6 +17,7 @@ from flask import g, has_app_context
 
 from .db_advances import (  # noqa: F401
     advance_month_totals,
+    advance_range_sums,
     advance_today_inbox,
     cents_to_yuan,
     count_advances,

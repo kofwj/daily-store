@@ -21,6 +21,29 @@ def test_production_rejects_missing_or_example_secret(monkeypatch):
     assert create_app().config["SECRET_KEY"].startswith("test-")
 
 
+def test_production_disables_template_auto_reload(tmp_db):
+    assert create_app().config["TEMPLATES_AUTO_RELOAD"] is False
+    assert create_app(testing=True).config["TEMPLATES_AUTO_RELOAD"] is True
+
+
+def test_hot_settings_refresh_after_brand_save(tmp_db, client):
+    client.post("/login", data={"username": "admin", "pin": "123456"})
+    client.post(
+        "/settings",
+        data={
+            "action": "save_brand",
+            "tab": "brand",
+            "brand_mark": "缓存",
+            "brand_kicker": "缓存副标",
+            "brand_title": "缓存日报",
+        },
+    )
+    client.post("/logout")
+    login = client.get("/login").get_data(as_text=True)
+    assert "缓存日报" in login
+    assert "缓存副标" in login
+
+
 def test_login_locks_after_five_failures(client):
     body = ""
     for _ in range(5):
