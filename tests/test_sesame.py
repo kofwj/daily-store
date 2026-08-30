@@ -179,6 +179,31 @@ def test_imported_rows_locked_from_filler(tmp_db):
     assert "已删除" in admin_del
 
 
+def test_sesame_week_bulletin_from_imported_rows(tmp_db):
+    app = create_app(testing=True)
+    c = app.test_client()
+    c.post("/login", data={"username": "admin", "pin": "123456"})
+    data = _make_sesame_xlsx(_sample_rows())
+    c.post("/advance/sesame/preview", data={"sesame_file": (BytesIO(data), "s.xlsx")})
+    c.post("/advance/sesame/confirm", follow_redirects=True)
+    page = c.get("/advance/sesame/week?start=2026-08-10&end=2026-08-16").get_data(as_text=True)
+    assert "芝麻周报" in page
+    assert "【芝麻服务费】" in page
+    assert "示例甲店" in page
+    assert "9.58" in page
+    city = c.get("/advance/sesame/week?start=2026-08-10&end=2026-08-16&city=示例市").get_data(as_text=True)
+    assert "示例甲店" in city
+    assert "示例戊店" not in city
+    xlsx = c.get("/advance/sesame/week.xlsx?start=2026-08-10&end=2026-08-16")
+    assert xlsx.status_code == 200
+    book = openpyxl.load_workbook(BytesIO(xlsx.get_data()))
+    assert book.active["A1"].value == "门店"
+    c.post("/logout")
+    c.post("/login", data={"username": "alpha", "pin": "123456"})
+    blocked = c.get("/advance/sesame/week", follow_redirects=True)
+    assert "需要管理员或只读权限" in blocked.get_data(as_text=True)
+
+
 def test_sesame_shows_in_advance_totals(tmp_db):
     app = create_app(testing=True)
     c = app.test_client()

@@ -20,6 +20,7 @@
     {% endif %}
     {% if is_admin %}
     <a class="btn ghost" href="{{ url_for('advance_sesame_page') }}">导入芝麻服务费</a>
+    <a class="btn ghost" href="{{ url_for('sesame_week_page') }}">芝麻周报</a>
     <a class="btn ghost" href="{{ url_for('advance_pay', month=month.strftime('%Y-%m')) }}">去兑付</a>
     {% endif %}
   </form>

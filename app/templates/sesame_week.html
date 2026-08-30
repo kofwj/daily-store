@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block title %}芝麻周报{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div class="page-title">
+    <h1>芝麻周报</h1>
+    <p class="muted">按已导入的官方芝麻服务费出周报。每周上传明细后，这里按周一到周日汇总，可贴群。</p>
+  </div>
+  <form method="get" class="page-filters">
+    <label class="filter">
+      <span>开始</span>
+      <input type="date" name="start" value="{{ start.isoformat() }}" onchange="this.form.submit()">
+    </label>
+    <label class="filter">
+      <span>结束</span>
+      <input type="date" name="end" value="{{ end.isoformat() }}" onchange="this.form.submit()">
+    </label>
+    {% if cities %}
+    <label class="filter">
+      <span>地市</span>
+      <select name="city" onchange="this.form.submit()">
+        <option value="">全部</option>
+        {% for c in cities %}
+        <option value="{{ c }}" {% if c == city %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% endif %}
+    <a class="btn ghost" href="{{ url_for('sesame_week_page', start=prev_start.isoformat(), end=prev_end.isoformat(), city=city) }}">上周</a>
+    <a class="btn ghost" href="{{ url_for('sesame_week_page', start=next_start.isoformat(), end=next_end.isoformat(), city=city) }}">下周</a>
+    <button type="button" id="btnCopyShot" onclick="copyBulletinImage()">复制图片</button>
+    <button type="button" id="btnDownShot" class="ghost" onclick="downloadBulletinImage()">下载图片</button>
+    <a class="btn ghost" href="{{ url_for('sesame_week_xlsx', start=start.isoformat(), end=end.isoformat(), city=city) }}">导出 Excel</a>
+    {% if is_admin %}
+    <a class="btn ghost" href="{{ url_for('advance_sesame_page') }}">导入明细</a>
+    {% endif %}
+    <span class="chip" id="copyHint">可贴进微信</span>
+  </form>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="muted">净服务费</div><div class="kpi-num">{{ '%.2f'|format(totals.net) }}</div></div>
+  <div class="kpi"><div class="muted">扣费</div><div class="kpi-num">{{ totals.charge_n }} 笔</div><div class="muted">{{ '%.2f'|format(totals.charge) }} 元</div></div>
+  <div class="kpi"><div class="muted">退款</div><div class="kpi-num">{{ totals.refund_n }} 笔</div><div class="muted">{{ '%.2f'|format(totals.refund_abs) }} 元</div></div>
+  <div class="kpi"><div class="muted">有数门店</div><div class="kpi-num">{{ totals.stores }}</div></div>
+</div>
+
+{% if copy_text %}
+<div class="card bulletin-review">
+  <div class="bulletin-review-head">
+    <div>
+      <strong>贴群文案</strong>
+      <span class="muted">{{ week_label }}{% if city %} · {{ city }}{% endif %}</span>
+    </div>
+    <button type="button" class="ghost" onclick="copyReviewText()">复制文案</button>
+  </div>
+  <textarea id="reviewText" class="bulletin-review-text" readonly rows="8">{{ copy_text }}</textarea>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="bulletin-wrap">
+  <div class="bulletin-shot" id="bulletinShot">
+    <div class="bulletin-shot-title">芝麻服务费周报{% if city %} · {{ city }}{% endif %}</div>
+    <div class="bulletin-shot-date">{{ week_label }} · 净 {{ '%.2f'|format(totals.net) }} 元</div>
+    {% if rows %}
+    <table class="bulletin sesame-week">
+      <thead>
+        <tr>
+          <th class="g-profile">#</th>
+          <th class="g-profile left">门店</th>
+          <th class="g-month">笔数</th>
+          <th class="g-month">扣费</th>
+          <th class="g-day">退款</th>
+          <th class="g-day">净额</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td class="name">{{ r.name }}</td>
+          <td>{{ r.n }}</td>
+          <td>{{ r.charge_n }} / {{ '%.2f'|format(r.charge) }}</td>
+          <td>{{ r.refund_n }}{% if r.refund_n %} / {{ '%.2f'|format(r.refund_abs) }}{% endif %}</td>
+          <td class="total-num">{{ '%.2f'|format(r.net) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="total">
+          <td colspan="2" class="name">合计 {{ totals.stores }} 家</td>
+          <td>{{ totals.n }}</td>
+          <td>{{ totals.charge_n }} / {{ '%.2f'|format(totals.charge) }}</td>
+          <td>{{ totals.refund_n }} / {{ '%.2f'|format(totals.refund_abs) }}</td>
+          <td class="total-num">{{ '%.2f'|format(totals.net) }}</td>
+        </tr>
+      </tfoot>
+    </table>
+    {% else %}
+    <p class="muted">这一周还没有已导入的芝麻流水。{% if is_admin %}先在「导入明细」上传官方 xlsx。{% endif %}</p>
+    {% endif %}
+  </div>
+  </div>
+</div>
+
+<div class="card" id="shotPreviewCard" hidden>
+  <h2>图片预览</h2>
+  <p class="muted">手机长按图片可转发到微信。电脑也可右键另存。</p>
+  <img id="shotPreview" class="shot-preview" alt="芝麻周报截图">
+</div>
+<script src="{{ url_for('static', filename='html2canvas.min.js') }}"></script>
+<script>
+const SHOT_NAME = 'sesame_{{ start.isoformat() }}_{{ end.isoformat() }}.png';
+const UA = navigator.userAgent || '';
+const IS_WECHAT = /MicroMessenger/i.test(UA);
+const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(UA);
+
+function copyReviewText() {
+  copyText(document.getElementById('reviewText'), '周报文案已复制，去微信粘贴');
+}
+
+function showPreview(url) {
+  const card = document.getElementById('shotPreviewCard');
+  const img = document.getElementById('shotPreview');
+  if (!card || !img) return;
+  img.src = url;
+  card.hidden = false;
+  try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  catch (e) { card.scrollIntoView(true); }
+}
+
+function renderBulletinCanvas() {
+  const el = document.getElementById('bulletinShot');
+  if (!el) return Promise.reject(new Error('找不到周报'));
+  if (typeof html2canvas !== 'function') return Promise.reject(new Error('截图组件未加载'));
+  const scale = Math.min(IS_MOBILE ? 1.5 : 2, window.devicePixelRatio || 2);
+  return html2canvas(el, {
+    backgroundColor: '#ffffff',
+    scale: scale,
+    useCORS: true,
+    logging: false,
+    scrollX: 0,
+    scrollY: -window.scrollY,
+    windowWidth: document.documentElement.clientWidth,
+  });
+}
+
+function canvasToBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    if (!canvas || !canvas.toBlob) {
+      try {
+        const data = canvas.toDataURL('image/png');
+        const bin = atob(data.split(',')[1] || '');
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        resolve(new Blob([arr], { type: 'image/png' }));
+      } catch (e) { reject(e); }
+      return;
+    }
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('截图失败')), 'image/png');
+  });
+}
+
+function downloadBlob(blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = SHOT_NAME;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 8000);
+}
+
+function setBusy(busy) {
+  ['btnCopyShot', 'btnDownShot'].forEach(function (id) {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = !!busy;
+  });
+}
+
+async function makeShot() {
+  setCopyHint('正在截图…');
+  const canvas = await renderBulletinCanvas();
+  const blob = await canvasToBlob(canvas);
+  showPreview(URL.createObjectURL(blob));
+  return blob;
+}
+
+async function copyBulletinImage() {
+  if (window.__shotBusy) return;
+  window.__shotBusy = true;
+  setBusy(true);
+  try {
+    const blob = await makeShot();
+    if (IS_WECHAT || IS_MOBILE) {
+      setCopyHint('图片已生成，请长按下方预览图转发到微信');
+      return;
+    }
+    if (navigator.clipboard && window.ClipboardItem) {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        setCopyHint('图片已复制，去微信粘贴');
+        return;
+      } catch (err) {}
+    }
+    downloadBlob(blob);
+    setCopyHint('当前浏览器不能复制图片，已下载；也可长按下方预览');
+  } catch (err) {
+    const msg = (err && err.message) ? err.message : '请再试';
+    setCopyHint('截图失败：' + msg);
+  } finally {
+    window.__shotBusy = false;
+    setBusy(false);
+  }
+}
+
+async function downloadBulletinImage() {
+  if (window.__shotBusy) return;
+  window.__shotBusy = true;
+  setBusy(true);
+  try {
+    const blob = await makeShot();
+    if (IS_WECHAT) {
+      setCopyHint('微信里请长按下方预览图保存或转发');
+      return;
+    }
+    downloadBlob(blob);
+    setCopyHint('已下载图片');
+  } catch (err) {
+    const msg = (err && err.message) ? err.message : '请再试';
+    setCopyHint('截图失败：' + msg);
+  } finally {
+    window.__shotBusy = false;
+    setBusy(false);
+  }
+}
+</script>
+{% endblock %}

@@ -94,6 +94,11 @@ from .sesame import (  # noqa: F401
     classify_sesame_rows,
     import_sesame_rows,
     parse_sesame_xlsx,
+    render_week_text,
+    sesame_week_rows,
+    sesame_week_totals,
+    week_label,
+    week_span,
 )
 from .wecom import (  # noqa: F401
     get_webhook,

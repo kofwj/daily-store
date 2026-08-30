@@ -15,8 +15,9 @@
       <label>选择文件</label>
       <input type="file" name="sesame_file" accept=".xlsx" required>
     </p>
-    <p class="muted">只支持 .xlsx，不超过 4 MiB。导入后进垫资台账，名称「芝麻服务费」，店员不能改删。</p>
+    <p class="muted">只支持 .xlsx，不超过 4 MiB。导入后进垫资台账，名称「芝麻服务费」，店员不能改删。导入完可去「芝麻周报」按周贴群。</p>
     <button type="submit">预览</button>
+    <a class="btn ghost" href="{{ url_for('sesame_week_page') }}">芝麻周报</a>
     <a class="btn ghost" href="{{ url_for('advance_page') }}">返回垫资</a>
   </form>
 </div>

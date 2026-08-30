@@ -669,6 +669,9 @@ table.bulletin tr.wait td.name { color: #9a3412; }
 table.bulletin tr.wait td.scale { background: #fff7ed !important; color: #9a3412 !important; }
 table.bulletin tr.wait td.flag-yes,
 table.bulletin tr.wait td.flag-no { background: #ffedd5; }
+table.bulletin.sesame-week { min-width: 640px; }
+table.bulletin.sesame-week th.left,
+table.bulletin.sesame-week td.name { text-align: left; }
 .miss-tag {
   display: inline-block; margin-left: 5px; padding: 0 4px;
   font-size: 10px; font-weight: 600; letter-spacing: 0; line-height: 16px;

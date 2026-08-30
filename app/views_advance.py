@@ -21,8 +21,10 @@ from .helpers import (
     pagination,
     parse_date,
     pick_store,
+    readonly_required,
     request_scope,
     viewer_only,
+    xlsx_bytes,
     xlsx_response,
 )
 
@@ -317,6 +319,71 @@ def register_advance(app) -> None:
         else:
             flash(f"已兑付 {n} 笔。" if n else "没有可兑付的记录。", "ok" if n else "error")
         return redirect(url_for("advance_pay", month=month, store_id=store_id, paid=paid, scope=scope))
+
+    def _sesame_week_range():
+        today_d = db.today_local()
+        default_start, default_end = sesame.week_span(today_d)
+        start = parse_date(request.args.get("start"), default_start)
+        end = parse_date(request.args.get("end"), sesame.week_span(start)[1])
+        if end < start:
+            start, end = end, start
+        if (end - start).days > 31:
+            end = start + timedelta(days=6)
+        return start, end
+
+    @app.route("/advance/sesame/week")
+    @readonly_required
+    def sesame_week_page():
+        start, end = _sesame_week_range()
+        prev_start, prev_end = start - timedelta(days=7), end - timedelta(days=7)
+        next_start, next_end = start + timedelta(days=7), end + timedelta(days=7)
+        with db.get_db() as conn:
+            stores = accessible_stores(conn)
+            cities = sorted({(s["city"] or "").strip() or "未分地市" for s in stores})
+            city = (request.args.get("city") or "").strip()
+            if city and city not in cities:
+                city = ""
+            scoped = [s for s in stores if ((s["city"] or "").strip() or "未分地市") == city] if city else stores
+            rows = sesame.sesame_week_rows(conn, [int(s["id"]) for s in scoped], start, end)
+            totals = sesame.sesame_week_totals(rows)
+            copy_text = sesame.render_week_text(rows, totals, start, end, city)
+            return render_template(
+                "sesame_week.html",
+                start=start,
+                end=end,
+                prev_start=prev_start,
+                prev_end=prev_end,
+                next_start=next_start,
+                next_end=next_end,
+                city=city,
+                cities=cities,
+                rows=rows,
+                totals=totals,
+                copy_text=copy_text,
+                week_label=sesame.week_label(start, end),
+                is_admin=g.user["role"] == "admin",
+            )
+
+    @app.route("/advance/sesame/week.xlsx")
+    @readonly_required
+    def sesame_week_xlsx():
+        start, end = _sesame_week_range()
+        with db.get_db() as conn:
+            stores = accessible_stores(conn)
+            city = (request.args.get("city") or "").strip()
+            cities = sorted({(s["city"] or "").strip() or "未分地市" for s in stores})
+            if city and city not in cities:
+                city = ""
+            scoped = [s for s in stores if ((s["city"] or "").strip() or "未分地市") == city] if city else stores
+            rows = sesame.sesame_week_rows(conn, [int(s["id"]) for s in scoped], start, end)
+        header = ["门店", "地市", "笔数", "扣费笔数", "扣费金额", "退款笔数", "退款金额", "净额"]
+        data = [
+            [r["name"], r["city"], r["n"], r["charge_n"], r["charge"], r["refund_n"], r["refund_abs"], r["net"]]
+            for r in rows
+        ]
+        tag = "".join(ch for ch in city if ch.isalnum()) or "all"
+        filename = f"sesame_week_{start.isoformat()}_{end.isoformat()}_{tag}.xlsx"
+        return xlsx_response(xlsx_bytes(header, data, sheet="芝麻周报"), filename)
 
     @app.route("/advance/sesame", methods=["GET"])
     @admin_required

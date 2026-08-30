@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from secrets import token_hex
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from openpyxl import load_workbook
 
@@ -253,3 +253,112 @@ def _prune_previews() -> None:
                 path.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def week_span(day: date) -> tuple[date, date]:
+    """自然周：周一到周日。"""
+    start = day - timedelta(days=day.weekday())
+    return start, start + timedelta(days=6)
+
+
+def week_label(start: date, end: date) -> str:
+    if start.year == end.year and start.month == end.month:
+        return f"{start.month}月{start.day}日–{end.day}日"
+    if start.year == end.year:
+        return f"{start.month}月{start.day}日–{end.month}月{end.day}日"
+    return f"{start.isoformat()}–{end.isoformat()}"
+
+
+def sesame_week_rows(
+    conn,
+    store_ids: Sequence[int],
+    start: date,
+    end: date,
+) -> List[Dict[str, Any]]:
+    ids = [int(i) for i in store_ids]
+    if not ids:
+        return []
+    clause, params = db_core.store_in_clause("a.store_id", ids)
+    rows = conn.execute(
+        f"""
+        SELECT a.store_id AS store_id,
+               COALESCE(st.short_name, st.name, '') AS name,
+               COALESCE(st.city, '') AS city,
+               COUNT(*) AS n,
+               SUM(CASE WHEN a.sesame > 0 THEN 1 ELSE 0 END) AS charge_n,
+               SUM(CASE WHEN a.sesame < 0 THEN 1 ELSE 0 END) AS refund_n,
+               ROUND(SUM(CASE WHEN a.sesame > 0 THEN a.sesame ELSE 0 END) / 100.0, 2) AS charge,
+               ROUND(SUM(CASE WHEN a.sesame < 0 THEN a.sesame ELSE 0 END) / 100.0, 2) AS refund,
+               ROUND(SUM(a.sesame) / 100.0, 2) AS net
+        FROM advance_posts a
+        JOIN stores st ON st.id = a.store_id
+        WHERE a.source='sesame' AND a.biz_date>=? AND a.biz_date<=? AND {clause}
+        GROUP BY a.store_id
+        ORDER BY net DESC, name
+        """,
+        [start.isoformat(), end.isoformat(), *params],
+    )
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        charge = float(row["charge"] or 0)
+        refund = float(row["refund"] or 0)
+        out.append(
+            {
+                "store_id": int(row["store_id"]),
+                "name": row["name"] or "",
+                "city": row["city"] or "",
+                "n": int(row["n"] or 0),
+                "charge_n": int(row["charge_n"] or 0),
+                "refund_n": int(row["refund_n"] or 0),
+                "charge": charge,
+                "refund": refund,
+                "refund_abs": round(abs(refund), 2),
+                "net": float(row["net"] or 0),
+            }
+        )
+    return out
+
+
+def sesame_week_totals(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    n = charge_n = refund_n = 0
+    charge = refund = net = 0.0
+    for row in rows:
+        n += int(row.get("n") or 0)
+        charge_n += int(row.get("charge_n") or 0)
+        refund_n += int(row.get("refund_n") or 0)
+        charge += float(row.get("charge") or 0)
+        refund += float(row.get("refund") or 0)
+        net += float(row.get("net") or 0)
+    return {
+        "n": n,
+        "charge_n": charge_n,
+        "refund_n": refund_n,
+        "charge": round(charge, 2),
+        "refund": round(refund, 2),
+        "refund_abs": round(abs(refund), 2),
+        "net": round(net, 2),
+        "stores": len(rows),
+    }
+
+
+def render_week_text(
+    rows: Sequence[Mapping[str, Any]],
+    totals: Mapping[str, Any],
+    start: date,
+    end: date,
+    city: str = "",
+) -> str:
+    city_bit = (city or "").replace("市", "") or "全店"
+    lines = [
+        f"【芝麻服务费】{week_label(start, end)} · {city_bit}",
+        f"净 {float(totals.get('net') or 0):.2f} 元 · 扣费 {int(totals.get('charge_n') or 0)} 笔 · 退款 {int(totals.get('refund_n') or 0)} 笔",
+        "",
+    ]
+    if not rows:
+        lines.append("本周还没有已导入的芝麻流水。")
+        return "\n".join(lines) + "\n"
+    for i, row in enumerate(rows, 1):
+        lines.append(
+            f"{i} {row.get('name') or '门店'}  {int(row.get('n') or 0)}笔  净{float(row.get('net') or 0):.2f}"
+        )
+    return "\n".join(lines) + "\n"
