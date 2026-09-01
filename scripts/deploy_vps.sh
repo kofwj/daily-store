@@ -28,6 +28,7 @@ docker compose ps
 PORT="${CADDY_PORT:-8099}"
 echo
 echo "容器内健康检查："
-curl -fsS "http://127.0.0.1:${PORT}/health"
+# caddy 刚重建时可能瞬时拒连：重试几次再判失败，避免误报部署失败中断 sync 尾部步骤
+curl -fsS --retry 5 --retry-delay 1 --retry-all-errors "http://127.0.0.1:${PORT}/health"
 echo
 echo "局域网打开：http://${APP_DOMAIN:-127.0.0.1}:${PORT}"
