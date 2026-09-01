@@ -363,6 +363,94 @@ def test_advance_cents_migration_is_idempotent(tmp_db):
     assert after == 3999  # 绝不重复转换
 
 
+def test_sesame_orders_upsert_stores_cents(tmp_db):
+    """芝麻订单入库：冻结金额按分存（与 advance 金额同口径）。"""
+    from app import db_core
+
+    with db.get_db() as conn:
+        db_core.sesame_orders_upsert(
+            conn,
+            [{"order_no": "o1", "store_code": "s1", "frozen": 500.0, "terms": 12, "order_title": "500档"}],
+            "2026-08-15 00:00:00",
+        )
+    with db.get_db() as conn:
+        row = conn.execute("SELECT frozen FROM sesame_orders WHERE order_no='o1'").fetchone()
+    assert int(row["frozen"]) == 50000
+    # 覆盖写（重新导入同一订单）仍按分存
+    with db.get_db() as conn:
+        db_core.sesame_orders_upsert(
+            conn,
+            [{"order_no": "o1", "store_code": "s1", "frozen": 1368.75, "terms": 3, "order_title": "1368档"}],
+            "2026-08-16 00:00:00",
+        )
+    with db.get_db() as conn:
+        row = conn.execute("SELECT frozen FROM sesame_orders WHERE order_no='o1'").fetchone()
+    assert int(row["frozen"]) == 136875
+
+
+def test_sesame_frozen_migration_is_idempotent(tmp_db):
+    """迁移 v15 重跑不会把分再乘 100。"""
+    from app import db_core
+
+    with db.get_db() as conn:
+        db_core.sesame_orders_upsert(
+            conn,
+            [{"order_no": "o1", "store_code": "s1", "frozen": 500.0, "terms": 12, "order_title": "500档"}],
+            "2026-08-15 00:00:00",
+        )
+        conn.execute("DELETE FROM schema_migrations WHERE version=15")
+        conn.commit()
+        before = conn.execute("SELECT frozen FROM sesame_orders WHERE order_no='o1'").fetchone()[0]
+    db_core.migrate()
+    with db.get_db() as conn:
+        after = conn.execute("SELECT frozen FROM sesame_orders WHERE order_no='o1'").fetchone()[0]
+    assert int(before) == 50000
+    assert int(after) == 50000  # 绝不重复转换
+
+
+def test_sesame_frozen_migration_converts_legacy_real(tmp_db):
+    """旧库 frozen 按元存（REAL 列）：迁移后转成整数分。"""
+    from app import db_core
+
+    with db.get_db() as conn:
+        conn.execute("DROP TABLE sesame_orders")
+        conn.execute(
+            """
+            CREATE TABLE sesame_orders (
+                order_no TEXT PRIMARY KEY,
+                store_code TEXT NOT NULL DEFAULT '',
+                frozen REAL NOT NULL DEFAULT 0,
+                terms INTEGER NOT NULL DEFAULT 0,
+                tier TEXT NOT NULL DEFAULT '',
+                category TEXT NOT NULL DEFAULT '',
+                order_title TEXT NOT NULL DEFAULT '',
+                imported_at TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO sesame_orders(order_no, store_code, frozen, terms, imported_at) VALUES "
+            "('legacy1', 's1', 500.0, 12, '2026-08-15 00:00:00'), "
+            "('legacy2', 's2', 1368.75, 3, '2026-08-15 00:00:00')"
+        )
+        conn.execute("DELETE FROM schema_migrations WHERE version=15")
+        # 真正的旧库从未跑过该迁移，也就没有 marker；fresh 库 init 时已写，这里要一并清掉
+        conn.execute("DELETE FROM app_meta WHERE key='sesame_frozen_cents_marker'")
+        conn.commit()
+    db_core.migrate()
+    with db.get_db() as conn:
+        rows = {
+            r["order_no"]: int(r["frozen"])
+            for r in conn.execute("SELECT order_no, frozen FROM sesame_orders")
+        }
+        marker = conn.execute(
+            "SELECT value FROM app_meta WHERE key='sesame_frozen_cents_marker'"
+        ).fetchone()
+    assert rows["legacy1"] == 50000
+    assert rows["legacy2"] == 136875
+    assert marker is not None
+
+
 def test_money_ok_tolerates_nonfinite():
     from app import db
 

@@ -233,6 +233,7 @@ MIGRATIONS: List[Tuple[int, str, str]] = [
     (12, "admin_pin_six_digits", "_admin_pin_six_digits"),
     (13, "bisuan_mobile_table", "_migrate_bisuan_mobile_from_settings"),
     (14, "expand_user_roles_city", "_expand_user_roles_city"),
+    (15, "sesame_frozen_to_cents", "_sesame_frozen_to_cents"),
 ]
 
 def _now() -> str:
@@ -363,6 +364,7 @@ def migrate() -> None:
             "_scale_bisuan_tenths": _scale_bisuan_tenths,
             "_admin_pin_six_digits": _admin_pin_six_digits,
             "_migrate_bisuan_mobile_from_settings": _bisuan_mobile_migration,
+            "_sesame_frozen_to_cents": _sesame_frozen_to_cents,
         }
         for version, name, fn_name in sorted(MIGRATIONS):
             if version in applied:
@@ -578,6 +580,39 @@ def _advance_amounts_to_cents(conn: sqlite3.Connection) -> None:
     )
 
 
+def _sesame_frozen_to_cents(conn: sqlite3.Connection) -> None:
+    """把芝麻订单「冻结金额」从元(REAL)迁到分(INTEGER)。已是整数分的库跳过。
+
+    幂等保证：app_meta 里的 sesame_frozen_cents_marker 写入后绝不重跑。
+    与 _advance_amounts_to_cents 同口径：一律 ×100，不靠采样值猜。
+    """
+    _ensure_app_meta(conn)
+    marker = conn.execute(
+        "SELECT value FROM app_meta WHERE key='sesame_frozen_cents_marker'"
+    ).fetchone()
+    if marker is not None:
+        return
+
+    cols = {row[1]: row[2] for row in conn.execute("PRAGMA table_info(sesame_orders)")}
+    if not cols:
+        return
+
+    if (cols.get("frozen") or "").upper() == "INTEGER":
+        # 新库列声明是 INTEGER：值已经是分，只写标记。
+        conn.execute(
+            "INSERT OR IGNORE INTO app_meta(key, value) VALUES('sesame_frozen_cents_marker','1')"
+        )
+        return
+
+    # 旧库 REAL 列：当初写入的就是元，一律 ×100 转分。
+    conn.execute(
+        "UPDATE sesame_orders SET frozen=CAST(ROUND(COALESCE(frozen, 0) * 100) AS INTEGER)"
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO app_meta(key, value) VALUES('sesame_frozen_cents_marker','1')"
+    )
+
+
 def _ensure_advance_posts(conn: sqlite3.Connection) -> None:
     """门店垫资流水：一笔一行，管理员兑付。"""
     conn.execute(
@@ -635,7 +670,7 @@ def _ensure_sesame_orders(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS sesame_orders (
             order_no TEXT PRIMARY KEY,
             store_code TEXT NOT NULL DEFAULT '',
-            frozen REAL NOT NULL DEFAULT 0,
+            frozen INTEGER NOT NULL DEFAULT 0,
             terms INTEGER NOT NULL DEFAULT 0,
             tier TEXT NOT NULL DEFAULT '',
             category TEXT NOT NULL DEFAULT '',
@@ -676,7 +711,8 @@ def sesame_orders_upsert(conn: sqlite3.Connection, orders: Sequence[Dict[str, An
             (
                 str(o.get("order_no") or "")[:40],
                 str(o.get("store_code") or "")[:40],
-                float(o.get("frozen") or 0),
+                # 冻结金额统一按分存（与 advance 金额同口径）；解析层保留元的展示值
+                int(round(float(o.get("frozen") or 0) * 100)),
                 int(o.get("terms") or 0),
                 str(o.get("tier") or "")[:20],
                 str(o.get("category") or "")[:20],

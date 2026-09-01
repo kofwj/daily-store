@@ -15,7 +15,7 @@ from flask import (
     url_for,
 )
 
-from . import broadcast, db, deal
+from . import broadcast, db, deal, policy
 from .helpers import (
     admin_required,
     broadcast_compact_sections,
@@ -53,36 +53,27 @@ def register_daily(app) -> None:
         with db.get_db() as conn:
             store, stores = pick_store(conn, request.values.get("store_id"))
             if store is None:
-                flash("还没有可填的门店，请管理员先建店", "error")
+                if not stores:
+                    flash("还没有可填的门店，请管理员先建店", "error")
                 return render_template("empty.html")
             biz_date = parse_date(request.values.get("date"))
             today = db.today_local()
             metrics = db.list_metrics(conn)
             if request.method == "POST":
                 role = g.user["role"]
-                if role == "readonly":
-                    flash("只读账号不能填日报", "error")
-                    return redirect(url_for("report", store_id=store["id"]))
                 filler_month = db.get_setting(conn, "filler_edit_month", "0") == "1"
-                same_month = biz_date.year == today.year and biz_date.month == today.month
-                if role != "admin":
-                    if biz_date > today:
-                        flash("非管理员不能填写未来日期。", "error")
-                        return redirect(url_for("today", store_id=store["id"], date=biz_date.isoformat()))
-                    if not same_month:
-                        flash("只能改本月的日报，历史跨月需找管理员修改。", "error")
-                        return redirect(url_for("today", store_id=store["id"]))
-                    if role == "city":
-                        pass  # 地市负责人：本月任意日期，不受「本月可改」开关和当天锁定限制
-                    elif biz_date != today and not filler_month:
-                        flash("只能改当天（管理员开启『本月可改』后可补录本月）。", "error")
-                        return redirect(url_for("today", store_id=store["id"]))
-                    elif db.is_locked(biz_date):
-                        flash(
-                            f"当天数据已锁定（{db.LOCK_HOUR:02d}:{db.LOCK_MINUTE:02d} 后不可改），找管理员解锁修改。",
-                            "error",
-                        )
-                        return redirect(url_for("today", store_id=store["id"], date=biz_date.isoformat()))
+                gate = policy.daily_edit_gate(
+                    role,
+                    biz_date,
+                    today,
+                    filler_month=filler_month,
+                    locked=db.is_locked(biz_date),
+                )
+                if not gate.allowed:
+                    flash(gate.reason, "error")
+                    if role == "readonly":
+                        return redirect(url_for("report", store_id=store["id"]))
+                    return redirect(url_for("today", store_id=store["id"], date=biz_date.isoformat()))
                 existing = db.get_report(conn, store["id"], biz_date)
                 if existing and existing["submitted_by"] and existing["submitted_by"] != g.user["id"] and role not in ("admin", "city"):
                     flash("该日已有其他人提交，覆盖前请与对方确认。", "error")
@@ -205,19 +196,13 @@ def register_daily(app) -> None:
                 biz_date=biz_date,
                 is_today=biz_date == today,
                 filler_month=filler_month,
-                can_edit=(
-                    g.user["role"] != "readonly"
-                    and (
-                        g.user["role"] == "admin"
-                        or (
-                            g.user["role"] == "city"
-                            and biz_date.year == today.year
-                            and biz_date.month == today.month
-                        )
-                        or biz_date == today
-                        or (filler_month and biz_date.year == today.year and biz_date.month == today.month)
-                    )
-                ),
+                can_edit=policy.daily_edit_gate(
+                    g.user["role"],
+                    biz_date,
+                    today,
+                    filler_month=filler_month,
+                    locked=db.is_locked(biz_date),
+                ).allowed,
                 grouped=grouped,
                 report=report,
                 broadcast_text=text,
@@ -233,6 +218,8 @@ def register_daily(app) -> None:
         with db.get_db() as conn:
             store, stores = pick_store(conn, request.values.get("store_id"))
             if store is None:
+                if not stores:
+                    flash("还没有可填的门店，请管理员先建店", "error")
                 return render_template("empty.html")
             values = deal.form_values(
                 request.form if request.method == "POST" else None,

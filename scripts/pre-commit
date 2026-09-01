@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 提交前 lint：对这个仓库跑 ruff check。ruff 未装则跳过并提示（不阻塞）。
+# 提交前 lint + 回归：ruff check → mypy（算钱模块）→ pytest 全量。
+# 工具未装则跳过并提示（不阻塞提交）。
 # 安装：ln -sf ../../scripts/pre-commit .git/hooks/pre-commit  (见 scripts/install_precommit.sh)
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 1
@@ -28,4 +29,13 @@ fi
 if [ -n "$MYPY" ]; then
   echo "→ mypy (算钱模块)"
   "$MYPY" || exit 1
+fi
+
+# 回归测试：全量用例必须在提交前通过。未建 .venv 或没装 pytest 时跳过（不阻塞）。
+# 用 python -m 运行，保证仓库根在 sys.path（.venv/bin/pytest 入口脚本拿不到）
+if [ -x "./.venv/bin/pytest" ]; then
+  echo "→ pytest（全量回归）"
+  ./.venv/bin/python -m pytest -q || exit 1
+else
+  echo "⚠️  .venv 里没有 pytest（python3 -m venv .venv && .venv/bin/pip install -r requirements.txt pytest），本次跳过测试"
 fi

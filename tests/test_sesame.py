@@ -1,11 +1,19 @@
 """芝麻服务费导入：解析、对店、去重、垫资联动、店员只读。"""
 
+from datetime import date
 from io import BytesIO
 
 import openpyxl
 from openpyxl import Workbook
 
 from app import db
+
+# 样本数据业务日：跟随机器当前月，避免跨月后「本月视图 / 本月合计」断言失配。
+# 取本月 15 号（月初则取今天，保证 ≤ 今天且在本月内）。
+_REF = date.today().replace(day=min(15, date.today().day))
+_REF_ISO = _REF.isoformat()
+_REF_MONTH = _REF.strftime("%Y%m")
+_MONTH_START = _REF.replace(day=1).isoformat()
 
 
 def _make_sesame_xlsx(rows):
@@ -31,30 +39,30 @@ def _sample_rows():
         [
             "1786774661473466851", "1786774661473466851", "江苏省", "示例市", "甲区",
             "JSCM_20250116110103117937984", "91320602MA7E6JC70A", "示例公司甲",
-            "JSCM_10000001", "示例甲店vivo专营店", "加盟店", "202608",
+            "JSCM_10000001", "示例甲店vivo专营店", "加盟店", _REF_MONTH,
             1368.00, -9.58, "处理成功",
-            "行业芝麻订单(1786774661473466851)服务费", "2026-08-15 14:19:38.0",
+            "行业芝麻订单(1786774661473466851)服务费", f"{_REF_ISO} 14:19:38.0",
         ],
         [
             "1786527145403143969_R", "1786527145403143969", "江苏省", "示例市", "乙区",
             "JSCM_20250116110103117937984", "91320602MA7E6JC70A", "示例公司甲",
-            "JSCM_10000004", "示例戊店vivo专卖店", "加盟店", "202608",
+            "JSCM_10000004", "示例戊店vivo专卖店", "加盟店", _REF_MONTH,
             1368.00, 9.58, "处理成功",
-            "行业芝麻订单(1786527145403143969)服务费退款", "2026-08-14 09:22:26.0",
+            "行业芝麻订单(1786527145403143969)服务费退款", f"{_REF_ISO} 09:22:26.0",
         ],
         [
             "1785792754901613702", "1785792754901613702", "江苏省", "邻市", "丙区",
             "JSCM_20250116120104683937984", "91321202MA7M941H5H", "示例公司乙",
-            "JSCM_10000003", "示例戊店带店vivo专卖店", "加盟店", "202608",
+            "JSCM_10000003", "示例戊店带店vivo专卖店", "加盟店", _REF_MONTH,
             792.00, -5.54, "处理成功",
-            "行业芝麻订单(1785792754901613702)服务费", "2026-08-15 19:21:56.0",
+            "行业芝麻订单(1785792754901613702)服务费", f"{_REF_ISO} 19:21:56.0",
         ],
         [
             "9999999999999999999", "9999999999999999999", "江苏省", "示例市", "丁区",
             "JSCM_20250116110103117937984", "91320602MA7E6JC70A", "示例公司甲",
-            "JSCM_99999999", "对不上的店", "加盟店", "202608",
+            "JSCM_99999999", "对不上的店", "加盟店", _REF_MONTH,
             480.00, -3.36, "处理成功",
-            "行业芝麻订单(9999999999999999999)服务费", "2026-08-10 10:00:00.0",
+            "行业芝麻订单(9999999999999999999)服务费", f"{_REF_ISO} 10:00:00.0",
         ],
     ]
 
@@ -79,7 +87,7 @@ def test_parse_sesame_xlsx(tmp_db):
     assert r0["mobile_code"] == "10000001"
     assert r0["amount"] == 9.58  # 取反
     assert r0["refund"] is False
-    assert r0["biz_date"] == "2026-08-15"
+    assert r0["biz_date"] == _REF_ISO
     r1 = rows[1]
     assert r1["amount"] == -9.58  # 退款取反为负
     assert r1["refund"] is True
@@ -149,7 +157,7 @@ def test_imported_rows_locked_from_filler(tmp_db, admin_client):
         data={
             "store_id": str(row["store_id"]),
             "advance_id": str(row["id"]),
-            "biz_date": "2026-08-15",
+            "biz_date": _REF_ISO,
             "phone": "13900000000",
             "rebate": "100",
         },
@@ -179,7 +187,7 @@ def test_sesame_week_bulletin_from_imported_rows(tmp_db, admin_client):
     data = _make_sesame_xlsx(_sample_rows())
     c.post("/advance/sesame/preview", data={"sesame_file": (BytesIO(data), "s.xlsx")})
     c.post("/advance/sesame/confirm", follow_redirects=True)
-    page = c.get("/advance/sesame/week?start=2026-08-10&end=2026-08-16").get_data(as_text=True)
+    page = c.get(f"/advance/sesame/week?start={_REF_ISO}&end={_REF_ISO}").get_data(as_text=True)
     assert "芝麻周报" in page
     assert "【芝麻直降办理周报】" in page
     # 通报表门店用全称
@@ -187,10 +195,10 @@ def test_sesame_week_bulletin_from_imported_rows(tmp_db, admin_client):
     assert "9.58" in page
     # 戊店只有退款：净笔数为 -1
     assert "邻市戊路vivo体验店" in page
-    city = c.get("/advance/sesame/week?start=2026-08-10&end=2026-08-16&city=示例市").get_data(as_text=True)
+    city = c.get(f"/advance/sesame/week?start={_REF_ISO}&end={_REF_ISO}&city=示例市").get_data(as_text=True)
     assert "示例市甲街vivo体验店" in city
     assert "邻市戊路vivo体验店" not in city
-    xlsx = c.get("/advance/sesame/week.xlsx?start=2026-08-10&end=2026-08-16")
+    xlsx = c.get(f"/advance/sesame/week.xlsx?start={_REF_ISO}&end={_REF_ISO}")
     assert xlsx.status_code == 200
     book = openpyxl.load_workbook(BytesIO(xlsx.get_data()))
     assert book.active["A1"].value == "门店"
@@ -242,7 +250,7 @@ def test_sesame_import_with_orders_and_tier_stats(tmp_db, admin_client):
     assert "档位覆盖" in page and "小天才直降" in page
     c.post("/advance/sesame/confirm", follow_redirects=True)
 
-    week = c.get("/advance/sesame/week?start=2026-08-10&end=2026-08-16").get_data(as_text=True)
+    week = c.get(f"/advance/sesame/week?start={_REF_ISO}&end={_REF_ISO}").get_data(as_text=True)
     # 通报表列：小天才 / AI手机 / 直降分档；退款列不再出现
     assert "芝麻直降办理周报" in week
     assert ">小天才</th>" in week and ">AI手机</th>" in week
@@ -254,7 +262,7 @@ def test_sesame_import_with_orders_and_tier_stats(tmp_db, admin_client):
     assert "【芝麻直降办理周报】" in textarea
     assert "净办理" in textarea and "退款" not in textarea
     # Excel 按档位 sheet：直降分档办理笔数（1900 档退款不算办理）
-    xlsx = c.get("/advance/sesame/week.xlsx?start=2026-08-10&end=2026-08-16")
+    xlsx = c.get(f"/advance/sesame/week.xlsx?start={_REF_ISO}&end={_REF_ISO}")
     book = openpyxl.load_workbook(BytesIO(xlsx.get_data()))
     assert "按档位" in book.sheetnames
     ws = book["按档位"]
@@ -270,16 +278,16 @@ def test_sesame_month_mode_and_filters(tmp_db, admin_client):
     data = _make_sesame_xlsx(_sample_rows())
     c.post("/advance/sesame/preview", data={"sesame_file": (BytesIO(data), "s.xlsx")})
     c.post("/advance/sesame/confirm", follow_redirects=True)
-    page = c.get("/advance/sesame/week?mode=month&start=2026-08-01").get_data(as_text=True)
+    page = c.get(f"/advance/sesame/week?mode=month&start={_MONTH_START}").get_data(as_text=True)
     assert "芝麻直降办理月报" in page
     assert "区域经理" in page  # 筛选器
     assert "按地市" not in page  # 独立分类表已撤，改筛选
     assert "示例市甲街vivo体验店" in page
     # 地市筛选仍可用
-    city = c.get("/advance/sesame/week?mode=month&start=2026-08-01&city=示例市").get_data(as_text=True)
+    city = c.get(f"/advance/sesame/week?mode=month&start={_MONTH_START}&city=示例市").get_data(as_text=True)
     assert "示例市甲街vivo体验店" in city
     assert "示例市丁路vivo体验店" not in city
-    xlsx = c.get("/advance/sesame/week.xlsx?mode=month&start=2026-08-01")
+    xlsx = c.get(f"/advance/sesame/week.xlsx?mode=month&start={_MONTH_START}")
     assert xlsx.status_code == 200
     book = openpyxl.load_workbook(BytesIO(xlsx.get_data()))
     assert "按地市" not in book.sheetnames
@@ -328,9 +336,9 @@ def test_import_more_than_200_rows_imports_all(tmp_db, admin_client):
             [
                 f"TESTEXT{i:08d}", f"TESTORD{i:08d}", "江苏省", "示例市", "甲区",
                 "JSCM_20250116110103117937984", "91320602MA7E6JC70A", "示例公司甲",
-                "JSCM_10000001", "示例甲店vivo专营店", "加盟店", "202608",
+                "JSCM_10000001", "示例甲店vivo专营店", "加盟店", _REF_MONTH,
                 1000.00, -5.00, "处理成功",
-                f"行业芝麻订单(TESTEXT{i:08d})服务费", "2026-08-15 14:19:38.0",
+                f"行业芝麻订单(TESTEXT{i:08d})服务费", f"{_REF_ISO} 14:19:38.0",
             ]
         )
     # 预览：ready_count 显示全量 230，预览表只展示 200

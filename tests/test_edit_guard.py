@@ -23,14 +23,21 @@ def test_filler_cannot_save_past_date(filler_client):
 
 def test_filler_month_switch_off_blocks_this_month_past(filler_client):
     sid = store_id()
-    # 本月 1 号（非当天），开关默认关 → 拒绝
-    past = date.today().replace(day=1)
+    today_d = date.today()
+    if today_d.day > 1:
+        # 本月 1 号（非当天），开关默认关 → 拒绝
+        past = today_d.replace(day=1)
+        expect = "只能改当天"
+    else:
+        # 今天就是 1 号：本月中旬没有「本月过去日」，用昨天（跨月）验证往日仍不可改
+        past = today_d - timedelta(days=1)
+        expect = "只能改本月"
     resp = filler_client.post(
         "/today",
         data={"store_id": str(sid), "date": past.isoformat(), "m_phone_sales": "5"},
         follow_redirects=True,
     )
-    assert "只能改当天" in resp.get_data(as_text=True)
+    assert expect in resp.get_data(as_text=True)
     with db.get_db() as conn:
         assert db.get_report(conn, sid, past) is None
 

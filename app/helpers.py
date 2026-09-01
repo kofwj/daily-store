@@ -416,16 +416,26 @@ def pick_store(conn, raw_id: Optional[str]):
     stores = accessible_stores(conn)
     if not stores:
         return None, []
+    writing = request.method in ("POST", "PUT", "PATCH", "DELETE")
     if raw_id:
         try:
             sid = int(raw_id)
         except ValueError:
             flash("店号无效，请重新选择门店。", "error")
             return None, stores  # 别静默落到第一家店，避免数据写错店
+        if not db.user_can_access_store(conn, g.user, sid):
+            if writing:
+                # 写路径绝不静默回退：宁可拒绝，也不能把表单写进另一家店
+                flash("店号不存在或没有这家店的权限，已拒绝保存。", "error")
+                return None, stores
+            sid = stores[0]["id"]  # 只读浏览：会话里的店号可能已失效，回退到第一家可见店
     else:
         sid = session.get("store_id") or stores[0]["id"]
-    if not db.user_can_access_store(conn, g.user, sid):
-        sid = stores[0]["id"]
+        if not db.user_can_access_store(conn, g.user, sid):
+            if writing:
+                flash("当前门店已不可访问，请重新选择门店后再保存。", "error")
+                return None, stores
+            sid = stores[0]["id"]
     session["store_id"] = sid
     store = db.get_store(conn, sid)
     return store, stores
