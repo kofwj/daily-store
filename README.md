@@ -73,9 +73,11 @@ export STORE_DAILY_SECRET='换成一段随机字符串'
 复制 `.env.example` 为 `.env`，填入主机和密钥后再同步：
 
 ```bash
-# 同步代码到生产机，不覆盖库
-./scripts/sync_to_vps.sh --no-db
+# 同步代码到生产机（默认不覆盖库）
+./scripts/sync_to_vps.sh
 ```
+
+本机 `data/store_daily.db` 是开发/测试库，**不是生产库**。日常部署只推代码。只有本机库确认是最新生产快照时，才用 `./scripts/sync_to_vps.sh --with-db`。
 
 机外备份读 `scripts/backup.env`（不进 git）。拷库必须用 SQLite backup API，禁止直接 `cp *.db`。代码 bundle 每次部署推一份到两台灾备机，自动只留最新 10 份（`CODE_BUNDLE_KEEP` 可改）；备份机是手机时脚本会先清本机 ARP，避免其「隐私 MAC」重连换地址后长时间连不上。
 

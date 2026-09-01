@@ -20,7 +20,7 @@
 ```bash
 cd /path/to/store-daily
 chmod +x scripts/sync_to_vps.sh scripts/deploy_vps.sh
-./scripts/sync_to_vps.sh
+./scripts/sync_to_vps.sh          # 默认不覆盖远端库
 ```
 
 `.env` 里填：
@@ -50,13 +50,13 @@ ssh-copy-id user@your-primary-host
 脚本会：
 
 1. 本机没有 `.env` 时自动生成，并写入随机 `STORE_DAILY_SECRET`
-2. `rsync` 代码、`.env`；加 `--no-db` 则不覆盖远端库
+2. `rsync` 代码、`.env`；**默认不覆盖远端库**
 3. SSH 到生产机跑 `docker compose up -d --build`
 
-之后改代码再跑同一条命令即可。远端已经有人填过数、不想被本机空库盖掉时：
+之后改代码再跑同一条命令即可。本机 `data/store_daily.db` 是过期测试库，**禁止**用它盖生产。真要推库必须显式：
 
 ```bash
-./scripts/sync_to_vps.sh --no-db
+./scripts/sync_to_vps.sh --with-db   # 仅当本机库就是最新生产快照
 ```
 
 8099 也被占了就改 `.env`：
@@ -119,7 +119,7 @@ CADDYFILE=./caddy/Caddyfile.tunnel
 APP_DOMAIN=daily.example.com
 ```
 
-隧道 Public Hostname 回源 `http://127.0.0.1:8099`（这是 **生产机本机回环**，和局域网直连不是一回事）。然后 `./scripts/sync_to_vps.sh --no-db`。
+隧道 Public Hostname 回源 `http://127.0.0.1:8099`（这是 **生产机本机回环**，和局域网直连不是一回事）。然后 `./scripts/sync_to_vps.sh`（默认不覆盖库）。
 
 ## 不要做的事
 

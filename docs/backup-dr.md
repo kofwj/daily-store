@@ -183,7 +183,7 @@ sqlite3 data/store_daily.db "SELECT COUNT(*) FROM stores; SELECT COUNT(*) FROM d
 
 | 动作 | 为什么 |
 |---|---|
-| `./scripts/sync_to_vps.sh` **带库**盖生产 | 本机空库/旧库会冲掉线上 |
+| `./scripts/sync_to_vps.sh --with-db` 用本机旧库盖生产 | 本机空库/测试库会冲掉线上。日常部署不要带 `--with-db` |
 | 直接 `cp *.db` 当备份 | WAL 模式可能不完整 |
 | 两台同时接店员写 | 数据分叉，无法合并 |
 | 把 `.env` 提交 git / 发群 | 会话密钥泄露等于谁都能伪造登录 |

@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # 从这台 Mac 把 store-daily 同步到局域网 VPS，并在那边重建容器。
 # 用法：
-#   ./scripts/sync_to_vps.sh
+#   ./scripts/sync_to_vps.sh                  # 只同步代码，不覆盖远端库（默认）
 #   VPS_USER=ubuntu ./scripts/sync_to_vps.sh
-#   ./scripts/sync_to_vps.sh --no-db          # 不覆盖远端已有日报库
+#   ./scripts/sync_to_vps.sh --no-db          # 同上，显式不覆盖库
+#   ./scripts/sync_to_vps.sh --with-db        # 用本机库覆盖远端（本机必须是最新生产库）
 #   ./scripts/sync_to_vps.sh --setup-only     # 只拷文件，不 docker compose
+#
+# 2026-09-01：本机 data/store_daily.db 是过期测试库，裸跑脚本曾把生产库盖掉。
+# 以后日常部署只推代码。真要推库必须显式 --with-db。
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-SYNC_DB=1
+SYNC_DB=0
 SETUP_ONLY=0
 SNAPSHOT_DB=""
 cleanup_snapshot() {
@@ -23,6 +27,7 @@ trap cleanup_snapshot EXIT
 for arg in "$@"; do
   case "$arg" in
     --no-db) SYNC_DB=0 ;;
+    --with-db) SYNC_DB=1 ;;
     --setup-only) SETUP_ONLY=1 ;;
     *)
       echo "未知参数: $arg" >&2
@@ -84,6 +89,11 @@ REMOTE="${VPS_USER}@${VPS_HOST}"
 SSH=(ssh -o ConnectTimeout=12 -o BatchMode=yes -p "${VPS_SSH_PORT}")
 RSYNC_SSH="ssh -o ConnectTimeout=12 -o BatchMode=yes -p ${VPS_SSH_PORT}"
 echo "同步到 ${REMOTE}:${VPS_DIR} (ssh ${VPS_SSH_PORT})"
+if [[ "${SYNC_DB}" == "1" ]]; then
+  echo "⚠ 将用本机 data/store_daily.db 覆盖远端生产库。本机必须是最新生产快照，否则会冲掉线上数据。" >&2
+else
+  echo "只同步代码，不覆盖远端库（默认）。真要推库：./scripts/sync_to_vps.sh --with-db"
+fi
 chmod +x scripts/write_version.sh
 ./scripts/write_version.sh
 
