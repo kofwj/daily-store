@@ -2,8 +2,14 @@
 
 from datetime import date, datetime, timedelta
 
-from app import db
+from app import db, db_core
 from tests.conftest import store_id
+
+
+def _freeze_lock_now(biz_date, now=None):
+    """用真实 is_locked 逻辑，把「现在」冻结到 23:30 —— 让锁定分支端到端可测。"""
+    t = date.today()
+    return db_core.is_locked(biz_date, now=datetime(t.year, t.month, t.day, 23, 30))
 
 
 def test_filler_cannot_save_past_date(filler_client):
@@ -96,9 +102,7 @@ def test_admin_can_save_past_date(admin_client):
 def test_locked_today_blocked_but_admin_ok(filler_client, monkeypatch):
     today_d = date.today()
     # 模拟锁定时间后的 now
-    monkeypatch.setattr(
-        db, "is_locked", lambda biz_date, now=None: biz_date == today_d
-    )
+    monkeypatch.setattr(db, "is_locked", _freeze_lock_now)
     sid = store_id()
     resp = filler_client.post(
         "/today",
@@ -112,7 +116,7 @@ def test_locked_today_blocked_but_admin_ok(filler_client, monkeypatch):
 
 def test_admin_override_lock(admin_client, monkeypatch):
     today_d = date.today()
-    monkeypatch.setattr(db, "is_locked", lambda biz_date, now=None: biz_date == today_d)
+    monkeypatch.setattr(db, "is_locked", _freeze_lock_now)
     sid = store_id()
     resp = admin_client.post(
         "/today",
@@ -193,7 +197,7 @@ def test_month_switch_does_not_unlock_today(client, monkeypatch):
     client.post("/login", data={"username": "alpha", "pin": "123456"})
     today_d = date.today()
     # 锁定今天
-    monkeypatch.setattr(db, "is_locked", lambda biz_date, now=None: biz_date == today_d)
+    monkeypatch.setattr(db, "is_locked", _freeze_lock_now)
     sid = store_id()
     resp = client.post(
         "/today",

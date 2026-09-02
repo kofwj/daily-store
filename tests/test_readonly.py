@@ -91,12 +91,12 @@ def test_readonly_cannot_write(client):
 
 def test_readonly_cannot_admin(client):
     _mk_readonly(client, username="rd_admin_block", store_code="store-alpha")
-    for path, flag in (
-        ("/board", "多店看板"),
-        ("/incentive", "月度考核"),
-        ("/edits", "修改审计"),
-        ("/logins", "登录日志"),
-        ("/advance/pay", "垫资兑付"),
+    for path in (
+        "/board",
+        "/incentive",
+        "/edits",
+        "/logins",
+        "/advance/pay",
     ):
         resp = client.get(path, follow_redirects=True)
         assert "需要管理员权限" in resp.get_data(as_text=True), path

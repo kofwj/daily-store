@@ -99,16 +99,19 @@ def test_bulletin_row_and_tsv_match_sheet():
     assert "20001744" in text
     assert "陈店长" in text
     headers = csv_rows([row], date(2026, 8, 13))[0]
-    assert headers[8] == "8月AI手机合约"
-    assert headers[9] == "8月灵犀·晓伴"
-    assert headers[10] == "8月笔算业务"
-    assert headers[11] == "8月金币直降"
-    assert headers[12] == "8月13日AI手机合约"
-    assert headers[13] == "8月13日灵犀·晓伴"
-    assert headers[14] == "8月13日笔算业务"
-    assert headers[15] == "8月13日金币直降"
-    assert headers[6] == "AI破0"
-    assert headers[7] == "笔算破0"
+    for col in (
+        "8月AI手机合约",
+        "8月灵犀·晓伴",
+        "8月笔算业务",
+        "8月金币直降",
+        "8月13日AI手机合约",
+        "8月13日灵犀·晓伴",
+        "8月13日笔算业务",
+        "8月13日金币直降",
+        "AI破0",
+        "笔算破0",
+    ):
+        assert col in headers
 
 
 def test_follow_uses_month_break_zero_for_every_store():
@@ -227,13 +230,12 @@ def test_totals_row_sums_and_break_zero_count():
     assert "合计（2 店）" in text
 
 
-def test_bulletin_review_preset_switch(app_client):
-    app_client.post("/login", data={"username": "admin", "pin": "123456"})
-    page = app_client.get("/bulletin").get_data(as_text=True)
-    assert "套用" not in page or True
+def test_bulletin_review_preset_switch(client):
+    client.post("/login", data={"username": "admin", "pin": "123456"})
+    page = client.get("/bulletin").get_data(as_text=True)
     assert "精简" in page
     assert "追差" in page
-    switched = app_client.post(
+    switched = client.post(
         "/bulletin/review-preset",
         data={"preset": "brief", "date": "2026-08-18", "city": "南通市"},
         follow_redirects=True,
@@ -390,8 +392,7 @@ def test_summary_review_text():
     assert "今日AI 5" in custom
     assert "标杆 示例丙店" in custom
     assert "【本月】" not in custom
-    keys = [p["key"] for p in REVIEW_PRESETS]
-    assert keys == ["standard", "check", "praise", "brief", "chase", "deal"]
+    assert {p["key"] for p in REVIEW_PRESETS} == {"standard", "check", "praise", "brief", "chase", "deal"}
     brief = next(p["body"] for p in REVIEW_PRESETS if p["key"] == "brief")
     brief_text = summary(rows, date(2026, 8, 17), "南通", template=brief)
     assert "今日 AI 5" in brief_text

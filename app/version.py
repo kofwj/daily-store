@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from functools import lru_cache
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -35,7 +36,9 @@ def _from_file() -> tuple[str, str, str]:
     return version, built, summary
 
 
+@lru_cache(maxsize=1)
 def _from_git() -> str:
+    """git 短哈希进程内不变，lru_cache 免每个请求 fork 一次 git。"""
     try:
         out = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -60,26 +63,13 @@ def _display(raw: str) -> str:
     return text
 
 
-_current_memo: tuple | None = None  # (mtime_ns, env, payload)
-
-
 def current() -> dict:
-    """VERSION 文件 + 环境变量很少变，按 mtime 缓存，免每个 HTML 请求读盘。"""
-    global _current_memo
+    """组合环境变量 / VERSION 文件 / git 哈希。文件很小，每次现读即可。"""
     env = _from_env()
-    path = _version_file()
-    try:
-        mtime = path.stat().st_mtime_ns
-    except OSError:
-        mtime = -1
-    if _current_memo is not None and _current_memo[0] == mtime and _current_memo[1] == env:
-        return dict(_current_memo[2])
     file_ver, built, summary = _from_file()
-    payload = {
+    return {
         "version": _display(env or file_ver or "V0.0.0"),
         "git": _from_git(),
         "built_at": built,
         "summary": summary,
     }
-    _current_memo = (mtime, env, payload)
-    return dict(payload)

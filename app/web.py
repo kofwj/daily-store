@@ -77,7 +77,7 @@ def create_app(*, testing: bool = False) -> Flask:
     app.config["SESSION_COOKIE_SECURE"] = secure
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=24)
     app.config["SESSION_REFRESH_EACH_REQUEST"] = True
-    if not testing and not secure and os.environ.get("STORE_DAILY_TESTING") != "1":
+    if not testing and not secure and os.environ.get("STORE_DAILY_SUPPRESS_INSECURE_WARNING", "0") != "1":
         app.logger.warning(
             "STORE_DAILY_SECURE 未开启：登录 Cookie 会走明文 HTTP。生产请走 TLS/Cloudflare，并设 STORE_DAILY_SECURE=1"
         )

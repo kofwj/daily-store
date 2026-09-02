@@ -6,8 +6,8 @@ from openpyxl import load_workbook
 from app import db, invoice
 
 
-def test_save_invoice_and_export_matches_template(app_client):
-    app_client.post("/login", data={"username": "admin", "pin": "123456"})
+def test_save_invoice_and_export_matches_template(client):
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
         store = conn.execute("SELECT * FROM stores WHERE active=1 ORDER BY id LIMIT 1").fetchone()
         sid = int(store["id"])
@@ -83,15 +83,15 @@ def test_save_invoice_and_export_matches_template(app_client):
     assert lease["D9"].value in (None, "")
 
 
-def test_invoice_page_admin_only_save_and_delete(app_client):
-    denied = app_client.get("/incentive/invoice")
+def test_invoice_page_admin_only_save_and_delete(client):
+    denied = client.get("/incentive/invoice")
     assert denied.status_code in (302, 401, 403)
-    app_client.post("/login", data={"username": "alpha", "pin": "123456"})
-    filler = app_client.get("/incentive/invoice")
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
+    filler = client.get("/incentive/invoice")
     assert filler.status_code in (302, 403)
-    app_client.post("/logout")
-    app_client.post("/login", data={"username": "admin", "pin": "123456"})
-    page = app_client.get("/incentive/invoice").get_data(as_text=True)
+    client.post("/logout")
+    client.post("/login", data={"username": "admin", "pin": "123456"})
+    page = client.get("/incentive/invoice").get_data(as_text=True)
     assert "开票申请" in page
     assert "服务费" in page
     assert "结算月" in page
@@ -100,10 +100,10 @@ def test_invoice_page_admin_only_save_and_delete(app_client):
     with db.get_db() as conn:
         sid = conn.execute("SELECT id FROM stores WHERE active=1 ORDER BY id LIMIT 1").fetchone()["id"]
         db.save_invoice_month(conn, sid, "2026-07", service=10, fee=2)
-    august = app_client.get("/incentive?month=2026-08").get_data(as_text=True)
+    august = client.get("/incentive?month=2026-08").get_data(as_text=True)
     assert "开票/房补是 2026-07" in august
     assert "month=2026-07" in august
-    saved = app_client.post(
+    saved = client.post(
         "/incentive/invoice",
         data={
             "month": "2026-06",
@@ -116,9 +116,9 @@ def test_invoice_page_admin_only_save_and_delete(app_client):
         follow_redirects=True,
     ).get_data(as_text=True)
     assert "开票申请已保存" in saved
-    xlsx = app_client.get(f"/incentive/invoice.xlsx?month=2026-06&store_id={sid}")
+    xlsx = client.get(f"/incentive/invoice.xlsx?month=2026-06&store_id={sid}")
     assert xlsx.status_code == 200
-    deleted = app_client.post(
+    deleted = client.post(
         "/incentive/invoice",
         data={"month": "2026-06", "store_id": str(sid), "action": "delete"},
         follow_redirects=True,
@@ -127,9 +127,9 @@ def test_invoice_page_admin_only_save_and_delete(app_client):
     with db.get_db() as conn:
         rec = db.get_invoice_month(conn, sid, "2026-06")
     assert rec["id"] == 0
-    edits = app_client.get("/edits?kind=invoice&days=7").get_data(as_text=True)
+    edits = client.get("/edits?kind=invoice&days=7").get_data(as_text=True)
     assert "新增开票" in edits
     assert "删除开票" in edits
     assert "服务费" in edits
-    settings = app_client.get("/settings?tab=invoice").get_data(as_text=True)
+    settings = client.get("/settings?tab=invoice").get_data(as_text=True)
     assert "开票主体" in settings

@@ -350,9 +350,9 @@ def test_wsgi_refuses_testing_env(monkeypatch):
         importlib.import_module("wsgi")
 
 
-def test_open_redirect_blocked(app_client):
+def test_open_redirect_blocked(client):
     """/login?next= 协议相对的站外地址必须丢弃，回到 /today。"""
-    resp = app_client.post(
+    resp = client.post(
         "/login?next=//evil.com",
         data={"username": "admin", "pin": "123456"},
         follow_redirects=True,

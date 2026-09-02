@@ -107,15 +107,15 @@ def test_effective_month_bisuan_is_single_caliber():
     assert effective_month_bisuan(None, 0) == 0
 
 
-def test_insights_page_admin_only(app_client):
-    denied = app_client.get("/insights")
+def test_insights_page_admin_only(client):
+    denied = client.get("/insights")
     assert denied.status_code in (302, 401, 403)
-    app_client.post("/login", data={"username": "alpha", "pin": "123456"})
-    filler = app_client.get("/insights")
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
+    filler = client.get("/insights")
     assert filler.status_code in (302, 403)
-    app_client.post("/logout")
-    app_client.post("/login", data={"username": "admin", "pin": "123456"})
-    page = app_client.get("/insights").get_data(as_text=True)
+    client.post("/logout")
+    client.post("/login", data={"username": "admin", "pin": "123456"})
+    page = client.get("/insights").get_data(as_text=True)
     assert "洞察" in page
     assert "本月时间进度" in page
     assert "本周 vs 上周" in page
@@ -125,7 +125,7 @@ def test_insights_page_admin_only(app_client):
     assert "只看有顾问" in page
     assert "insight-metric-h" in page
     assert "复制文案" not in page
-    filtered = app_client.get("/insights?advisor=yes").get_data(as_text=True)
+    filtered = client.get("/insights?advisor=yes").get_data(as_text=True)
     assert 'value="yes"' in filtered
 
 

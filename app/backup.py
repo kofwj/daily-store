@@ -200,7 +200,6 @@ def restore_bytes(data: bytes) -> Path:
             db_core._ensure_user_columns(conn)
             db_core._add_must_change_pin(conn)
             db_core.bump_all_session_epochs(conn)
-        db_core.invalidate_hot_settings()
     finally:
         try:
             tmp.unlink()

@@ -111,20 +111,20 @@ def test_city_rejects_cross_month_and_future(city_client):
     assert "非管理员不能填写未来日期" in resp.get_data(as_text=True)
 
 
-def test_city_can_overwrite_other_submission(app_client):
+def test_city_can_overwrite_other_submission(client):
     """店员已提交的日报，地市负责人可直接覆盖。"""
     day = date.today().isoformat()
     sid = _stores()[0]["id"]
-    login(app_client, "alpha")  # 店员 alpha 先提交
-    app_client.post(
+    login(client, "alpha")  # 店员 alpha 先提交
+    client.post(
         "/today",
         data={"store_id": str(sid), "date": day, "m_phone_sales": "1"},
         follow_redirects=True,
     )
-    app_client.post("/logout")
+    client.post("/logout")
     make_city_user()
-    login(app_client, "cityboss", "654321")
-    resp = app_client.post(
+    login(client, "cityboss", "654321")
+    resp = client.post(
         "/today",
         data={"store_id": str(sid), "date": day, "m_phone_sales": "9"},
         follow_redirects=True,

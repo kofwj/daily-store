@@ -1174,40 +1174,23 @@ def get_setting(conn: sqlite3.Connection, key: str, default: str = "") -> str:
     return row["value"] if row else default
 
 
-# 页头每次都读的几个 setting：按库路径 + data_version 缓存。
-# 别的 worker 一提交，本连接 PRAGMA data_version 会变，不会跨进程读到过期值。
+# 页头每次都读的几个 setting。单行主键点查微秒级，直接现读，不缓存。
 _HOT_SETTING_KEYS = ("brand_mark", "brand_kicker", "brand_title", "policy_require_read")
-_hot_settings_memo: Dict[str, Tuple[int, Dict[str, str]]] = {}
-
-
-def invalidate_hot_settings() -> None:
-    _hot_settings_memo.clear()
 
 
 def hot_settings(conn: sqlite3.Connection) -> Dict[str, str]:
-    path = str(DB_PATH)
-    try:
-        ver = int(conn.execute("PRAGMA data_version").fetchone()[0])
-    except (TypeError, ValueError, sqlite3.Error):
-        ver = 0
-    hit = _hot_settings_memo.get(path)
-    if hit is not None and hit[0] == ver:
-        return dict(hit[1])
     placeholders = ",".join("?" * len(_HOT_SETTING_KEYS))
     rows = conn.execute(
         f"SELECT key, value FROM app_meta WHERE key IN ({placeholders})",
         _HOT_SETTING_KEYS,
     )
-    data = {str(row[0]): str(row[1] or "") for row in rows}
-    _hot_settings_memo[path] = (ver, data)
-    return dict(data)
+    return {str(row[0]): str(row[1] or "") for row in rows}
 
 def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
     conn.execute(
         "INSERT INTO app_meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         (key, value),
     )
-    invalidate_hot_settings()
 
 def _reset_filler_pins_once(conn: sqlite3.Connection) -> None:
     done = conn.execute(
@@ -1636,26 +1619,24 @@ def month_cum_through_many(
     """多店整月累计一条 SQL 查完（结算/考核/看板用），语义同逐店调 month_cum_through。
 
     返回里只有库里有值的指标代码，取数方一律 .get(code, 0)。
-    月内 daily_facts 规模有限，整月聚合后按 store_ids 过滤，避免动态拼 IN 子句。
     """
-    allowed = {int(i) for i in (store_ids or ())}
-    if not allowed:
+    if not store_ids:
         return {}
     start, end = month_bounds(biz_date)
+    in_clause, ids = store_in_clause("store_id", store_ids)
     out: Dict[int, Dict[str, int]] = {}
     rows = conn.execute(
-        """
+        f"""
         SELECT store_id, metric_code, SUM(day_value) AS total
         FROM daily_facts
-        WHERE biz_date>=? AND biz_date<=?
+        WHERE biz_date>=? AND biz_date<=? AND {in_clause}
         GROUP BY store_id, metric_code
         """,
-        (start, end),
+        (start, end, *ids),
     )
     for row in rows:
         sid = int(row["store_id"])
-        if sid in allowed:
-            out.setdefault(sid, {})[row["metric_code"]] = int(row["total"] or 0)
+        out.setdefault(sid, {})[row["metric_code"]] = int(row["total"] or 0)
     return out
 
 def get_report(conn: sqlite3.Connection, store_id: int, biz_date: date) -> Optional[sqlite3.Row]:
