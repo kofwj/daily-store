@@ -47,7 +47,7 @@ def test_render_matches_wechat_log():
     assert text.startswith("8月13日\n示例戊店\n")
     assert "当天手机销量：日1，累13" in text
     assert "查询身份证数：日1，累4" in text
-    assert "\n重点业务\n比算新增：日0.0，累0.5\n比算新增[高]：日0.3，累0.3\n" in text
+    assert "\n重点业务\n比算新增：日0.0，累0.5\n比算新增[高]：日0.3，累0.3\nAi手机合约：日0，累0\n灵犀·晓伴：日0，累0\n" in text
     assert "\n新增类\n安心/副卡：日0，累0\n其他卡类：日0，累5\n" in text
     assert "\n家庭类\n宽带：日3，累10\n" in text
     assert "电视会员：日0，累0" in text
@@ -116,9 +116,10 @@ def test_metric_codes_cover_all_seed_items():
     assert "tv_member" in metric_codes()
     assert "broadband_renew" in metric_codes()
     assert "wifi" in metric_codes()
+    assert "lingxi_xiaoban" in metric_codes()
     assert "coin_cut_new" not in metric_codes()
     assert "coin_cut" not in metric_codes()
-    assert len(metric_codes()) == 41
+    assert len(metric_codes()) == 42
 
 
 def test_broadcast_rolls_coin_cut_parts_into_one_line():
@@ -140,6 +141,26 @@ def test_broadcast_rolls_coin_cut_parts_into_one_line():
     assert "芝麻免充" not in text
     assert "全品类" not in text
     assert "小天才直降" not in text
+
+
+def test_today_form_has_lingxi_xiaoban_under_ai_contract(admin_client):
+    page = admin_client.get("/today").get_data(as_text=True)
+    ai = page.find("Ai手机合约")
+    lx = page.find("灵犀·晓伴")
+    assert ai != -1 and lx != -1 and ai < lx
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+    from datetime import date as _date
+
+    day = _date.today().isoformat()
+    saved = admin_client.post(
+        "/today",
+        data={"store_id": str(sid), "date": day, "m_lingxi_xiaoban": "2"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "灵犀·晓伴：日2，累2" in saved
+    with db.get_db() as conn:
+        assert db.day_values(conn, sid, _date.today())["lingxi_xiaoban"] == 2
 
 
 def test_broadcast_compact_is_admin_setting(admin_client):
