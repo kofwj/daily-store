@@ -575,7 +575,7 @@ table.data.insight-stores .insight-metric {
   font-size: 13px; color: #334155; margin: 0 0 14px; text-align: center;
 }
 .shot-preview { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
-table.bulletin { border-collapse: collapse; min-width: 980px; font-size: 14px; color: #111827; }
+table.bulletin { border-collapse: collapse; min-width: 1120px; font-size: 14px; color: #111827; }
 table.bulletin th, table.bulletin td {
   border: 1px solid #d1d5db;
   padding: 8px 10px;

@@ -84,8 +84,8 @@
       <tr>
         <th colspan="6" class="g-profile">门店概况</th>
         <th colspan="2" class="g-follow">跟进</th>
-        <th colspan="3" class="g-month">{{ month_label }}</th>
-        <th colspan="3" class="g-day">{{ day_label }}</th>
+        <th colspan="4" class="g-month">{{ month_label }}</th>
+        <th colspan="4" class="g-day">{{ day_label }}</th>
       </tr>
       <tr>
         <th class="g-profile">大区</th>
@@ -97,9 +97,11 @@
         <th class="g-follow">AI破0</th>
         <th class="g-follow">笔算破0</th>
         <th class="g-month">AI手机合约</th>
+        <th class="g-month">灵犀·晓伴</th>
         <th class="g-month">笔算业务{% if mobile_asof_head %}<div class="bisuan-asof-head">{{ mobile_asof_head }}</div>{% endif %}</th>
         <th class="g-month">金币直降</th>
         <th class="g-day">AI手机合约</th>
+        <th class="g-day">灵犀·晓伴</th>
         <th class="g-day">笔算业务</th>
         <th class="g-day">金币直降</th>
       </tr>
@@ -116,9 +118,11 @@
         <td class="{{ 'flag-yes' if row.follow_ai else 'flag-no' }}">{{ '✓' if row.follow_ai else '❌' }}</td>
         <td class="{{ 'flag-yes' if row.follow_bisuan else 'flag-no' }}">{{ '✓' if row.follow_bisuan else '❌' }}</td>
         <td class="scale" style="background:{{ row.month_ai_color }}">{{ row.month_ai_text }}</td>
+        <td class="scale" style="background:{{ row.month_lingxi_color }}">{{ row.month_lingxi_text }}</td>
         <td class="scale{% if row.month_bisuan_gap_class %} {{ row.month_bisuan_gap_class }}-cell{% endif %}" style="background:{{ row.month_bisuan_color }}">{{ row.month_bisuan_text }}{% if row.month_bisuan_mobile %}<span class="bisuan-official {{ row.month_bisuan_gap_class }}" title="上报同期{{ row.month_bisuan_sys_asof or row.month_bisuan_text }} / 移{{ row.month_bisuan_mobile }}">移{{ row.month_bisuan_mobile }}{% if row.month_bisuan_diff_signed and row.month_bisuan_diff_signed != '0' and row.month_bisuan_diff_signed != '0.0' %} {{ row.month_bisuan_diff_signed }}{% endif %}</span>{% endif %}</td>
         <td class="scale" style="background:{{ row.month_coin_color }}">{{ row.month_coin_text }}</td>
         <td class="scale" style="background:{{ row.day_ai_color }}">{{ row.day_ai_text }}</td>
+        <td class="scale" style="background:{{ row.day_lingxi_color }}">{{ row.day_lingxi_text }}</td>
         <td class="scale" style="background:{{ row.day_bisuan_color }}">{{ row.day_bisuan_text }}</td>
         <td class="scale" style="background:{{ row.day_coin_color }}">{{ row.day_coin_text }}</td>
       </tr>
@@ -131,9 +135,11 @@
         <td class="{{ 'flag-yes' if totals.follow_ai else 'flag-no' }}">{{ totals.follow_ai_text }}</td>
         <td class="{{ 'flag-yes' if totals.follow_bisuan else 'flag-no' }}">{{ totals.follow_bisuan_text }}</td>
         <td class="total-num">{{ totals.month_ai_text }}</td>
+        <td class="total-num">{{ totals.month_lingxi_text }}</td>
         <td class="total-num">{{ totals.month_bisuan_text }}</td>
         <td class="total-num">{{ totals.month_coin_text }}</td>
         <td class="total-num">{{ totals.day_ai_text }}</td>
+        <td class="total-num">{{ totals.day_lingxi_text }}</td>
         <td class="total-num">{{ totals.day_bisuan_text }}</td>
         <td class="total-num">{{ totals.day_coin_text }}</td>
       </tr>

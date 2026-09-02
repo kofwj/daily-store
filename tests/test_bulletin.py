@@ -100,11 +100,13 @@ def test_bulletin_row_and_tsv_match_sheet():
     assert "陈店长" in text
     headers = csv_rows([row], date(2026, 8, 13))[0]
     assert headers[8] == "8月AI手机合约"
-    assert headers[9] == "8月笔算业务"
-    assert headers[10] == "8月金币直降"
-    assert headers[11] == "8月13日AI手机合约"
-    assert headers[12] == "8月13日笔算业务"
-    assert headers[13] == "8月13日金币直降"
+    assert headers[9] == "8月灵犀·晓伴"
+    assert headers[10] == "8月笔算业务"
+    assert headers[11] == "8月金币直降"
+    assert headers[12] == "8月13日AI手机合约"
+    assert headers[13] == "8月13日灵犀·晓伴"
+    assert headers[14] == "8月13日笔算业务"
+    assert headers[15] == "8月13日金币直降"
     assert headers[6] == "AI破0"
     assert headers[7] == "笔算破0"
 
@@ -239,6 +241,27 @@ def test_bulletin_review_preset_switch(app_client):
     assert "复盘模板已切换" in switched or "精简" in switched
 
 
+def test_bulletin_page_shows_lingxi_day_and_month(admin_client):
+    from datetime import date as _date
+
+    day = _date.today()
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+    admin_client.post(
+        "/today",
+        data={
+            "store_id": str(sid),
+            "date": day.isoformat(),
+            "m_lingxi_xiaoban": "3",
+            "m_ai_contract": "1",
+        },
+        follow_redirects=True,
+    )
+    page = admin_client.get(f"/bulletin?date={day.isoformat()}").get_data(as_text=True)
+    assert page.count("灵犀·晓伴") >= 2
+    assert page.count('class="total-num">3</td>') >= 2
+
+
 def test_bulletin_export_xlsx(client):
     """管理员通报表导出为 .xlsx，旧 /bulletin.csv 重定向到新地址。"""
     import io
@@ -274,6 +297,7 @@ def test_bulletin_export_xlsx(client):
     header = [c.value for c in ws[1]]
     assert header[1] == "地市" and header[3] == "移动编码"
     assert "区域经理" in header
+    assert any(h and "灵犀" in str(h) for h in header)
     # 旧 CSV 链接现在重定向到 .xlsx
     r2 = client.get(f"/bulletin.csv?date={biz_date}")
     assert r2.status_code in (302, 200)

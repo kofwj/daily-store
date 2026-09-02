@@ -154,6 +154,8 @@ def build_row(
     month_bisuan: int,
     day_coin: int = 0,
     month_coin: int = 0,
+    day_lingxi: int = 0,
+    month_lingxi: int = 0,
     submitted: bool,
     month_bisuan_mobile: Any = None,
     month_bisuan_asof: Any = None,
@@ -178,15 +180,19 @@ def build_row(
         "follow_bisuan_text": yn(follow_bisuan),
         "month_coin": month_coin,
         "month_ai": month_ai,
+        "month_lingxi": month_lingxi,
         "month_bisuan": month_bisuan,
         "day_coin": day_coin,
         "day_ai": day_ai,
+        "day_lingxi": day_lingxi,
         "day_bisuan": day_bisuan,
         "month_coin_text": fmt_metric("coin_cut_old", month_coin),
         "month_ai_text": fmt_metric("ai_contract", month_ai),
+        "month_lingxi_text": fmt_metric("lingxi_xiaoban", month_lingxi),
         "month_bisuan_text": fmt_metric("bisuan", month_bisuan),
         "day_coin_text": fmt_metric("coin_cut_old", day_coin),
         "day_ai_text": fmt_metric("ai_contract", day_ai),
+        "day_lingxi_text": fmt_metric("lingxi_xiaoban", day_lingxi),
         "day_bisuan_text": fmt_metric("bisuan", day_bisuan),
         "ai_zero": month_ai <= 0,
         "bisuan_zero": month_bisuan <= 0,
@@ -195,6 +201,7 @@ def build_row(
         "submitted": submitted,
         "month_coin_color": "",
         "month_ai_color": "",
+        "month_lingxi_color": "",
         "month_bisuan_color": "",
         # 移 = 移动取数；asof = 取数截止日；sys_asof = 上报同期（1号~截止日）
         "month_bisuan_mobile": "" if month_bisuan_mobile in (None, "") else fmt_metric("bisuan", month_bisuan_mobile),
@@ -209,6 +216,7 @@ def build_row(
         "month_bisuan_gap_class": "",
         "day_coin_color": "",
         "day_ai_color": "",
+        "day_lingxi_color": "",
         "day_bisuan_color": "",
     }
 
@@ -217,14 +225,24 @@ def apply_scales(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     max_month = max(
         [0]
         + [
-            max(int(r["month_ai"]), int(r["month_bisuan"]), int(r.get("month_coin") or 0))
+            max(
+                int(r["month_ai"]),
+                int(r.get("month_lingxi") or 0),
+                int(r["month_bisuan"]),
+                int(r.get("month_coin") or 0),
+            )
             for r in rows
         ]
     )
     max_day = max(
         [0]
         + [
-            max(int(r["day_ai"]), int(r["day_bisuan"]), int(r.get("day_coin") or 0))
+            max(
+                int(r["day_ai"]),
+                int(r.get("day_lingxi") or 0),
+                int(r["day_bisuan"]),
+                int(r.get("day_coin") or 0),
+            )
             for r in rows
         ]
     )
@@ -263,16 +281,20 @@ def apply_scales(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             wait = ""
             row["month_coin_color"] = wait
             row["month_ai_color"] = wait
+            row["month_lingxi_color"] = wait
             row["month_bisuan_color"] = wait
             row["day_coin_color"] = wait
             row["day_ai_color"] = wait
+            row["day_lingxi_color"] = wait
             row["day_bisuan_color"] = wait
             continue
         row["month_coin_color"] = scale_color(int(row.get("month_coin") or 0), max_month, "month")
         row["month_ai_color"] = scale_color(row["month_ai"], max_month, "month")
+        row["month_lingxi_color"] = scale_color(int(row.get("month_lingxi") or 0), max_month, "month")
         row["month_bisuan_color"] = scale_color(row["month_bisuan"], max_month, "month")
         row["day_coin_color"] = scale_color(int(row.get("day_coin") or 0), max_day, "day")
         row["day_ai_color"] = scale_color(row["day_ai"], max_day, "day")
+        row["day_lingxi_color"] = scale_color(int(row.get("day_lingxi") or 0), max_day, "day")
         row["day_bisuan_color"] = scale_color(row["day_bisuan"], max_day, "day")
     return rows
 
@@ -281,9 +303,11 @@ def totals_row(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     n = len(rows)
     month_coin = sum(int(r.get("month_coin") or 0) for r in rows)
     month_ai = sum(int(r["month_ai"] or 0) for r in rows)
+    month_lingxi = sum(int(r.get("month_lingxi") or 0) for r in rows)
     month_bisuan = sum(int(r["month_bisuan"] or 0) for r in rows)
     day_coin = sum(int(r.get("day_coin") or 0) for r in rows)
     day_ai = sum(int(r["day_ai"] or 0) for r in rows)
+    day_lingxi = sum(int(r.get("day_lingxi") or 0) for r in rows)
     day_bisuan = sum(int(r["day_bisuan"] or 0) for r in rows)
     ai_ok = sum(1 for r in rows if r.get("follow_ai"))
     bisuan_ok = sum(1 for r in rows if r.get("follow_bisuan"))
@@ -340,12 +364,15 @@ def totals_row(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "follow_bisuan_text": f"{bisuan_ok}/{n}" if n else "0/0",
         "month_coin": month_coin,
         "month_ai": month_ai,
+        "month_lingxi": month_lingxi,
         "month_bisuan": month_bisuan,
         "day_coin": day_coin,
         "day_ai": day_ai,
+        "day_lingxi": day_lingxi,
         "day_bisuan": day_bisuan,
         "month_coin_text": fmt_metric("coin_cut_old", month_coin),
         "month_ai_text": fmt_metric("ai_contract", month_ai),
+        "month_lingxi_text": fmt_metric("lingxi_xiaoban", month_lingxi),
         "month_bisuan_text": month_bisuan_cell,
         "month_bisuan_mobile": mobile_text,
         "month_bisuan_sys_asof": sys_asof_text,
@@ -354,12 +381,15 @@ def totals_row(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "month_bisuan_diff_signed": mobile_diff_signed,
         "day_coin_text": fmt_metric("coin_cut_old", day_coin),
         "day_ai_text": fmt_metric("ai_contract", day_ai),
+        "day_lingxi_text": fmt_metric("lingxi_xiaoban", day_lingxi),
         "day_bisuan_text": fmt_metric("bisuan", day_bisuan),
         "month_coin_color": scale_color(month_coin, month_coin or 1, "month"),
         "month_ai_color": scale_color(month_ai, month_ai or 1, "month"),
+        "month_lingxi_color": scale_color(month_lingxi, month_lingxi or 1, "month"),
         "month_bisuan_color": scale_color(month_bisuan, month_bisuan or 1, "month"),
         "day_coin_color": scale_color(day_coin, day_coin or 1, "day"),
         "day_ai_color": scale_color(day_ai, day_ai or 1, "day"),
+        "day_lingxi_color": scale_color(day_lingxi, day_lingxi or 1, "day"),
         "day_bisuan_color": scale_color(day_bisuan, day_bisuan or 1, "day"),
     }
 
@@ -385,7 +415,9 @@ def tsv(rows: Sequence[Mapping[str, Any]], biz_date: date) -> str:
         month_label(biz_date),
         "",
         "",
+        "",
         day_label(biz_date),
+        "",
         "",
         "",
     ]
@@ -399,9 +431,11 @@ def tsv(rows: Sequence[Mapping[str, Any]], biz_date: date) -> str:
         "AI破0",
         "笔算破0",
         "AI手机合约",
+        "灵犀·晓伴",
         "笔算业务",
         "金币直降",
         "AI手机合约",
+        "灵犀·晓伴",
         "笔算业务",
         "金币直降",
     ]
@@ -422,9 +456,11 @@ def tsv(rows: Sequence[Mapping[str, Any]], biz_date: date) -> str:
                     total["follow_ai_text"],
                     total["follow_bisuan_text"],
                     total["month_ai_text"],
+                    total["month_lingxi_text"],
                     total["month_bisuan_text"],
                     total["month_coin_text"],
                     total["day_ai_text"],
+                    total["day_lingxi_text"],
                     total["day_bisuan_text"],
                     total["day_coin_text"],
                 ]
@@ -445,9 +481,11 @@ def _tsv_data_line(row: Mapping[str, Any]) -> str:
             str(row.get("follow_ai_text") or ""),
             str(row.get("follow_bisuan_text") or ""),
             str(row.get("month_ai_text") or ""),
+            str(row.get("month_lingxi_text") or ""),
             str(row.get("month_bisuan_text") or ""),
             str(row.get("month_coin_text") or ""),
             str(row.get("day_ai_text") or ""),
+            str(row.get("day_lingxi_text") or ""),
             str(row.get("day_bisuan_text") or ""),
             str(row.get("day_coin_text") or ""),
         ]
@@ -466,9 +504,11 @@ def csv_rows(rows: Sequence[Mapping[str, Any]], biz_date: date) -> List[List[str
             "AI破0",
             "笔算破0",
             f"{month_label(biz_date)}AI手机合约",
+            f"{month_label(biz_date)}灵犀·晓伴",
             f"{month_label(biz_date)}笔算业务",
             f"{month_label(biz_date)}金币直降",
             f"{day_label(biz_date)}AI手机合约",
+            f"{day_label(biz_date)}灵犀·晓伴",
             f"{day_label(biz_date)}笔算业务",
             f"{day_label(biz_date)}金币直降",
         ],
@@ -483,9 +523,11 @@ def csv_rows(rows: Sequence[Mapping[str, Any]], biz_date: date) -> List[List[str
                 row["follow_ai_text"],
                 row["follow_bisuan_text"],
                 row["month_ai_text"],
+                row["month_lingxi_text"],
                 row["month_bisuan_text"],
                 row["month_coin_text"],
                 row["day_ai_text"],
+                row["day_lingxi_text"],
                 row["day_bisuan_text"],
                 row["day_coin_text"],
             ]
@@ -505,9 +547,11 @@ def csv_rows(rows: Sequence[Mapping[str, Any]], biz_date: date) -> List[List[str
                 total["follow_ai_text"],
                 total["follow_bisuan_text"],
                 total["month_ai_text"],
+                total["month_lingxi_text"],
                 total["month_bisuan_text"],
                 total["month_coin_text"],
                 total["day_ai_text"],
+                total["day_lingxi_text"],
                 total["day_bisuan_text"],
                 total["day_coin_text"],
             ]

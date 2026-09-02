@@ -93,6 +93,7 @@ def _bulletin_rows(conn, stores, biz_date: date):
             continue
         pairs = values_for_broadcast(conn, store["id"], biz_date)
         day_ai, month_ai = pairs.get("ai_contract", (0, 0))
+        day_lingxi, month_lingxi = pairs.get("lingxi_xiaoban", (0, 0))
         day_bisuan = bulletin.bisuan_total(
             {"bisuan": pairs.get("bisuan", (0, 0))[0], "bisuan_high": pairs.get("bisuan_high", (0, 0))[0]}
         )
@@ -116,6 +117,8 @@ def _bulletin_rows(conn, stores, biz_date: date):
                 store,
                 day_ai=day_ai,
                 month_ai=month_ai,
+                day_lingxi=day_lingxi,
+                month_lingxi=month_lingxi,
                 day_bisuan=day_bisuan,
                 month_bisuan=month_bisuan,
                 day_coin=day_coin,
