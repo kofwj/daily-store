@@ -30,6 +30,9 @@ def tmp_db(tmp_path, monkeypatch):
     monkeypatch.setenv("STORE_DAILY_TESTING", "1")
     # 生产态 create_app 不自检 SECURE 告警；测试里噪声日志一并关掉
     monkeypatch.setenv("STORE_DAILY_SUPPRESS_INSECURE_WARNING", "1")
+    # 测试不继承宿主的 STORE_DAILY_SECURE：deploy 脚本会 source .env，泄漏的 SECURE=1
+    # 把 PREFERRED_URL_SCHEME 顶成 https，CSRF 同源 referrer 用例就会失配。测试必须显式控制。
+    monkeypatch.delenv("STORE_DAILY_SECURE", raising=False)
     # 测试一律用示例店，避免加载 stores_seed_local 里的真实门店
     monkeypatch.setenv("STORE_DAILY_SAMPLE_SEED", "1")
     # DB_PATH/DATA_DIR 真正被读的地方是 db_core.connect()（模块级全局），
