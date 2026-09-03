@@ -1854,6 +1854,25 @@ body.sp-open { overflow: hidden; }
   border: 1px solid #fedf89;
 }
 .miss-chip:hover { background: #ffefc7; color: #93370d; }
+.adv-month-inbox summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.adv-month-inbox summary::-webkit-details-marker { display: none; }
+.adv-sum-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--warn-bg);
+  color: var(--warn);
+  border: 1px solid #fedf89;
+  font-size: 13px;
+  font-weight: 600;
+}
+.adv-month-inbox:not([open]) .adv-sum-btn::before { content: '▸ '; }
+.adv-month-inbox[open] .adv-sum-btn::before { content: '▾ '; }
 .pager {
   display: flex;
   align-items: center;

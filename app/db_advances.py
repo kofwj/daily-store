@@ -343,8 +343,8 @@ def list_all_advances(
     )
 
 
-def advance_today_inbox(conn: sqlite3.Connection, day: date) -> List[sqlite3.Row]:
-    """当天未兑付：按店汇总，管理员用来看谁交了要兑。"""
+def advance_inbox(conn: sqlite3.Connection, start: date, end: date) -> List[sqlite3.Row]:
+    """区间内未兑付按店汇总，管理员看谁有待兑。"""
     return list(
         conn.execute(
             """
@@ -355,13 +355,18 @@ def advance_today_inbox(conn: sqlite3.Connection, day: date) -> List[sqlite3.Row
                    ROUND(SUM(a.broadband + a.rebate + a.other + a.sesame) / 100.0, 2) AS total
             FROM advance_posts a
             JOIN stores st ON st.id = a.store_id
-            WHERE a.biz_date=? AND a.paid=0
+            WHERE a.biz_date>=? AND a.biz_date<=? AND a.paid=0
             GROUP BY a.store_id
             ORDER BY st.sort_order, st.id
             """,
-            (day.isoformat(),),
+            (start.isoformat(), end.isoformat()),
         )
     )
+
+
+def advance_today_inbox(conn: sqlite3.Connection, day: date) -> List[sqlite3.Row]:
+    """当天未兑付：按店汇总，管理员用来看谁交了要兑。"""
+    return advance_inbox(conn, day, day)
 
 
 def advance_range_sums(

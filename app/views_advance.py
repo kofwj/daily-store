@@ -253,9 +253,11 @@ def register_advance(app) -> None:
                 sid = None
             scoped_ids = None if (sid or not city_scope["active"]) else city_scope["ids"]
             inbox = db.advance_today_inbox(conn, today_d)
+            month_inbox = db.advance_inbox(conn, month, month_end)
             if scoped_ids is not None:
                 allow = set(scoped_ids)
                 inbox = [r for r in inbox if int(r["store_id"]) in allow]
+                month_inbox = [r for r in month_inbox if int(r["store_id"]) in allow]
             total = db.count_advances(
                 conn, store_id=sid, start=start, end=end, paid=paid, store_ids=scoped_ids
             )
@@ -284,6 +286,7 @@ def register_advance(app) -> None:
                 scope=scope,
                 city_scope=city_scope,
                 inbox=inbox,
+                month_inbox=month_inbox,
                 page=page,
                 pages=pages,
                 total=total,

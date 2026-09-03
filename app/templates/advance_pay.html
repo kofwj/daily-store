@@ -38,7 +38,7 @@
     <a class="btn ghost" href="{{ url_for('advance_xlsx', month=month.strftime('%Y-%m')) }}">导出垫资表</a>
   </form>
 </div>
-{% if inbox %}
+{% if scope == 'today' and inbox %}
 <div class="card board-missing">
   <div class="board-missing-head">
     <h2>今天待兑</h2>
@@ -54,6 +54,19 @@
 <div class="card board-missing">
   <div class="board-missing-head"><h2>今天待兑</h2><span class="muted">{{ today.isoformat() }} 还没有未兑付的垫资</span></div>
 </div>
+{% endif %}
+{% if scope == 'month' and month_inbox %}
+<details class="card board-missing adv-month-inbox">
+  <summary class="board-missing-head">
+    <span class="adv-sum-btn">按店汇总</span>
+    <span class="muted">本月待兑 {{ month_inbox|length }} 家店</span>
+  </summary>
+  <div class="board-missing-list">
+    {% for s in month_inbox %}
+    <a class="miss-chip" href="{{ url_for('advance_pay', month=month.strftime('%Y-%m'), store_id=s.store_id, paid='0', scope='month') }}">{{ s.store_short or s.store_name }} · {{ s.n }}笔 {{ '%.0f'|format(s.total) }}</a>
+    {% endfor %}
+  </div>
+</details>
 {% endif %}
 <div class="kpi-row">
   <div class="kpi"><div class="muted">本月合计</div><div class="kpi-num">{{ '%.2f'|format(sums.total) }}</div></div>
