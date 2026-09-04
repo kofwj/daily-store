@@ -1479,11 +1479,7 @@ def _seed_catalog_stores(conn: sqlite3.Connection) -> None:
                     "UPDATE stores SET ai_target=? WHERE id=?",
                     (int(item.get("ai_target") or 10), row["id"]),
                 )
-            # 目录新补的移动编码：只填空，不覆盖管理员已改过的
-            if not (row["mobile_code"] if "mobile_code" in row.keys() else "" or "").strip():
-                code = (item.get("mobile_code") or "").strip()
-                if code:
-                    conn.execute("UPDATE stores SET mobile_code=? WHERE id=?", (code, row["id"]))
+            # 空移动编码是管理员故意不进通报表，启动不再从目录填回去
 
 def _seed_defaults(conn: sqlite3.Connection) -> None:
     all_ids = [row["id"] for row in conn.execute("SELECT id FROM stores WHERE active=1")]

@@ -458,7 +458,7 @@ def test_seed_does_not_overwrite_admin_edits(tmp_db):
     with db.get_db() as conn:
         store = conn.execute("SELECT * FROM stores LIMIT 1").fetchone()
         conn.execute(
-            "UPDATE stores SET active=0, store_manager='管理员手改', area_manager='手改A' WHERE id=?",
+            "UPDATE stores SET active=0, store_manager='管理员手改', area_manager='手改A', mobile_code='' WHERE id=?",
             (store["id"],),
         )
         uid = conn.execute("SELECT id FROM users WHERE username='alpha'").fetchone()["id"]
@@ -471,6 +471,7 @@ def test_seed_does_not_overwrite_admin_edits(tmp_db):
         assert s["active"] == 0
         assert s["store_manager"] == "管理员手改"
         assert s["area_manager"] == "手改A"
+        assert s["mobile_code"] == ""
         u = conn.execute("SELECT active FROM users WHERE username='alpha'").fetchone()
         assert u["active"] == 0
         uid2 = conn.execute("SELECT id FROM users WHERE username='alpha'").fetchone()["id"]
