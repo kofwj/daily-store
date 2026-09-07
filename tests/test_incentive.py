@@ -6,31 +6,31 @@ from app.settlement import prev_month_start
 
 
 def test_with_advisor_table():
-    """未达标按接近度分两档：总量差 ≤3 算差一点，罚得轻；差得远顶格。"""
+    """未达标按接近度分两档：总量差 ≤4 算差一点（6–9），差得远 ≤5。"""
     assert judge_with_advisor(3, 7)["store_reward"] == 500
     assert judge_with_advisor(2, 8)["store_reward"] == 200
     row = judge_with_advisor(0, 10)
     assert row["store_reward"] == 0
     assert row["advisor_penalty"] == 100
-    # AI≥5：顾问免责，罚门店；差一点 100，差得远 200
-    row = judge_with_advisor(5, 2)  # 总量 7，差 3 → 差一点
+    # AI≥5：顾问免责；差一点 50，差得远 100
+    row = judge_with_advisor(5, 1)  # 总量 6 → 差一点
+    assert row["store_penalty"] == 50
+    assert row["advisor_penalty"] == 0
+    row = judge_with_advisor(5, 0)  # 总量 5 → 差得远
     assert row["store_penalty"] == 100
     assert row["advisor_penalty"] == 0
-    row = judge_with_advisor(5, 0)  # 总量 5，差 5 → 差得远
-    assert row["store_penalty"] == 200
-    assert row["advisor_penalty"] == 0
-    # AI 1-4：整体欠佳；差一点 100/50，差得远 200/50
-    row = judge_with_advisor(2, 7)  # 总量 9，差 1
+    # AI 1-4：差一点 50/50，差得远 100/50
+    row = judge_with_advisor(2, 7)  # 总量 9
+    assert row["store_penalty"] == 50
+    assert row["advisor_penalty"] == 50
+    row = judge_with_advisor(2, 3)  # 总量 5
     assert row["store_penalty"] == 100
     assert row["advisor_penalty"] == 50
-    row = judge_with_advisor(2, 3)  # 总量 5，差 5
-    assert row["store_penalty"] == 200
-    assert row["advisor_penalty"] == 50
-    # AI=0：整体极差；差一点顾问罚减半，差得远顶格
-    row = judge_with_advisor(0, 8)  # 总量 8，差 2
-    assert row["store_penalty"] == 200
-    assert row["advisor_penalty"] == 50
-    row = judge_with_advisor(0, 4)  # 总量 4，差 6
+    # AI=0：顾问一律 100；差一点门店 100，差得远门店 200
+    row = judge_with_advisor(0, 6)  # 总量 6 → 差一点
+    assert row["store_penalty"] == 100
+    assert row["advisor_penalty"] == 100
+    row = judge_with_advisor(0, 4)  # 总量 4 → 差得远
     assert row["store_penalty"] == 200
     assert row["advisor_penalty"] == 100
 
@@ -39,10 +39,10 @@ def test_near_miss_gap_configurable():
     rules = dict(DEFAULTS)
     rules["near_miss_gap"] = 1  # 只有差 1 分算差一点
     row = judge_with_advisor(5, 2, rules)  # 总量 7，差 3 → 差得远
-    assert row["store_penalty"] == 200
+    assert row["store_penalty"] == 100
     rules["near_miss_gap"] = 5  # 差 5 以内都算差一点
     row = judge_with_advisor(2, 4, rules)  # 总量 6，差 4 → 差一点
-    assert row["store_penalty"] == 100
+    assert row["store_penalty"] == 50
     assert row["advisor_penalty"] == 50
 
 
@@ -60,13 +60,14 @@ def test_near_miss_effective_from_september():
     assert row["store_penalty"] == 100
     row = judge(True, 0, 8, as_of=before)
     assert row["advisor_penalty"] == 100
-    # 9 月起走新阶梯
-    row = judge(True, 5, 2, as_of=NEAR_MISS_FROM)
+    # 9 月起走新阶梯：差一点 6–9，差得远 ≤5
+    row = judge(True, 5, 2, as_of=NEAR_MISS_FROM)  # 总量 7 → 差一点
+    assert row["store_penalty"] == 50
+    row = judge(True, 2, 3, as_of=NEAR_MISS_FROM)  # 总量 5 → 差得远
     assert row["store_penalty"] == 100
-    row = judge(True, 2, 3, as_of=NEAR_MISS_FROM)
-    assert row["store_penalty"] == 200
-    row = judge(True, 0, 8, as_of=NEAR_MISS_FROM)
-    assert row["advisor_penalty"] == 50
+    row = judge(True, 0, 8, as_of=NEAR_MISS_FROM)  # 总量 8 → 差一点，顾问不减责
+    assert row["store_penalty"] == 100
+    assert row["advisor_penalty"] == 100
 
 
 def test_without_advisor_table():
@@ -105,7 +106,7 @@ def test_new_user_cut_includes_full_category():
 def test_money_text():
     assert money_text(judge(True, 3, 7)) == "奖门店 500"
     assert money_text(judge(False, 0, 0)) == "罚门店 100"
-    assert "罚门店 100" in money_text(judge(True, 2, 7))  # 差一点的欠佳档
+    assert "罚门店 50" in money_text(judge(True, 2, 7))  # 差一点的欠佳档
     assert "罚顾问 50" in money_text(judge(True, 2, 7))
 
 

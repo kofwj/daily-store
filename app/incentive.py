@@ -23,22 +23,24 @@ DEFAULTS: Dict[str, int] = {
     # 有顾问：AI + 新用户直降 ≥ 总量阈值才可能达标
     "total_threshold": 10,   # 总量达标线
     # 未达标时按「接近度」分两档：总量差 ≤ near_miss_gap 算差一点，罚得轻些
-    "near_miss_gap": 3,
+    # 默认 4：达标 10 时，总量 6–9 差一点，≤5 差得远
+    "near_miss_gap": 4,
     "ai_best": 3,            # AI ≥ 此值 → 高效完成
     "ai_pass": 1,            # AI ≥ 此值 → 已破 0
     "reward_best": 500,      # 高效完成奖门店
     "reward_pass": 200,      # 总量达标奖门店
     "reward_sesame_penalty": 100,  # 总量靠直降、AI 未破 0 → 罚顾问
-    # 有顾问未达标：
+    # 有顾问未达标（9 月起）：
     "ai_5": 5,              # AI ≥ 此值 → 顾问免责，只罚门店
-    "penal_store_ai5": 200,        # 免责 + 差得远：罚门店顶格
-    "penal_store_ai5_near": 100,   # 免责 + 差一点：与整体欠佳持平
-    "penal_store_mid": 100,        # 整体欠佳 + 差一点：罚门店
-    "penal_store_mid_far": 200,    # 整体欠佳 + 差得远：罚门店顶格
+    "penal_store_ai5": 100,        # 免责 + 差得远：罚门店
+    "penal_store_ai5_near": 50,    # 免责 + 差一点：罚门店
+    "penal_store_mid": 50,         # 整体欠佳 + 差一点：罚门店
+    "penal_store_mid_far": 100,    # 整体欠佳 + 差得远：罚门店
     "penal_advisor_mid": 50,       # 整体欠佳罚顾问
-    "penal_store_zero": 200,       # AI 挂 0 罚门店
-    "penal_advisor_zero": 100,     # AI 挂 0 且差得远：罚顾问顶格
-    "penal_advisor_zero_near": 50, # AI 挂 0 但总量差一点：顾问罚减半
+    "penal_store_zero": 200,       # AI 挂 0 + 差得远：罚门店顶格
+    "penal_store_zero_near": 100,  # AI 挂 0 + 差一点：罚门店
+    "penal_advisor_zero": 100,     # AI 挂 0：顾问顶格（差一点/差得远相同）
+    "penal_advisor_zero_near": 100, # AI 挂 0 差一点：顾问不减责
     # 无顾问：
     "reward_no_advisor": 200,    # AI、新用户直降均破 0 → 奖门店
     "penal_store_one": 50,     # 单项破 0 → 罚门店
@@ -84,27 +86,27 @@ def judge_with_advisor(
             True, "总量靠直降", "总量达标但 AI 未破 0，顾问主业失职",
             advisor_penalty=r["reward_sesame_penalty"],
         )
-    # 生效月之前走旧口径（只按 AI 分档，不引入接近度），当月数字不回头变
+    # 生效月之前走旧口径（只按 AI 分档、金额固定），8 月已结算不跟 9 月新默认走
     if not near_enabled:
         if ai >= r["ai_5"]:
             return _result(
                 False, "顾问搭载好、总量不够",
                 "AI≥高线 但总量未达标，店长带队拖后腿，顾问免责",
-                store_penalty=r["penal_store_ai5"],
+                store_penalty=200,
             )
         if ai >= r["ai_pass"]:
             return _result(
                 False, "整体欠佳", "总量未达标且 AI 只有中段",
-                store_penalty=r["penal_store_mid"],
-                advisor_penalty=r["penal_advisor_mid"],
+                store_penalty=100,
+                advisor_penalty=50,
             )
         return _result(
             False, "整体极差", "总量未达标且 AI 挂 0，顶格处罚",
-            store_penalty=r["penal_store_zero"],
-            advisor_penalty=r["penal_advisor_zero"],
+            store_penalty=200,
+            advisor_penalty=100,
         )
-    # 未达标按接近度分两档：差一点（≤ near_miss_gap）轻罚，差得远顶格
-    near = total >= r["total_threshold"] - max(0, int(r.get("near_miss_gap", 3) or 0))
+    # 未达标按接近度分两档：差一点（≤ near_miss_gap）轻罚，差得远加重
+    near = total >= r["total_threshold"] - max(0, int(r.get("near_miss_gap", 4) or 0))
     if ai >= r["ai_5"]:
         if near:
             return _result(
@@ -132,7 +134,7 @@ def judge_with_advisor(
     if near:
         return _result(
             False, "整体极差", "总量差一点但 AI 挂 0，顾问主业失职",
-            store_penalty=r["penal_store_zero"],
+            store_penalty=r["penal_store_zero_near"],
             advisor_penalty=r["penal_advisor_zero_near"],
         )
     return _result(
