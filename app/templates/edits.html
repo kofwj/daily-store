@@ -10,7 +10,7 @@
   <div class="settings-main">
     <div class="settings-page-head">
       <h1>修改审计</h1>
-      <p class="muted">日报、触客、垫资、开票谁在什么时候改过。锁定后覆盖、删记录都会记在这里。</p>
+      <p class="muted">日报、触客、垫资、开票的修改与删除记录。</p>
     </div>
     <form method="get" class="page-filters">
       <label class="filter">
@@ -69,7 +69,7 @@
       </table>
       {{ pager(page, pages, total, 'edits_page', days=days, store_id=store_id, kind=kind, city=city_scope.city, area_manager=city_scope.manager) }}
       {% else %}
-      <p class="muted">近 {{ days }} 天还没有修改记录。</p>
+      <p class="muted">近 {{ days }} 天没有修改记录</p>
       {% endif %}
     </div>
   </div>

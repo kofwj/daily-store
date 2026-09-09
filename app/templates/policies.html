@@ -5,11 +5,11 @@
 <div class="page-head">
   <div class="page-title">
     <h1>政策说明</h1>
-    <p class="muted">{% if require %}开关已开：未确认的政策要先点「已阅读」才能看其他页面。{% else %}最新业务口径，管理员在设置里维护。{% endif %}</p>
+    <p class="muted">{% if require %}开关已开：未确认的政策要点「已阅读」才能看其他页面。{% else %}最新业务口径，管理员在设置里维护。{% endif %}</p>
   </div>
 </div>
 {% if not items %}
-<div class="card"><p class="muted">还没有政策，请管理员在「设置 → 政策」里添加。</p></div>
+<div class="card"><p class="muted">没有政策，管理员在「设置 → 政策」里添加</p></div>
 {% else %}
 <div class="policy-layout">
   <aside class="policy-nav">
@@ -38,7 +38,7 @@
       <button type="submit">已阅读并确认</button>
     </form>
     {% else %}
-    <p class="muted">已确认本版。</p>
+    <p class="muted">已确认本版</p>
     {% endif %}
   </article>
 </div>

@@ -501,7 +501,7 @@ def render_week_text(
         "",
     ]
     if not rows:
-        lines.append("这一期还没有已导入的芝麻流水。")
+        lines.append("这一期没有已导入的芝麻流水。")
         return "\n".join(lines) + "\n"
     for i, row in enumerate(rows, 1):
         lines.append(

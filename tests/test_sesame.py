@@ -349,7 +349,7 @@ def test_import_more_than_200_rows_imports_all(tmp_db, admin_client):
     )
     page = resp.get_data(as_text=True)
     assert "可导入 <strong>230</strong>" in page
-    assert "仅展示前 200 笔" in page
+    assert "展示前 200 笔" in page
     with db.get_db() as conn:
         assert conn.execute("SELECT COUNT(*) FROM advance_posts WHERE source='sesame'").fetchone()["COUNT(*)"] == 0
     # 确认：全部 230 笔都要进库

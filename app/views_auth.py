@@ -11,7 +11,7 @@ from .helpers import client_ip, default_home, login_required
 
 def _lock_message(seconds: int) -> str:
     minutes = max(1, (int(seconds) + 59) // 60)
-    return f"连续输错太多，请 {minutes} 分钟后再试"
+    return f"连续输错太多，{minutes} 分钟后再试"
 
 
 def register_auth(app) -> None:

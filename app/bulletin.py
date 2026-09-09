@@ -41,7 +41,7 @@ REVIEW_PRESETS: List[Dict[str, str]] = [
     {
         "key": "praise",
         "name": "表彰",
-        "hint": "先点名有量的店和标杆，适合周末/冲刺",
+        "hint": "点名有量的店和标杆，适合周末/冲刺",
         "body": """{head}
 【今日表扬】
 {praise}

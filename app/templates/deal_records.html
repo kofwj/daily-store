@@ -7,7 +7,7 @@
 <div class="page-head">
   <div class="page-title">
     <h1>{% if all_stores %}{% if scope.active %}{{ scope.label }}触客{% else %}今天全店触客{% endif %}{% else %}触客记录{% endif %}</h1>
-    <p class="muted">{% if all_stores %}一页看{% if scope.active %}{{ scope.label }}{% else %}所有店{% endif %}今天的触客。可按地市、区域经理筛，或右边切单店。{% else %}当天的可以点进去改、再复制；往日的只能查看。号码默认打码。{% endif %}</p>
+    <p class="muted">{% if not all_stores %}当天可改，往日只读；号码默认打码。{% endif %}</p>
   </div>
   <form method="get" class="page-filters">
     {% if is_admin and stores|length > 1 %}
@@ -91,7 +91,7 @@
   </div>
   {{ pager(page, pages, total, 'deal_records', label=start.isoformat() + ' ~ ' + end.isoformat(), store_id=('all' if all_stores else store.id), days=days, city=scope.city, area_manager=scope.manager) }}
   {% else %}
-  <p class="muted">{% if days == 1 %}今天还没有触客记录。{% else %}近 {{ days }} 天还没有触客记录。{% endif %}</p>
+  <p class="muted">{% if days == 1 %}今天没有触客记录{% else %}近 {{ days }} 天没有触客记录{% endif %}</p>
   {% endif %}
 </div>
 {% endblock %}

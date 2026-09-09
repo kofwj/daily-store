@@ -22,7 +22,6 @@
         <div><label>正文</label>
           <textarea id="policyBody" name="body" rows="14">{{ policy_edit.body if policy_edit else '' }}</textarea>
         </div>
-        <p class="muted">审批标注：选中文字点删除线表示去掉，点绿色高亮表示新增。也可保存后在政策页看「对照上一版」。</p>
         <link rel="stylesheet" href="{{ url_for('static', filename='vendor/suneditor/suneditor.min.css') }}?v={{ app_version }}">
         <script src="{{ url_for('static', filename='vendor/suneditor/suneditor.min.js') }}?v={{ app_version }}"></script>
         <script src="{{ url_for('static', filename='vendor/suneditor/zh_cn.js') }}?v={{ app_version }}"></script>
@@ -98,7 +97,7 @@
         </tbody>
       </table>
       {% else %}
-      <p class="muted">还没有政策。</p>
+      <p class="muted">没有政策</p>
       {% endif %}
     </div>
     {% if policy_revisions %}

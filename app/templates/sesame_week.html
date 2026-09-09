@@ -4,7 +4,6 @@
 <div class="page-head">
   <div class="page-title">
     <h1>芝麻周报</h1>
-    <p class="muted">按已导入的官方芝麻服务费出周报。每周上传明细后，这里按周一到周日汇总，可贴群。</p>
   </div>
   <form method="get" class="page-filters">
     <div class="sp-groupby sesame-mode" role="tablist" aria-label="周期">
@@ -122,7 +121,7 @@
       </tfoot>
     </table>
     {% else %}
-    <p class="muted">这一期还没有已导入的芝麻流水。{% if is_admin %}先在「导入明细」上传官方 xlsx。{% endif %}</p>
+    <p class="muted">这一期没有已导入的芝麻流水。{% if is_admin %}在「导入明细」上传官方 xlsx。{% endif %}</p>
     {% endif %}
   </div>
   </div>
@@ -130,7 +129,6 @@
 
 <div class="card" id="shotPreviewCard" hidden>
   <h2>图片预览</h2>
-  <p class="muted">手机长按图片可转发到微信。电脑也可右键另存。</p>
   <img id="shotPreview" class="shot-preview" alt="芝麻周报截图">
 </div>
 <script src="{{ url_for('static', filename='html2canvas.min.js') }}"></script>
@@ -170,7 +168,7 @@ function showShotError(msg) {
 function renderBulletinCanvas() {
   const el = document.getElementById('bulletinShot');
   if (!el) return Promise.reject(new Error('找不到周报'));
-  if (typeof html2canvas !== 'function') return Promise.reject(new Error('截图组件未加载，请刷新页面重试'));
+  if (typeof html2canvas !== 'function') return Promise.reject(new Error('截图组件未加载'));
   let scale = Math.min(IS_MOBILE ? 1.5 : 2, window.devicePixelRatio || 2);
   // 大表在手机浏览器会超 canvas 面积上限，按上限压 scale
   const area = Math.max(1, el.scrollWidth) * Math.max(1, el.scrollHeight);
@@ -241,20 +239,20 @@ async function copyBulletinImage() {
   try {
     const blob = await makeShot();
     if (IS_WECHAT || IS_MOBILE) {
-      setCopyHint('图片已生成，请长按下方预览图转发到微信');
+      setCopyHint('图片已生成，长按下方预览转发');
       return;
     }
     if (navigator.clipboard && window.ClipboardItem) {
       try {
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-        setCopyHint('图片已复制，去微信粘贴');
+        setCopyHint('图片已复制');
         return;
       } catch (err) {}
     }
     downloadBlob(blob);
-    setCopyHint('当前浏览器不能复制图片，已下载；也可长按下方预览');
+    setCopyHint('当前浏览器不支持复制图片，已下载');
   } catch (err) {
-    const msg = (err && err.message) ? err.message : '请再试';
+    const msg = (err && err.message) ? err.message : '再试';
     showShotError(msg);
   } finally {
     window.__shotBusy = false;
@@ -269,13 +267,13 @@ async function downloadBulletinImage() {
   try {
     const blob = await makeShot();
     if (IS_WECHAT) {
-      setCopyHint('微信里请长按下方预览图保存或转发');
+      setCopyHint('微信里长按下方预览图保存或转发');
       return;
     }
     downloadBlob(blob);
     setCopyHint('已下载图片');
   } catch (err) {
-    const msg = (err && err.message) ? err.message : '请再试';
+    const msg = (err && err.message) ? err.message : '再试';
     showShotError(msg);
   } finally {
     window.__shotBusy = false;

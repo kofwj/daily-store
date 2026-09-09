@@ -87,6 +87,6 @@ def send_test(conn, url: str) -> tuple[bool, str]:
         result = json.loads(body) if body else {}
         if result.get("errcode", 0) != 0:
             return False, f"企微返回错误：{result}"
-        return True, "测试消息已发送，请到群里确认。"
+        return True, "测试消息已发送"
     except Exception as exc:  # noqa: BLE001
         return False, f"发送失败：{exc}"

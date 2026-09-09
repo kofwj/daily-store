@@ -46,19 +46,19 @@ def daily_edit_gate(
     if role == "admin":
         return EditGate(True)
     if biz_date > today:
-        return EditGate(False, "非管理员不能填写未来日期。")
+        return EditGate(False, "非管理员不能填写未来日期")
     same_month = biz_date.year == today.year and biz_date.month == today.month
     if not same_month:
-        return EditGate(False, "只能改本月的日报，历史跨月需找管理员修改。")
+        return EditGate(False, "只能改本月的日报，跨月找管理员")
     if role == "city":
         return EditGate(True)
     if biz_date != today:
         if not filler_month:
-            return EditGate(False, "只能改当天（管理员开启『本月可改』后可补录本月）。")
+            return EditGate(False, "只能改当天（管理员开启『本月可改』后可补录本月）")
         return EditGate(True)
     if locked:
         return EditGate(
             False,
-            f"当天数据已锁定（{LOCK_HOUR:02d}:{LOCK_MINUTE:02d} 后不可改），找管理员解锁修改。",
+            f"当天数据已锁定（{LOCK_HOUR:02d}:{LOCK_MINUTE:02d} 后不可改），找管理员解锁",
         )
     return EditGate(True)

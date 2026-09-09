@@ -232,7 +232,7 @@ def register_report(app) -> None:
                 return Response("forbidden", status=403)
             report = db.get_report(conn, sid, biz_date)
             if report is None:
-                flash("该日没有日报，无需删除。", "error")
+                flash("该日没有日报，无需删除", "error")
             else:
                 before = db.day_values(conn, sid, biz_date)
                 db.record_edit(
@@ -252,7 +252,7 @@ def register_report(app) -> None:
                     "DELETE FROM daily_reports WHERE store_id=? AND biz_date=?",
                     (sid, biz_date.isoformat()),
                 )
-                flash("已删除该日日报（已记录审计）。", "ok")
+                flash("已删除该日日报", "ok")
         return redirect(
             url_for("report", store_id=sid, view="month", start=biz_date.replace(day=1).isoformat())
         )

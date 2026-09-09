@@ -113,7 +113,7 @@ def register_advance(app) -> None:
             all_stores = is_admin and request.method == "GET" and raw_sid in ("", "all") and not request.args.get("advance_id")
             store, stores = pick_store(conn, None if all_stores else raw_sid)
             if store is None:
-                flash("还没有可填的门店，请管理员先建店", "error")
+                flash("还没有可填的门店，管理员先建店", "error")
                 return render_template("empty.html")
             today_d = db.today_local()
             is_viewer = g.user["role"] in ("readonly", "city")
@@ -127,7 +127,7 @@ def register_advance(app) -> None:
                         form = _form_from_row(row)
             if request.method == "POST":
                 if is_viewer:
-                    flash("只读账号不能填垫资，联系管理员。", "error")
+                    flash("只读账号不能填垫资", "error")
                     return redirect(url_for("advance_page", store_id=store["id"]))
                 raw_id = request.form.get("advance_id") or ""
                 aid = parse_int(raw_id, None)
@@ -148,20 +148,20 @@ def register_advance(app) -> None:
                     rebate = db.parse_money(request.form.get("rebate"))
                     other = db.parse_money(request.form.get("other"))
                 except ValueError:
-                    flash("金额请填数字，可留空。", "error")
+                    flash("金额请填数字，可留空", "error")
                     return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
                 same_month = biz_date.year == today_d.year and biz_date.month == today_d.month
                 if not is_admin and biz_date > today_d:
-                    flash("非管理员不能记未来日期。", "error")
+                    flash("非管理员不能记未来日期", "error")
                     return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
                 if not is_admin and not same_month:
-                    flash("门店只能记本月垫资。", "error")
+                    flash("门店只能记本月垫资", "error")
                     return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
                 if not is_admin and not phone:
-                    flash("门店填写垫资必须带号码。", "error")
+                    flash("门店填垫资必须带号码", "error")
                     return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
                 if not db.money_ok(broadband, rebate, other):
-                    flash("三类金额至少填一项。", "error")
+                    flash("三类金额至少填一项", "error")
                     return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
                 try:
                     db.record_advance(
@@ -178,13 +178,13 @@ def register_advance(app) -> None:
                     )
                 except ValueError as exc:
                     if str(exc) == "paid_locked":
-                        flash("已兑付的垫资不能改，先让管理员取消兑付。", "error")
+                        flash("已兑付的垫资不能改，先取消兑付", "error")
                     elif str(exc) == "imported_locked":
-                        flash("芝麻服务费是官方导入的，不能改。", "error")
+                        flash("芝麻服务费是官方导入的，不能改", "error")
                     else:
-                        flash("这条垫资不存在。", "error")
+                        flash("这条垫资不存在", "error")
                     return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
-                flash("垫资已保存，可在下方本月记录里核对；填错了点「改」。", "ok")
+                flash("垫资已保存，填错了点「改」", "ok")
                 return redirect(url_for("advance_page", store_id=store["id"]))
             return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d, all_stores=all_stores)
 
@@ -198,19 +198,19 @@ def register_advance(app) -> None:
             sid = int(store_id)
             aid = int(advance_id)
         except (TypeError, ValueError):
-            flash("参数不对。", "error")
+            flash("参数不对", "error")
             return redirect(url_for("advance_page"))
         with db.get_db() as conn:
             if not db.user_can_access_store(conn, g.user, sid):
-                flash("没有这家店的权限。", "error")
+                flash("没有这家店的权限", "error")
                 return redirect(url_for("advance_page"))
             row = db.get_advance(conn, aid, sid)
             if row is None:
-                flash("这条垫资不存在，或已删除。", "error")
+                flash("这条垫资不存在，或已删除", "error")
             elif (row["source"] or "") == "sesame" and g.user["role"] != "admin":
-                flash("芝麻服务费是官方导入的，店员不能删。", "error")
+                flash("芝麻服务费是官方导入的，店员不能删", "error")
             elif int(row["paid"] or 0) and not (g.user["role"] == "admin" and (row["source"] or "") == "sesame"):
-                flash("已兑付的垫资不能删。", "error")
+                flash("已兑付的垫资不能删", "error")
             else:
                 allow_imported = g.user["role"] == "admin"
                 try:
@@ -219,12 +219,12 @@ def register_advance(app) -> None:
                     )
                 except ValueError as exc:
                     if str(exc) == "imported_locked":
-                        flash("芝麻服务费是官方导入的，店员不能删。", "error")
+                        flash("芝麻服务费是官方导入的，店员不能删", "error")
                         ok = False
                     else:
                         raise
                 else:
-                    flash("已删除这条垫资。" if ok else "这条垫资不存在，或已删除。", "ok" if ok else "error")
+                    flash("已删除这条垫资" if ok else "这条垫资不存在，或已删除", "ok" if ok else "error")
         return redirect(url_for("advance_page", store_id=sid))
 
     @app.route("/advance/pay")
@@ -466,13 +466,13 @@ def register_advance(app) -> None:
     def advance_sesame_preview():
         uploaded = request.files.get("sesame_file")
         if uploaded is None or not uploaded.filename:
-            flash("请选择芝麻服务费明细 xlsx。", "error")
+            flash("选芝麻服务费明细 xlsx", "error")
             return redirect(url_for("advance_sesame_page"))
         old = session.pop("sesame_token", None)
         if old:
             sesame.drop_preview(old)
         if not (uploaded.filename or "").lower().endswith(".xlsx"):
-            flash("只支持 .xlsx 文件。", "error")
+            flash("只支持 .xlsx 文件", "error")
             return redirect(url_for("advance_sesame_page"))
         data = uploaded.read()
         try:
@@ -528,7 +528,7 @@ def register_advance(app) -> None:
         }
         session["sesame_token"] = sesame.save_preview(preview)
         if not groups["ready"]:
-            flash("没有可导入的新流水（可能都已导入，或对不上门店）。", "error")
+            flash("没有可导入的新流水（都已导入或对不上门店）", "error")
         return redirect(url_for("advance_sesame_page"))
 
     @app.route("/advance/sesame/confirm", methods=["POST"])
@@ -538,7 +538,7 @@ def register_advance(app) -> None:
         preview = sesame.load_preview(token or "")
         sesame.drop_preview(token or "")
         if not preview or not preview.get("ready"):
-            flash("预览已过期，请重新上传。", "error")
+            flash("预览已过期，重新上传", "error")
             return redirect(url_for("advance_sesame_page"))
         ready = preview["ready"]
         orders = preview.get("orders") or []

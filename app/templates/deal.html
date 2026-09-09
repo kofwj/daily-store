@@ -92,16 +92,11 @@
   <div class="card {{ 'empty' if not deal_text.strip() else '' }}" id="dealShot">
     <h2>复制进微信群</h2>
     {% if deal_text.strip() %}
-    <p class="muted">点按钮后去微信长按输入框粘贴。</p>
     <textarea id="dealText" readonly>{{ deal_text }}</textarea>
     <div class="toolbar">
       <button type="button" class="copy-btn" onclick="copyDeal()">复制全文</button>
       <span class="chip" id="copyHint">未复制</span>
     </div>
-    {% elif editable %}
-    <p class="muted">先填左边的单，点「生成播报」。</p>
-    {% else %}
-    <p class="muted">这条往日触客没有保存播报全文。</p>
     {% endif %}
   </div>
   </div>

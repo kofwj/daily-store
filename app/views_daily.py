@@ -54,7 +54,7 @@ def register_daily(app) -> None:
             store, stores = pick_store(conn, request.values.get("store_id"))
             if store is None:
                 if not stores:
-                    flash("还没有可填的门店，请管理员先建店", "error")
+                    flash("还没有可填的门店，管理员先建店", "error")
                 return render_template("empty.html")
             biz_date = parse_date(request.values.get("date"))
             today = db.today_local()
@@ -76,7 +76,7 @@ def register_daily(app) -> None:
                     return redirect(url_for("today", store_id=store["id"], date=biz_date.isoformat()))
                 existing = db.get_report(conn, store["id"], biz_date)
                 if existing and existing["submitted_by"] and existing["submitted_by"] != g.user["id"] and role not in ("admin", "city"):
-                    flash("该日已有其他人提交，覆盖前请与对方确认。", "error")
+                    flash("该日已有其他人提交，覆盖前与对方确认", "error")
                     return redirect(url_for("today", store_id=store["id"], date=biz_date.isoformat()))
                 values = {}
                 for m in metrics:
@@ -103,7 +103,7 @@ def register_daily(app) -> None:
                         after=values,
                         note="覆盖保存",
                     )
-                flash("已保存，累计已按本月重算。点「复制全文」贴进微信群。", "ok")
+                flash("已保存，累计已按本月重算", "ok")
                 # 先提交放写锁：企微播报的网络调用慢，不能拖住其他店的保存
                 conn.commit()
                 from . import wecom
@@ -219,7 +219,7 @@ def register_daily(app) -> None:
             store, stores = pick_store(conn, request.values.get("store_id"))
             if store is None:
                 if not stores:
-                    flash("还没有可填的门店，请管理员先建店", "error")
+                    flash("还没有可填的门店，管理员先建店", "error")
                 return render_template("empty.html")
             values = deal.form_values(
                 request.form if request.method == "POST" else None,
@@ -255,7 +255,7 @@ def register_daily(app) -> None:
                     db.get_deal_post(conn, deal_id_int, store["id"]) if deal_id_int else None
                 )
                 if existing is not None and not deal.is_today_deal(existing, today_d):
-                    flash("往日触客只能查看，不能改。", "error")
+                    flash("往日触客只能查看，不能改", "error")
                     return redirect(
                         url_for("deal_page", store_id=store["id"], deal_id=deal_id_int)
                     )
@@ -266,7 +266,7 @@ def register_daily(app) -> None:
                         (store["id"], today_d.isoformat(), values["phone"]),
                     ).fetchone()
                     if dup is not None and int(dup["user_id"] or 0) != int(g.user["id"]):
-                        flash("同日同号已有一条记录（他人填的），提交后按规则覆盖。", "warn")
+                        flash("同日同号已有一条记录（他人填的），提交后按规则覆盖", "warn")
                 text = deal.render_deal(
                     broadcast_store_name(store),
                     **{k: v for k, v in values.items() if k != "deal_id"},
@@ -290,7 +290,7 @@ def register_daily(app) -> None:
                         biz_date=today_d,
                     )
                 except ValueError:
-                    flash("这条触客记录不存在或已删除，请刷新后重试。", "error")
+                    flash("这条触客记录不存在或已删除，刷新后重试", "error")
                     return redirect(url_for("deal_records", store_id=store["id"]))
                 values["deal_id"] = saved_id
                 editable = True
@@ -333,13 +333,13 @@ def register_daily(app) -> None:
                 return Response("forbidden", status=403)
             row = db.get_deal_post(conn, did, sid)
             if row is None:
-                flash("这条记录不存在，或已删除。", "error")
+                flash("这条记录不存在，或已删除", "error")
             elif not deal.is_today_deal(row, db.today_local()):
-                flash("往日触客只能查看，不能删。", "error")
+                flash("往日触客只能查看，不能删", "error")
             elif db.delete_deal_post(conn, did, sid, user_id=g.user["id"]):
-                flash("已删除该触客记录。", "ok")
+                flash("已删除该触客记录", "ok")
             else:
-                flash("这条记录不存在，或已删除。", "error")
+                flash("这条记录不存在，或已删除", "error")
         return redirect(url_for("deal_records", store_id=sid))
 
     @app.route("/deal/records")

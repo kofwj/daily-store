@@ -318,7 +318,7 @@ def _settings_post(conn, tab: str):
             flash("口令已改，下次用新口令登录", "ok")
             return redirect(url_for("settings", tab="account"))
         if int(g.user["must_change_pin"] or 0):
-            raise ValueError("请先改掉默认口令")
+            raise ValueError("先改掉默认口令")
         if g.user["role"] != "admin":
             raise ValueError("需要管理员权限")
         handler = _SETTINGS_ACTIONS.get(action)
@@ -332,7 +332,7 @@ def _settings_post(conn, tab: str):
         flash(str(exc), "error")
     except Exception:  # noqa: BLE001 — 其余是服务端问题，原文可能带表名/路径，不外露
         current_app.logger.exception("settings action failed: %s", action)
-        flash("操作失败，请稍后重试；若反复出现请联系管理员查看日志。", "error")
+        flash("操作失败，稍后重试；反复出现联系管理员看日志", "error")
     return redirect(url_for("settings", tab=tab))
 
 
@@ -510,7 +510,7 @@ def _do_reset_pin(conn):
         session["session_epoch"] = epoch
     name = target["display_name"] or target["id"]
     flash(
-        f"已把 {name} 的口令重置为默认 {pin}，下次登录必须改掉。",
+        f"已把 {name} 的口令重置为默认 {pin}，下次登录必须改掉",
         "ok",
     )
     if (request.form.get("tab") or "") in ("people", "stores"):
@@ -703,14 +703,14 @@ def _do_make_backup(conn):
 def _do_restore_named(conn):
     confirm = request.form.get("confirm_pin") or ""
     if not db.verify_pin(confirm, g.user["pin_hash"]):
-        raise ValueError("恢复前请输入当前口令确认")
+        raise ValueError("恢复前输入当前口令确认")
     name = (request.form.get("backup_name") or "").strip()
     safety = backup.restore_named(name)
     admins = "、".join(backup.restored_admin_names()) or "（无）"
     db.abandon_request_conn()
     session.clear()
     flash(
-        f"已用 {name} 恢复，请重新登录。库中管理员：{admins}。恢复前现场另存为 {safety.name}",
+        f"已用 {name} 恢复，重新登录。库中管理员：{admins}。恢复前现场另存为 {safety.name}",
         "ok",
     )
     return redirect(url_for("login"))
@@ -719,17 +719,17 @@ def _do_restore_named(conn):
 def _do_restore_upload(conn):
     confirm = request.form.get("confirm_pin") or ""
     if not db.verify_pin(confirm, g.user["pin_hash"]):
-        raise ValueError("恢复前请输入当前口令确认")
+        raise ValueError("恢复前输入当前口令确认")
     uploaded = request.files.get("backup_file")
     if uploaded is None or not uploaded.filename:
-        raise ValueError("请先选择备份文件")
+        raise ValueError("先选择备份文件")
     data = uploaded.read()
     safety = backup.restore_bytes(data)
     admins = "、".join(backup.restored_admin_names()) or "（无）"
     db.abandon_request_conn()
     session.clear()
     flash(
-        f"已用上传文件恢复，请重新登录。库中管理员：{admins}。恢复前现场另存为 {safety.name}",
+        f"已用上传文件恢复，重新登录。库中管理员：{admins}。恢复前现场另存为 {safety.name}",
         "ok",
     )
     return redirect(url_for("login"))
@@ -753,8 +753,8 @@ def _do_save_rules(conn):
         db.set_setting(conn, "sesame_tier_rules", json.dumps(
             {"xtc": tier_xtc, "ai": tier_ai}, ensure_ascii=False))
     except ValueError:
-        flash("芝麻档位没改：需要两个不同的正整数。", "error")
-    flash("考核规则已保存，立即生效", "ok")
+        flash("芝麻档位没改：需要两个不同的正整数", "error")
+    flash("考核规则已保存", "ok")
 
 
 _SETTINGS_ACTIONS = {

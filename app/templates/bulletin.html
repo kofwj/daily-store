@@ -4,7 +4,6 @@
 <div class="page-head">
   <div class="page-title">
     <h1>通报表</h1>
-    <p class="muted">电脑 Chrome / Edge 点「复制图片」再粘贴。微信里点后会生成下方预览，长按图片转发到聊天。</p>
   </div>
   <form method="get" class="page-filters">
     <label class="filter">
@@ -34,7 +33,6 @@
     <input type="hidden" name="city" value="{{ city }}">
     <div class="official-row">
       <strong>录移动取数</strong>
-      <span class="muted">只记移动侧笔算累计，用来和填报对照，不改店员填的数。默认截止前一天；移数没更新时截止日保持不动。</span>
       <label class="filter">
         <span>取数截止</span>
         <input type="date" name="asof" value="{{ (mobile_asof or biz_date).isoformat() }}" required>
@@ -54,7 +52,6 @@
   <div class="bulletin-review-head">
     <div>
       <strong>本日 / 本月复盘</strong>
-      <span class="muted">点名今日单项有量的店，复制后贴群</span>
     </div>
     <button type="button" class="ghost" onclick="copyReviewText()">复制文案</button>
   </div>
@@ -151,7 +148,6 @@
 
 <div class="card" id="shotPreviewCard" hidden>
   <h2>图片预览</h2>
-  <p class="muted">手机长按图片可转发到微信。电脑也可右键另存。</p>
   <img id="shotPreview" class="shot-preview" alt="通报表截图">
 </div>
 <script src="{{ url_for('static', filename='html2canvas.min.js') }}"></script>
@@ -166,7 +162,7 @@ function setHint(text) {
 }
 
 function copyReviewText() {
-  copyText(document.getElementById('reviewText'), '复盘文案已复制，去微信粘贴');
+  copyText(document.getElementById('reviewText'), '复盘文案已复制');
 }
 
 function showPreview(url) {
@@ -250,20 +246,20 @@ async function copyBulletinImage() {
     const blob = await makeShot();
     // 微信/手机内置浏览器几乎不支持写图片到剪贴板，也不靠谱下载
     if (IS_WECHAT || IS_MOBILE) {
-      setHint('图片已生成，请长按下方预览图转发到微信');
+      setHint('图片已生成，长按下方预览转发');
       return;
     }
     if (navigator.clipboard && window.ClipboardItem) {
       try {
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-        setHint('图片已复制，去微信粘贴');
+        setHint('图片已复制');
         return;
       } catch (err) {}
     }
     downloadBlob(blob);
-    setHint('当前浏览器不能复制图片，已下载；也可长按下方预览');
+    setHint('当前浏览器不支持复制图片，已下载');
   } catch (err) {
-    const msg = (err && err.message) ? err.message : '请再试';
+    const msg = (err && err.message) ? err.message : '再试';
     setHint('截图失败：' + msg);
   } finally {
     window.__shotBusy = false;
@@ -279,13 +275,13 @@ async function downloadBulletinImage() {
     const blob = await makeShot();
     if (IS_WECHAT) {
       // 微信里 download 常被拦，预览长按更稳
-      setHint('微信里请长按下方预览图保存或转发');
+      setHint('微信里长按下方预览图保存或转发');
       return;
     }
     downloadBlob(blob);
-    setHint('已下载，发给微信即可');
+    setHint('已下载');
   } catch (err) {
-    const msg = (err && err.message) ? err.message : '请再试';
+    const msg = (err && err.message) ? err.message : '再试';
     setHint('下载失败：' + msg);
   } finally {
     window.__shotBusy = false;

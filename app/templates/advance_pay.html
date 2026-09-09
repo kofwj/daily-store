@@ -7,7 +7,6 @@
 <div class="page-head">
   <div class="page-title">
     <h1>垫资兑付</h1>
-    <p class="muted">先看今天谁交了待兑。门店填错且已兑付时，取消兑付后店里就能改。</p>
   </div>
   <form method="get" class="page-filters">
     <div class="seg">
@@ -52,7 +51,7 @@
 </div>
 {% elif scope == 'today' %}
 <div class="card board-missing">
-  <div class="board-missing-head"><h2>今天待兑</h2><span class="muted">{{ today.isoformat() }} 还没有未兑付的垫资</span></div>
+  <div class="board-missing-head"><h2>今天待兑</h2><span class="muted">{{ today.isoformat() }} 没有未兑付的垫资</span></div>
 </div>
 {% endif %}
 {% if scope == 'month' and month_inbox %}
@@ -140,7 +139,7 @@
   </form>
   {{ pager(page, pages, total, 'advance_pay', month=month.strftime('%Y-%m'), store_id=store_id, paid=paid, scope=scope, city=city_scope.city, area_manager=city_scope.manager) }}
   {% else %}
-  <p class="muted">这个筛选下没有垫资。</p>
+  <p class="muted">这个筛选下没有垫资</p>
   {% endif %}
 </div>
 {% endblock %}

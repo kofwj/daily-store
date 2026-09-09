@@ -24,9 +24,7 @@
   </form>
 </div>
 {% if report %}
-<p class="muted">已由 {{ report.submitter_name or '未知' }} 于 {{ report.submitted_at }} 提交，可覆盖保存。</p>
-{% else %}
-<p class="muted">只填今天的数，累自动算。下面三块是月度考核进度。</p>
+<p class="muted">{{ report.submitter_name or '未知' }} · {{ report.submitted_at }} 提交，可覆盖保存。</p>
 {% endif %}
 {% if kpi_cards %}
 <div class="kpi-row">
@@ -50,7 +48,6 @@
 {% if report %}
 <div class="card" id="broadcast">
   <h2>一键复制到微信群</h2>
-  <p class="muted">点按钮后去微信长按输入框粘贴。</p>
   <textarea id="broadcastText" readonly>{{ broadcast_text }}</textarea>
   <div class="toolbar">
     <button type="button" class="copy-btn" onclick="copyBroadcast()">复制全文</button>
@@ -63,7 +60,7 @@
   <input type="hidden" name="store_id" value="{{ store.id }}">
   <input type="hidden" name="date" value="{{ biz_date.isoformat() }}">
   {% if not is_today and g.user['role'] != 'admin' and not can_edit %}
-  <div class="flash warn">历史日期：店员只能改<b>当天</b>。如要改历史，请联系管理员。</div>
+  <div class="flash warn">历史日期：店员只能改<b>当天</b>，改历史找管理员。</div>
   {% elif not is_today and g.user['role'] != 'admin' %}
   <div class="flash ok">本月补录模式已开启：可修改本月内的数据（{{ biz_date }}）。</div>
   {% endif %}
@@ -104,7 +101,6 @@
 {% if not report %}
 <div class="card">
   <h2>一键复制到微信群</h2>
-  <p class="muted">先保存今天的数字，这里才会出现可复制的全文。</p>
 </div>
 {% endif %}
 

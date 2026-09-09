@@ -151,7 +151,7 @@ def pin_change_required():
     endpoint = request.endpoint or ""
     if endpoint in {"settings", "logout", "login", "health", "static"}:
         return None
-    flash("请先改掉默认口令，再继续使用", "error")
+    flash("请先改掉默认口令", "error")
     return redirect(url_for("settings", tab="account"))
 
 
@@ -170,7 +170,7 @@ def policy_read_required():
         unread = db.unread_policies(conn, g.user["id"])
     if not unread:
         return None
-    flash(f"请先阅读并确认 {len(unread)} 条政策，再继续使用。", "error")
+    flash(f"请先阅读并确认 {len(unread)} 条政策，再继续使用", "error")
     return redirect(url_for("policies_page"))
 
 
@@ -191,7 +191,7 @@ def csrf_protect():
             return Response(
                 '{"ok": false, "error": "csrf"}', status=400, mimetype="application/json"
             )
-        flash("页面停留太久，操作校验失败，请刷新后重试。", "error")
+        flash("页面停留太久，校验失败，刷新后重试", "error")
         # 只跟同源 referrer，防开放重定向。Referer 几乎总是绝对 URL，
         # 同源的转成站内路径再跳；外站、协议相对 //、带反斜杠的一律丢弃。
         target = request.referrer or ""
@@ -421,19 +421,19 @@ def pick_store(conn, raw_id: Optional[str]):
         try:
             sid = int(raw_id)
         except ValueError:
-            flash("店号无效，请重新选择门店。", "error")
+            flash("店号无效，重新选择门店", "error")
             return None, stores  # 别静默落到第一家店，避免数据写错店
         if not db.user_can_access_store(conn, g.user, sid):
             if writing:
                 # 写路径绝不静默回退：宁可拒绝，也不能把表单写进另一家店
-                flash("店号不存在或没有这家店的权限，已拒绝保存。", "error")
+                flash("店号不存在或没有这家店的权限，已拒绝保存", "error")
                 return None, stores
             sid = stores[0]["id"]  # 只读浏览：会话里的店号可能已失效，回退到第一家可见店
     else:
         sid = session.get("store_id") or stores[0]["id"]
         if not db.user_can_access_store(conn, g.user, sid):
             if writing:
-                flash("当前门店已不可访问，请重新选择门店后再保存。", "error")
+                flash("当前门店已不可访问，重新选择门店后再保存", "error")
                 return None, stores
             sid = stores[0]["id"]
     session["store_id"] = sid

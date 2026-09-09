@@ -1,7 +1,7 @@
     {% if tab == 'stores' and g.user['role'] == 'admin' %}
     <div class="settings-page-head">
       <h1>门店档案</h1>
-      <p class="muted">改店档、考核口径和顾问。账号去「人员账号」页管。</p>
+      <p class="muted">店档、考核口径和顾问。账号在「人员账号」页。</p>
     </div>
     <div class="stores-desk">
       <aside class="store-list card" id="storeList">
@@ -39,7 +39,7 @@
         {% if store_selection_invalid %}
         <div class="empty-state">
           <h2>门店不存在</h2>
-          <p class="muted">链接里的门店编号无效，请从左侧目录重新选择。</p>
+          <p class="muted">链接里的门店编号无效，从左侧目录重新选择。</p>
           <a class="btn" href="{{ url_for('settings', tab='stores') }}">返回门店目录</a>
         </div>
         {% elif current_store %}
@@ -67,7 +67,7 @@
           <section class="store-section">
             <div class="store-section-head">
               <h3>归属</h3>
-              <p class="muted">大区和地市用于筛选、通报分组；有移动编码的店才会进通报表。</p>
+              <p class="muted">大区和地市用于筛选、通报分组；有移动编码的店才进通报表。</p>
             </div>
             <div class="store-editor-grid">
               <p>
@@ -126,7 +126,7 @@
           <section class="store-section">
             <div class="store-section-head">
               <h3>开票 / 租赁</h3>
-              <p class="muted">开票申请按税务样表导出时带出；全称必须和税控一致。</p>
+              <p class="muted">开票申请导出时带出；全称与税控一致。</p>
             </div>
             <div class="store-editor-grid">
               <p class="span-2"><label>发票上门店全称</label><input name="invoice_name" value="{{ current_store.invoice_name }}" placeholder="如 TZ南通市海安万达广场vivo体验店"></p>
@@ -142,7 +142,7 @@
         <div class="card settings-card settings-danger-zone store-danger-zone">
           <div class="settings-card-head">
             <h2>停用 / 删除</h2>
-            <p class="muted">停用后不出现在填报和通报里，随时可启用；有填报记录的店不能删。</p>
+            <p class="muted">停用后不进填报和通报，可再启用；有填报记录的店不能删。</p>
           </div>
           <div class="store-danger-actions">
             <form method="post">
@@ -163,7 +163,7 @@
         <div class="store-editor-head">
           <div>
             <h2>添加门店</h2>
-            <p class="muted">新店加进来后会出现在左边名单。</p>
+            <p class="muted">新店加进来后出现在左边名单。</p>
           </div>
         </div>
         <form method="post" class="store-editor-form">

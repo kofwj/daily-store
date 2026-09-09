@@ -170,7 +170,7 @@ def restore_bytes(data: bytes) -> Path:
                 dst.execute("BEGIN IMMEDIATE")
                 dst.commit()
             except sqlite3.OperationalError as exc:
-                raise ValueError("数据库正被其它操作占用，请稍等几秒重试") from exc
+                raise ValueError("数据库被其它操作占用，稍等几秒重试") from exc
             src = sqlite3.connect(str(tmp))
             try:
                 src.backup(dst)

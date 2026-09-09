@@ -8,7 +8,7 @@
   <div class="settings-main">
     <div class="settings-page-head">
       <h1>登录日志</h1>
-      <p class="muted">只记成功登录和退出，失败次数仍走登录锁定。日志保留 90 天。</p>
+      <p class="muted">登录与退出记录，保留 90 天。</p>
     </div>
     <form method="get" class="page-filters">
       <label class="filter">
@@ -71,7 +71,7 @@
       </table>
       {{ pager(page, pages, total, 'logins_page', days=days, action=action, role=role, q=q) }}
       {% else %}
-      <p class="muted">近 {{ days }} 天还没有登录记录。</p>
+      <p class="muted">近 {{ days }} 天没有登录记录</p>
       {% endif %}
     </div>
   </div>

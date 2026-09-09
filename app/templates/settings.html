@@ -40,7 +40,7 @@
     {% if tab == 'account' %}
     <div class="settings-page-head">
       <h1>账号</h1>
-      <p class="muted">{% if g.user['must_change_pin'] %}还在用系统默认口令，先改成自己的再继续用。{% else %}登录身份和口令。口令只保存在本机，改完下次用新口令登。{% endif %}</p>
+      <p class="muted">{% if g.user['must_change_pin'] %}还在用默认口令，改掉再继续用。{% else %}登录身份和口令。口令只存在本机。{% endif %}</p>
     </div>
     <div class="card settings-card">
       <div class="settings-card-head">
@@ -68,7 +68,7 @@
     <div class="card settings-card">
       <div class="settings-card-head">
         <h2>改口令</h2>
-        <p class="muted">{% if g.user['must_change_pin'] %}默认口令必须改掉，也不能改回 123456、重复数字或连续数字。{% else %}新口令至少 8 位，不要用重复或连续数字。{% endif %}</p>
+        <p class="muted">{% if g.user['must_change_pin'] %}默认口令必须改掉；不能改回 123456、重复或连续数字。{% else %}新口令至少 8 位，不含重复或连续数字。{% endif %}</p>
       </div>
       <form method="post" class="settings-form">
         <input type="hidden" name="action" value="change_pin">
@@ -89,7 +89,7 @@
     {% if tab == 'targets' and g.user['role'] == 'admin' %}
     <div class="settings-page-head">
       <h1>月目标</h1>
-      <p class="muted">三项月目标：比算新增、Ai手机合约、金币直降。奖罚看 AI + 新用户直降。0 表示不考核。</p>
+      <p class="muted">三项月目标：比算新增、Ai手机合约、金币直降。0 表示不考核。</p>
     </div>
     <div class="card settings-card">
       <div class="settings-card-head">
@@ -113,7 +113,7 @@
     {% if tab == 'permissions' and g.user['role'] == 'admin' %}
     <div class="settings-page-head">
       <h1>权限设置</h1>
-      <p class="muted">控制店员能改哪些日期的数据。锁定时间（23:00）后当天不可改，本月补录不受锁定影响。</p>
+      <p class="muted">控制店员能改哪些日期。锁定时间（23:00）后当天不可改，本月补录不受锁定影响。</p>
     </div>
     <form method="post" class="card settings-card">
       <input type="hidden" name="action" value="save_permissions">
@@ -121,14 +121,14 @@
       <label class="settings-switch">
         <span>
           <strong>允许店员修改本月数据（补录/修正）</strong>
-          <span class="muted">默认只能改当天；开启后可在本月内补录。跨月仍需管理员。</span>
+          <span class="muted">默认只能改当天；开启后可在本月内补录。跨月需管理员。</span>
         </span>
         <input type="checkbox" name="filler_edit_month" value="1" {% if filler_edit_month %}checked{% endif %}>
       </label>
       <label class="settings-switch">
         <span>
           <strong>使用前必须先确认政策</strong>
-          <span class="muted">打开后，填报员、店长、区域经理未点「已阅读」不能看其他页面。管理员改政策正文会升版本，需重新确认。</span>
+          <span class="muted">填报员、店长、区域经理未点「已阅读」不能看其他页面。管理员改政策正文会升版本，需重新确认。</span>
         </span>
         <input type="checkbox" name="policy_require_read" value="1" {% if policy_require_read %}checked{% endif %}>
       </label>
@@ -139,7 +139,7 @@
     {% if tab == 'broadcast' and g.user['role'] == 'admin' %}
     <div class="settings-page-head">
       <h1>播报设置</h1>
-      <p class="muted">控制「保存并生成播报」贴进微信群的内容。全部门店共用，填报员不用再勾选。</p>
+      <p class="muted">「保存并生成播报」贴进微信群的内容。全部门店共用。</p>
     </div>
     <form method="post" class="card settings-card">
       <input type="hidden" name="action" value="save_broadcast">
@@ -164,7 +164,7 @@
       <input type="hidden" name="action" value="save_wecom">
       <input type="hidden" name="tab" value="broadcast">
       <h2>企业微信群机器人</h2>
-      <p class="muted">保存日报或触客后自动发群。先在企微群里加机器人拿 webhook 地址。全局地址所有店都发；按地市填的会覆盖全局。</p>
+      <p class="muted">保存日报或触客后发群。企微群里加机器人拿 webhook 地址；按地市填的覆盖全局。</p>
       <label class="settings-field">
         <span>全局 Webhook（所有店默认发这）</span>
         <input type="url" name="wecom_global" value="{{ wecom_global }}" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." autocomplete="off">
@@ -196,7 +196,7 @@
     {% if tab == 'rules' and g.user['role'] == 'admin' %}
     <div class="settings-page-head">
       <h1>考核规则</h1>
-      <p class="muted">季度改阈值和奖罚金额，保存后立即生效。考核项不变，只改数字。</p>
+      <p class="muted">季度改阈值和奖罚金额，保存后生效。</p>
     </div>
     <form method="post" class="rules-form">
       <input type="hidden" name="action" value="save_rules">
@@ -204,7 +204,7 @@
       <div class="card settings-card">
         <div class="settings-card-head">
           <h2>有运营商顾问</h2>
-          <p class="muted">走 AI + 新用户直降总量方案。「差一点 / 差得远」接近度分档自 2026 年 9 月起生效，之前月份按旧口径。</p>
+          <p class="muted">AI + 新用户直降总量方案。「差一点 / 差得远」接近度分档自 2026 年 9 月生效。</p>
         </div>
         <div class="rules-grid">
           <p><label>达标总量 AI+新用户直降 ≥</label><input type="number" min="0" name="r_total_threshold" value="{{ incentive_rules['total_threshold'] }}"></p>
@@ -230,7 +230,7 @@
       <div class="card settings-card">
         <div class="settings-card-head">
           <h2>无运营商顾问</h2>
-          <p class="muted">走双破 0 方案。</p>
+          <p class="muted">双破 0 方案。</p>
         </div>
         <div class="rules-grid">
           <p><label>双破0奖门店</label><input type="number" min="0" name="r_reward_no_advisor" value="{{ incentive_rules['reward_no_advisor'] }}"></p>
@@ -241,7 +241,7 @@
       <div class="card settings-card">
         <div class="settings-card-head">
           <h2>芝麻档位分类</h2>
-          <p class="muted">导入「芝麻订单信息」时按订单标题的档位归类：等于小天才档 → 小天才直降；等于 AI 档 → AI手机；其余档位 → 新用户芝麻直降。</p>
+          <p class="muted">导入「芝麻订单信息」按订单标题归类：等于小天才档 → 小天才直降；等于 AI 档 → AI手机；其余 → 新用户芝麻直降。</p>
         </div>
         <div class="rules-grid">
           <p><label>小天才直降档位</label><input type="number" min="1" name="r_tier_xtc" value="{{ sesame_tier_rules['xtc'] }}"></p>
@@ -255,17 +255,17 @@
     {% if tab == 'review' and g.user['role'] == 'admin' %}
     <div class="settings-page-head">
       <h1>复盘模板</h1>
-      <p class="muted">通报表复盘文案可自定义；垫资导出按地市汇总用公司名。</p>
+      <p class="muted">复盘文案可自定义；垫资导出按地市汇总用公司名。</p>
     </div>
     <form method="post" class="card settings-card">
       <input type="hidden" name="action" value="save_review">
       <input type="hidden" name="tab" value="review">
       <h2>垫资导出公司名</h2>
-      <p class="muted">南通各店汇总一行、泰州各店汇总一行。以前写死「示例公司甲/乙」，现在这里改。</p>
+      <p class="muted">南通各店汇总一行、泰州各店汇总一行。</p>
       <p><label>南通公司名</label><input name="org_name_nt" value="{{ company_form.nt }}" maxlength="30" required></p>
       <p><label>泰州公司名</label><input name="org_name_tz" value="{{ company_form.tz }}" maxlength="30" required></p>
       <h2>通报表复盘模板</h2>
-      <p class="muted">留空用内置默认。点套用再改字。通报表复盘区也可快速切换。占位符按用途分组：</p>
+      <p class="muted">留空用内置默认。占位符按用途分组：</p>
       <div class="ph-groups">
         <div class="ph-group">
           <span class="ph-tag">头部</span>
@@ -324,7 +324,7 @@
     {% if tab == 'invoice' and g.user['role'] == 'admin' %}
     <div class="settings-page-head">
       <h1>开票主体</h1>
-      <p class="muted">导出酬金/租赁申请单时按地市带出销售方和购买方。购买方是移动地市公司，一般不用改。</p>
+      <p class="muted">导出酬金/租赁申请单按地市带出销售方和购买方。购买方是移动地市公司，一般不改。</p>
     </div>
     <form method="post" class="card settings-card">
       <input type="hidden" name="action" value="save_invoice">
@@ -350,7 +350,7 @@
     {% if tab == 'brand' and g.user['role'] == 'admin' %}
     <div class="settings-page-head">
       <h1>登录页</h1>
-      <p class="muted">改登录页标志、副标题和系统名。页头也用这个系统名。</p>
+      <p class="muted">登录页标志、副标题和系统名。页头也用这个系统名。</p>
     </div>
     <form method="post" class="card settings-card">
       <input type="hidden" name="action" value="save_brand">

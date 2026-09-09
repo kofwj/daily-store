@@ -608,7 +608,7 @@ def register_admin(app) -> None:
             flash("移动取数参数不对", "error")
             return redirect(url_for("bulletin_page", date=biz_raw or None, city=city or None))
         if mobile_raw.strip() == "":
-            flash("请填移动取数", "error")
+            flash("填移动取数", "error")
             return redirect(url_for("bulletin_page", date=biz_date.isoformat(), city=city or None))
         month_start = biz_date.replace(day=1)
         asof = _clamp_bisuan_mobile_asof(asof, biz_date)

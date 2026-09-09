@@ -4,7 +4,7 @@
 <div class="page-head">
   <div class="page-title">
     <h1>导入芝麻服务费</h1>
-    <p class="muted">上传官方「芝麻服务费明细」xlsx，按门店编码对店，扣费记正数、退款记负数，自动进垫资。已导入的流水号会跳过，可重复上传。</p>
+    <p class="muted">官方「芝麻服务费明细」xlsx，按门店编码对店；扣费正数、退款负数；重复流水号跳过。</p>
   </div>
 </div>
 
@@ -19,7 +19,7 @@
       <label>芝麻订单信息（选传，用于按档位分类）</label>
       <input type="file" name="order_file" accept=".xlsx">
     </p>
-    <p class="muted">只支持 .xlsx，不超过 4 MiB。明细进垫资台账，名称「芝麻服务费」，店员不能改删。订单信息按订单号匹配档位（小天才直降 / AI手机 / 新用户芝麻直降），不传则档位统计进「未分类」，之后可单独补传。导入完可去「芝麻周报」按周贴群。</p>
+    <p class="muted">.xlsx，不超过 4 MiB。订单信息按订单号匹配档位，不传则进「未分类」。</p>
     <button type="submit">预览</button>
     <a class="btn ghost" href="{{ url_for('sesame_week_page') }}">芝麻周报</a>
     <a class="btn ghost" href="{{ url_for('advance_page') }}">返回垫资</a>
@@ -72,7 +72,7 @@
         </tr>
         {% endfor %}
         {% if preview.ready_shown|length < preview.ready_count %}
-        <tr><td colspan="8" class="muted">仅展示前 200 笔，确认将导入全部 {{ preview.ready_count }} 笔。</td></tr>
+        <tr><td colspan="8" class="muted">展示前 200 笔，确认导入全部 {{ preview.ready_count }} 笔</td></tr>
         {% endif %}
       </tbody>
     </table>

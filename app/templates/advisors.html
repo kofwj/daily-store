@@ -13,17 +13,15 @@
     <h1>{% if self_advisor and not edit_col %}我的打分{% else %}顾问打分{% endif %}</h1>
     <p class="muted">
       {% if self_advisor and not edit_col %}
-      {{ month.year }}年{{ month.month }}月，店长 / 区域经理 / 地市负责人给你的分。三方都打才会出系数。
+      {{ month.year }}年{{ month.month }}月，店长 / 区域经理 / 地市负责人给你的分；三方都打才出系数。
       {% elif edit_col %}
-      {{ month.year }}年{{ month.month }}月，你填「{{ col_label.get(edit_col, '打分') }}」。0–10 分，留空=未打。填完点「保存打分」。
-      {% else %}
-      运营商顾问用自己的姓名登录，可看各岗位给自己的分。
+      {{ month.year }}年{{ month.month }}月，「{{ col_label.get(edit_col, '打分') }}」0–10 分，留空=未打。
       {% endif %}
     </p>
     {% if window_open %}
     <p class="flash-inline ok">每月 1–5 日评上个月。本窗口到 {{ deadline.month }}月{{ deadline.day }}日，还剩 {{ (deadline - today).days }} 天。</p>
     {% elif is_admin %}
-    <p class="flash-inline warn">打分窗口是次月 1–5 日。现在已过期，管理员仍可改。</p>
+    <p class="flash-inline warn">打分窗口是次月 1–5 日。已过期，管理员仍可改。</p>
     {% else %}
     <p class="flash-inline warn">打分窗口是次月 1–5 日（截止 {{ deadline.month }}月{{ deadline.day }}日）。现在只能看{% if not self_advisor %}，改分找管理员{% endif %}。</p>
     {% endif %}
@@ -106,13 +104,12 @@
 <div class="card empty-state">
   {% if self_advisor and not edit_col %}
   <h2>这个月还没有你的打分</h2>
-  <p class="muted">店长、区域经理、地市负责人打完后会出现在这里。</p>
+  <p class="muted">店长、区域经理、地市负责人打完后出现在这里。</p>
   {% elif edit_col %}
   <h2>这个月还没有顾问</h2>
-  <p class="muted">顾问来自门店档案里的「运营商顾问」。给门店配上顾问后，这里自动出现。</p>
+  <p class="muted">顾问来自门店档案的「运营商顾问」。</p>
   {% else %}
   <h2>没有可看的打分</h2>
-  <p class="muted">运营商顾问用自己的姓名登录，可看各岗位给自己的分。店长 / 区域经理 / 地市负责人在这里给顾问打分。</p>
   {% endif %}
 </div>
 {% endif %}

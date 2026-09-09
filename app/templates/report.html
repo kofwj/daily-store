@@ -89,7 +89,7 @@
     </section>
     {% endfor %}
   </div>
-  <p class="muted report-note">日均 = 区间合计 ÷ 已提交天数。要改某一天，切到周报或日报。</p>
+  <p class="muted report-note">日均 = 区间合计 ÷ 已提交天数。</p>
   {% else %}
   <div class="card report-table-card">
     <div class="report-table-scroll">
@@ -154,7 +154,7 @@
     </div>
     <p class="muted report-note">
       {% if g.user['role'] == 'admin' %}
-      管理员点某个格子改数，回车只保存这一格。日均 = 区间合计 ÷ 已提交天数。
+      点格子改数，回车保存这一格。日均 = 区间合计 ÷ 已提交天数。
       {% else %}
       「·」表示当日为 0。日均 = 区间合计 ÷ 已提交天数。
       {% endif %}
