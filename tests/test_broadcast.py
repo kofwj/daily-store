@@ -47,14 +47,16 @@ def test_render_matches_wechat_log():
     assert text.startswith("8月13日\n示例戊店\n")
     assert "当天手机销量：日1，累13" in text
     assert "查询身份证数：日1，累4" in text
-    assert "\n重点业务\n比算新增：日0.0，累0.5\n比算新增[高]：日0.3，累0.3\nAi手机合约：日0，累0\n灵犀·晓伴：日0，累0\n" in text
+    assert "\n重点业务\n比算新增：日0.0，累0.5\n比算新增[高]：日0.3，累0.3\nAi手机合约：日0，累0\n" in text
+    assert "\n数字化\n" in text
+    assert text.endswith("灵犀·晓伴：日0，累0\n")
     assert "\n新增类\n安心/副卡：日0，累0\n其他卡类：日0，累5\n" in text
     assert "\n家庭类\n宽带：日3，累10\n" in text
     assert "电视会员：日0，累0" in text
     assert "\n终端合约\n金币直降：日0，累1\n购机让利：日2，累8\n" in text
     assert "老用户直降" not in text
     assert "定向包：日1，累1" in text
-    assert text.endswith("个人/全家保底：日0，累0\n")
+    assert "个人/全家保底：日0，累0" in text
 
 
 def test_compact_hides_zero_digital_rows():
@@ -143,11 +145,13 @@ def test_broadcast_rolls_coin_cut_parts_into_one_line():
     assert "小天才直降" not in text
 
 
-def test_today_form_has_lingxi_xiaoban_under_ai_contract(admin_client):
+def test_today_form_has_lingxi_xiaoban_under_digital(admin_client):
     page = admin_client.get("/today").get_data(as_text=True)
-    ai = page.find("Ai手机合约")
+    digital = page.find("数字化")
+    spend = page.find("个人/全家保底")
     lx = page.find("灵犀·晓伴")
-    assert ai != -1 and lx != -1 and ai < lx
+    assert digital != -1 and spend != -1 and lx != -1
+    assert digital < spend < lx
     with db.get_db() as conn:
         sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
     from datetime import date as _date

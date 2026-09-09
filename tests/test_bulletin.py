@@ -101,11 +101,9 @@ def test_bulletin_row_and_tsv_match_sheet():
     headers = csv_rows([row], date(2026, 8, 13))[0]
     for col in (
         "8月AI手机合约",
-        "8月灵犀·晓伴",
         "8月笔算业务",
         "8月金币直降",
         "8月13日AI手机合约",
-        "8月13日灵犀·晓伴",
         "8月13日笔算业务",
         "8月13日金币直降",
         "AI破0",
@@ -243,7 +241,7 @@ def test_bulletin_review_preset_switch(client):
     assert "复盘模板已切换" in switched or "精简" in switched
 
 
-def test_bulletin_page_shows_lingxi_day_and_month(admin_client):
+def test_bulletin_page_hides_lingxi(admin_client):
     from datetime import date as _date
 
     day = _date.today()
@@ -260,8 +258,8 @@ def test_bulletin_page_shows_lingxi_day_and_month(admin_client):
         follow_redirects=True,
     )
     page = admin_client.get(f"/bulletin?date={day.isoformat()}").get_data(as_text=True)
-    assert page.count("灵犀·晓伴") >= 2
-    assert page.count('class="total-num">3</td>') >= 2
+    assert "灵犀·晓伴" not in page
+    assert "AI手机合约" in page
 
 
 def test_bulletin_export_xlsx(client):
@@ -299,7 +297,7 @@ def test_bulletin_export_xlsx(client):
     header = [c.value for c in ws[1]]
     assert header[1] == "地市" and header[3] == "移动编码"
     assert "区域经理" in header
-    assert any(h and "灵犀" in str(h) for h in header)
+    assert not any(h and "灵犀" in str(h) for h in header)
     # 旧 CSV 链接现在重定向到 .xlsx
     r2 = client.get(f"/bulletin.csv?date={biz_date}")
     assert r2.status_code in (302, 200)
