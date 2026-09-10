@@ -33,8 +33,7 @@
     <input type="hidden" name="city" value="{{ city }}">
     <div class="official-row">
       <strong>录移动取数</strong>
-      <label class="filter">
-        <span>取数截止</span>
+      <label class="official-field">截止
         <input type="date" name="asof" value="{{ (mobile_asof or biz_date).isoformat() }}" required>
       </label>
       <select name="store_id">
