@@ -383,3 +383,47 @@ def test_sesame_advance_cannot_unpay(tmp_db, admin_client):
         row = conn.execute("SELECT paid FROM advance_posts WHERE id=?", (aid,)).fetchone()
         assert int(row["paid"] or 0) == 1
 
+
+def test_set_advance_paid_counts_only_changed_rows(tmp_db):
+    """取消兑付：芝麻记录不算成功、不写 unpay 审计；同批的普通记录正常取消。"""
+    from datetime import date
+
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        admin_id = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        aid_sesame = db.record_advance(
+            conn, store_id=sid, user_id=admin_id, biz_date=date.today(),
+            sesame=5.5, source="sesame", ext_id="TEST_R2", paid=True,
+        )
+        aid_normal = db.record_advance(
+            conn, store_id=sid, user_id=admin_id, biz_date=date.today(),
+            broadband=3.0, paid=True,
+        )
+        n = db.set_advance_paid(conn, [aid_sesame, aid_normal], paid=False, user_id=admin_id)
+        assert n == 1
+        assert int(conn.execute("SELECT paid FROM advance_posts WHERE id=?", (aid_sesame,)).fetchone()["paid"] or 0) == 1
+        assert int(conn.execute("SELECT paid FROM advance_posts WHERE id=?", (aid_normal,)).fetchone()["paid"] or 0) == 0
+        audits = conn.execute(
+            "SELECT COUNT(*) AS c FROM advance_edits WHERE advance_id=? AND action='unpay'",
+            (aid_sesame,),
+        ).fetchone()["c"]
+        assert audits == 0
+
+
+def test_parse_orders_xlsx_text_amounts_and_warnings():
+    """冻结金额/期数兼容文本格式（千分位/货币符号/「期」）；实在不是数字要出告警，不能静默归 0。"""
+    from app.sesame import parse_orders_xlsx
+
+    orders, warnings = parse_orders_xlsx(_make_orders_xlsx([
+        ["o1", "1,000.00", "12期", "购机优惠500档（低消70-24期）"],
+        ["o2", "¥500", 24, "购机优惠1000档（35元A套-36期）"],
+        ["o3", "坏数据", "abc", "购机优惠500档"],
+        ["o4", 300.0, "", "没有档位"],
+    ]))
+    by_no = {o["order_no"]: o for o in orders}
+    assert by_no["o1"]["frozen"] == 1000.0 and by_no["o1"]["terms"] == 12
+    assert by_no["o2"]["frozen"] == 500.0 and by_no["o2"]["terms"] == 24
+    assert by_no["o3"]["frozen"] == 0.0 and by_no["o3"]["terms"] == 0
+    assert by_no["o4"]["terms"] == 0  # 空值 = 未填，不算坏行
+    assert len(warnings) == 2 and all("o3" in w for w in warnings)
+

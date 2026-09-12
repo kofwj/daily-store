@@ -229,16 +229,19 @@ def set_advance_paid(
         if not paid and not was_paid:
             continue
         if paid:
-            conn.execute(
+            cur = conn.execute(
                 "UPDATE advance_posts SET paid=1, paid_at=?, paid_by=?, updated_at=? WHERE id=? AND paid=0",
                 (day, user_id, now_s, old["id"]),
             )
         else:
             # 芝麻导入的记录「导入即已兑」，不进取消兑付；与其他路径对 sesame 的保护一致
-            conn.execute(
+            cur = conn.execute(
                 "UPDATE advance_posts SET paid=0, paid_at='', paid_by=NULL, updated_at=? WHERE id=? AND paid=1 AND source!='sesame'",
                 (now_s, old["id"]),
             )
+        if cur.rowcount <= 0:
+            # 状态没变（典型：勾进了受保护的芝麻记录），不算成功、不写审计
+            continue
         new = conn.execute("SELECT * FROM advance_posts WHERE id=?", (old["id"],)).fetchone()
         _audit(conn, new, user_id=user_id, action="pay" if paid else "unpay",
                before=_snapshot(old, cents=True), after=_snapshot(new, cents=True), note="兑付状态变更")

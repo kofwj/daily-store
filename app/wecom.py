@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from urllib.request import Request, urlopen
 
 from . import db_core
@@ -13,6 +14,11 @@ logger = logging.getLogger("wecom")
 WEBHOOK_PREFIX = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send"
 TIMEOUT = 8
 MAX_CONTENT = 4000  # 企微 text 消息上限 4096 字节，留余量（一个中文 3 字节）
+
+
+def _redact_key(text: str) -> str:
+    """异常文本可能带完整 webhook URL，里面的 key 是长期凭据，落日志/页面前先抹掉。"""
+    return re.sub(r"(key=)[^&\s]+", r"\1***", str(text))
 
 
 def _cut_utf8_bytes(text: str, limit: int) -> str:
@@ -67,7 +73,7 @@ def send_text(conn, store, text: str, *, source: str = "") -> bool:
             return False
         return True
     except Exception as exc:  # noqa: BLE001
-        logger.warning("wecom send error: %s source=%s", exc, source)
+        logger.warning("wecom send error: %s source=%s", _redact_key(str(exc)), source)
         return False
 
 
@@ -89,4 +95,4 @@ def send_test(conn, url: str) -> tuple[bool, str]:
             return False, f"企微返回错误：{result}"
         return True, "测试消息已发送"
     except Exception as exc:  # noqa: BLE001
-        return False, f"发送失败：{exc}"
+        return False, f"发送失败：{_redact_key(str(exc))}"

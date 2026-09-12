@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from secrets import token_hex
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from openpyxl import load_workbook
 
@@ -49,8 +49,38 @@ def tier_category(title: str, rules: Mapping[str, int]) -> str:
     return "新用户芝麻直降"
 
 
-def parse_orders_xlsx(data: bytes) -> List[Dict[str, Any]]:
-    """解析芝麻订单信息 xlsx：订单号 + 档位类别，不碰姓名/手机号/身份证等隐私列。"""
+def _coerce_amount(raw: Any) -> Optional[float]:
+    """金额列兼容文本格式（千分位 / 货币符号）；实在不是数字返回 None。"""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return 0.0
+    if isinstance(raw, (int, float)):
+        return round(float(raw), 2)
+    text = re.sub(r"[,，\s¥￥元]", "", str(raw).strip())
+    try:
+        return round(float(text), 2)
+    except ValueError:
+        return None
+
+
+def _coerce_int(raw: Any) -> Optional[int]:
+    """期数列兼容「12期」这类文本；实在不是数字返回 None。"""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return 0
+    if isinstance(raw, (int, float)):
+        return int(raw)
+    text = re.sub(r"[期\s,，]", "", str(raw).strip())
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def parse_orders_xlsx(data: bytes) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """解析芝麻订单信息 xlsx：订单号 + 档位类别，不碰姓名/手机号/身份证等隐私列。
+
+    返回 (订单列表, 告警列表)；金额/期数解析不了的行按 0 计入，但会在告警里点出，
+    不静默吞掉——涉及金额，错了要让人看见。
+    """
     if not data:
         raise ValueError("没有文件")
     if len(data) > MAX_IMPORT_BYTES:
@@ -74,6 +104,9 @@ def parse_orders_xlsx(data: bytes) -> List[Dict[str, Any]]:
         raise ValueError("不是芝麻订单信息（缺订单号 / 订单标题）")
     header = [str(v or "").strip() for v in rows[header_idx]]
     out: List[Dict[str, Any]] = []
+    warnings: List[str] = []
+    bad_frozen: List[str] = []
+    bad_terms: List[str] = []
     seen = set()
     for r in rows[header_idx + 1 :]:
         rec = dict(zip(header, r))
@@ -82,15 +115,14 @@ def parse_orders_xlsx(data: bytes) -> List[Dict[str, Any]]:
             continue
         seen.add(order_no)
         title = str(rec.get("订单标题") or "").strip()
-        frozen_raw = rec.get("冻结金额")
-        try:
-            frozen = round(float(frozen_raw or 0), 2)
-        except (TypeError, ValueError):
+        frozen = _coerce_amount(rec.get("冻结金额"))
+        if frozen is None:
             frozen = 0.0
-        try:
-            terms = int(rec.get("期数") or 0)
-        except (TypeError, ValueError):
+            bad_frozen.append(order_no)
+        terms = _coerce_int(rec.get("期数"))
+        if terms is None:
             terms = 0
+            bad_terms.append(order_no)
         out.append(
             {
                 "order_no": order_no[:40],
@@ -103,7 +135,15 @@ def parse_orders_xlsx(data: bytes) -> List[Dict[str, Any]]:
         )
     if not out:
         raise ValueError("订单信息里没有数据行")
-    return out
+    if bad_frozen:
+        warnings.append(
+            f"订单信息有 {len(bad_frozen)} 行冻结金额不是数字（按 0 计），订单号如：{'、'.join(bad_frozen[:3])}"
+        )
+    if bad_terms:
+        warnings.append(
+            f"订单信息有 {len(bad_terms)} 行期数不是数字（按 0 计），订单号如：{'、'.join(bad_terms[:3])}"
+        )
+    return out, warnings
 
 MAX_IMPORT_BYTES = 4 * 1024 * 1024
 

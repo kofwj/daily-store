@@ -491,9 +491,11 @@ def register_advance(app) -> None:
                 try:
                     with db.get_db() as conn:
                         rules = sesame.tier_rules(conn)
-                    orders = sesame.parse_orders_xlsx(order_file.read())
+                    orders, order_warnings = sesame.parse_orders_xlsx(order_file.read())
                     for o in orders:
                         o["category"] = sesame.tier_category(o.get("order_title"), rules)
+                    if order_warnings:
+                        order_error = "；".join(order_warnings)
                 except ValueError as exc:
                     order_error = f"订单信息解析失败：{exc}（已忽略，本次导入不分档位）"
         with db.get_db() as conn:

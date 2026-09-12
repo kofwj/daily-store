@@ -329,9 +329,11 @@ def _settings_post(conn, tab: str):
             if resp is not None:
                 return resp
     except ValueError as exc:  # 表单校验/备份恢复的预期错误，原文可给用户看
+        conn.rollback()  # with 块退出会 commit，先撤销本次操作已执行的一半写入
         flash(str(exc), "error")
     except Exception:  # noqa: BLE001 — 其余是服务端问题，原文可能带表名/路径，不外露
         current_app.logger.exception("settings action failed: %s", action)
+        conn.rollback()
         flash("操作失败，稍后重试；反复出现联系管理员看日志", "error")
     return redirect(url_for("settings", tab=tab))
 

@@ -217,3 +217,18 @@ def test_store_picker_has_city_and_manager_groupby(admin_client):
     assert 'id="storeGroupBy"' in settings
     assert 'data-group="manager"' in settings
 
+
+def test_settings_post_rolls_back_partial_writes(tmp_db, admin_client, monkeypatch):
+    """设置操作中途失败要整体回滚，不能把已执行的一半写入提交。"""
+    from app import db_core, views_settings
+
+    def bad_handler(conn):
+        db_core.set_setting(conn, "rollback_probe", "written")
+        raise RuntimeError("boom")
+
+    monkeypatch.setitem(views_settings._SETTINGS_ACTIONS, "boom", bad_handler)
+    page = admin_client.post("/settings", data={"action": "boom"}, follow_redirects=True).get_data(as_text=True)
+    assert "操作失败" in page
+    with db.get_db() as conn:
+        assert db_core.get_setting(conn, "rollback_probe", "") == ""
+

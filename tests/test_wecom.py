@@ -112,3 +112,12 @@ def test_broadcast_error_keeps_daily_saved(filler_client):
     assert resp.status_code == 200
     with db.get_db() as conn:
         assert db.get_report(conn, sid, date.today()) is not None
+
+
+def test_redact_key_hides_webhook_secret():
+    """异常文本里的 webhook key 是长期凭据，落日志/页面前必须抹掉。"""
+    from app.wecom import _redact_key
+
+    text = "HTTP Error 400: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=SECRET123&foo=bar"
+    out = _redact_key(text)
+    assert "SECRET123" not in out and "key=***" in out and "foo=bar" in out
