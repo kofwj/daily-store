@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import logging
-import time
 
 from flask import current_app, render_template, request
 
@@ -37,15 +36,10 @@ def register_errors(app) -> None:
     @app.errorhandler(500)
     def handle_500(exc):
         # 关键：自定义处理器接管后 Flask 不再自动打日志，必须自己记。
-        started = getattr(request, "_start_time", None)
-        elapsed = ""
-        if started is not None:
-            elapsed = f" ({time.monotonic() - started:.2f}s)"
         current_app.logger.error(
-            "未捕获异常 %s %s%s (%s): %s",
+            "未捕获异常 %s %s (%s): %s",
             request.method,
             request.url,
-            elapsed,
             request.remote_addr,
             request.path,
             exc_info=exc,

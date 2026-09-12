@@ -625,6 +625,10 @@ table.bulletin .bisuan-official {
 table.bulletin .bisuan-gap-ok {
   background: #ecfdf5; color: #14532d; border-color: #a7f3d0;
 }
+/* 移数/上报数解析失败：琥珀色"异常"，不能混进正常分档 */
+table.bulletin .bisuan-gap-bad {
+  background: #fef3c7; color: #92400e; border-color: #fbbf24; font-weight: 800;
+}
 table.bulletin .bisuan-gap-soft-up {
   background: #eff6ff; color: #1e3a8a; border-color: #bfdbfe;
 }

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import sqlite3
@@ -283,6 +284,10 @@ def begin_immediate(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError as exc:
         if "within a transaction" not in str(exc).lower():
             raise
+        # 已经开着的是 DEFERRED 事务，抢锁保护没生效；不值得炸掉请求，但要让日志看见
+        logging.getLogger(__name__).warning(
+            "begin_immediate 在已有事务内调用，写锁保护失效"
+        )
 
 
 @contextmanager
@@ -317,6 +322,8 @@ def init_db() -> None:
         _ensure_invoice_tables(conn)
         _ensure_policy_tables(conn)
         # 种子（建表/加列/回填默认）每次幂等执行即可；真正“动数据”的迁移走 migrate() 一次
+        # seed 是"先 SELECT 再 INSERT"，多 worker 同时启动会撞 UNIQUE；和 migrate() 一样先抢写锁
+        begin_immediate(conn)
         _seed_metrics(conn)
         _seed_kpi_targets(conn)
         _seed_catalog_stores(conn)

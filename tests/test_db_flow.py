@@ -554,3 +554,26 @@ def test_store_has_data_counts_invoice_edits(tmp_db):
         )
         assert db_core.store_has_data(conn, sid)
 
+
+def test_abandon_request_conn_resets_depth(tmp_db):
+    """abandon 后同一请求再开 get_db 要能正常 commit，不能被残留 depth 吞掉写入。"""
+    import sqlite3 as sq3
+
+    from app.web import create_app
+
+    app = create_app(testing=True)
+    with app.test_request_context():
+        with db.get_db() as conn:
+            conn.execute("INSERT INTO app_meta(key, value) VALUES ('probe', '1')")
+            db.abandon_request_conn()
+        # abandon 后同请求再写：depth 必须从 0 起步，with 退出要 commit
+        with db.get_db() as conn:
+            conn.execute("INSERT INTO app_meta(key, value) VALUES ('probe2', '2')")
+    raw = sq3.connect(tmp_db)
+    try:
+        keys = {r[0] for r in raw.execute("SELECT key FROM app_meta")}
+    finally:
+        raw.close()
+    assert "probe" not in keys  # abandon 时已回滚
+    assert "probe2" in keys
+

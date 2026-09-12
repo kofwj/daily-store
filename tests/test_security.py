@@ -417,3 +417,18 @@ def test_create_user_rejects_case_variant_dup(tmp_db):
                 role="filler", store_ids=[],
             )
 
+
+def test_login_next_keeps_query_string(client):
+    """会话过期被踢到登录页，登录后要带着 query string 回原页面。"""
+    resp = client.get("/report?view=week", follow_redirects=False)
+    assert resp.status_code == 302
+    loc = resp.headers["Location"]
+    assert "next=" in loc and "view%3Dweek" in loc, loc
+    landed = client.post(
+        "/login?next=%2Freport%3Fview%3Dweek",
+        data={"username": "admin", "pin": "123456"},
+        follow_redirects=True,
+    )
+    assert landed.request.path == "/report"
+    assert landed.request.query_string == b"view=week"
+

@@ -501,11 +501,11 @@ def register_advance(app) -> None:
         with db.get_db() as conn:
             stores = accessible_stores(conn)
             groups = sesame.classify_sesame_rows(conn, rows, stores)
+            rules = sesame.tier_rules(conn)
         total_in = round(sum(r["amount"] for r in groups["ready"]), 2)
         # ready 必须存全量，否则确认时只导入截断的前 200 条，超出部分被静默丢弃。
         # 表格展示单独截前 200，计数/合计/按钮始终用全量。
         if orders:
-            rules = sesame.tier_rules(conn)
             cat_by_order = {o["order_no"]: o["category"] for o in orders}
             tier_preview = Counter(
                 cat_by_order.get(str(r["ext_id"]).removesuffix("_R"), "未分类")

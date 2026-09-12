@@ -205,3 +205,6 @@ def abandon_request_conn() -> None:
     except Exception:  # noqa: BLE001
         pass
     g._db_conn = None
+    # 嵌套深度是跟着旧连接走的；不一起清零，同一请求再开 get_db 会被误当成嵌套块，
+    # 退出时不 commit，写入静默丢失
+    g._db_depth = 0

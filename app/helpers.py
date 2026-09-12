@@ -226,11 +226,17 @@ def client_ip() -> str:
     return (request.remote_addr or "").strip()
 
 
+def _login_next_target() -> str:
+    """登录后要回的完整页面：带 query string，否则 /report?view=week 登录回来丢了筛选。"""
+    target = request.full_path
+    return target[:-1] if target.endswith("?") else target
+
+
 def login_required(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
         if g.user is None:
-            return redirect(url_for("login", next=request.path))
+            return redirect(url_for("login", next=_login_next_target()))
         return fn(*args, **kwargs)
 
     return wrapper
@@ -240,7 +246,7 @@ def admin_required(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
         if g.user is None:
-            return redirect(url_for("login", next=request.path))
+            return redirect(url_for("login", next=_login_next_target()))
         if g.user["role"] != "admin":
             flash("需要管理员权限", "error")
             return redirect(default_home())

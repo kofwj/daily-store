@@ -261,21 +261,27 @@ def apply_scales(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 base = int(sys_asof) if sys_asof is not None and sys_asof != "" else int(row["month_bisuan"])
                 diff = int(mobile) - base
             except (TypeError, ValueError):
-                diff = 0
-            row["month_bisuan_diff"] = fmt_metric("bisuan", diff)
-            sign = "+" if diff > 0 else ""
-            row["month_bisuan_diff_signed"] = f"{sign}{fmt_metric('bisuan', diff)}"
-            # diff = 移 − 上报；分级着色，大差距更醒目（十分位整数）
-            abs_d = abs(int(diff))
-            if diff == 0:
-                gap_cls = "bisuan-gap-ok"
-            elif abs_d <= 5:  # ≤0.5
-                gap_cls = "bisuan-gap-soft-up" if diff > 0 else "bisuan-gap-soft-down"
-            elif abs_d <= 15:  # ≤1.5
-                gap_cls = "bisuan-gap-mid-up" if diff > 0 else "bisuan-gap-mid-down"
+                diff = None
+            if diff is None:
+                # 移数/上报数坏了要显眼，不能算不出就伪装成"已对齐"
+                row["month_bisuan_diff"] = ""
+                row["month_bisuan_diff_signed"] = "异常"
+                row["month_bisuan_gap_class"] = "bisuan-gap-bad"
             else:
-                gap_cls = "bisuan-gap-big-up" if diff > 0 else "bisuan-gap-big-down"
-            row["month_bisuan_gap_class"] = gap_cls
+                row["month_bisuan_diff"] = fmt_metric("bisuan", diff)
+                sign = "+" if diff > 0 else ""
+                row["month_bisuan_diff_signed"] = f"{sign}{fmt_metric('bisuan', diff)}"
+                # diff = 移 − 上报；分级着色，大差距更醒目（十分位整数）
+                abs_d = abs(int(diff))
+                if diff == 0:
+                    gap_cls = "bisuan-gap-ok"
+                elif abs_d <= 5:  # ≤0.5
+                    gap_cls = "bisuan-gap-soft-up" if diff > 0 else "bisuan-gap-soft-down"
+                elif abs_d <= 15:  # ≤1.5
+                    gap_cls = "bisuan-gap-mid-up" if diff > 0 else "bisuan-gap-mid-down"
+                else:
+                    gap_cls = "bisuan-gap-big-up" if diff > 0 else "bisuan-gap-big-down"
+                row["month_bisuan_gap_class"] = gap_cls
         if not row.get("submitted"):
             # 未交行不套热力，避免和已交的浅色格子撞在一起
             wait = ""

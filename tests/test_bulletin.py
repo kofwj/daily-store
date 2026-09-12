@@ -528,3 +528,26 @@ def test_bisuan_accepts_one_decimal_and_month_calibrates(admin_client):
     if day.day > 1:
         assert f'name="asof" value="{asof.isoformat()}"' in page or asof.isoformat() in page
 
+
+def test_apply_scales_marks_bad_mobile_diff():
+    """移数/上报数解析失败要标"异常"，不能 diff=0 伪装成已对齐。"""
+    rows = [
+        {
+            "month_coin": 10, "month_ai": 20, "month_bisuan": 50,
+            "day_coin": 1, "day_ai": 2, "day_bisuan": 3,
+            "submitted": True,
+            "_month_bisuan_mobile_stored": "不是数字",
+        },
+        {
+            "month_coin": 10, "month_ai": 20, "month_bisuan": 50,
+            "day_coin": 1, "day_ai": 2, "day_bisuan": 3,
+            "submitted": True,
+            "_month_bisuan_mobile_stored": 52,
+        },
+    ]
+    apply_scales(rows)
+    assert rows[0]["month_bisuan_diff_signed"] == "异常"
+    assert rows[0]["month_bisuan_gap_class"] == "bisuan-gap-bad"
+    assert rows[1]["month_bisuan_diff_signed"] == "+0.2"  # 移数按 0.1 位存储
+    assert rows[1]["month_bisuan_gap_class"] != "bisuan-gap-bad"
+
