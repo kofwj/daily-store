@@ -157,7 +157,7 @@ def record_deal_post(
             raise ValueError("past_deal_locked")
         existing_id = int(row["id"])
         existing_row = row
-    if existing_id is None and payload["phone"]:
+    if payload["phone"]:
         row = conn.execute(
             """
             SELECT * FROM deal_posts
@@ -166,9 +166,14 @@ def record_deal_post(
             """,
             (store_id, day.isoformat(), payload["phone"]),
         ).fetchone()
-        if row:
-            existing_id = int(row["id"])
-            existing_row = row
+        if existing_id is None:
+            # 新建：同店 + 当日 + 同号码按口径覆盖到已有记录上
+            if row:
+                existing_id = int(row["id"])
+                existing_row = row
+        elif row and int(row["id"]) != existing_id:
+            # 编辑：号码改成同店同日另一条记录的号会撞唯一索引，明确拒绝
+            raise ValueError("deal_phone_dup")
     after = _payload_snapshot(payload)
     if existing_id is not None:
         before = _row_snapshot(existing_row) if existing_row is not None else {}

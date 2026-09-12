@@ -539,3 +539,18 @@ def test_comma_input_strict(tmp_db):
     with pytest.raises(ValueError):
         parse_money("12,5")
 
+
+def test_store_has_data_counts_invoice_edits(tmp_db):
+    """开票审计行也算门店数据：否则删过开票月的店会被误判无数据，删店撞外键。"""
+    from app import db_core
+
+    with db.get_db() as conn:
+        sid = db.create_store(conn, "数据校验店", "x-data")
+        assert not db_core.store_has_data(conn, sid)
+        conn.execute(
+            "INSERT INTO invoice_edits(store_id, user_id, month, edited_at, action)"
+            " VALUES (?, 1, '2026-09', '2026-09-12 10:00:00', 'test')",
+            (sid,),
+        )
+        assert db_core.store_has_data(conn, sid)
+

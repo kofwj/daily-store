@@ -400,3 +400,20 @@ def test_csrf_referrer_follows_same_site_absolute_url(tmp_db):
         loc = r.headers["Location"]
         assert loc.startswith("/") and not loc.startswith("//"), loc
 
+
+def test_login_username_case_insensitive(client):
+    """用户名大小写打错也能登录，认证与失败计数同一口径。"""
+    resp = client.post("/login", data={"username": "ADMIN", "pin": "123456"}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/today")
+
+
+def test_create_user_rejects_case_variant_dup(tmp_db):
+    """登录按不分大小写匹配，建号时就不能出现只差大小写的重名。"""
+    with db.get_db() as conn:
+        with pytest.raises(ValueError, match="用户名已存在"):
+            db.create_user(
+                conn, username="ADMIN", display_name="重复", pin="123456",
+                role="filler", store_ids=[],
+            )
+

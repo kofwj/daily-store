@@ -1,6 +1,7 @@
 import io
 
 import openpyxl
+import pytest
 
 from app import db
 from app.deal import form_values, mask_phone, render_deal
@@ -427,4 +428,18 @@ def test_mask_phone_standard_format():
     assert mask_phone("13812345678") == "138****5678"
     assert mask_phone("95") == "95"
     assert mask_phone("1234") == "****"
+
+
+def test_deal_edit_to_dup_phone_rejected(tmp_db):
+    """编辑改成同店同日已有号码要被明确拒绝，不能撞唯一索引变成 500。"""
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        day = db.today_local()
+        a = db.record_deal_post(conn, store_id=sid, user_id=uid, closed=True, model="S60", phone="15500000011", biz_date=day)
+        b = db.record_deal_post(conn, store_id=sid, user_id=uid, closed=True, model="S60", phone="15500000022", biz_date=day)
+        with pytest.raises(ValueError, match="deal_phone_dup"):
+            db.record_deal_post(conn, store_id=sid, user_id=uid, closed=True, model="S60", phone="15500000022", deal_id=a, biz_date=day)
+        # 号码没动、只改其他字段的编辑不受影响
+        assert db.record_deal_post(conn, store_id=sid, user_id=uid, closed=False, model="S70", phone="15500000022", deal_id=b, biz_date=day) == b
 

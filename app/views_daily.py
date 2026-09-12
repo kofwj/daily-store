@@ -289,8 +289,11 @@ def register_daily(app) -> None:
                         deal_id=deal_id_int,
                         biz_date=today_d,
                     )
-                except ValueError:
-                    flash("这条触客记录不存在或已删除，刷新后重试", "error")
+                except ValueError as exc:
+                    if str(exc) == "deal_phone_dup":
+                        flash("同日同号已有另一条记录，号码不能改成当天已填过的", "error")
+                    else:
+                        flash("这条触客记录不存在或已删除，刷新后重试", "error")
                     return redirect(url_for("deal_records", store_id=store["id"]))
                 values["deal_id"] = saved_id
                 editable = True

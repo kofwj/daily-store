@@ -204,3 +204,13 @@ def test_restore_safe_while_other_connection_open(tmp_db):
     finally:
         other.close()
 
+
+def test_restore_corrupt_sqlite_file_is_valueerror(tmp_path):
+    """魔数对但页损坏的备份要报"备份文件损坏"，不能炸成 500。"""
+    import pytest
+
+    corrupt = tmp_path / "corrupt.db"
+    corrupt.write_bytes(b"SQLite format 3\x00" + b"\x00" * 8192)
+    with pytest.raises(ValueError, match="备份文件损坏"):
+        backup.restore_bytes(corrupt.read_bytes())
+

@@ -147,11 +147,15 @@ def restore_bytes(data: bytes) -> Path:
                 raise ValueError("备份里缺表：" + "、".join(missing))
             if probe.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("备份完整性校验失败")
-            required_columns = {"users": {"id", "username", "pin_hash", "role"}, "advance_posts": {"id", "store_id", "biz_date", "paid"}}
-            for table, columns in required_columns.items():
-                actual = {row[1] for row in probe.execute(f"PRAGMA table_info({table})")}
-                if not columns <= actual:
-                    raise ValueError(f"备份表结构不完整：{table}")
+            users_cols = {row[1] for row in probe.execute("PRAGMA table_info(users)")}
+            if not {"id", "username", "pin_hash", "role"} <= users_cols:
+                raise ValueError("备份表结构不完整：users")
+            advance_cols = {row[1] for row in probe.execute("PRAGMA table_info(advance_posts)")}
+            if not {"id", "store_id", "biz_date", "paid"} <= advance_cols:
+                raise ValueError("备份表结构不完整：advance_posts")
+        except sqlite3.DatabaseError as exc:
+            # 魔数对但页损坏/加密/截断的文件会在这里炸，转成预期错误给用户看
+            raise ValueError("备份文件损坏，读不出来") from exc
         finally:
             probe.close()
         # Validation is complete: only now preserve live state and replace it.

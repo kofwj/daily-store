@@ -1531,8 +1531,10 @@ def _seed_store_fillers(conn: sqlite3.Connection) -> None:
             )
 
 def get_user_by_username(conn: sqlite3.Connection, username: str) -> Optional[sqlite3.Row]:
+    # COLLATE NOCASE 与登录锁定计数的 lower 口径一致：大小写打错也在打同一个账号的失败额度，
+    # 不会出现"Admin 认证失败却把 admin 刷锁定"的错位
     return conn.execute(
-        "SELECT * FROM users WHERE username=? AND active=1",
+        "SELECT * FROM users WHERE username=? COLLATE NOCASE AND active=1",
         (username.strip(),),
     ).fetchone()
 
@@ -1806,13 +1808,20 @@ def create_user(
 ) -> int:
     if role not in ("admin", "filler", "readonly", "city"):
         raise ValueError("role")
+    name = username.strip()
+    dup = conn.execute(
+        "SELECT 1 FROM users WHERE username=? COLLATE NOCASE", (name,)
+    ).fetchone()
+    if dup:
+        # 登录按不分大小写匹配，重名（含只差大小写）会让身份含糊，建号时就挡住
+        raise ValueError("用户名已存在（不分大小写）")
     must_change = 1 if is_weak_new_pin(pin) else 0
     conn.execute(
         """
         INSERT INTO users(username, display_name, pin_hash, role, scope, must_change_pin, active, created_at)
         VALUES (?, ?, ?, ?, ?, ?, 1, ?)
         """,
-        (username.strip(), display_name.strip(), hash_pin(pin), role, scope.strip(), must_change, _now()),
+        (name, display_name.strip(), hash_pin(pin), role, scope.strip(), must_change, _now()),
     )
     user_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
     for store_id in store_ids:
@@ -1924,6 +1933,7 @@ def store_has_data(conn: sqlite3.Connection, store_id: int) -> bool:
         "report_edits",
         "deal_edits",
         "advance_edits",
+        "invoice_edits",
     )
     for table in tables:
         exists = conn.execute(
