@@ -551,3 +551,57 @@ def test_apply_scales_marks_bad_mobile_diff():
     assert rows[1]["month_bisuan_diff_signed"] == "+0.2"  # 移数按 0.1 位存储
     assert rows[1]["month_bisuan_gap_class"] != "bisuan-gap-bad"
 
+
+def test_mobile_compare_block_labels_stale_asof():
+    """移数每周更新、0 店不动，各店截止日会差几天：
+    汇总头标截止区间，截止日早于通报日的店在行尾单独标注。"""
+    from datetime import timedelta
+
+    from app.bulletin import _mobile_compare_block
+
+    today = date.today()
+    old_day = today - timedelta(days=3)
+    rows = [
+        {
+            "short_name": "甲店",
+            "month_bisuan": 50,
+            "_month_bisuan_mobile_stored": 52,
+            "month_bisuan_asof": today.isoformat(),
+            "month_bisuan_asof_label": f"至{today.month}/{today.day}",
+            "month_bisuan_mobile_stale": False,
+        },
+        {
+            "short_name": "乙店",
+            "month_bisuan": 30,
+            "_month_bisuan_mobile_stored": 31,
+            "month_bisuan_asof": old_day.isoformat(),
+            "month_bisuan_asof_label": f"至{old_day.month}/{old_day.day}",
+            "month_bisuan_mobile_stale": True,
+        },
+    ]
+    block = _mobile_compare_block(rows, today)
+    assert "分店对照" in block
+    assert f"更新至{today.month}/{today.day}，部分店至{old_day.month}/{old_day.day}" in block
+    assert f"移3.1 差+0.1（至{old_day.month}/{old_day.day}）" in block  # 陈旧店标注自己截止日
+    assert "（至" not in block.split("分店对照：")[1].splitlines()[1]  # 当天店不加标注
+
+
+def test_mobile_compare_block_single_asof_keeps_old_header():
+    """所有店截止日一致时，汇总头保持单一日期。"""
+    from app.bulletin import _mobile_compare_block
+
+    today = date.today()
+    rows = [
+        {
+            "short_name": "甲店",
+            "month_bisuan": 50,
+            "_month_bisuan_mobile_stored": 50,
+            "month_bisuan_asof": today.isoformat(),
+            "month_bisuan_asof_label": f"至{today.month}/{today.day}",
+            "month_bisuan_mobile_stale": False,
+        },
+    ]
+    block = _mobile_compare_block(rows, today)
+    assert f"（移动数据更新至{today.month}/{today.day}）" in block
+    assert "部分店至" not in block
+

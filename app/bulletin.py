@@ -765,7 +765,11 @@ def summary(
 
 
 def _mobile_compare_block(rows: Sequence[Mapping[str, Any]], biz_date: date) -> str:
-    """今天更新了移数才出对照段，否则空串。"""
+    """今天更新了移数才出对照段，否则空串。
+
+    移数习惯是每周更新、0 店不动，各家截止日常常差几天：汇总头标注截止区间，
+    截止日早于通报日的店在行尾单独标出自己的截止日，免得陈旧数冒充当天数。
+    """
     updated_today = any(
         (r.get("month_bisuan_asof") or "").strip()[:10] == biz_date.isoformat()
         for r in rows
@@ -774,7 +778,7 @@ def _mobile_compare_block(rows: Sequence[Mapping[str, Any]], biz_date: date) -> 
     mobile_lines = []
     mobile_sum = 0
     report_asof_sum = 0
-    asof_label = ""
+    asof_dates: List[date] = []
     for r in rows:
         mobile = r.get("_month_bisuan_mobile_stored")
         if mobile is None or mobile == "" or not updated_today:
@@ -788,19 +792,30 @@ def _mobile_compare_block(rows: Sequence[Mapping[str, Any]], biz_date: date) -> 
             continue
         mobile_sum += mob_i
         report_asof_sum += rep_i
-        if not asof_label:
-            asof_label = (r.get("month_bisuan_asof_label") or "").strip()
+        asof_raw = (r.get("month_bisuan_asof") or "").strip()[:10]
+        try:
+            asof_dates.append(date.fromisoformat(asof_raw))
+        except ValueError:
+            pass
         sign = "+" if diff > 0 else ""
         gap = f"差{sign}{fmt_metric('bisuan', diff)}" if diff != 0 else "已对齐"
-        mobile_lines.append(
+        line = (
             f"{_row_name(r)} 上报{fmt_metric('bisuan', rep_i)} "
             f"移{fmt_metric('bisuan', mob_i)} {gap}"
         )
+        if bool(r.get("month_bisuan_mobile_stale")):
+            label = (r.get("month_bisuan_asof_label") or "").strip()
+            if label:
+                line += f"（{label}）"
+        mobile_lines.append(line)
     if not mobile_lines:
         return ""
-    if asof_label:
-        day_bit = asof_label[1:] if asof_label.startswith("至") else asof_label
-        asof_bit = f"（移动数据更新至{day_bit}）"
+    if asof_dates:
+        newest, oldest = max(asof_dates), min(asof_dates)
+        if newest == oldest:
+            asof_bit = f"（移动数据更新至{newest.month}/{newest.day}）"
+        else:
+            asof_bit = f"（移动数据更新至{newest.month}/{newest.day}，部分店至{oldest.month}/{oldest.day}）"
     else:
         asof_bit = ""
     tot_diff = mobile_sum - report_asof_sum
