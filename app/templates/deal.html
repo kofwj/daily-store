@@ -38,11 +38,11 @@
       </p>
       <p>
         <label>号码</label>
-        <input name="phone" value="{{ form.phone }}" inputmode="numeric" placeholder="11位手机号" autocomplete="off">
+        <input name="phone" value="{{ form.phone }}" inputmode="numeric" pattern="[0-9]{11}" maxlength="11" title="请输入11位手机号" placeholder="11位手机号" autocomplete="off">
       </p>
       <p>
         <label>消费</label>
-        <input name="spend" value="{{ form.spend }}" inputmode="decimal" placeholder="如 99" autocomplete="off">
+        <input name="spend" value="{{ form.spend }}" inputmode="decimal" pattern="\d+(\.\d{1,2})?" title="数字，最多两位小数" placeholder="如 99" autocomplete="off">
       </p>
       <p>
         <label>推荐套餐</label>

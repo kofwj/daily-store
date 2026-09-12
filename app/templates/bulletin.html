@@ -18,9 +18,22 @@
         {% endfor %}
       </select>
     </label>
+    {% if areas %}
+    <label class="filter">
+      <span>区域经理</span>
+      <select name="area" onchange="this.form.submit()">
+        <option value="">全部</option>
+        {% for a in areas %}
+        <option value="{{ a }}" {% if a == area %}selected{% endif %}>{{ a }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% endif %}
+    <a class="btn ghost" href="{{ url_for('bulletin_page', date=prev_day, city=city, area=area or None) }}">前一天</a>
+    <a class="btn ghost" href="{{ url_for('bulletin_page', date=next_day, city=city, area=area or None) }}">后一天</a>
     <button type="button" id="btnCopyShot" onclick="copyBulletinImage()">复制图片</button>
     <button type="button" id="btnDownShot" class="ghost" onclick="downloadBulletinImage()">下载图片</button>
-    <a class="btn ghost" href="{{ url_for('bulletin_xlsx', date=biz_date.isoformat(), city=city) }}">导出 Excel</a>
+    <a class="btn ghost" href="{{ url_for('bulletin_xlsx', date=biz_date.isoformat(), city=city, area=area or None) }}">导出 Excel</a>
     <span class="chip" id="copyHint">可贴进微信</span>
   </form>
 </div>
@@ -31,6 +44,7 @@
   <form method="post" action="{{ url_for('bulletin_bisuan_mobile') }}">
     <input type="hidden" name="date" value="{{ biz_date.isoformat() }}">
     <input type="hidden" name="city" value="{{ city }}">
+    <input type="hidden" name="area" value="{{ area or '' }}">
     <div class="official-row">
       <strong>录移动取数</strong>
       <label class="official-field">截止

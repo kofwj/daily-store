@@ -486,6 +486,7 @@ def register_admin(app) -> None:
     def bulletin_page():
         biz_date = parse_date(request.args.get("date"))
         city = (request.args.get("city") or "").strip()
+        area = (request.args.get("area") or "").strip()
         with db.get_db() as conn:
             stores = accessible_stores(conn)
             # 通报表只看有移动编码的店；地市下拉也按这个口径，避免空店把泰州带出来
@@ -495,6 +496,13 @@ def register_admin(app) -> None:
                 city = ""
             if not city:
                 city = "南通市" if "南通市" in cities else (cities[0] if cities else "")
+            areas = sorted(
+                {(s["area_manager"] or "").strip() for s in stores if (s["area_manager"] or "").strip()}
+            )
+            if area and area not in areas:
+                area = ""
+            if area:
+                stores = [s for s in stores if (s["area_manager"] or "").strip() == area]
             stores = [s for s in stores if (s["city"] or "南通市") == city] if city else stores
             rows = _bulletin_rows(conn, stores, biz_date)
             copy_text = bulletin.tsv(rows, biz_date)
@@ -555,6 +563,10 @@ def register_admin(app) -> None:
                 copy_text=copy_text,
                 city=city,
                 cities=cities,
+                area=area,
+                areas=areas,
+                prev_day=(biz_date - timedelta(days=1)).isoformat(),
+                next_day=(biz_date + timedelta(days=1)).isoformat(),
                 is_admin=g.user["role"] == "admin",
                 mobile_asof=mobile_asof,
                 mobile_asof_head=mobile_asof_head,
@@ -595,6 +607,7 @@ def register_admin(app) -> None:
         asof_raw = request.form.get("asof") or ""
         mobile_raw = request.form.get("mobile") or request.form.get("official") or ""
         city = (request.form.get("city") or "").strip()
+        area = (request.form.get("area") or "").strip()
         try:
             sid = int(store_id)
             biz_date = date.fromisoformat(biz_raw)
@@ -606,10 +619,10 @@ def register_admin(app) -> None:
             mobile = max(0, to_stored("bisuan", mobile_raw))
         except (ValueError, TypeError):
             flash("移动取数参数不对", "error")
-            return redirect(url_for("bulletin_page", date=biz_raw or None, city=city or None))
+            return redirect(url_for("bulletin_page", date=biz_raw or None, city=city or None, area=area or None))
         if mobile_raw.strip() == "":
             flash("填移动取数", "error")
-            return redirect(url_for("bulletin_page", date=biz_date.isoformat(), city=city or None))
+            return redirect(url_for("bulletin_page", date=biz_date.isoformat(), city=city or None, area=area or None))
         month_start = biz_date.replace(day=1)
         asof = _clamp_bisuan_mobile_asof(asof, biz_date)
         with db.get_db() as conn:
@@ -634,7 +647,7 @@ def register_admin(app) -> None:
                 f"上报同期 {format_stored('bisuan', current)}，差额 {sign}{format_stored('bisuan', delta)}（填报未改）",
                 "ok",
             )
-        return redirect(url_for("bulletin_page", date=biz_date.isoformat(), city=city))
+        return redirect(url_for("bulletin_page", date=biz_date.isoformat(), city=city, area=area or None))
 
     @app.route("/incentive")
     @admin_required
@@ -1019,10 +1032,13 @@ def register_admin(app) -> None:
         """通报表导出为真实 Excel（.xlsx）。保留旧 /bulletin.csv 作为兼容别名。"""
         biz_date = parse_date(request.args.get("date"))
         city = (request.args.get("city") or "").strip()
+        area = (request.args.get("area") or "").strip()
         with db.get_db() as conn:
             stores = accessible_stores(conn)
             if city:
                 stores = [s for s in stores if (s["city"] or "南通市") == city]
+            if area:
+                stores = [s for s in stores if (s["area_manager"] or "").strip() == area]
             rows = _bulletin_rows(conn, stores, biz_date)
             lines = bulletin.csv_rows(rows, biz_date)
             header, data_rows = lines[0], lines[1:]
