@@ -15,11 +15,11 @@ REVIEW_PRESETS: List[Dict[str, str]] = [
         "hint": "跟现在默认一样，适合每天贴群",
         "body": """{head}
 【今日】
-销量：AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin}
+销量：AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 迎回 {day_welcome}
 触客：{day_count} 笔（成交 {day_closed}）
 {praise}
 【本月】
-累计：AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin}
+累计：AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin} · 迎回 {month_welcome}
 触客：{month_count} 笔（成交 {month_closed}）
 综合标杆：{top_detail}
 {month_bits}
@@ -30,10 +30,10 @@ REVIEW_PRESETS: List[Dict[str, str]] = [
         "name": "检查",
         "hint": "盯销量和触客，标杆放后面，适合周中盯进度",
         "body": """{head}
-【今日核销量】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin}
+【今日核销量】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 迎回 {day_welcome}
 触客 {day_count} 笔，成交 {day_closed}。没量的店对照通报表未交行。
 {praise}
-【本月进度】AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin}
+【本月进度】AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin} · 迎回 {month_welcome}
 标杆 {top_detail}
 {month_bits}
 {mobile_compare}""",
@@ -47,8 +47,8 @@ REVIEW_PRESETS: List[Dict[str, str]] = [
 {praise}
 综合标杆：{top_detail}
 {month_bits}
-【今日销量】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin}；触客 {day_count}（成交 {day_closed}）
-【本月累计】AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin}
+【今日销量】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 迎回 {day_welcome}；触客 {day_count}（成交 {day_closed}）
+【本月累计】AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin} · 迎回 {month_welcome}
 {mobile_compare}""",
     },
     {
@@ -56,8 +56,8 @@ REVIEW_PRESETS: List[Dict[str, str]] = [
         "name": "精简",
         "hint": "三行数字，适合群里快速过一眼",
         "body": """{head}
-今日 AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 触客 {day_count}/{day_closed}（{day_rate}）
-本月 AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin} · 标杆 {top_name}
+今日 AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 迎回 {day_welcome} · 触客 {day_count}/{day_closed}（{day_rate}）
+本月 AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin} · 迎回 {month_welcome} · 标杆 {top_name}
 {month_bits}""",
     },
     {
@@ -65,7 +65,7 @@ REVIEW_PRESETS: List[Dict[str, str]] = [
         "name": "追差",
         "hint": "点未交、挂零、跟进没破0，适合早会点名",
         "body": """{head}
-【今日】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 触客 {day_count}/{day_closed}（{day_rate}）
+【今日】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 迎回 {day_welcome} · 触客 {day_count}/{day_closed}（{day_rate}）
 已交 {submit_n}/{store_n}。{missing}
 {zero_day}
 【挂零】{zero_ai}
@@ -82,7 +82,7 @@ REVIEW_PRESETS: List[Dict[str, str]] = [
         "body": """{head}
 【触客】今日 {day_count} 笔，成交 {day_closed}，成功率 {day_rate}
 本月 {month_count} 笔，成交 {month_closed}，成功率 {month_rate}
-【今日销量】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin}
+【今日销量】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 迎回 {day_welcome}
 {praise}
 {missing}""",
     },
@@ -654,6 +654,8 @@ def summary(
         int(total["day_bisuan"] or 0),
         int(total.get("day_coin") or 0),
     )
+    day_welcome = int(total.get("day_welcome") or 0)
+    month_welcome = int(total.get("month_welcome") or 0)
     from .helpers import close_rate
 
     day_count, day_closed = int(day_deal[0] or 0), int(day_deal[1] or 0)
@@ -729,6 +731,7 @@ def summary(
         "day_ai": str(day_ai),
         "day_bisuan": day_bisuan_text,
         "day_coin": str(day_coin),
+        "day_welcome": str(day_welcome),
         "day_count": str(day_count),
         "day_closed": str(day_closed),
         "day_rate": day_rate,
@@ -736,6 +739,7 @@ def summary(
         "month_ai": str(month_ai),
         "month_bisuan": month_bisuan_text,
         "month_coin": str(month_coin),
+        "month_welcome": str(month_welcome),
         "month_count": str(month_count),
         "month_closed": str(month_closed),
         "month_rate": month_rate,
@@ -763,11 +767,11 @@ def summary(
     lines = [
         head,
         "【今日】",
-        f"销量：AI {day_ai} · 笔算 {day_bisuan_text} · 直降 {day_coin}",
+        f"销量：AI {day_ai} · 笔算 {day_bisuan_text} · 直降 {day_coin} · 迎回 {day_welcome}",
         f"触客：{day_count} 笔（成交 {day_closed}）",
         praise_text,
         "【本月】",
-        f"累计：AI {month_ai} · 笔算 {month_bisuan_text} · 直降 {month_coin}",
+        f"累计：AI {month_ai} · 笔算 {month_bisuan_text} · 直降 {month_coin} · 迎回 {month_welcome}",
         f"触客：{month_count} 笔（成交 {month_closed}）",
         f"综合标杆：{top_detail}",
     ]

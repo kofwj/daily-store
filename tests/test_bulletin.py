@@ -316,6 +316,8 @@ def test_summary_review_text():
             "day_ai": 2,
             "day_bisuan": 4,
             "day_coin": 1,
+            "day_welcome": 3,
+            "month_welcome": 7,
         },
         {
             "name": "示例市丙路vivo专卖店",
@@ -326,6 +328,8 @@ def test_summary_review_text():
             "day_ai": 3,
             "day_bisuan": 1,
             "day_coin": 0,
+            "day_welcome": 1,
+            "month_welcome": 2,
         },
         {
             "name": "示例市乙街vivo专卖店",
@@ -342,14 +346,14 @@ def test_summary_review_text():
     lines = text.split("\n")
     assert lines[0] == "2026-08-13 南通vivo零售运营中心"
     assert "【今日】" in lines
-    assert "销量：AI 5 · 笔算 0.5 · 直降 1" in lines
+    assert "销量：AI 5 · 笔算 0.5 · 直降 1 · 迎回 4" in lines
     assert "触客：7 笔（成交 5）" in lines
     assert "AI有量：示例甲店、示例丙店" in lines
     assert "笔算有量：示例甲店、示例丙店" in lines
     assert "直降有量：示例甲店" in lines
     assert "今日三项都有：示例甲店" in lines
     assert "示例乙店" not in text  # 今日三项都是 0，不进表扬
-    assert "累计：AI 17 · 笔算 1.4 · 直降 8" in lines
+    assert "累计：AI 17 · 笔算 1.4 · 直降 8 · 迎回 9" in lines
     assert "触客：60 笔（成交 42）" in lines
     assert "综合标杆：示例丙店（AI 12，笔算 0.6，直降 5）" in lines
     assert "单项第一：AI 示例丙店 · 笔算 示例甲店 · 直降 示例丙店" in lines
@@ -663,3 +667,32 @@ def test_export_column_counts_after_welcome_back():
     assert {len(line.split("\t")) for line in lines} == {16}
     grid = csv_rows([row], date(2026, 8, 13))
     assert {len(r) for r in grid} == {16}
+
+
+def test_review_includes_welcome_back_everywhere():
+    """底部迎回要进复盘：默认文案、每个内置预设模板都得有。"""
+    from app.bulletin import REVIEW_PRESETS, preset_by_key
+
+    rows = [
+        {
+            "name": "甲店", "short_name": "甲店",
+            "month_ai": 5, "month_bisuan": 8, "month_coin": 3,
+            "month_welcome": 7,
+            "day_ai": 2, "day_bisuan": 4, "day_coin": 1, "day_welcome": 3,
+        }
+    ]
+    default = summary(rows, date(2026, 8, 13))
+    assert "· 迎回 3" in default
+    assert "· 迎回 7" in default
+
+    # 预设模板：日/月销量行都要带迎回占位符
+    for preset in REVIEW_PRESETS:
+        has_day = "迎回 {day_welcome}" in preset["body"]
+        has_month = "迎回 {month_welcome}" in preset["body"]
+        assert has_day or has_month, f'{preset["key"]} 缺迎回'
+
+    # 套用「标准」预设后渲染，迎回要出真实数字
+    body = preset_by_key("standard")["body"]
+    custom = summary(rows, date(2026, 8, 13), template=body)
+    assert "· 迎回 3" in custom
+    assert "· 迎回 7" in custom
