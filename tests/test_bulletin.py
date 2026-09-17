@@ -101,9 +101,11 @@ def test_bulletin_row_and_tsv_match_sheet():
     headers = csv_rows([row], date(2026, 8, 13))[0]
     for col in (
         "8月AI手机合约",
+        "8月底部迎回",
         "8月笔算业务",
         "8月金币直降",
         "8月13日AI手机合约",
+        "8月13日底部迎回",
         "8月13日笔算业务",
         "8月13日金币直降",
         "AI破0",
@@ -605,3 +607,59 @@ def test_mobile_compare_block_single_asof_keeps_old_header():
     assert f"（移动数据更新至{today.month}/{today.day}）" in block
     assert "部分店至" not in block
 
+def test_bulletin_shows_welcome_back_month_and_day(admin_client):
+    """底部迎回在通报表里有月累计和日两列；值取自当日填报。"""
+    from datetime import date as _date
+
+    day = _date.today()
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+    admin_client.post(
+        "/today",
+        data={
+            "store_id": str(sid),
+            "date": day.isoformat(),
+            "m_welcome_back": "4",
+            "m_ai_contract": "1",
+        },
+        follow_redirects=True,
+    )
+    page = admin_client.get(f"/bulletin?date={day.isoformat()}").get_data(as_text=True)
+    assert page.count("底部迎回") >= 2  # 月、日两列表头
+    assert page.count('class="total-num">4</td>') >= 2  # 月累计与日各一处
+    # 表头叶子列数 = 数据行列数，避免加列后表头和数据错位
+    head_row = page.split('<th class="g-profile">大区</th>')[1].split("</tr>")[0]
+    assert head_row.count("<th") == 15  # 6 概况里剩 5 + 2 跟进 + 4 月 + 4 日
+    tbody = page.split("<tbody>")[1].split("</tbody>")[0]
+    body_row = tbody.split("<tr")[1].split("</tr>")[0]
+    assert body_row.count("<td") == 16  # 6 + 2 + 4 + 4
+    total_row = page.split('<tr class="total">')[1].split("</tr>")[0]
+    assert total_row.count("<td") == 11  # 概况合计 colspan=6 占一格 + 2 + 4 + 4
+
+
+def test_today_form_puts_welcome_back_under_focus_after_ai(admin_client):
+    """今日填报里 底部迎回 排在重点业务的 Ai手机合约 之后，且已不在终端合约。"""
+    page = admin_client.get("/today").get_data(as_text=True)
+    # 用表单里的指标行/section 标题定位，避开顶部 KPI 卡片里的同名文字
+    focus = page.index('<div class="section-title">重点业务</div>')
+    ai = page.index('<div class="name">Ai手机合约</div>')
+    welcome = page.index('<div class="name">底部迎回</div>')
+    contract = page.index('<div class="section-title">终端合约</div>')
+    assert focus < ai < welcome < contract
+
+
+def test_export_column_counts_after_welcome_back():
+    """通报表加列后 TSV / Excel 每行列数必须一致，否则导出会列错位。"""
+    row = build_row(
+        {
+            "id": 1, "code": "a", "name": "A", "region_group": "通泰", "city": "南通市",
+            "mobile_code": "1", "area_manager": "", "store_manager": "",
+        },
+        day_ai=1, month_ai=2, day_bisuan=3, month_bisuan=4, submitted=True,
+        day_welcome=5, month_welcome=6,
+    )
+    apply_scales([row])
+    lines = tsv([row], date(2026, 8, 13)).strip().split("\n")
+    assert {len(line.split("\t")) for line in lines} == {16}
+    grid = csv_rows([row], date(2026, 8, 13))
+    assert {len(r) for r in grid} == {16}

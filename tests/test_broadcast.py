@@ -47,13 +47,15 @@ def test_render_matches_wechat_log():
     assert text.startswith("8月13日\n示例戊店\n")
     assert "当天手机销量：日1，累13" in text
     assert "查询身份证数：日1，累4" in text
-    assert "\n重点业务\n比算新增：日0.0，累0.5\n比算新增[高]：日0.3，累0.3\nAi手机合约：日0，累0\n" in text
+    assert "\n重点业务\n比算新增：日0.0，累0.5\n比算新增[高]：日0.3，累0.3\nAi手机合约：日0，累0\n底部迎回：日0，累0\n" in text
     assert "\n数字化\n" in text
     assert text.endswith("灵犀·晓伴：日0，累0\n")
     assert "\n新增类\n安心/副卡：日0，累0\n其他卡类：日0，累5\n" in text
     assert "\n家庭类\n宽带：日3，累10\n" in text
     assert "电视会员：日0，累0" in text
     assert "\n终端合约\n金币直降：日0，累1\n购机让利：日2，累8\n" in text
+    # 底部迎回已挪到重点业务，终端合约段不该再有它
+    assert "底部迎回" not in text.split("\n终端合约\n")[1]
     assert "老用户直降" not in text
     assert "定向包：日1，累1" in text
     assert "个人/全家保底：日0，累0" in text

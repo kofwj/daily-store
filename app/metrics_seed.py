@@ -27,6 +27,7 @@ SECTIONS: List[Dict] = [
             ("bisuan", "比算新增", "可填到 0.1。周报可用移动官方数校准"),
             ("bisuan_high", "比算新增[高]", "可填到 0.1。上面这类里，折后主套105以上"),
             ("ai_contract", "Ai手机合约", ""),
+            ("welcome_back", "底部迎回", ""),
         ],
     },
     {
@@ -66,7 +67,6 @@ SECTIONS: List[Dict] = [
             ("coin_cut_xtc", "小天才直降", "不算进考核"),
             ("phone_discount", "购机让利", ""),
             ("gift_2g", "送2G流量", ""),
-            ("welcome_back", "底部迎回", ""),
         ],
     },
     {
