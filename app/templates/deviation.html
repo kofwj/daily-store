@@ -51,7 +51,11 @@
       <tr>
         <td class="rank">{{ loop.index }}</td>
         <td class="store">
+          {% if r.asof_iso %}
+          <strong><a class="store-name" href="{% if r.city and r.city != '未分地市' %}{{ url_for('bulletin_page', date=r.asof_iso, city=r.city) }}{% else %}{{ url_for('bulletin_page', date=r.asof_iso) }}{% endif %}" title="去通报表对照">{{ r.name }}</a></strong>
+          {% else %}
           <strong>{{ r.name }}</strong>
+          {% endif %}
           <span class="sub">{{ r.city }}{% if r.asof_text %} · 至 {{ r.asof_text }}{% endif %}</span>
         </td>
         <td class="num">{{ (r.reported / 10)|round(1) }}</td>

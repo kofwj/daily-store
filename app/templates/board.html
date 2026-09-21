@@ -69,8 +69,15 @@
   <div class="card board-missing">
     <div class="board-missing-head">
       <h2>{{ '今日未交' if view=='today' else '本月还没交过' }}</h2>
-      <span class="chip">{{ missing|length }} 家</span>
+      <div class="board-missing-actions">
+        <span class="chip">{{ missing|length }} 家</span>
+        {% if chase_text %}
+        <button type="button" class="ghost" onclick="copyText(document.getElementById('chaseText'), '催交已复制')">复制催交</button>
+        <span class="chip" id="copyHint"></span>
+        {% endif %}
+      </div>
     </div>
+    {% if chase_text %}<textarea id="chaseText" class="sr-only" readonly>{{ chase_text }}</textarea>{% endif %}
     <div class="board-missing-list">
       {% for r in missing %}
       <a class="miss-chip" href="{{ url_for('today', store_id=r.store.id, date=biz_date.isoformat()) }}">{{ r.store.name }}</a>

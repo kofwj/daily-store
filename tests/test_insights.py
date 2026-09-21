@@ -4,7 +4,10 @@ from app import db
 from app.insights import (
     build_deviation_board,
     build_insights,
+    chase_copy_text,
+    chase_lag_copy_text,
     clamp_mobile_asof,
+    deviation_ref,
     fold_bisuan_reported,
     prev_week_span,
     week_span,
@@ -67,6 +70,10 @@ def test_insights_pace_week_compare_and_laggards():
     assert week["ai_contract"]["delta"] == -1
     lag_names = [x["name"] for x in payload["laggards"]]
     assert "乙店" in lag_names
+    assert payload["laggards"][0]["id"] in (1, 2)
+    assert "乙店" in payload["chase_text"]
+    assert "【催交】" in payload["chase_text"]
+    assert "【落后】" in payload["chase_text"]
     by_name = {r["name"]: r for r in payload["store_rows"]}
     assert by_name["乙店"]["flags"] == ["今日未交", "本月未交", "进度落后"]
     assert by_name["乙店"]["month_ok"] is False
@@ -137,6 +144,9 @@ def test_insights_page_admin_only(client):
     assert "环比" in page
     assert "同比" not in page
     assert "复制文案" not in page
+    assert "复制催办" in page
+    assert "落后于时间" in page
+    assert "/report?" in page
     idle_page = client.get("/insights?idle=1").get_data(as_text=True)
     assert "insight-month" in idle_page
     filtered = client.get("/insights?advisor=yes").get_data(as_text=True)
@@ -203,6 +213,7 @@ def test_board_shows_deals_and_exports_xlsx(admin_client):
     assert "触客" in page
     assert "成交/触客" in page
     assert "示例甲店" in page
+    assert "复制催交" in page
     assert "/report?" in page
     r = admin_client.get("/board.xlsx?view=today")
     assert r.status_code == 200
@@ -317,6 +328,25 @@ def test_board_ranks_by_bisuan_not_sum_and_hides_idle_month(admin_client):
     assert ">示例丙店<" not in month_page  # 不进排行
 
 
+def test_chase_copy_and_deviation_ref():
+    as_of = date(2026, 8, 16)
+    assert chase_copy_text(as_of=as_of, names=[]) == ""
+    assert chase_copy_text(as_of=as_of, names=["甲店", "乙店"]) == "【催交】8月16日未交日报（2家）\n甲店、乙店"
+    assert "还没交过" in chase_copy_text(as_of=as_of, names=["丙店"], kind="month")
+    text = chase_lag_copy_text(
+        as_of=as_of,
+        pace=51.6,
+        missing_today=["乙店"],
+        laggards=[{"name": "乙店", "bits": ["比算新增 0.0/10（0%）"]}],
+    )
+    assert "【催交】8月16日未交（1家）" in text
+    assert "乙店：比算新增 0.0/10（0%）" in text
+    assert "落后超过 15 个百分点" in text
+    assert deviation_ref(date(2026, 10, 1), date(2026, 10, 31), date(2026, 9, 21)) == date(2026, 10, 1)
+    assert deviation_ref(date(2026, 8, 1), date(2026, 8, 31), date(2026, 9, 21)) == date(2026, 8, 31)
+    assert deviation_ref(date(2026, 9, 1), date(2026, 9, 30), date(2026, 9, 21)) == date(2026, 9, 21)
+
+
 def test_insights_monday_notes_one_day_week(admin_client):
     page = admin_client.get("/insights?date=2026-09-21").get_data(as_text=True)
     assert "本周仅 1 天" in page
@@ -340,6 +370,7 @@ def test_deviation_page_admin_only(admin_client):
     assert "截止日同期" in html
     assert "元" not in html  # 计数单位是个，不是金额
     assert "少报" in html and "多报" in html
+    assert "/bulletin?" in html
 
 
 def test_deviation_page_cuts_reported_at_asof(admin_client):

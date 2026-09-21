@@ -7,7 +7,7 @@
     <h1>洞察</h1>
     <p class="muted">本月进度对时间；本周对比上周同一星期几。</p>
   </div>
-  <form method="get" class="page-filters">
+    <form method="get" class="page-filters">
     <label class="filter">
       <span>日期</span>
       <input type="date" name="date" value="{{ as_of.isoformat() }}" onchange="this.form.submit()">
@@ -22,6 +22,10 @@
       </select>
     </label>
     {% if show_idle %}<input type="hidden" name="idle" value="1">{% endif %}
+    {% if chase_text %}
+    <button type="button" class="ghost" onclick="copyText(document.getElementById('chaseText'), '催办已复制')">复制催办</button>
+    <span class="chip" id="copyHint"></span>
+    {% endif %}
   </form>
 </div>
 
@@ -45,6 +49,24 @@
   </div>
   {% endfor %}
 </div>
+
+{% if chase_text %}<textarea id="chaseText" class="sr-only" readonly>{{ chase_text }}</textarea>{% endif %}
+
+{% if laggards %}
+<div class="card insight-lag">
+  <div class="board-rank-head">
+    <h2>落后于时间 · {{ laggards|length }} 家</h2>
+  </div>
+  <ul class="insight-lag-list">
+    {% for item in laggards %}
+    <li>
+      <a class="store-name" href="{{ url_for('report', store_id=item.id, start=(as_of.replace(day=1)).isoformat(), end=as_of.isoformat()) }}">{{ item.name }}</a>
+      <span class="muted">{{ item.bits|join('、') }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
 
 <div class="card">
   <h2>本周 vs 上周 · 合计</h2>
@@ -108,7 +130,7 @@
       {% set shown.n = shown.n + 1 %}
       <tr class="{% if not r.today_ok %}row-miss{% elif r.lag_bits %}row-lag{% endif %}">
         <td>
-          <div class="insight-store">{{ r.name }}{% if r.mobile_based %}<span class="chip chip-mobile" title="当月比算按移动校准数">移</span>{% endif %}</div>
+          <div class="insight-store"><a class="store-name" href="{{ url_for('report', store_id=r.id, start=(as_of.replace(day=1)).isoformat(), end=as_of.isoformat()) }}">{{ r.name }}</a>{% if r.mobile_based %}<span class="chip chip-mobile" title="当月比算按移动校准数">移</span>{% endif %}</div>
           {% if r.flags %}<div class="insight-flags">{% for f in r.flags %}<span class="flag {{ 'flag-miss' if '未交' in f else 'flag-lag' }}">{{ f }}</span>{% endfor %}</div>{% endif %}
         </td>
         <td>{{ r.manager }}</td>

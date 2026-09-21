@@ -34,6 +34,50 @@ def _store_name(store: Mapping[str, Any]) -> str:
     return (store["short_name"] or store["name"] or "").strip() or "未命名"
 
 
+def deviation_ref(month_start: date, month_end: date, today: date) -> date:
+    """对照截止日上限：当月到今天，往月到月末，未来月锁在月初。"""
+    return max(month_start, min(today, month_end))
+
+
+def chase_copy_text(*, as_of: date, names: Sequence[str], kind: str = "today") -> str:
+    """看板催交文案。kind=today 按日，month 按月未交。"""
+    names = [n for n in names if n]
+    if not names:
+        return ""
+    if kind == "month":
+        head = f"【催交】{as_of.month}月还没交过日报（{len(names)}家）"
+    else:
+        head = f"【催交】{as_of.month}月{as_of.day}日未交日报（{len(names)}家）"
+    return head + "\n" + "、".join(names)
+
+
+def chase_lag_copy_text(
+    *,
+    as_of: date,
+    pace: float,
+    missing_today: Sequence[str],
+    laggards: Sequence[Mapping[str, Any]],
+) -> str:
+    """洞察催办文案：未交一段、落后一段，缺的段省略。"""
+    parts: List[str] = []
+    missing = [n for n in missing_today if n]
+    if missing:
+        parts.append(
+            f"【催交】{as_of.month}月{as_of.day}日未交（{len(missing)}家）\n" + "、".join(missing)
+        )
+    if laggards:
+        lines = [
+            f"【落后】时间进度 {pace:.0f}%，落后超过 {LAG_POINTS} 个百分点（{len(laggards)}家）"
+        ]
+        for item in laggards:
+            bits = "、".join(item.get("bits") or [])
+            name = (item.get("name") or "未命名").strip() or "未命名"
+            lines.append(f"{name}：{bits}" if bits else name)
+        parts.append("\n".join(lines))
+    return "\n\n".join(parts)
+
+
+
 def clamp_mobile_asof(raw: str, *, month_start: date, ref: date) -> date:
     """偏差对照截止日：有 asof 用 asof，空/非法用 ref，再钳到 [月初, ref]。"""
     parsed: Optional[date] = None
@@ -125,6 +169,7 @@ def build_deviation_board(
                 "asof_text": _asof_text(
                     asof=asof, raw=asof_raw.get(sid, ""), month_end=month_end
                 ),
+                "asof_iso": asof.isoformat() if asof else "",
             }
         )
     rows.sort(key=lambda r: (-int(r["abs_diff"]), r["name"]))
@@ -280,7 +325,7 @@ def build_insights(
             if target and month_progress is not None and month_progress + LAG_POINTS < pace:
                 bits.append(f"{name} {format_display(scale, month_v)}/{target}（{month_progress:.0f}%）")
         if bits:
-            laggards.append({"name": _store_name(store), "bits": bits})
+            laggards.append({"id": sid, "name": _store_name(store), "bits": bits})
         today_ok = sid in reported_today
         month_ok = sid in reported_month
         flags = []
@@ -337,4 +382,7 @@ def build_insights(
         "done_today": sum(1 for s in stores if int(s["id"]) in reported_today),
         "done_month": sum(1 for s in stores if int(s["id"]) in reported_month),
         "idle_n": sum(1 for r in store_rows if not r["month_ok"]),
+        "chase_text": chase_lag_copy_text(
+            as_of=as_of, pace=pace, missing_today=missing_today, laggards=laggards
+        ),
     }

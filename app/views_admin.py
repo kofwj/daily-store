@@ -284,6 +284,11 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
         "n": n,
         "cities": cities,
         "city": city,
+        "chase_text": insights.chase_copy_text(
+            as_of=biz_date,
+            names=[store_label(r["store"]) for r in missing],
+            kind="today" if view == "today" else "month",
+        ),
     }
 
 
@@ -421,7 +426,7 @@ def register_admin(app) -> None:
         prev_month = (month - timedelta(days=1)).replace(day=1)
         next_month = _month_end(month) + timedelta(days=1)
         # 对照截止日：当月到今天，往月到月末，未来月锁在月初（别让 asof 落到 ref 之后）
-        ref = max(month, min(today_d, month_end))
+        ref = insights.deviation_ref(month, month_end, today_d)
         with db.get_db() as conn:
             stores = accessible_stores(conn)
             mobile = db.bisuan_mobile_map(conn, month_key)
