@@ -429,6 +429,22 @@ def test_parse_orders_xlsx_text_amounts_and_warnings():
     assert by_no["o4"]["terms"] == 0  # 空值 = 未填，不算坏行
     assert len(warnings) == 2 and all("o3" in w for w in warnings)
 
+def _sesame_rows(page: str, tag: str):
+    """取出周报表里某个区段的行（tbody / tfoot），用于核对结构和顺序。"""
+    body = re.search(rf"<{tag}>(.*?)</{tag}>", page, re.S).group(1)
+    return re.findall(r"<tr.*?</tr>", body, re.S)
+
+
+def _covers_cols(row_html: str, cols: int) -> bool:
+    """一行铺满表头列数（colspan 叠加其余单元格），不然整表会错位。"""
+    covered = 0
+    for attrs in re.findall(r"<td([^>]*)>", row_html):
+        span = re.search(r'colspan="(\d+)"', attrs)
+        covered += int(span.group(1)) if span else 1
+    return covered == cols
+
+
+
 
 def _make_order_rows():
     """三家店：示例市两家（目录顺序 甲→乙，净额却是 乙>甲）、邻市一家净额最高。
@@ -462,22 +478,34 @@ def test_sesame_week_order_by_city(tmp_db, admin_client):
     by_city = c.get(f"{url}&order=city").get_data(as_text=True)
     # 两种排列都给了入口
     assert "净额排名" in ranked and "地市分组" in ranked
-    # 默认按净额：邻市丁店 30.00 > 示例市乙店 20.00 > 示例市甲店 9.58，没有地市带
+    # 默认按净额：邻市丁店 30.00 > 示例市乙店 20.00 > 示例市甲店 9.58，没有地市分组痕迹
     assert (
         ranked.index("示例市丁路vivo体验店")
         < ranked.index("示例市乙街vivo专卖店")
         < ranked.index("示例市甲街vivo体验店")
     )
-    assert "city-band" not in ranked
+    assert "city-band" not in ranked and "city-start" not in ranked
+    assert "示例市 · 2 家" not in ranked  # 净额排名下不掺地市汇总
     # 按地市：示例市在前（门店目录顺序），组内仍按净额（乙 20.00 在甲 9.58 前）
     assert by_city.index("示例市乙街vivo专卖店") < by_city.index("示例市甲街vivo体验店")
     assert by_city.index("示例市甲街vivo体验店") < by_city.index("示例市丁路vivo体验店")
-    assert '<tr class="city-band">' in by_city
-    assert "示例市 · 2 家 · 净办理 2 笔 · 净 29.58 元" in by_city
-    assert "邻市 · 1 家 · 净办理 1 笔 · 净 30.00 元" in by_city
-    # 地市带的列数要跟表头一致，不然整表错位
+    # 表体只有门店行，不插小计带；地市的第一行加一条分隔线
+    assert "city-band" not in by_city
+    body_rows = _sesame_rows(by_city, "tbody")
+    assert len(body_rows) == 3
+    assert body_rows[0].count('class="city-start"') == 1  # 示例市首行
+    assert body_rows[2].count('class="city-start"') == 1  # 邻市首行
+    assert body_rows[1].count("city-start") == 0
+    # 分地市汇总在表底：两个地市各一行，再合计
     head_cols = len(re.findall(r"<th", re.search(r"<thead>(.*?)</thead>", by_city, re.S).group(1)))
-    assert f'<td colspan="{head_cols}">' in by_city
+    assert all(_covers_cols(r, head_cols) for r in body_rows)
+    foot_rows = _sesame_rows(by_city, "tfoot")
+    assert len(foot_rows) == 3
+    assert "示例市 · 2 家" in foot_rows[0] and "29.58" in foot_rows[0]
+    assert "邻市 · 1 家" in foot_rows[1] and "30.00" in foot_rows[1]
+    assert "合计 3 家" in foot_rows[2]
+    # 表底行的列数也要对得上，不然整表错位
+    assert all(_covers_cols(r, head_cols) for r in foot_rows)
     # 贴群文案同步分段，且每段编号从 1 起（跟表格一致）
     assert "【示例市】2 家 · 净办理 2 笔 · 净 29.58 元\n1 示例市乙街vivo专卖店" in by_city
     assert "【邻市】1 家 · 净办理 1 笔 · 净 30.00 元\n1 示例市丁路vivo体验店" in by_city
@@ -527,9 +555,11 @@ def test_sesame_week_city_unassigned_last(tmp_db, admin_client):
     c.post("/advance/sesame/preview", data={"sesame_file": (BytesIO(data), "s.xlsx")})
     c.post("/advance/sesame/confirm", follow_redirects=True)
     page = c.get(f"/advance/sesame/week?start={_REF_ISO}&end={_REF_ISO}&order=city").get_data(as_text=True)
-    assert "未分地市 · 1 家 · 净办理 1 笔 · 净 50.00 元" in page
-    # 未分地市整段排在 邻市 后面（净额 50.00 更高也不越位）
-    assert page.index("邻市 · 1 家") < page.index("未分地市 · 1 家")
+    # 未分地市整段排在 邻市 后面（净额 50.00 更高也不越位）；汇总行在表底
+    foot_rows = _sesame_rows(page, "tfoot")
+    assert "邻市 · 1 家" in foot_rows[0] and "50.00" not in foot_rows[0]
+    assert "未分地市 · 1 家" in foot_rows[1] and "50.00" in foot_rows[1]
+    assert "合计 2 家" in foot_rows[2]
     assert '<option value="未分地市"' in page
     xlsx = c.get(f"/advance/sesame/week.xlsx?start={_REF_ISO}&end={_REF_ISO}&order=city")
     ws = openpyxl.load_workbook(BytesIO(xlsx.get_data())).active

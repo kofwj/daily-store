@@ -56,6 +56,9 @@ def _empty_form(today: date) -> Dict[str, str]:
         "note": "",
     }
 
+# 「全部兑付 / 全部撤回」一次最多动多少笔：区间太大就让人先缩小范围，别一口气改几千行
+MAX_BULK_PAY = 2000
+
 
 def _sum_totals(maps):
     out = {"broadband": 0.0, "rebate": 0.0, "other": 0.0, "sesame": 0.0, "total": 0.0}
@@ -227,24 +230,40 @@ def register_advance(app) -> None:
                     flash("已删除这条垫资" if ok else "这条垫资不存在，或已删除", "ok" if ok else "error")
         return redirect(url_for("advance_page", store_id=sid))
 
+    def _advance_filters():
+        """兑付页的月份 / 范围 / 状态口径，GET 和批量兑付共用，防止两处算得不一样。"""
+        today_d = db.today_local()
+        month = parse_date(request.values.get("month"), today_d.replace(day=1)).replace(day=1)
+        this_month = (month.year, month.month) == (today_d.year, today_d.month)
+        month_end = min(_month_end(month), today_d) if this_month else _month_end(month)
+        scope = (request.values.get("scope") or "today").strip()
+        if scope not in ("today", "month"):
+            scope = "today"
+        return {
+            "today": today_d,
+            "month": month,
+            "month_end": month_end,
+            "scope": scope,
+            "paid_raw": request.values.get("paid", "0"),
+            "start": today_d if scope == "today" else month,
+            "end": today_d if scope == "today" else month_end,
+        }
+
+    def _advance_scope_ids(conn, sid):
+        """当前请求的地市 / 经理范围（None = 不限门店）。跟页面显示同一套口径。"""
+        city_scope = request_scope(accessible_stores(conn))
+        return None if (sid or not city_scope["active"]) else city_scope["ids"]
+
     @app.route("/advance/pay")
     @admin_required
     def advance_pay():
-        today_d = db.today_local()
-        month = parse_date(request.args.get("month"), today_d.replace(day=1)).replace(day=1)
-        month_end = min(_month_end(month), today_d) if month.year == today_d.year and month.month == today_d.month else _month_end(month)
+        f = _advance_filters()
         store_id = request.args.get("store_id", "")
-        paid_raw = request.args.get("paid", "0")
-        scope = request.args.get("scope", "today")
-        if scope not in ("today", "month"):
-            scope = "today"
         paid = None
-        if paid_raw == "0":
+        if f["paid_raw"] == "0":
             paid = 0
-        elif paid_raw == "1":
+        elif f["paid_raw"] == "1":
             paid = 1
-        start = today_d if scope == "today" else month
-        end = today_d if scope == "today" else month_end
         with db.get_db() as conn:
             stores = accessible_stores(conn)
             city_scope = request_scope(stores)
@@ -252,38 +271,42 @@ def register_advance(app) -> None:
             if sid and not any(s["id"] == sid for s in stores):
                 sid = None
             scoped_ids = None if (sid or not city_scope["active"]) else city_scope["ids"]
-            inbox = db.advance_today_inbox(conn, today_d)
-            month_inbox = db.advance_inbox(conn, month, month_end)
+            inbox = db.advance_today_inbox(conn, f["today"])
+            month_inbox = db.advance_inbox(conn, f["month"], f["month_end"])
             if scoped_ids is not None:
                 allow = set(scoped_ids)
                 inbox = [r for r in inbox if int(r["store_id"]) in allow]
                 month_inbox = [r for r in month_inbox if int(r["store_id"]) in allow]
             total = db.count_advances(
-                conn, store_id=sid, start=start, end=end, paid=paid, store_ids=scoped_ids
+                conn, store_id=sid, start=f["start"], end=f["end"], paid=paid, store_ids=scoped_ids
             )
             page, pages = pagination(request.args.get("page"), total)
             rows = db.list_advances(
                 conn,
                 store_id=sid,
-                start=start,
-                end=end,
+                start=f["start"],
+                end=f["end"],
                 paid=paid,
                 limit=50,
                 offset=(page - 1) * 50,
                 store_ids=scoped_ids,
             )
             sums = db.advance_range_sums(
-                conn, start=start, end=end, store_id=sid, store_ids=scoped_ids
+                conn, start=f["start"], end=f["end"], store_id=sid, store_ids=scoped_ids
+            )
+            # 勾选合计在浏览器端算；批量按钮的笔数 / 金额必须服务端算，才能覆盖翻页看不到的
+            bulk = db.advance_paid_totals(
+                conn, start=f["start"], end=f["end"], store_id=sid, store_ids=scoped_ids
             )
             return render_template(
                 "advance_pay.html",
                 stores=stores,
                 rows=rows,
-                month=month,
-                today=today_d,
+                month=f["month"],
+                today=f["today"],
                 store_id=str(sid or ""),
-                paid=paid_raw,
-                scope=scope,
+                paid=f["paid_raw"],
+                scope=f["scope"],
                 city_scope=city_scope,
                 inbox=inbox,
                 month_inbox=month_inbox,
@@ -291,17 +314,25 @@ def register_advance(app) -> None:
                 pages=pages,
                 total=total,
                 sums=sums,
+                bulk=bulk,
             )
 
     @app.route("/advance/pay", methods=["POST"])
     @admin_required
     def advance_pay_post():
         action = request.form.get("action") or "pay"
+        back = {
+            "month": request.form.get("month") or "",
+            "store_id": request.form.get("store_id") or "",
+            "paid": request.form.get("paid") or "0",
+            "scope": request.form.get("scope") or "today",
+            # 表单 action 把这些带在查询串上，批量按筛选处理时才不会漏掉地市 / 经理范围
+            "city": (request.args.get("city") or "").strip(),
+            "area_manager": (request.args.get("area_manager") or "").strip(),
+        }
+        if action in ("pay_all", "unpay_all"):
+            return _advance_bulk(action, back)
         ids = request.form.getlist("advance_id")
-        month = request.form.get("month") or ""
-        store_id = request.form.get("store_id") or ""
-        paid = request.form.get("paid") or "0"
-        scope = request.form.get("scope") or "today"
         with db.get_db() as conn:
             n = db.set_advance_paid(
                 conn,
@@ -313,7 +344,49 @@ def register_advance(app) -> None:
             flash(f"已取消兑付 {n} 笔。门店现在可以改这条。" if n else "没有可取消的记录。", "ok" if n else "error")
         else:
             flash(f"已兑付 {n} 笔。" if n else "没有可兑付的记录。", "ok" if n else "error")
-        return redirect(url_for("advance_pay", month=month, store_id=store_id, paid=paid, scope=scope))
+        return redirect(url_for("advance_pay", **back))
+
+    def _advance_bulk(action, back):
+        """按当前筛选批量兑付 / 撤回（翻页看不到的也算），走 set_advance_paid，保护与审计都不绕。"""
+        f = _advance_filters()
+        want_paid = action == "pay_all"
+        target = 0 if want_paid else 1
+        sid = int(back["store_id"]) if back["store_id"].isdigit() else None
+        with db.get_db() as conn:
+            if sid and not any(s["id"] == sid for s in accessible_stores(conn)):
+                # 勾了某家店但这店已停用 / 不在范围内：写路径绝不回落成「全部门店」，
+                # 宁可让人刷新重来，也不能把别家店的未兑付一次兑掉
+                flash("这家门店已停用或不在你的范围内，刷新页面后重试。", "error")
+                return redirect(url_for("advance_pay", **back))
+            scoped_ids = _advance_scope_ids(conn, sid)
+            ids = db.list_advance_ids(
+                conn,
+                store_id=sid,
+                start=f["start"],
+                end=f["end"],
+                paid=target,
+                store_ids=scoped_ids,
+                limit=MAX_BULK_PAY + 1,
+            )
+            if len(ids) > MAX_BULK_PAY:
+                bulk = db.advance_paid_totals(
+                    conn, start=f["start"], end=f["end"], store_id=sid, store_ids=scoped_ids
+                )
+                # 报真实总数（按钮和确认框上的那个数），不是被 limit 截断的
+                real = bulk["unpaid_n"] if want_paid else bulk["revert_n"]
+                flash(
+                    f"这批有 {real} 笔，超过一次 {MAX_BULK_PAY} 笔的上限，"
+                    "先按门店或地市缩小范围再兑。",
+                    "error",
+                )
+                return redirect(url_for("advance_pay", **back))
+            n = db.set_advance_paid(conn, ids, paid=want_paid, user_id=g.user["id"])
+        what = "兑付" if want_paid else "取消兑付"
+        if n:
+            flash(f"已{what} {n} 笔（当前筛选下全部）。", "ok")
+        else:
+            flash(f"没有可{what}的记录。", "error")
+        return redirect(url_for("advance_pay", **back))
 
     def _sesame_week_range():
         today_d = db.today_local()
@@ -365,21 +438,13 @@ def register_advance(app) -> None:
         return out
 
     def _sesame_table_rows(rows, groups, order):
-        """表格行：净额排名平铺；按地市时每地市先插一条小计带，店内重新编号。"""
+        """表格行：净额排名平铺；按地市时店内重新编号，并标出每个地市的第一行。"""
         if order != "city":
             return [{"seq": i, "row": r} for i, r in enumerate(rows, 1)]
         out = []
         for group in groups:
-            out.append(
-                {
-                    "band": (
-                        f"{group['city']} · {group['stores']} 家 · 净办理 {group['n']} 笔"
-                        f" · 净 {group['net']:.2f} 元"
-                    )
-                }
-            )
             for i, row in enumerate(group["rows"], 1):
-                out.append({"seq": i, "row": row})
+                out.append({"seq": i, "row": row, "city_start": i == 1})
         return out
 
     @app.route("/advance/sesame/week")
@@ -439,7 +504,6 @@ def register_advance(app) -> None:
                 tier_totals=tier_totals,
                 groups=groups,
                 table_rows=_sesame_table_rows(rows, groups, order),
-                band_colspan=6 + len(tier_cols),
                 copy_text=copy_text,
                 period_label=sesame.period_label(start, end, mode),
                 mode=mode,

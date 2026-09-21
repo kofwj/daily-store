@@ -103,10 +103,7 @@
       </thead>
       <tbody>
         {% for item in table_rows %}
-        {% if item.band %}
-        <tr class="city-band"><td colspan="{{ band_colspan }}">{{ item.band }}</td></tr>
-        {% else %}
-        <tr>
+        <tr{% if item.city_start %} class="city-start"{% endif %}>
           <td>{{ item.seq }}</td>
           <td class="name">{{ item.row.name }}</td>
           <td>{{ item.row.cat_charges.get('小天才直降') or '-' }}</td>
@@ -115,10 +112,22 @@
           <td>{{ item.row.n }}</td>
           <td class="total-num">{{ '%.2f'|format(item.row.net) }}</td>
         </tr>
-        {% endif %}
         {% endfor %}
       </tbody>
       <tfoot>
+        {# 分地市汇总放表格底部合计上方：插在门店行中间会把表切碎，看着突兀 #}
+        {% if order == 'city' and groups|length > 1 %}
+        {% for grp in groups %}
+        <tr class="city-sub">
+          <td colspan="2" class="name">{{ grp.city }} · {{ grp.stores }} 家</td>
+          <td>{{ grp.cats.get('小天才直降') or '-' }}</td>
+          <td>{{ grp.cats.get('AI手机') or '-' }}</td>
+          {% for t in tier_cols %}<td>{{ grp.tiers.get(t) or '-' }}</td>{% endfor %}
+          <td>{{ grp.n }}</td>
+          <td class="total-num">{{ '%.2f'|format(grp.net) }}</td>
+        </tr>
+        {% endfor %}
+        {% endif %}
         <tr class="total">
           <td colspan="2" class="name">合计 {{ totals.stores }} 家</td>
           <td>{{ cat_totals['小天才直降'] or '-' }}</td>

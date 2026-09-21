@@ -278,6 +278,87 @@ def count_advances(
         or 0
     )
 
+def list_advance_ids(
+    conn: sqlite3.Connection,
+    *,
+    store_id: Optional[int],
+    start: date,
+    end: date,
+    paid: Optional[int] = None,
+    store_ids: Optional[Sequence[int]] = None,
+    limit: int = 2000,
+) -> List[int]:
+    """筛选条件下的 id 列表，给「全部兑付 / 全部取消兑付」用。
+
+    WHERE 跟 count_advances / list_advances 同一套，翻页看不全也能一次处理完。
+    要判断「有没有超上限」的调用方请自己传 limit=上限+1：默认值一旦被改小，
+    护栏就失效，那是静默少兑——钱少了还不报错。
+    """
+    where = ["biz_date>=?", "biz_date<=?"]
+    params: List[Any] = [start.isoformat(), end.isoformat()]
+    if store_id:
+        where.append("store_id=?")
+        params.append(store_id)
+    elif store_ids is not None:
+        clause, ids = _store_in("store_id", store_ids)
+        where.append(clause)
+        params.extend(ids)
+    if paid is not None:
+        where.append("paid=?")
+        params.append(int(paid))
+    params.append(int(limit))
+    return [
+        int(row["id"])
+        for row in conn.execute(
+            f"SELECT id FROM advance_posts WHERE {' AND '.join(where)} ORDER BY id LIMIT ?",
+            params,
+        )
+    ]
+
+
+def advance_paid_totals(
+    conn: sqlite3.Connection,
+    *,
+    start: date,
+    end: date,
+    store_id: Optional[int] = None,
+    store_ids: Optional[Sequence[int]] = None,
+) -> Dict[str, Any]:
+    """区间内「可兑付 / 可撤回」的笔数与金额，一条 SQL，给兑付页的批量按钮兜底。
+
+    可撤回要排除芝麻导入（导入即已兑，set_advance_paid 也撤不动它），
+    不然按钮上的笔数会比实际能撤的多，点下去才发现少了几笔。
+    """
+    where = ["biz_date>=?", "biz_date<=?"]
+    params: List[Any] = [start.isoformat(), end.isoformat()]
+    if store_id:
+        where.append("store_id=?")
+        params.append(int(store_id))
+    elif store_ids is not None:
+        clause, ids = _store_in("store_id", store_ids)
+        where.append(clause)
+        params.extend(ids)
+    row = conn.execute(
+        f"""
+        SELECT
+            SUM(CASE WHEN IFNULL(paid, 0)=0 THEN 1 ELSE 0 END) AS unpaid_n,
+            ROUND(SUM(CASE WHEN IFNULL(paid, 0)=0
+                           THEN broadband + rebate + other + sesame ELSE 0 END) / 100.0, 2) AS unpaid_total,
+            SUM(CASE WHEN IFNULL(paid, 0)=1 AND source!='sesame' THEN 1 ELSE 0 END) AS revert_n,
+            ROUND(SUM(CASE WHEN IFNULL(paid, 0)=1 AND source!='sesame'
+                           THEN broadband + rebate + other + sesame ELSE 0 END) / 100.0, 2) AS revert_total
+        FROM advance_posts
+        WHERE {' AND '.join(where)}
+        """,
+        params,
+    ).fetchone()
+    return {
+        "unpaid_n": int(row["unpaid_n"] or 0),
+        "unpaid_total": float(row["unpaid_total"] or 0),
+        "revert_n": int(row["revert_n"] or 0),
+        "revert_total": float(row["revert_total"] or 0),
+    }
+
 
 def list_advances(
     conn: sqlite3.Connection,

@@ -10,8 +10,8 @@
   </div>
   <form method="get" class="page-filters">
     <div class="seg">
-      <a class="{{ 'active' if scope=='today' else '' }}" href="{{ url_for('advance_pay', month=month.strftime('%Y-%m'), store_id=store_id, paid=paid, scope='today') }}">今天</a>
-      <a class="{{ 'active' if scope=='month' else '' }}" href="{{ url_for('advance_pay', month=month.strftime('%Y-%m'), store_id=store_id, paid=paid, scope='month') }}">本月</a>
+      <a class="{{ 'active' if scope=='today' else '' }}" href="{{ url_for('advance_pay', month=month.strftime('%Y-%m'), store_id=store_id, paid=paid, scope='today', city=city_scope.city, area_manager=city_scope.manager) }}">今天</a>
+      <a class="{{ 'active' if scope=='month' else '' }}" href="{{ url_for('advance_pay', month=month.strftime('%Y-%m'), store_id=store_id, paid=paid, scope='month', city=city_scope.city, area_manager=city_scope.manager) }}">本月</a>
     </div>
     <label class="filter">
       <span>月份</span>
@@ -45,7 +45,7 @@
   </div>
   <div class="board-missing-list">
     {% for s in inbox %}
-    <a class="miss-chip" href="{{ url_for('advance_pay', month=month.strftime('%Y-%m'), store_id=s.store_id, paid='0', scope='today') }}">{{ s.store_short or s.store_name }} · {{ s.n }}笔 {{ '%.0f'|format(s.total) }}</a>
+    <a class="miss-chip" href="{{ url_for('advance_pay', month=month.strftime('%Y-%m'), store_id=s.store_id, paid='0', scope='today', city=city_scope.city, area_manager=city_scope.manager) }}">{{ s.store_short or s.store_name }} · {{ s.n }}笔 {{ '%.0f'|format(s.total) }}</a>
     {% endfor %}
   </div>
 </div>
@@ -62,7 +62,7 @@
   </summary>
   <div class="board-missing-list">
     {% for s in month_inbox %}
-    <a class="miss-chip" href="{{ url_for('advance_pay', month=month.strftime('%Y-%m'), store_id=s.store_id, paid='0', scope='month') }}">{{ s.store_short or s.store_name }} · {{ s.n }}笔 {{ '%.0f'|format(s.total) }}</a>
+    <a class="miss-chip" href="{{ url_for('advance_pay', month=month.strftime('%Y-%m'), store_id=s.store_id, paid='0', scope='month', city=city_scope.city, area_manager=city_scope.manager) }}">{{ s.store_short or s.store_name }} · {{ s.n }}笔 {{ '%.0f'|format(s.total) }}</a>
     {% endfor %}
   </div>
 </details>
@@ -77,19 +77,38 @@
 
 <div class="card deal-records">
   {% if rows %}
-  <form method="post" action="{{ url_for('advance_pay_post') }}">
+  <form method="post" id="payForm" action="{{ url_for('advance_pay_post', city=city_scope.city or None, area_manager=city_scope.manager or None) }}">
     <input type="hidden" name="month" value="{{ month.strftime('%Y-%m') }}">
     <input type="hidden" name="store_id" value="{{ store_id }}">
     <input type="hidden" name="paid" value="{{ paid }}">
     <input type="hidden" name="scope" value="{{ scope }}">
-    <div class="records-toolbar">
-      <span class="muted">本页 {{ rows|length }} 笔</span>
-      <div>
+    <div class="records-toolbar pay-bar">
+      <span class="muted">
+        本页 {{ rows|length }} 笔{% if total > rows|length %} · 本期筛选共 {{ total }} 笔{% endif %}
+      </span>
+      <div class="pay-pick">
+        <button type="button" class="ghost" id="pickAllBtn">全选本页</button>
+        <button type="button" class="ghost" id="pickNoneBtn">清空</button>
+        <span class="chip" id="pickSum">已选 0 笔 · 合计 0.00 元</span>
+      </div>
+      <div class="pay-actions">
         {% if paid != '1' %}
-        <button type="submit" name="action" value="pay">兑付勾选</button>
+        <button type="submit" name="action" value="pay" id="btnPay">兑付勾选</button>
         {% endif %}
         {% if paid != '0' %}
-        <button class="ghost" type="submit" name="action" value="unpay">取消兑付</button>
+        <button class="ghost" type="submit" name="action" value="unpay" id="btnUnpay">取消兑付</button>
+        {% endif %}
+        {% if paid != '1' and bulk.unpaid_n %}
+        <button class="ghost" type="submit" name="action" value="pay_all"
+                data-confirm="按当前筛选兑付全部 {{ bulk.unpaid_n }} 笔，合计 {{ '%.2f'|format(bulk.unpaid_total) }} 元？">
+          全部兑付（未兑 {{ bulk.unpaid_n }} 笔 · {{ '%.2f'|format(bulk.unpaid_total) }}）
+        </button>
+        {% endif %}
+        {% if paid != '0' and bulk.revert_n %}
+        <button class="ghost" type="submit" name="action" value="unpay_all"
+                data-confirm="按当前筛选取消兑付 {{ bulk.revert_n }} 笔，合计 {{ '%.2f'|format(bulk.revert_total) }} 元？">
+          全部取消兑付（已兑 {{ bulk.revert_n }} 笔 · {{ '%.2f'|format(bulk.revert_total) }}）
+        </button>
         {% endif %}
       </div>
     </div>
@@ -97,7 +116,7 @@
       <table class="data">
         <thead>
           <tr>
-            <th></th>
+            <th><input type="checkbox" id="pickAllHead" aria-label="全选本页" title="全选本页"></th>
             <th class="left">日期</th>
             <th class="left">门店</th>
             <th class="left">号码</th>
@@ -113,14 +132,14 @@
         <tbody>
           {% for r in rows %}
           <tr>
-            <td><input type="checkbox" name="advance_id" value="{{ r.id }}"></td>
+            <td>{% if r.source == 'sesame' and r.paid %}<span class="muted" title="芝麻服务费导入即已兑，取消兑付改不动它">—</span>{% else %}<input type="checkbox" class="js-pick" name="advance_id" value="{{ r.id }}" data-total="{{ '%.2f'|format(r.total) }}">{% endif %}</td>
             <td class="left">{{ r.biz_date }}</td>
             <td class="left">{{ r.store_short or r.store_name }}</td>
             <td class="left">{{ r.phone or '—' }}</td>
             <td>{{ '%.2f'|format(r.broadband) if r.broadband else '—' }}</td>
             <td>{{ '%.2f'|format(r.rebate) if r.rebate else '—' }}</td>
             <td>{{ '%.2f'|format(r.other) if r.other else '—' }}</td>
-            <td>{{ '%.2f'|format(r.sesame) if r.sesame else '—' }}</td></td>
+            <td>{{ '%.2f'|format(r.sesame) if r.sesame else '—' }}</td>
             <td>{{ '%.2f'|format(r.total) }}</td>
             <td class="left">{{ r.note or '—' }}</td>
             <td>
@@ -142,4 +161,80 @@
   <p class="muted">这个筛选下没有垫资</p>
   {% endif %}
 </div>
+
+<script>
+(function () {
+  const form = document.getElementById('payForm');
+  if (!form) return;
+  const sumEl = document.getElementById('pickSum');
+  const head = document.getElementById('pickAllHead');
+  const btnPay = document.getElementById('btnPay');
+  const btnUnpay = document.getElementById('btnUnpay');
+  const fmt = new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const boxes = () => Array.from(form.querySelectorAll('input.js-pick[name="advance_id"]'));
+  // 金额按分累加：直接加浮点元数，几十笔之后就会出现 0.01 的尾巴
+  const cents = (box) => Math.round(parseFloat(box.dataset.total || '0') * 100);
+  let lastIndex = null;
+
+  function picked() {
+    return boxes().filter((b) => b.checked);
+  }
+
+  function refresh() {
+    const chosen = picked();
+    const total = chosen.reduce((sum, b) => sum + cents(b), 0);
+    sumEl.textContent = '已选 ' + chosen.length + ' 笔 · 合计 ' + fmt.format(total / 100) + ' 元';
+    sumEl.classList.toggle('is-on', chosen.length > 0);
+    const all = boxes();
+    if (head) {
+      head.checked = all.length > 0 && chosen.length === all.length;
+      head.indeterminate = chosen.length > 0 && chosen.length < all.length;
+    }
+    [btnPay, btnUnpay].forEach((b) => { if (b) b.disabled = chosen.length === 0; });
+  }
+
+  function setAll(checked) {
+    boxes().forEach((b) => { b.checked = checked; });
+    refresh();
+  }
+
+  if (head) head.addEventListener('change', () => setAll(head.checked));
+  const allBtn = document.getElementById('pickAllBtn');
+  if (allBtn) allBtn.addEventListener('click', () => setAll(true));
+  const noneBtn = document.getElementById('pickNoneBtn');
+  if (noneBtn) noneBtn.addEventListener('click', () => setAll(false));
+
+  form.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!target.matches || !target.matches('input.js-pick')) return;
+    const all = boxes();
+    const index = all.indexOf(target);
+    // Shift 点一下：从上次那笔勾到这里（大表里勾一段不用一个个点）
+    if (event.shiftKey && lastIndex !== null && lastIndex !== index) {
+      const from = Math.min(lastIndex, index);
+      const to = Math.max(lastIndex, index);
+      for (let i = from; i <= to; i += 1) all[i].checked = target.checked;
+      refresh();
+    }
+    lastIndex = index;
+  });
+  form.addEventListener('change', (event) => {
+    if (event.target.matches && event.target.matches('input.js-pick')) refresh();
+  });
+
+  // 批量按钮先让人看清笔数和金额；提交后锁按钮，防手抖点两下兑付两次
+  form.addEventListener('click', (event) => {
+    const btn = event.target.closest ? event.target.closest('button[data-confirm]') : null;
+    if (btn && !window.confirm(btn.dataset.confirm)) event.preventDefault();
+  });
+  form.addEventListener('submit', (event) => {
+    const btn = event.submitter;
+    if (!btn) return;
+    setTimeout(() => { btn.disabled = true; btn.textContent = '处理中…'; }, 0);
+  });
+
+  window.addEventListener('pageshow', refresh);  // 浏览器恢复表单状态（返回 / 刷新）后重算
+  refresh();
+})();
+</script>
 {% endblock %}

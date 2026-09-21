@@ -1,3 +1,4 @@
+import re
 from datetime import date
 from io import BytesIO
 
@@ -419,3 +420,176 @@ def test_advance_phone_masked_for_filler(filler_client):
     filler_client.post("/login", data={"username": "admin", "pin": "123456"})
     admin_page = filler_client.get("/advance").get_data(as_text=True)
     assert "13812345678" in admin_page
+
+
+def _seed_advances(rows, store_code="store-alpha"):
+    """把 (门店编码, 让利金额) 灌成当天的未兑付记录；返回 (store_id, admin_id)。"""
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code=?", (store_code,)).fetchone()["id"]
+        admin_id = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        for code, amount in rows:
+            target = sid
+            if code is not None:
+                target = conn.execute("SELECT id FROM stores WHERE code=?", (code,)).fetchone()["id"]
+            db.record_advance(
+                conn, store_id=target, user_id=admin_id, biz_date=db.today_local(), rebate=amount
+            )
+    return sid, admin_id
+
+
+def test_advance_pay_pick_all_and_selected_total(tmp_db, admin_client):
+    """勾选区：全选按钮、每行金额、批量按钮上的笔数与合计都得出得来。"""
+    c = admin_client
+    _seed_advances([(None, 10.0), (None, 20.0), (None, 30.5)])
+    page = c.get("/advance/pay?scope=today").get_data(as_text=True)
+    assert 'id="pickAllBtn"' in page and 'id="pickNoneBtn"' in page
+    assert 'id="pickSum"' in page and "已选 0 笔 · 合计 0.00 元" in page
+    # 每行带自己的合计，浏览器按分累加
+    for amount in ("10.00", "20.00", "30.50"):
+        assert 'data-total="%s"' % amount in page
+    # 批量按钮的笔数 / 金额由服务端算
+    assert "全部兑付（未兑 3 笔 · 60.50）" in page
+    assert 'data-confirm="按当前筛选兑付全部 3 笔，合计 60.50 元？"' in page
+    assert 'id="payForm"' in page
+    # 未兑付视图下不该出现撤回按钮
+    assert "全部取消兑付" not in page
+
+
+def test_advance_pay_all_covers_every_page(tmp_db, admin_client):
+    """一页 50 笔：第二页的也能被「全部兑付」一次处理掉。"""
+    c = admin_client
+    today = db.today_local()
+    _seed_advances([(None, 1.0)] * 51)
+    page = c.get("/advance/pay?scope=today").get_data(as_text=True)
+    assert "本页 50 笔 · 本期筛选共 51 笔" in page
+    assert "全部兑付（未兑 51 笔 · 51.00）" in page
+    done = c.post(
+        "/advance/pay",
+        data={"action": "pay_all", "scope": "today", "month": today.strftime("%Y-%m"), "paid": "0"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "已兑付 51 笔（当前筛选下全部）" in done
+    with db.get_db() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM advance_posts WHERE paid=0").fetchone()[0] == 0
+
+
+def test_advance_unpay_all_keeps_sesame(tmp_db, admin_client):
+    """批量取消兑付不能动芝麻导入的记录（它导入即已兑）。"""
+    c = admin_client
+    today = db.today_local()
+    sid, admin_id = _seed_advances([(None, 10.0)])
+    with db.get_db() as conn:
+        db.record_advance(
+            conn, store_id=sid, user_id=admin_id, biz_date=today, sesame=9.58,
+            source="sesame", ext_id="ses-1", paid=True,
+        )
+        conn.execute("UPDATE advance_posts SET paid=1 WHERE rebate=1000 AND source=''")
+    page = c.get("/advance/pay?scope=today&paid=1").get_data(as_text=True)
+    # 芝麻那条不算「可撤回」，按钮只报普通那 1 笔
+    assert "全部取消兑付（已兑 1 笔 · 10.00）" in page
+    c.post(
+        "/advance/pay",
+        data={"action": "unpay_all", "scope": "today", "month": today.strftime("%Y-%m"), "paid": "1"},
+        follow_redirects=True,
+    )
+    with db.get_db() as conn:
+        assert int(conn.execute("SELECT paid FROM advance_posts WHERE ext_id='ses-1'").fetchone()["paid"]) == 1
+        left = conn.execute("SELECT COUNT(*) FROM advance_posts WHERE source!='sesame' AND paid=1").fetchone()[0]
+    assert left == 0
+
+
+def test_advance_bulk_respects_city_scope(tmp_db, admin_client):
+    """按地市筛着用批量兑付，不能碰到别的地市的记录。"""
+    c = admin_client
+    today = db.today_local()
+    _seed_advances([(None, 10.0)])            # store-alpha：示例市
+    _seed_advances([("store-delta", 20.0)])   # store-delta：邻市
+    page = c.get("/advance/pay?scope=today&city=示例市").get_data(as_text=True)
+    # 地市范围要挂在表单 action 上，POST 才认得出当前范围
+    assert "city=" in page
+    c.post(
+        "/advance/pay?city=示例市",
+        data={"action": "pay_all", "scope": "today", "month": today.strftime("%Y-%m"), "paid": "0"},
+        follow_redirects=True,
+    )
+    with db.get_db() as conn:
+        paid = {
+            row["code"]: int(row["paid"])
+            for row in conn.execute(
+                "SELECT s.code AS code, a.paid AS paid FROM advance_posts a "
+                "JOIN stores s ON s.id = a.store_id"
+            )
+        }
+        ids = db.list_advance_ids(
+            conn,
+            store_id=None,
+            start=today,
+            end=today,
+            paid=0,
+            store_ids=[int(r["id"]) for r in conn.execute("SELECT id FROM stores WHERE city='示例市'")],
+        )
+    assert paid == {"store-alpha": 1, "store-delta": 0}
+    assert ids == []
+
+
+def test_advance_pay_all_hits_cardinality_guard(tmp_db, admin_client, monkeypatch):
+    """区间大到离谱时宁可不动：护栏拦住并提示缩小范围。"""
+    c = admin_client
+    today = db.today_local()
+    _seed_advances([(None, 10.0), (None, 20.0)])
+    from app import views_advance
+
+    monkeypatch.setattr(views_advance, "MAX_BULK_PAY", 1)
+    page = c.post(
+        "/advance/pay",
+        data={"action": "pay_all", "scope": "today", "month": today.strftime("%Y-%m"), "paid": "0"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "超过一次 1 笔的上限" in page
+    with db.get_db() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM advance_posts WHERE paid=0").fetchone()[0] == 2
+
+
+def test_advance_bulk_refuses_inaccessible_store(tmp_db, admin_client):
+    """表单里带着的门店已经停用 / 不在范围：批量必须中止，不能回落成「全部门店」。"""
+    c = admin_client
+    today = db.today_local()
+    sid, _ = _seed_advances([(None, 10.0)])       # store-alpha
+    _seed_advances([("store-delta", 20.0)])       # store-delta
+    with db.get_db() as conn:
+        conn.execute("UPDATE stores SET active=0 WHERE code='store-alpha'")
+    page = c.post(
+        "/advance/pay",
+        data={
+            "action": "pay_all",
+            "scope": "today",
+            "month": today.strftime("%Y-%m"),
+            "paid": "0",
+            "store_id": str(sid),
+        },
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "已停用或不在你的范围内" in page
+    with db.get_db() as conn:
+        # 一笔都不许兑：尤其不能把别家店的未兑付顺手兑掉
+        assert conn.execute("SELECT COUNT(*) FROM advance_posts WHERE paid=1").fetchone()[0] == 0
+
+
+def test_advance_paid_view_has_no_checkbox_for_sesame(tmp_db, admin_client):
+    """已兑付视图里芝麻那行不给勾：勾了也撤不动，不能让人以为撤掉了。"""
+    c = admin_client
+    today = db.today_local()
+    sid, admin_id = _seed_advances([(None, 10.0)])
+    with db.get_db() as conn:
+        db.record_advance(
+            conn, store_id=sid, user_id=admin_id, biz_date=today, phone="13900000009",
+            sesame=9.58, source="sesame", ext_id="ses-9", paid=True,
+        )
+        conn.execute("UPDATE advance_posts SET paid=1 WHERE rebate=1000 AND source=''")
+    page = c.get("/advance/pay?scope=today&paid=1").get_data(as_text=True)
+    rows = re.findall(r"<tr>.*?</tr>", page, re.S)
+    sesame_row = next(r for r in rows if "13900000009" in r)
+    normal_row = next(r for r in rows if "13900000009" not in r and "10.00" in r)
+    assert "js-pick" not in sesame_row
+    assert "芝麻服务费导入即已兑" in sesame_row
+    assert 'class="js-pick"' in normal_row

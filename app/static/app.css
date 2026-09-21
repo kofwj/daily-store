@@ -612,10 +612,13 @@ table.bulletin td.scale {
   color: #111827 !important; font-variant-numeric: tabular-nums; font-weight: 800; font-size: 14px;
 }
 
-table.bulletin tr.city-band td {
-  text-align: left; font-weight: 800; color: #0f172a; letter-spacing: .3px;
-  background: #f1f5f9; padding-left: 10px;
+/* 分地市：表体不再插小计带，只把每个地市的第一行切一道线；汇总走表底 city-sub 行 */
+table.bulletin tr.city-start td { border-top: 2px solid #cbd5e1; }
+table.bulletin tfoot tr.city-sub td {
+  background: #f8fafc; color: #334155; font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
+table.bulletin tfoot tr.city-sub td.name { text-align: left; padding-left: 10px; }
 table.bulletin .bisuan-official {
   position: relative;
   display: inline-block; margin-left: 4px; padding: 1px 5px 1px 7px;
@@ -1911,6 +1914,14 @@ body.sp-open { overflow: hidden; }
   margin-bottom: 10px;
 }
 .records-toolbar .btn { text-decoration: none; font-size: 13px; padding: 6px 12px; }
+/* 兑付页工具条：勾选汇总 + 批量按钮 */
+.records-toolbar.pay-bar { flex-wrap: wrap; row-gap: 8px; }
+.pay-pick, .pay-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pay-bar button { padding: 6px 12px; font-size: 13px; }
+.pay-bar button:disabled { opacity: .45; cursor: not-allowed; }
+#pickSum { font-variant-numeric: tabular-nums; white-space: nowrap; }
+#pickSum.is-on { background: var(--ok-bg, #dcfce7); color: var(--ok, #14532d); font-weight: 700; }
+#pickAllHead { width: 16px; height: 16px; }
 td.right form { display: inline; }
 @media (max-width: 800px) {
   .deal-records-kpis { grid-template-columns: 1fr 1fr; width: 100%; }
