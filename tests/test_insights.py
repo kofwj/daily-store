@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from app import db
 from app.insights import (
@@ -193,6 +193,30 @@ def test_week_report_range_clamped(admin_client):
     page = admin_client.get("/report?view=week&start=9999-12-01&end=9999-12-31").get_data(as_text=True)
     assert "9999" not in page
 
+
+def test_month_report_honors_end_within_month(admin_client):
+    """月报认 end=，偏差截止日跳过来时不看到月末。"""
+    page = admin_client.get("/report?view=month&start=2026-08-01&end=2026-08-10").get_data(as_text=True)
+    assert "08/01~08/10" in page or "8/01~8/10" in page
+    assert "8/10" in page or "08/10" in page
+    assert "8/31" not in page and "08/31" not in page
+
+
+def test_month_report_stale_end_and_future_start_do_not_invert(admin_client):
+    """换月后残留的旧 end、未来月份的 start：区间不能倒挂，也不能塌成单日。"""
+    # 从偏差跳到 7/1~7/10 后把月份改成 8 月，旧 end 比 start 早：应回到默认窗口
+    stale = admin_client.get(
+        "/report?view=month&start=2026-08-01&end=2026-07-10"
+    ).get_data(as_text=True)
+    assert "08/01~08/01" not in stale  # 别塌成一天
+    assert "~07/10" not in stale  # 别倒挂
+    # 未来月份：cap 比 start 早，结束日与 start 对齐，不能出现「12/01~09/21」这种
+    future = (date.today().replace(day=1) + timedelta(days=32)).replace(day=1)
+    page = admin_client.get(
+        f"/report?view=month&start={future.isoformat()}"
+    ).get_data(as_text=True)
+    stamp = future.strftime("%m/%d")
+    assert f"{stamp}~{stamp}" in page
 
 def test_board_shows_deals_and_exports_xlsx(admin_client):
     """看板含成交列，点店名进报表，当前视图可导出 Excel。"""
@@ -393,14 +417,21 @@ def test_insights_monday_notes_one_day_week(admin_client):
     assert "本周仅 1 天" not in later
 
 
-def test_deviation_page_admin_only(admin_client):
+def test_deviation_page_admin_only(client):
     """偏差路由是管理员专属，且能渲染（单位是个，不是元）。"""
+    denied = client.get("/deviation")
+    assert denied.status_code in (302, 401, 403)
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
+    filler = client.get("/deviation")
+    assert filler.status_code in (302, 403)
+    client.post("/logout")
+    client.post("/login", data={"username": "admin", "pin": "123456"})
     with db.get_db() as conn:
         sid = conn.execute("SELECT id FROM stores LIMIT 1").fetchone()["id"]
         db.save_bisuan_mobile(
             conn, store_id=sid, month="2026-08", value_tenths=120, asof=date.today()
         )
-    r = admin_client.get("/deviation?month=2026-08-01")
+    r = client.get("/deviation?month=2026-08-01")
     html = r.get_data(as_text=True)
     assert r.status_code == 200
     assert "填报偏差榜" in html
@@ -408,9 +439,9 @@ def test_deviation_page_admin_only(admin_client):
     assert "截止日同期" in html
     assert "元" not in html  # 计数单位是个，不是金额
     assert "少报" in html and "多报" in html
-    assert "少报" in html and "多报" in html
     assert "/bulletin?" in html
     assert "date=2026-08-31" in html
+
 
 
 def test_deviation_page_cuts_reported_at_asof(admin_client):
@@ -443,8 +474,10 @@ def test_deviation_empty_when_mobile_only_on_inactive_store(admin_client):
         )
         db.set_store_active(conn, sid, False)
     html = admin_client.get("/deviation?month=2026-08-01").get_data(as_text=True)
-    assert "本月没有移动校准数" in html
+    assert "可见门店本月没有移动校准数" in html
+    assert "另有 1 家停用店录过校准" in html
     assert "纳入对比" not in html
+
 
 
 def test_deviation_without_mobile_code_links_report(admin_client):
@@ -456,7 +489,9 @@ def test_deviation_without_mobile_code_links_report(admin_client):
     html = admin_client.get("/deviation?month=2026-08-01").get_data(as_text=True)
     assert f"store_id={sid}" in html
     assert "/report?" in html
+    assert "end=2026-08-10" in html
     assert "/bulletin?" not in html
+
 
 
 def test_insights_mobile_used_follows_scope(admin_client):
@@ -485,8 +520,11 @@ def test_copy_js_does_not_fake_success_when_execcommand_fails():
     assert "setCopyHint(doneMsg)" in src
     # 失败路径必须露源，不能只提示已复制
     fail_at = src.find("ok = !!document.execCommand")
-    reveal_at = src.find("revealCopySource")
-    assert 0 <= fail_at < reveal_at or src.count("revealCopySource") >= 1
+    fail_else = src.find("} else {", fail_at)
+    reveal_at = src.find("revealCopySource", fail_else)
+    assert 0 <= fail_at < fail_else < reveal_at
+    assert src.find("setCopyHint(doneMsg)", fail_at) < fail_else
+
 
 
 def test_catalog_city_order_groups_stable_and_keeps_rank():
@@ -606,7 +644,10 @@ def test_deviation_hides_small_diff_groups_by_city(admin_client):
     under = admin_client.get("/deviation?month=2026-08-01&side=under").get_data(as_text=True)
     assert "示例甲店" in under
     assert "示例丁店" not in under
+    assert "上方卡片按全部对比店计" in under
+    assert "正在看少报" in under
     over = admin_client.get("/deviation?month=2026-08-01&side=over").get_data(as_text=True)
     assert "示例丁店" in over
     assert "示例甲店" not in over
+    assert "正在看多报" in over
 

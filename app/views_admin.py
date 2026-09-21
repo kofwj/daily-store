@@ -512,6 +512,8 @@ def register_admin(app) -> None:
             ]
             by_id = {int(s["id"]): s for s in stores}
             city_order = insights.catalog_city_order(stores)
+            visible_ids = {int(s["id"]) for s in stores}
+            hidden_mobile_n = sum(1 for sid in mobile if int(sid) not in visible_ids)
             uncompared_n = len(stores) - len(rows)
             for i, r in enumerate(rows, 1):
                 r["rank"] = i
@@ -560,13 +562,13 @@ def register_admin(app) -> None:
             has_mobile=has_mobile,
             under_n=under_n,
             over_n=over_n,
-            even_n=len(rows) - under_n - over_n,
             max_abs=max_abs,
             net_diff=net_diff,
             show_all=show_all,
             side=side,
             hidden_small_n=hidden_small_n,
             uncompared_n=uncompared_n,
+            hidden_mobile_n=hidden_mobile_n,
             city_groups=city_groups,
         )
 

@@ -58,8 +58,16 @@ def register_report(app) -> None:
             else:
                 view = "month"
                 start = parse_date(request.args.get("start"), today_d.replace(day=1))
-                end = month_end(start)
-                end = min(end, today_d)
+                # 月报也认 end=：偏差「截止日同期」跳过来时不能被月末盖掉。
+                # 越界（换月后残留的旧结束日 / 未来月份）回落到默认窗口，
+                # 不能把区间钳成倒挂，也不能塌成单日。
+                month_last = month_end(start)
+                cap = min(month_last, today_d)
+                raw_end = (request.args.get("end") or "").strip()
+                end = parse_date(raw_end, cap) if raw_end else cap
+                if end < start or end > cap:
+                    end = max(start, cap)
+
 
             facts = db.facts_in_range(conn, store["id"], start, end)
             metrics = db.list_metrics(conn)

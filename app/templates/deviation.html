@@ -4,7 +4,7 @@
 <div class="page-head">
   <div class="page-title">
     <h1>填报偏差榜 · {{ month.strftime('%Y年%m月') }}</h1>
-    <p class="muted">温差 = 移动校准 − 截止日同期填报；正数少报、负数多报。按地市分组（目录顺序），# 是全区名次。</p>
+    <p class="muted">温差 = 移动校准 − 截止日同期填报；正数少报、负数多报。按地市分组（目录顺序），# 是全区名次。上方四张卡是全部对比店，不随少报/多报/小差筛选变。</p>
   </div>
   <div class="page-filters">
     <div class="dev-nav">
@@ -26,7 +26,7 @@
 </div>
 
 {% if not has_mobile %}
-<div class="card"><p class="muted">本月没有移动校准数，榜为空。去「通报表」录入。</p></div>
+<div class="card"><p class="muted">可见门店本月没有移动校准数，榜为空。{% if hidden_mobile_n %}另有 {{ hidden_mobile_n }} 家停用店录过校准，不进本榜。{% endif %}去「通报表」录入。</p></div>
 {% else %}
 <div class="dev-summary">
   <div class="dev-stat">
@@ -70,7 +70,7 @@
           {% if r.bulletin_city and r.asof_iso %}
           <strong><a class="store-name" href="{{ url_for('bulletin_page', date=r.asof_iso, city=r.bulletin_city) }}" title="去通报表对照">{{ r.name }}</a></strong>
           {% else %}
-          <strong><a class="store-name" href="{{ url_for('report', store_id=r.id, start=month.isoformat(), end=month_end.isoformat()) }}" title="去该店报表">{{ r.name }}</a></strong>
+          <strong><a class="store-name" href="{{ url_for('report', store_id=r.id, start=month.isoformat(), end=(r.asof_iso or month_end.isoformat())) }}" title="去该店报表">{{ r.name }}</a></strong>
           {% endif %}
           <span class="sub">{{ r.city }}{% if r.asof_text %} · 至 {{ r.asof_text }}{% endif %}</span>
         </td>
@@ -110,6 +110,8 @@
   <p class="muted">没有符合筛选的店。</p>
   {% endif %}
   <p class="muted board-note">
+    上方卡片按全部对比店计；表内是当前筛选。
+    {% if side == 'under' %}正在看少报。{% elif side == 'over' %}正在看多报。{% endif %}
     {% if hidden_small_n and not show_all %}
     已藏 |温差| 不到 1.0 的 {{ hidden_small_n }} 店。
     <a href="{{ url_for('deviation', month=month.isoformat(), all=1, side=(side or none)) }}">显示</a>
