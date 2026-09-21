@@ -50,7 +50,7 @@ ssh-copy-id user@your-primary-host
 脚本会：
 
 1. 本机没有 `.env` 时自动生成，并写入随机 `STORE_DAILY_SECRET`
-2. `rsync` 代码、`.env`；**默认不覆盖远端库**
+2. `rsync` 代码；`.env` **只在远端没有时初始化一次，之后以服务端为准**（免得把服务端手改的设置盖回本机）；**默认不覆盖远端库**
 3. SSH 到生产机跑 `docker compose up -d --build`
 
 之后改代码再跑同一条命令即可。本机 `data/store_daily.db` 是过期测试库，**禁止**用它盖生产。真要推库必须显式：

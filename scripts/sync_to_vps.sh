@@ -131,11 +131,21 @@ RSYNC=(
 )
 
 SYNC_SOURCES=(./app ./caddy ./scripts ./tests \
-  Dockerfile docker-compose.yml docker-entrypoint.sh requirements.txt wsgi.py README.md VERSION .env .gitignore)
+  Dockerfile docker-compose.yml docker-entrypoint.sh requirements.txt wsgi.py README.md VERSION .gitignore)
 "${RSYNC[@]}" \
   "${SYNC_SOURCES[@]}" \
-  Dockerfile docker-compose.yml docker-entrypoint.sh requirements.txt wsgi.py README.md VERSION .env .gitignore \
+  Dockerfile docker-compose.yml docker-entrypoint.sh requirements.txt wsgi.py README.md VERSION .gitignore \
   "${REMOTE}:${VPS_DIR}/"
+
+# .env 属于每台机器自己：只在远端还没有时用它初始化，之后一律以服务端为准。
+# 2026-09-21 事故：这里无条件 rsync .env，把服务端手改的 STORE_DAILY_SECURE=0
+# 盖回本机的 1，明文 HTTP 下登录 Cookie 被浏览器丢弃 → 所有人都登不进去。
+if "${SSH[@]}" "${REMOTE}" "test -f '${VPS_DIR}/.env'"; then
+  echo "远端 .env 保持不动（以服务端为准，不再覆盖）"
+else
+  echo "远端还没有 .env，用本机这份初始化一次"
+  rsync -az -e "${RSYNC_SSH}" .env "${REMOTE}:${VPS_DIR}/.env"
+fi
 
 if [[ "${SYNC_DB}" == "1" ]]; then
   rsync -az -e "${RSYNC_SSH}" --chmod=F600 "${SNAPSHOT_DB}" "${REMOTE}:${VPS_DIR}/data/store_daily.db" \
