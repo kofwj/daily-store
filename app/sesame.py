@@ -451,21 +451,66 @@ def week_label(start: date, end: date) -> str:
     return f"{start.isoformat()}–{end.isoformat()}"
 
 
+CITY_UNASSIGNED = "未分地市"
+
+# SQL 侧的空白字符集跟 Python str.strip() 对齐（含全角空格 / nbsp）：
+# 不然「南通市\u3000」在 SQL 里是另一个排序键，展示层却被 city_of 并进同一组，
+# 同一条地市带内的净额降序会被硬生生截成两段。
+CITY_BLANK_CHARS = (
+    "' ' || char(9) || char(10) || char(11) || char(12) || char(13)"
+    " || char(160) || char(12288)"
+)
+
+
+def _city_sql(alias: str) -> str:
+    """SQL 里的地市归一表达式，口径与 city_of 一致。"""
+    return f"TRIM(COALESCE({alias}.city, ''), {CITY_BLANK_CHARS})"
+
+
+def city_of(row: Any) -> str:
+    """取行的地市，空值统一并进「未分地市」；sqlite3.Row 和 dict 都能用。"""
+    try:
+        value = row["city"]
+    except (KeyError, IndexError, TypeError):
+        value = None
+    return str(value or "").strip() or CITY_UNASSIGNED
+
+
 def sesame_week_rows(
     conn,
     store_ids: Sequence[int],
     start: date,
     end: date,
+    order: str = "net",
 ) -> List[Dict[str, Any]]:
+    """门店行：默认按服务费净额排名；order="city" 改按地市排。
+
+    地市顺序取该地市启用门店的最小 sort_order, id——即门店目录里的排列，跟看板 / 下拉一致；
+    组内仍按净额降序。没填地市的店归「未分地市」，固定排最后。
+    """
     ids = [int(i) for i in store_ids]
     if not ids:
         return []
     clause, params = db_core.store_in_clause("a.store_id", ids)
+    if order == "city":
+        city_key = _city_sql("st")
+        # 地市顺序 = 该地市启用门店的最小 sort_order, id，跟门店目录 / 下拉一致；
+        # 只剩停用门店的地市（子查询为 NULL）垫到最后，未分地市固定最后。
+        city_rank = f"""COALESCE((SELECT MIN(s2.sort_order) FROM stores s2
+                            WHERE {_city_sql('s2')} = {city_key} AND s2.active = 1), 999999),
+                 COALESCE((SELECT MIN(s2.id) FROM stores s2
+                            WHERE {_city_sql('s2')} = {city_key} AND s2.active = 1), 999999)"""
+        order_by = f"""
+        ORDER BY CASE WHEN {city_key} = '' THEN 1 ELSE 0 END,
+                 {city_rank},
+                 net DESC, name, a.store_id"""
+    else:
+        order_by = "ORDER BY net DESC, name, a.store_id"
     rows = conn.execute(
         f"""
         SELECT a.store_id AS store_id,
                st.name AS name,
-               COALESCE(st.city, '') AS city,
+               {_city_sql('st')} AS city,
                COUNT(*) AS n,
                SUM(CASE WHEN a.sesame > 0 THEN 1 ELSE 0 END) AS charge_n,
                SUM(CASE WHEN a.sesame < 0 THEN 1 ELSE 0 END) AS refund_n,
@@ -476,7 +521,7 @@ def sesame_week_rows(
         JOIN stores st ON st.id = a.store_id
         WHERE a.source='sesame' AND a.biz_date>=? AND a.biz_date<=? AND {clause}
         GROUP BY a.store_id
-        ORDER BY net DESC, name
+        {order_by}
         """,
         [start.isoformat(), end.isoformat(), *params],
     )
@@ -490,7 +535,7 @@ def sesame_week_rows(
             {
                 "store_id": int(row["store_id"]),
                 "name": row["name"] or "",
-                "city": row["city"] or "",
+                "city": city_of(row),
                 # 总笔数 = 扣费 − 退款（净笔数）；跨期退款会为负
                 "n": charge_n - refund_n,
                 "charge_n": charge_n,
@@ -525,6 +570,60 @@ def sesame_week_totals(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "stores": len(rows),
     }
 
+
+def group_rows_by_city(
+    rows: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    """按地市分组（沿用传入行序），每组带家数 / 笔数 / 净额小计。
+
+    行上的 cat_charges / tier_charges（视图挂的档位统计）也一起累加，
+    表格地市小计带与贴群文案共用同一份分组结果，不会两处各算一遍。
+    """
+    groups: List[Dict[str, Any]] = []
+    index: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        city = city_of(row)
+        group = index.get(city)
+        if group is None:
+            group = index[city] = {
+                "city": city,
+                "rows": [],
+                "stores": 0,
+                "n": 0,
+                "charge_n": 0,
+                "refund_n": 0,
+                "charge": 0.0,
+                "refund": 0.0,
+                "net": 0.0,
+                "cats": {},
+                "tiers": {},
+            }
+            groups.append(group)
+        group["rows"].append(row)
+        group["stores"] += 1
+        group["n"] += int(row.get("n") or 0)
+        group["charge_n"] += int(row.get("charge_n") or 0)
+        group["refund_n"] += int(row.get("refund_n") or 0)
+        group["charge"] += float(row.get("charge") or 0)
+        group["refund"] += float(row.get("refund") or 0)
+        group["net"] += float(row.get("net") or 0)
+        for name, count in (row.get("cat_charges") or {}).items():
+            group["cats"][name] = group["cats"].get(name, 0) + int(count or 0)
+        for tier, count in (row.get("tier_charges") or {}).items():
+            group["tiers"][tier] = group["tiers"].get(tier, 0) + int(count or 0)
+    for group in groups:
+        group["charge"] = round(group["charge"], 2)
+        group["refund"] = round(group["refund"], 2)
+        group["net"] = round(group["net"], 2)
+    return groups
+
+def _store_text_line(seq: int, row: Mapping[str, Any]) -> str:
+    return (
+        f"{seq} {row.get('name') or '门店'}  净办理{int(row.get('n') or 0)}笔"
+        f"  净{float(row.get('net') or 0):.2f}"
+    )
+
+
 def render_week_text(
     rows: Sequence[Mapping[str, Any]],
     totals: Mapping[str, Any],
@@ -532,7 +631,9 @@ def render_week_text(
     end: date,
     city: str = "",
     mode: str = "week",
+    order: str = "net",
 ) -> str:
+    """贴群文案。order="city" 时按地市分段，段首一行地市小计，段内仍按净额降序。"""
     city_bit = (city or "").replace("市", "") or "全店"
     title = "芝麻直降办理月报" if mode == "month" else "芝麻直降办理周报"
     lines = [
@@ -543,8 +644,16 @@ def render_week_text(
     if not rows:
         lines.append("这一期没有已导入的芝麻流水。")
         return "\n".join(lines) + "\n"
+    if order == "city":
+        for group in group_rows_by_city(rows):
+            lines.append(
+                f"【{group['city']}】{group['stores']} 家 · 净办理 {group['n']} 笔"
+                f" · 净 {group['net']:.2f} 元"
+            )
+            # 编号跟表格一致：每个地市从 1 开始，不然截图和文案会数出两个号
+            for i, row in enumerate(group["rows"], 1):
+                lines.append(_store_text_line(i, row))
+        return "\n".join(lines) + "\n"
     for i, row in enumerate(rows, 1):
-        lines.append(
-            f"{i} {row.get('name') or '门店'}  净办理{int(row.get('n') or 0)}笔  净{float(row.get('net') or 0):.2f}"
-        )
+        lines.append(_store_text_line(i, row))
     return "\n".join(lines) + "\n"

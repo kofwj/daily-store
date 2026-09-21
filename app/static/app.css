@@ -611,6 +611,11 @@ table.bulletin td.flag-no { color: #b91c1c; font-weight: 800; background: #fee2e
 table.bulletin td.scale {
   color: #111827 !important; font-variant-numeric: tabular-nums; font-weight: 800; font-size: 14px;
 }
+
+table.bulletin tr.city-band td {
+  text-align: left; font-weight: 800; color: #0f172a; letter-spacing: .3px;
+  background: #f1f5f9; padding-left: 10px;
+}
 table.bulletin .bisuan-official {
   position: relative;
   display: inline-block; margin-left: 4px; padding: 1px 5px 1px 7px;

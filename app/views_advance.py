@@ -347,13 +347,49 @@ def register_advance(app) -> None:
             next_start, next_end = start + timedelta(days=7), end + timedelta(days=7)
         return start, end, prev_start, prev_end, next_start, next_end, mode
 
+    def _sesame_order():
+        """门店排列：net=按服务费净额排名（默认），city=按地市（门店目录顺序）。"""
+        order = (request.args.get("order") or "net").strip()
+        return order if order in ("net", "city") else "net"
+
+    def _sesame_cities(stores):
+        """地市下拉顺序跟门店目录（sort_order）走，没填地市的并成一项排最后。"""
+        out = []
+        for store in stores:
+            name = sesame.city_of(store)
+            if name not in out:
+                out.append(name)
+        if sesame.CITY_UNASSIGNED in out:
+            out.remove(sesame.CITY_UNASSIGNED)
+            out.append(sesame.CITY_UNASSIGNED)
+        return out
+
+    def _sesame_table_rows(rows, groups, order):
+        """表格行：净额排名平铺；按地市时每地市先插一条小计带，店内重新编号。"""
+        if order != "city":
+            return [{"seq": i, "row": r} for i, r in enumerate(rows, 1)]
+        out = []
+        for group in groups:
+            out.append(
+                {
+                    "band": (
+                        f"{group['city']} · {group['stores']} 家 · 净办理 {group['n']} 笔"
+                        f" · 净 {group['net']:.2f} 元"
+                    )
+                }
+            )
+            for i, row in enumerate(group["rows"], 1):
+                out.append({"seq": i, "row": row})
+        return out
+
     @app.route("/advance/sesame/week")
     @readonly_required
     def sesame_week_page():
         start, end, prev_start, prev_end, next_start, next_end, mode = _sesame_period()
+        order = _sesame_order()
         with db.get_db() as conn:
             stores = accessible_stores(conn)
-            cities = sorted({(s["city"] or "").strip() or "未分地市" for s in stores})
+            cities = _sesame_cities(stores)
             areas = sorted({(s["area_manager"] or "").strip() for s in stores if (s["area_manager"] or "").strip()})
             city = (request.args.get("city") or "").strip()
             if city and city not in cities:
@@ -361,11 +397,11 @@ def register_advance(app) -> None:
             area = (request.args.get("area") or "").strip()
             if area and area not in areas:
                 area = ""
-            scoped = [s for s in stores if ((s["city"] or "").strip() or "未分地市") == city] if city else stores
+            scoped = [s for s in stores if sesame.city_of(s) == city] if city else stores
             if area:
                 scoped = [s for s in scoped if (s["area_manager"] or "").strip() == area]
             scoped_ids = [int(s["id"]) for s in scoped]
-            rows = sesame.sesame_week_rows(conn, scoped_ids, start, end)
+            rows = sesame.sesame_week_rows(conn, scoped_ids, start, end, order)
             totals = sesame.sesame_week_totals(rows)
             # 通报表列：小天才 / AI手机 按类别，直降按原始档位；办理笔数按净数（扣费−退款）
             breakdown, tier_cols = sesame.sesame_tier_breakdown(conn, scoped_ids, start, end)
@@ -381,7 +417,8 @@ def register_advance(app) -> None:
             tier_totals = {
                 t: sum(int(r["tier_charges"].get(t) or 0) for r in rows) for t in tier_cols
             }
-            copy_text = sesame.render_week_text(rows, totals, start, end, city, mode=mode)
+            groups = sesame.group_rows_by_city(rows) if order == "city" else []
+            copy_text = sesame.render_week_text(rows, totals, start, end, city, mode=mode, order=order)
             return render_template(
                 "sesame_week.html",
                 start=start,
@@ -394,11 +431,15 @@ def register_advance(app) -> None:
                 cities=cities,
                 area=area,
                 areas=areas,
+                order=order,
                 rows=rows,
                 totals=totals,
                 tier_cols=tier_cols,
                 cat_totals=cat_totals,
                 tier_totals=tier_totals,
+                groups=groups,
+                table_rows=_sesame_table_rows(rows, groups, order),
+                band_colspan=6 + len(tier_cols),
                 copy_text=copy_text,
                 period_label=sesame.period_label(start, end, mode),
                 mode=mode,
@@ -409,21 +450,22 @@ def register_advance(app) -> None:
     @readonly_required
     def sesame_week_xlsx():
         start, end, _ps, _pe, _ns, _ne, mode = _sesame_period()
+        order = _sesame_order()
         with db.get_db() as conn:
             stores = accessible_stores(conn)
             city = (request.args.get("city") or "").strip()
-            cities = sorted({(s["city"] or "").strip() or "未分地市" for s in stores})
+            cities = _sesame_cities(stores)
             if city and city not in cities:
                 city = ""
             area = (request.args.get("area") or "").strip()
             areas = sorted({(s["area_manager"] or "").strip() for s in stores if (s["area_manager"] or "").strip()})
             if area and area not in areas:
                 area = ""
-            scoped = [s for s in stores if ((s["city"] or "").strip() or "未分地市") == city] if city else stores
+            scoped = [s for s in stores if sesame.city_of(s) == city] if city else stores
             if area:
                 scoped = [s for s in scoped if (s["area_manager"] or "").strip() == area]
             scoped_ids = [int(s["id"]) for s in scoped]
-            rows = sesame.sesame_week_rows(conn, scoped_ids, start, end)
+            rows = sesame.sesame_week_rows(conn, scoped_ids, start, end, order)
             breakdown, tier_cols = sesame.sesame_tier_breakdown(conn, scoped_ids, start, end)
         header = ["门店", "地市", "净笔数", "扣费笔数", "扣费金额", "退款笔数", "退款金额", "净额"]
         data = [

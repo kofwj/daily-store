@@ -1,5 +1,6 @@
 """芝麻服务费导入：解析、对店、去重、垫资联动、店员只读。"""
 
+import re
 from datetime import date
 from io import BytesIO
 
@@ -281,7 +282,8 @@ def test_sesame_month_mode_and_filters(tmp_db, admin_client):
     page = c.get(f"/advance/sesame/week?mode=month&start={_MONTH_START}").get_data(as_text=True)
     assert "芝麻直降办理月报" in page
     assert "区域经理" in page  # 筛选器
-    assert "按地市" not in page  # 独立分类表已撤，改筛选
+    assert "city-band" not in page  # 默认净额排名，没有地市分组带
+    assert "按地市" not in page  # 不再有按地市独立表（改筛选 + 地市分组排列）
     assert "示例市甲街vivo体验店" in page
     # 地市筛选仍可用
     city = c.get(f"/advance/sesame/week?mode=month&start={_MONTH_START}&city=示例市").get_data(as_text=True)
@@ -426,4 +428,111 @@ def test_parse_orders_xlsx_text_amounts_and_warnings():
     assert by_no["o3"]["frozen"] == 0.0 and by_no["o3"]["terms"] == 0
     assert by_no["o4"]["terms"] == 0  # 空值 = 未填，不算坏行
     assert len(warnings) == 2 and all("o3" in w for w in warnings)
+
+
+def _make_order_rows():
+    """三家店：示例市两家（目录顺序 甲→乙，净额却是 乙>甲）、邻市一家净额最高。
+
+    邻市那家的店名还故意以「示例市」开头，防止断言拿店名前缀当地市用。
+    """
+
+    def row(ext: str, code: str, name: str, fee: float):
+        return [
+            ext, ext, "江苏省", "示例市", "甲区",
+            "JSCM_20250116110103117937984", "91320602MA7E6JC70A", "示例公司甲",
+            f"JSCM_{code}", name, "加盟店", _REF_MONTH,
+            1368.00, fee, "处理成功",
+            f"行业芝麻订单({ext})服务费", f"{_REF_ISO} 14:19:38.0",
+        ]
+
+    return [
+        row("1786774661473466851", "10000001", "示例市甲街vivo体验店", -9.58),
+        row("1786774661473466852", "10000002", "示例市乙街vivo专卖店", -20.00),
+        row("1785792754901613702", "10000003", "示例市丁路vivo体验店", -30.00),
+    ]
+
+
+def test_sesame_week_order_by_city(tmp_db, admin_client):
+    c = admin_client
+    data = _make_sesame_xlsx(_make_order_rows())
+    c.post("/advance/sesame/preview", data={"sesame_file": (BytesIO(data), "s.xlsx")})
+    c.post("/advance/sesame/confirm", follow_redirects=True)
+    url = f"/advance/sesame/week?start={_REF_ISO}&end={_REF_ISO}"
+    ranked = c.get(url).get_data(as_text=True)
+    by_city = c.get(f"{url}&order=city").get_data(as_text=True)
+    # 两种排列都给了入口
+    assert "净额排名" in ranked and "地市分组" in ranked
+    # 默认按净额：邻市丁店 30.00 > 示例市乙店 20.00 > 示例市甲店 9.58，没有地市带
+    assert (
+        ranked.index("示例市丁路vivo体验店")
+        < ranked.index("示例市乙街vivo专卖店")
+        < ranked.index("示例市甲街vivo体验店")
+    )
+    assert "city-band" not in ranked
+    # 按地市：示例市在前（门店目录顺序），组内仍按净额（乙 20.00 在甲 9.58 前）
+    assert by_city.index("示例市乙街vivo专卖店") < by_city.index("示例市甲街vivo体验店")
+    assert by_city.index("示例市甲街vivo体验店") < by_city.index("示例市丁路vivo体验店")
+    assert '<tr class="city-band">' in by_city
+    assert "示例市 · 2 家 · 净办理 2 笔 · 净 29.58 元" in by_city
+    assert "邻市 · 1 家 · 净办理 1 笔 · 净 30.00 元" in by_city
+    # 地市带的列数要跟表头一致，不然整表错位
+    head_cols = len(re.findall(r"<th", re.search(r"<thead>(.*?)</thead>", by_city, re.S).group(1)))
+    assert f'<td colspan="{head_cols}">' in by_city
+    # 贴群文案同步分段，且每段编号从 1 起（跟表格一致）
+    assert "【示例市】2 家 · 净办理 2 笔 · 净 29.58 元\n1 示例市乙街vivo专卖店" in by_city
+    assert "【邻市】1 家 · 净办理 1 笔 · 净 30.00 元\n1 示例市丁路vivo体验店" in by_city
+    # 导出 Excel 跟随排序（组内也是净额降序）
+    xlsx = c.get(f"/advance/sesame/week.xlsx?start={_REF_ISO}&end={_REF_ISO}&order=city")
+    book = openpyxl.load_workbook(BytesIO(xlsx.get_data()))
+    ws = book.active
+    assert [ws.cell(row=i, column=1).value for i in (2, 3, 4)] == [
+        "示例市乙街vivo专卖店",
+        "示例市甲街vivo体验店",
+        "示例市丁路vivo体验店",
+    ]
+    assert [ws.cell(row=i, column=2).value for i in (2, 3, 4)] == ["示例市", "示例市", "邻市"]
+    # 非法 order 回落到净额排名，不报错
+    fallback = c.get(f"{url}&order=whatever").get_data(as_text=True)
+    assert "city-band" not in fallback
+
+
+def test_sesame_week_city_unassigned_last(tmp_db, admin_client):
+    """没填地市的店：带排最后，下拉里出现「未分地市」，导出也写这个名。"""
+    c = admin_client
+    with db.get_db() as conn:
+        # 拿一家目录店当「没填地市」的店：清掉地市，给它一个门店编码
+        conn.execute(
+            "UPDATE stores SET city='', mobile_code='10000005' WHERE code='store-zeta'"
+        )
+        conn.commit()
+    data = _make_sesame_xlsx(
+        [
+            # 邻市戊店净额最高，但「未分地市」的店必须排它后面
+            [
+                "1785792754901613000", "1785792754901613000", "江苏省", "示例市", "丁区",
+                "JSCM_20250116110103117937984", "91320602MA7E6JC70A", "示例公司甲",
+                "JSCM_10000005", "邻市巳街vivo专卖店", "加盟店", _REF_MONTH,
+                480.00, -50.00, "处理成功",
+                "行业芝麻订单(1785792754901613000)服务费", f"{_REF_ISO} 10:00:00.0",
+            ],
+            [
+                "1785792754901613001", "1785792754901613001", "江苏省", "邻市", "丁区",
+                "JSCM_20250116110103117937984", "91320602MA7E6JC70A", "示例公司甲",
+                "JSCM_10000003", "示例市丁路vivo体验店", "加盟店", _REF_MONTH,
+                1368.00, -9.58, "处理成功",
+                "行业芝麻订单(1785792754901613001)服务费", f"{_REF_ISO} 10:01:00.0",
+            ],
+        ]
+    )
+    c.post("/advance/sesame/preview", data={"sesame_file": (BytesIO(data), "s.xlsx")})
+    c.post("/advance/sesame/confirm", follow_redirects=True)
+    page = c.get(f"/advance/sesame/week?start={_REF_ISO}&end={_REF_ISO}&order=city").get_data(as_text=True)
+    assert "未分地市 · 1 家 · 净办理 1 笔 · 净 50.00 元" in page
+    # 未分地市整段排在 邻市 后面（净额 50.00 更高也不越位）
+    assert page.index("邻市 · 1 家") < page.index("未分地市 · 1 家")
+    assert '<option value="未分地市"' in page
+    xlsx = c.get(f"/advance/sesame/week.xlsx?start={_REF_ISO}&end={_REF_ISO}&order=city")
+    ws = openpyxl.load_workbook(BytesIO(xlsx.get_data())).active
+    assert ws.cell(row=2, column=2).value == "邻市"
+    assert ws.cell(row=3, column=2).value == "未分地市"
 

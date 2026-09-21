@@ -7,8 +7,12 @@
   </div>
   <form method="get" class="page-filters">
     <div class="sp-groupby sesame-mode" role="tablist" aria-label="周期">
-      <a class="sp-gb {{ 'is-on' if mode == 'week' else '' }}" href="{{ url_for('sesame_week_page', mode='week', start=start.isoformat(), city=city) }}">周报</a>
-      <a class="sp-gb {{ 'is-on' if mode == 'month' else '' }}" href="{{ url_for('sesame_week_page', mode='month', start=start.isoformat(), city=city) }}">月报</a>
+      <a class="sp-gb {{ 'is-on' if mode == 'week' else '' }}" href="{{ url_for('sesame_week_page', mode='week', start=start.isoformat(), city=city, area=area, order=order) }}">周报</a>
+      <a class="sp-gb {{ 'is-on' if mode == 'month' else '' }}" href="{{ url_for('sesame_week_page', mode='month', start=start.isoformat(), city=city, area=area, order=order) }}">月报</a>
+    </div>
+    <div class="sp-groupby sesame-order" role="tablist" aria-label="门店排列">
+      <a class="sp-gb {{ 'is-on' if order == 'net' else '' }}" href="{{ url_for('sesame_week_page', mode=mode, start=start.isoformat(), end=end.isoformat(), city=city, area=area) }}">净额排名</a>
+      <a class="sp-gb {{ 'is-on' if order == 'city' else '' }}" href="{{ url_for('sesame_week_page', mode=mode, start=start.isoformat(), end=end.isoformat(), city=city, area=area, order='city') }}">地市分组</a>
     </div>
     <label class="filter">
       <span>{{ '月份' if mode == 'month' else '开始' }}</span>
@@ -25,6 +29,7 @@
     </label>
     {% endif %}
     <input type="hidden" name="mode" value="{{ mode }}">
+    <input type="hidden" name="order" value="{{ order }}">
     {% if cities %}
     <label class="filter">
       <span>地市</span>
@@ -47,11 +52,11 @@
       </select>
     </label>
     {% endif %}
-    <a class="btn ghost" href="{{ url_for('sesame_week_page', mode=mode, start=prev_start.isoformat(), city=city) }}">{{ '上月' if mode == 'month' else '上周' }}</a>
-    <a class="btn ghost" href="{{ url_for('sesame_week_page', mode=mode, start=next_start.isoformat(), city=city) }}">{{ '下月' if mode == 'month' else '下周' }}</a>
+    <a class="btn ghost" href="{{ url_for('sesame_week_page', mode=mode, start=prev_start.isoformat(), end=prev_end.isoformat(), city=city, area=area, order=order) }}">{{ '上月' if mode == 'month' else '上周' }}</a>
+    <a class="btn ghost" href="{{ url_for('sesame_week_page', mode=mode, start=next_start.isoformat(), end=next_end.isoformat(), city=city, area=area, order=order) }}">{{ '下月' if mode == 'month' else '下周' }}</a>
     <button type="button" id="btnCopyShot" onclick="copyBulletinImage()">复制图片</button>
     <button type="button" id="btnDownShot" class="ghost" onclick="downloadBulletinImage()">下载图片</button>
-    <a class="btn ghost" href="{{ url_for('sesame_week_xlsx', mode=mode, start=start.isoformat(), end=end.isoformat(), city=city) }}">导出 Excel</a>
+    <a class="btn ghost" href="{{ url_for('sesame_week_xlsx', mode=mode, start=start.isoformat(), end=end.isoformat(), city=city, area=area, order=order) }}">导出 Excel</a>
     {% if is_admin %}
     <a class="btn ghost" href="{{ url_for('advance_sesame_page') }}">导入明细</a>
     {% endif %}
@@ -97,16 +102,20 @@
         </tr>
       </thead>
       <tbody>
-        {% for r in rows %}
+        {% for item in table_rows %}
+        {% if item.band %}
+        <tr class="city-band"><td colspan="{{ band_colspan }}">{{ item.band }}</td></tr>
+        {% else %}
         <tr>
-          <td>{{ loop.index }}</td>
-          <td class="name">{{ r.name }}</td>
-          <td>{{ r.cat_charges.get('小天才直降') or '-' }}</td>
-          <td>{{ r.cat_charges.get('AI手机') or '-' }}</td>
-          {% for t in tier_cols %}<td>{{ r.tier_charges.get(t) or '-' }}</td>{% endfor %}
-          <td>{{ r.n }}</td>
-          <td class="total-num">{{ '%.2f'|format(r.net) }}</td>
+          <td>{{ item.seq }}</td>
+          <td class="name">{{ item.row.name }}</td>
+          <td>{{ item.row.cat_charges.get('小天才直降') or '-' }}</td>
+          <td>{{ item.row.cat_charges.get('AI手机') or '-' }}</td>
+          {% for t in tier_cols %}<td>{{ item.row.tier_charges.get(t) or '-' }}</td>{% endfor %}
+          <td>{{ item.row.n }}</td>
+          <td class="total-num">{{ '%.2f'|format(item.row.net) }}</td>
         </tr>
+        {% endif %}
         {% endfor %}
       </tbody>
       <tfoot>
