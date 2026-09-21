@@ -626,8 +626,13 @@ table.bulletin td.scale {
 }
 
 /* 分地市：表体不再插小计带，只把每个地市的第一行切一道线；汇总走表底 city-sub 行 */
-table.bulletin tr.city-start td { border-top: 2px solid #cbd5e1; }
-table.bulletin tfoot tr.city-sub td {
+table.bulletin tr.city-start td,
+table.board-table tr.city-start td,
+table.insight-stores tr.city-start td,
+table.dev-table tr.city-start td { border-top: 2px solid #cbd5e1; }
+table.bulletin tfoot tr.city-sub td,
+table.board-table tfoot tr.city-sub td,
+table.dev-table tfoot tr.city-sub td {
   background: #f8fafc; color: #334155; font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -1890,6 +1895,22 @@ body.sp-open { overflow: hidden; }
   gap: 2px;
 }
 .insight-lag-list a.store-name { font-weight: 650; }
+.chase-text {
+  display: block;
+  width: 100%;
+  min-height: 88px;
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.chase-text.is-reveal {
+  outline: 2px solid var(--warn);
+  background: var(--warn-bg);
+}
 .board-missing-head h2, .board-rank-head h2 { margin: 0; }
 .board-missing-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .miss-chip {

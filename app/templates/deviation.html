@@ -4,11 +4,24 @@
 <div class="page-head">
   <div class="page-title">
     <h1>填报偏差榜 · {{ month.strftime('%Y年%m月') }}</h1>
-    <p class="muted">温差 = 移动校准 − 截止日同期填报；正数少报、负数多报。</p>
+    <p class="muted">温差 = 移动校准 − 截止日同期填报；正数少报、负数多报。按地市分组（目录顺序），# 是全区名次。</p>
   </div>
-  <div class="dev-nav">
-    <a class="btn ghost" href="{{ url_for('deviation', month=prev_month.strftime('%Y-%m-01')) }}">‹ 上月</a>
-    <a class="btn ghost" href="{{ url_for('deviation', month=next_month.strftime('%Y-%m-01')) }}">下月 ›</a>
+  <div class="page-filters">
+    <div class="dev-nav">
+      <a class="btn ghost" href="{{ url_for('deviation', month=prev_month.strftime('%Y-%m-01'), all=(1 if show_all else none), side=(side or none)) }}">‹ 上月</a>
+      <a class="btn ghost" href="{{ url_for('deviation', month=next_month.strftime('%Y-%m-01'), all=(1 if show_all else none), side=(side or none)) }}">下月 ›</a>
+    </div>
+    {% if has_mobile %}
+    <div class="seg">
+      <a class="{{ 'active' if not show_all else '' }}" href="{{ url_for('deviation', month=month.isoformat(), side=(side or none)) }}">|温差|≥1.0</a>
+      <a class="{{ 'active' if show_all else '' }}" href="{{ url_for('deviation', month=month.isoformat(), all=1, side=(side or none)) }}">含小差</a>
+    </div>
+    <div class="seg">
+      <a class="{{ 'active' if not side else '' }}" href="{{ url_for('deviation', month=month.isoformat(), all=(1 if show_all else none)) }}">两侧</a>
+      <a class="{{ 'active' if side == 'under' else '' }}" href="{{ url_for('deviation', month=month.isoformat(), all=(1 if show_all else none), side='under') }}">少报</a>
+      <a class="{{ 'active' if side == 'over' else '' }}" href="{{ url_for('deviation', month=month.isoformat(), all=(1 if show_all else none), side='over') }}">多报</a>
+    </div>
+    {% endif %}
   </div>
 </div>
 
@@ -35,6 +48,7 @@
 </div>
 
 <div class="card dev-card">
+  {% if shown %}
   <table class="data dev-table">
     <thead>
       <tr>
@@ -47,14 +61,16 @@
       </tr>
     </thead>
     <tbody>
-      {% for r in rows %}
-      <tr>
-        <td class="rank">{{ loop.index }}</td>
+      {% set ns = namespace(prev=None) %}
+      {% for r in shown %}
+      <tr class="{{ 'city-start' if ns.prev is not none and ns.prev != r.city else '' }}">
+        {% set ns.prev = r.city %}
+        <td class="rank">{{ r.rank }}</td>
         <td class="store">
-          {% if r.asof_iso %}
-          <strong><a class="store-name" href="{% if r.city and r.city != '未分地市' %}{{ url_for('bulletin_page', date=r.asof_iso, city=r.city) }}{% else %}{{ url_for('bulletin_page', date=r.asof_iso) }}{% endif %}" title="去通报表对照">{{ r.name }}</a></strong>
+          {% if r.bulletin_city and r.asof_iso %}
+          <strong><a class="store-name" href="{{ url_for('bulletin_page', date=r.asof_iso, city=r.bulletin_city) }}" title="去通报表对照">{{ r.name }}</a></strong>
           {% else %}
-          <strong>{{ r.name }}</strong>
+          <strong><a class="store-name" href="{{ url_for('report', store_id=r.id, start=month.isoformat(), end=month_end.isoformat()) }}" title="去该店报表">{{ r.name }}</a></strong>
           {% endif %}
           <span class="sub">{{ r.city }}{% if r.asof_text %} · 至 {{ r.asof_text }}{% endif %}</span>
         </td>
@@ -75,7 +91,36 @@
       </tr>
       {% endfor %}
     </tbody>
+    {% if city_groups %}
+    <tfoot>
+      {% for g in city_groups %}
+      <tr class="city-sub">
+        <td class="rank"></td>
+        <td class="store">{{ g.city }} · {{ g.n }} 家</td>
+        <td></td>
+        <td></td>
+        <td class="num">{{ '+' if g.net_diff > 0 else '' }}{{ (g.net_diff / 10)|round(1) }}</td>
+        <td></td>
+      </tr>
+      {% endfor %}
+    </tfoot>
+    {% endif %}
   </table>
+  {% else %}
+  <p class="muted">没有符合筛选的店。</p>
+  {% endif %}
+  <p class="muted board-note">
+    {% if hidden_small_n and not show_all %}
+    已藏 |温差| 不到 1.0 的 {{ hidden_small_n }} 店。
+    <a href="{{ url_for('deviation', month=month.isoformat(), all=1, side=(side or none)) }}">显示</a>
+    {% elif show_all and hidden_small_n %}
+    含 |温差| 不到 1.0 的 {{ hidden_small_n }} 店。
+    <a href="{{ url_for('deviation', month=month.isoformat(), side=(side or none)) }}">只看 ≥ 1.0</a>
+    {% endif %}
+    {% if uncompared_n %}
+    {{ uncompared_n }} 店没有移动校准，未进对比（不是温差 0）。
+    {% endif %}
+  </p>
 </div>
 {% endif %}
 {% endblock %}

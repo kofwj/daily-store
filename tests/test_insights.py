@@ -2,14 +2,18 @@ from datetime import date
 
 from app import db
 from app.insights import (
+    DEV_MIN_ABS,
     build_deviation_board,
     build_insights,
+    catalog_city_order,
     chase_copy_text,
     chase_lag_copy_text,
     clamp_mobile_asof,
     deviation_ref,
     fold_bisuan_reported,
+    group_rows_by_city_order,
     prev_week_span,
+    store_bulletin_city,
     week_span,
 )
 from app.metrics_seed import effective_month_bisuan
@@ -146,7 +150,13 @@ def test_insights_page_admin_only(client):
     assert "复制文案" not in page
     assert "复制催办" in page
     assert "落后于时间" in page
-    assert "/report?" in page
+    assert "【催交】" in page
+    assert "class=\"chase-text\"" in page
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+    assert f"store_id={sid}" in page
+    assert f"start={date.today().replace(day=1).isoformat()}" in page
+    assert f"end={date.today().isoformat()}" in page
     idle_page = client.get("/insights?idle=1").get_data(as_text=True)
     assert "insight-month" in idle_page
     filtered = client.get("/insights?advisor=yes").get_data(as_text=True)
@@ -214,7 +224,11 @@ def test_board_shows_deals_and_exports_xlsx(admin_client):
     assert "成交/触客" in page
     assert "示例甲店" in page
     assert "复制催交" in page
-    assert "/report?" in page
+    assert "【催交】" in page
+    assert f"store_id={sid}" in page
+    assert f"start={date.today().replace(day=1).isoformat()}" in page
+    assert f"end={date.today().isoformat()}" in page
+    assert "class=\"chase-text\"" in page
     r = admin_client.get("/board.xlsx?view=today")
     assert r.status_code == 200
     assert r.mimetype == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -324,8 +338,22 @@ def test_board_ranks_by_bisuan_not_sum_and_hides_idle_month(admin_client):
     assert "按比算新增排序" in month_page
     assert "三 KPI 累计" not in month_page and "三项累计" not in month_page
     assert "按本月比算新增累计排名" in month_page
-    assert "示例市丙路vivo体验店" in month_page  # 缺交
-    assert ">示例丙店<" not in month_page  # 不进排行
+    assert "示例丙店" in month_page
+    import re
+    with db.get_db() as conn:
+        gamma = conn.execute("SELECT id FROM stores WHERE code='store-gamma'").fetchone()["id"]
+    assert re.search(rf"/today\?[^\"']*store_id={gamma}", month_page)
+    assert not re.search(rf"/report\?[^\"']*store_id={gamma}", month_page)
+
+
+def test_board_month_empty_copy_and_city_scope(admin_client):
+    empty = admin_client.get("/board?view=month").get_data(as_text=True)
+    assert "本月没有已交的店可排" in empty
+    assert "今天没有店交数" not in empty
+    scoped = admin_client.get("/board?city=邻市").get_data(as_text=True)
+    assert "【范围】邻市" in scoped
+    assert "示例戊店" in scoped
+    assert "class=\"chase-text\"" in scoped
 
 
 def test_chase_copy_and_deviation_ref():
@@ -342,9 +370,19 @@ def test_chase_copy_and_deviation_ref():
     assert "【催交】8月16日未交（1家）" in text
     assert "乙店：比算新增 0.0/10（0%）" in text
     assert "落后超过 15 个百分点" in text
+    scoped = chase_copy_text(as_of=as_of, names=["甲店"], scope_label="邻市")
+    assert scoped.startswith("【范围】邻市")
+    lag_scoped = chase_lag_copy_text(
+        as_of=as_of, pace=50, missing_today=["乙店"], laggards=[], scope_label="示例市"
+    )
+    assert lag_scoped.startswith("【范围】示例市")
     assert deviation_ref(date(2026, 10, 1), date(2026, 10, 31), date(2026, 9, 21)) == date(2026, 10, 1)
     assert deviation_ref(date(2026, 8, 1), date(2026, 8, 31), date(2026, 9, 21)) == date(2026, 8, 31)
     assert deviation_ref(date(2026, 9, 1), date(2026, 9, 30), date(2026, 9, 21)) == date(2026, 9, 21)
+    cities = ["示例市", "邻市"]
+    assert store_bulletin_city({"mobile_code": "1", "city": "邻市"}, cities) == "邻市"
+    assert store_bulletin_city({"mobile_code": "", "city": "邻市"}, cities) == ""
+    assert store_bulletin_city({"mobile_code": "1", "city": "未名市"}, cities) == ""
 
 
 def test_insights_monday_notes_one_day_week(admin_client):
@@ -370,7 +408,9 @@ def test_deviation_page_admin_only(admin_client):
     assert "截止日同期" in html
     assert "元" not in html  # 计数单位是个，不是金额
     assert "少报" in html and "多报" in html
+    assert "少报" in html and "多报" in html
     assert "/bulletin?" in html
+    assert "date=2026-08-31" in html
 
 
 def test_deviation_page_cuts_reported_at_asof(admin_client):
@@ -391,3 +431,182 @@ def test_deviation_page_cuts_reported_at_asof(admin_client):
     assert "至 8/10" in html
     assert "+5.0" in html
     assert "一致" not in html
+    assert "date=2026-08-10" in html
+    assert "/bulletin?" in html
+
+
+def test_deviation_empty_when_mobile_only_on_inactive_store(admin_client):
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        db.save_bisuan_mobile(
+            conn, store_id=sid, month="2026-08", value_tenths=120, asof=date(2026, 8, 31)
+        )
+        db.set_store_active(conn, sid, False)
+    html = admin_client.get("/deviation?month=2026-08-01").get_data(as_text=True)
+    assert "本月没有移动校准数" in html
+    assert "纳入对比" not in html
+
+
+def test_deviation_without_mobile_code_links_report(admin_client):
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-gamma'").fetchone()["id"]
+        db.save_bisuan_mobile(
+            conn, store_id=sid, month="2026-08", value_tenths=50, asof=date(2026, 8, 10)
+        )
+    html = admin_client.get("/deviation?month=2026-08-01").get_data(as_text=True)
+    assert f"store_id={sid}" in html
+    assert "/report?" in html
+    assert "/bulletin?" not in html
+
+
+def test_insights_mobile_used_follows_scope(admin_client):
+    with db.get_db() as conn:
+        conn.execute("UPDATE stores SET advisor_name='李顾问' WHERE code='store-beta'")
+        alpha = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        db.save_bisuan_mobile(
+            conn,
+            store_id=alpha,
+            month=date.today().strftime("%Y-%m"),
+            value_tenths=80,
+            asof=date.today(),
+        )
+    yes = admin_client.get("/insights?advisor=yes").get_data(as_text=True)
+    assert "按移动校准数" not in yes
+    no = admin_client.get("/insights?advisor=no").get_data(as_text=True)
+    assert "按移动校准数" in no
+
+
+def test_copy_js_does_not_fake_success_when_execcommand_fails():
+    from pathlib import Path
+
+    src = Path("app/static/copy.js").read_text(encoding="utf-8")
+    assert "ok = !!document.execCommand('copy')" in src
+    assert "请长按文本框全选复制" in src
+    assert "setCopyHint(doneMsg)" in src
+    # 失败路径必须露源，不能只提示已复制
+    fail_at = src.find("ok = !!document.execCommand")
+    reveal_at = src.find("revealCopySource")
+    assert 0 <= fail_at < reveal_at or src.count("revealCopySource") >= 1
+
+
+def test_catalog_city_order_groups_stable_and_keeps_rank():
+    stores = [
+        _store(1, "甲店", "示例市"),
+        _store(2, "乙店", "邻市"),
+        _store(3, "丙店", "示例市"),
+        _store(4, "丁店", ""),
+    ]
+    order = catalog_city_order(stores)
+    assert order == ["示例市", "邻市", "未分地市"]
+    rows = [
+        {"name": "乙店", "city": "邻市", "rank": 1},
+        {"name": "丙店", "city": "示例市", "rank": 2},
+        {"name": "甲店", "city": "示例市", "rank": 3},
+        {"name": "丁店", "city": "未分地市", "rank": 4},
+    ]
+    grouped = group_rows_by_city_order(rows, order, lambda r: r["city"])
+    assert [r["name"] for r in grouped] == ["丙店", "甲店", "乙店", "丁店"]
+    assert [r["rank"] for r in grouped] == [2, 3, 1, 4]
+    assert DEV_MIN_ABS == 10
+
+
+def test_board_groups_by_city_keeps_global_rank(admin_client):
+    """目录地市切开后组内仍按比算；# 仍是全区名次。"""
+    import re
+
+    today = date.today()
+    with db.get_db() as conn:
+        alpha = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        epsilon = conn.execute("SELECT id FROM stores WHERE code='store-epsilon'").fetchone()["id"]
+        uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        db.save_daily(conn, store_id=alpha, biz_date=today, values={"bisuan": 5}, user_id=uid)
+        db.save_daily(conn, store_id=epsilon, biz_date=today, values={"bisuan": 50}, user_id=uid)
+    page = admin_client.get("/board?view=today").get_data(as_text=True)
+    pairs = re.findall(
+        r'class="rank-col">(\d+)</td>\s*<td class="left store-cell">\s*<a class="store-name"[^>]*>([^<]+)</a>',
+        page,
+    )
+    assert pairs[0] == ("2", "示例甲店")
+    assert pairs[1] == ("1", "示例戊店")
+    assert "city-start" in page
+    assert "city-band" not in page
+    assert page.find("</tbody>") < page.find("city-sub")
+    assert "示例市 · 1 家" in page
+    assert "邻市 · 1 家" in page
+    assert "按地市分组（目录顺序）" in page
+    assert "# 是全区名次" in page
+    assert f"store_id={alpha}" in page
+    assert f"start={today.replace(day=1).isoformat()}" in page
+    assert f"end={today.isoformat()}" in page
+
+
+def test_insights_store_table_groups_by_catalog_city(admin_client):
+    page = admin_client.get("/insights?idle=1").get_data(as_text=True)
+    start = page.find("insight-stores")
+    assert start >= 0
+    chunk = page[start : page.find("</table>", start)]
+    shi = ["示例甲店", "示例乙店", "示例丙店"]
+    lin = ["示例丁店", "示例戊店", "示例巳店"]
+    for a in shi:
+        for b in lin:
+            assert chunk.index(a) < chunk.index(b)
+    assert "city-start" in chunk
+    assert "city-band" not in chunk
+    assert "分店明细" in page
+    assert "按地市分组（目录顺序）" in page
+    assert "已显示本月未交" in page
+    assert 'name="idle"' in page
+
+
+def test_deviation_hides_small_diff_groups_by_city(admin_client):
+    with db.get_db() as conn:
+        alpha = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        beta = conn.execute("SELECT id FROM stores WHERE code='store-beta'").fetchone()["id"]
+        delta = conn.execute("SELECT id FROM stores WHERE code='store-delta'").fetchone()["id"]
+        uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        db.save_daily(
+            conn, store_id=alpha, biz_date=date(2026, 8, 5), values={"bisuan": 100}, user_id=uid
+        )
+        db.save_daily(
+            conn, store_id=beta, biz_date=date(2026, 8, 5), values={"bisuan": 100}, user_id=uid
+        )
+        db.save_daily(
+            conn, store_id=delta, biz_date=date(2026, 8, 5), values={"bisuan": 200}, user_id=uid
+        )
+        db.save_bisuan_mobile(
+            conn, store_id=alpha, month="2026-08", value_tenths=200, asof=date(2026, 8, 10)
+        )
+        db.save_bisuan_mobile(
+            conn, store_id=beta, month="2026-08", value_tenths=105, asof=date(2026, 8, 10)
+        )
+        db.save_bisuan_mobile(
+            conn, store_id=delta, month="2026-08", value_tenths=50, asof=date(2026, 8, 10)
+        )
+    html = admin_client.get("/deviation?month=2026-08-01").get_data(as_text=True)
+    assert "示例甲店" in html
+    assert "示例乙店" not in html
+    assert "示例丁店" in html
+    assert html.index("示例甲店") < html.index("示例丁店")
+    assert "city-start" in html
+    assert "city-band" not in html
+    assert html.find("</tbody>") < html.find("city-sub")
+    assert "示例市 · 1 家" in html
+    assert "邻市 · 1 家" in html
+    assert "已藏 |温差| 不到 1.0 的 1 店" in html
+    assert "all=1" in html
+    assert "side=under" in html
+    assert "side=over" in html
+    assert "3 店没有移动校准，未进对比" in html
+    assert "不是温差 0" in html
+    assert "/bulletin?" in html
+    assert "date=2026-08-10" in html
+    all_html = admin_client.get("/deviation?month=2026-08-01&all=1").get_data(as_text=True)
+    assert "示例乙店" in all_html
+    assert "含 |温差| 不到 1.0 的 1 店" in all_html
+    under = admin_client.get("/deviation?month=2026-08-01&side=under").get_data(as_text=True)
+    assert "示例甲店" in under
+    assert "示例丁店" not in under
+    over = admin_client.get("/deviation?month=2026-08-01&side=over").get_data(as_text=True)
+    assert "示例丁店" in over
+    assert "示例甲店" not in over
+

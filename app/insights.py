@@ -24,6 +24,8 @@ FACT_CODES = (
     *ROLLUPS["coin_cut"]["legacy"],
 )
 LAG_POINTS = 15  # 实际进度比时间进度落后超过 15 个百分点算落后
+CITY_UNASSIGNED = "未分地市"
+DEV_MIN_ABS = 10  # 温差 1.0（库内 ×10）
 
 
 def _scale(code: str) -> str:
@@ -33,14 +35,33 @@ def _scale(code: str) -> str:
 def _store_name(store: Mapping[str, Any]) -> str:
     return (store["short_name"] or store["name"] or "").strip() or "未命名"
 
+def catalog_city_order(stores: Sequence[Mapping[str, Any]]) -> List[str]:
+    """门店目录里地市首次出现的顺序，跟看板地下拉一致。"""
+    seen: List[str] = []
+    for store in stores:
+        city = (store["city"] or "").strip() or CITY_UNASSIGNED
+        if city not in seen:
+            seen.append(city)
+    return seen
+
+
+def group_rows_by_city_order(
+    rows: Sequence[Any],
+    city_order: Sequence[str],
+    get_city: Any,
+) -> List[Any]:
+    """按目录地市切开，组内保留传入顺序（稳定排序）。"""
+    rank = {c: i for i, c in enumerate(city_order)}
+    return sorted(list(rows), key=lambda r: rank.get(get_city(r), len(rank)))
+
 
 def deviation_ref(month_start: date, month_end: date, today: date) -> date:
     """对照截止日上限：当月到今天，往月到月末，未来月锁在月初。"""
     return max(month_start, min(today, month_end))
 
 
-def chase_copy_text(*, as_of: date, names: Sequence[str], kind: str = "today") -> str:
-    """看板催交文案。kind=today 按日，month 按月未交。"""
+def chase_copy_text(*, as_of: date, names: Sequence[str], kind: str = "today", scope_label: str = "") -> str:
+    """看板催交文案。kind=today 按日，month 按月未交。有筛选时先写【范围】。"""
     names = [n for n in names if n]
     if not names:
         return ""
@@ -48,7 +69,11 @@ def chase_copy_text(*, as_of: date, names: Sequence[str], kind: str = "today") -
         head = f"【催交】{as_of.month}月还没交过日报（{len(names)}家）"
     else:
         head = f"【催交】{as_of.month}月{as_of.day}日未交日报（{len(names)}家）"
-    return head + "\n" + "、".join(names)
+    body = head + "\n" + "、".join(names)
+    label = (scope_label or "").strip()
+    if label:
+        return f"【范围】{label}\n{body}"
+    return body
 
 
 def chase_lag_copy_text(
@@ -57,9 +82,13 @@ def chase_lag_copy_text(
     pace: float,
     missing_today: Sequence[str],
     laggards: Sequence[Mapping[str, Any]],
+    scope_label: str = "",
 ) -> str:
-    """洞察催办文案：未交一段、落后一段，缺的段省略。"""
+    """洞察催办文案：未交一段、落后一段，缺的段省略。有筛选时先写【范围】。"""
     parts: List[str] = []
+    label = (scope_label or "").strip()
+    if label:
+        parts.append(f"【范围】{label}")
     missing = [n for n in missing_today if n]
     if missing:
         parts.append(
@@ -76,6 +105,15 @@ def chase_lag_copy_text(
         parts.append("\n".join(lines))
     return "\n\n".join(parts)
 
+
+def store_bulletin_city(store: Optional[Mapping[str, Any]], bulletin_cities: Sequence[str]) -> str:
+    """这家店能否按地市落到通报表：要有移动编码，且该地市确有带编码的店。"""
+    if not store:
+        return ""
+    if not (store["mobile_code"] or "").strip():
+        return ""
+    city = (store["city"] or "").strip() or "南通市"
+    return city if city in set(bulletin_cities) else ""
 
 
 def clamp_mobile_asof(raw: str, *, month_start: date, ref: date) -> date:
@@ -159,7 +197,7 @@ def build_deviation_board(
             {
                 "id": sid,
                 "name": _store_name(store),
-                "city": (store["city"] or "").strip() or "未分地市",
+                "city": (store["city"] or "").strip() or CITY_UNASSIGNED,
                 "reported": rep,
                 "mobile": mobile,
                 "diff": diff,
@@ -361,12 +399,15 @@ def build_insights(
             r["name"],
         )
     )
+    store_rows = group_rows_by_city_order(
+        store_rows, catalog_city_order(stores), lambda r: r["city"]
+    )
 
     this_start, this_end = week_span(as_of)
     prev_start, prev_end = prev_week_span(as_of)
     return {
         "as_of": as_of,
-        "mobile_used": bool(mobile_bisuan),
+        "mobile_used": any(bool(r["mobile_based"]) for r in store_rows),
         "pace": pace,
         "days_in_month": days_in_month,
         "elapsed": elapsed,

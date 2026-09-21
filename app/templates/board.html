@@ -77,10 +77,10 @@
         {% endif %}
       </div>
     </div>
-    {% if chase_text %}<textarea id="chaseText" class="sr-only" readonly>{{ chase_text }}</textarea>{% endif %}
+    {% if chase_text %}<textarea id="chaseText" class="chase-text" readonly rows="4">{{ chase_text }}</textarea>{% endif %}
     <div class="board-missing-list">
       {% for r in missing %}
-      <a class="miss-chip" href="{{ url_for('today', store_id=r.store.id, date=biz_date.isoformat()) }}">{{ r.store.name }}</a>
+      <a class="miss-chip" href="{{ url_for('today', store_id=r.store.id, date=biz_date.isoformat()) }}">{{ r.store.short_name or r.store.name }}</a>
       {% endfor %}
     </div>
   </div>
@@ -106,8 +106,10 @@
           </tr>
         </thead>
         <tbody>
+          {% set ns = namespace(prev=None) %}
           {% for r in ranked %}
-          <tr>
+          <tr class="{{ 'city-start' if ns.prev is not none and ns.prev != r.city else '' }}">
+            {% set ns.prev = r.city %}
             <td class="rank-col">{{ r.rank }}</td>
             <td class="left store-cell">
               <a class="store-name" href="{{ url_for('report', store_id=r.store.id, start=(biz_date.replace(day=1)).isoformat(), end=biz_date.isoformat()) }}">{{ r.store.short_name or r.store.name }}</a>
@@ -133,17 +135,32 @@
           </tr>
           {% endfor %}
         </tbody>
+        {% if city_groups %}
+        <tfoot>
+          {% for g in city_groups %}
+          <tr class="city-sub">
+            <td></td>
+            <td class="left">{{ g.city }} · {{ g.n }} 家</td>
+            {% for k in g.kpis %}
+            <td>{{ k.value_text }}</td>
+            {% endfor %}
+            <td>{{ g.deal_closed }}/{{ g.deal_total }}</td>
+            <td></td>
+          </tr>
+          {% endfor %}
+        </tfoot>
+        {% endif %}
       </table>
     </div>
     <p class="muted board-note">
       {% if view == 'today' %}
-      按比算新增排序。蓝字是该指标今日最高。触客、考核不计入名次。触客是今日成交/全部，下行为成功率。点店名进该店报表。比算是填报数；和移动的差看偏差榜 / 通报表。
+      按地市分组（目录顺序），组内按比算新增排序。# 是全区名次。蓝字是该指标今日最高。触客、考核不计入名次。点店名进该店报表。比算是填报数；和移动的差看偏差榜 / 通报表。
       {% else %}
-      按比算新增排序。红字未达单店月目标；蓝字是该指标本月最高。触客、考核不计入名次。触客是本月成交/全部，下行为成功率。点店名进该店报表。比算是填报数；和移动的差看偏差榜 / 通报表。
+      按地市分组（目录顺序），组内按比算新增排序。# 是全区名次。红字未达单店月目标；蓝字是该指标本月最高。触客、考核不计入名次。点店名进该店报表。比算是填报数；和移动的差看偏差榜 / 通报表。
       {% endif %}
     </p>
     {% else %}
-    <p class="muted">今天没有店交数</p>
+    <p class="muted">{{ '今天没有店交数' if view=='today' else '本月没有已交的店可排' }}</p>
     {% endif %}
   </div>
 </div>

@@ -50,7 +50,7 @@
   {% endfor %}
 </div>
 
-{% if chase_text %}<textarea id="chaseText" class="sr-only" readonly>{{ chase_text }}</textarea>{% endif %}
+{% if chase_text %}<textarea id="chaseText" class="chase-text" readonly rows="5">{{ chase_text }}</textarea>{% endif %}
 
 {% if laggards %}
 <div class="card insight-lag">
@@ -100,7 +100,7 @@
 <div class="card">
   <h2>分店明细</h2>
   <p class="muted">
-    上是本月累计 / 目标；下是本周，徽章相对上周。
+    上是本月累计 / 目标；下是本周，徽章相对上周。按地市分组（目录顺序），组内仍是未交 / 落后 / 周差额。
     {% if idle_n %}
       {% if show_idle %}
       已显示本月未交 {{ idle_n }} 店。
@@ -124,11 +124,12 @@
       </tr>
     </thead>
     <tbody>
-      {% set shown = namespace(n=0) %}
+      {% set ns = namespace(prev=None, n=0) %}
       {% for r in store_rows %}
       {% if r.month_ok or show_idle %}
-      {% set shown.n = shown.n + 1 %}
-      <tr class="{% if not r.today_ok %}row-miss{% elif r.lag_bits %}row-lag{% endif %}">
+      {% set ns.n = ns.n + 1 %}
+      <tr class="{% if not r.today_ok %}row-miss{% elif r.lag_bits %}row-lag{% endif %}{{ ' city-start' if ns.prev is not none and ns.prev != r.city else '' }}">
+        {% set ns.prev = r.city %}
         <td>
           <div class="insight-store"><a class="store-name" href="{{ url_for('report', store_id=r.id, start=(as_of.replace(day=1)).isoformat(), end=as_of.isoformat()) }}">{{ r.name }}</a>{% if r.mobile_based %}<span class="chip chip-mobile" title="当月比算按移动校准数">移</span>{% endif %}</div>
           {% if r.flags %}<div class="insight-flags">{% for f in r.flags %}<span class="flag {{ 'flag-miss' if '未交' in f else 'flag-lag' }}">{{ f }}</span>{% endfor %}</div>{% endif %}
@@ -148,7 +149,7 @@
       </tr>
       {% endif %}
       {% endfor %}
-      {% if shown.n == 0 %}
+      {% if ns.n == 0 %}
       <tr><td class="muted" colspan="{{ 3 + week_kpis|length }}">没有可显示的门店</td></tr>
       {% endif %}
     </tbody>

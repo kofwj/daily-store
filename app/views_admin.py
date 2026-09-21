@@ -154,6 +154,40 @@ def _board_bisuan(row: Dict[str, Any], view: str) -> float:
     return 0.0
 
 
+def _board_city_groups(ranked: List[Dict[str, Any]], view: str) -> List[Dict[str, Any]]:
+    """排行按地市汇总：家数 + 三项 KPI + 触客。"""
+    groups: List[Dict[str, Any]] = []
+    index: Dict[str, Dict[str, Any]] = {}
+    for r in ranked:
+        city = r["city"]
+        g = index.get(city)
+        if g is None:
+            g = {
+                "city": city,
+                "n": 0,
+                "kpis": [
+                    {"code": k["code"], "name": k["name"], "value": 0.0} for k in r["kpis"]
+                ],
+                "deal_total": 0,
+                "deal_closed": 0,
+            }
+            index[city] = g
+            groups.append(g)
+        g["n"] += 1
+        deal = r["deal_today"] if view == "today" else r["deal_month"]
+        g["deal_total"] += int(deal["total"] or 0)
+        g["deal_closed"] += int(deal["closed"] or 0)
+        key = "day" if view == "today" else "month"
+        for i, k in enumerate(r["kpis"]):
+            g["kpis"][i]["value"] += float(k.get(key) or 0)
+    for g in groups:
+        g["deal_rate"] = close_rate(g["deal_closed"], g["deal_total"])
+        for k in g["kpis"]:
+            scale = "bisuan" if k["code"] == "bisuan_total" else k["code"]
+            k["value_text"] = format_display(scale, k["value"])
+    return groups
+
+
 def _board_payload(conn, biz_date: date, view: str, city: str = ""):
     """看板页面和导出共用的取数。"""
     stores = accessible_stores(conn)
@@ -205,6 +239,7 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
         rows.append(
             {
                 "store": store,
+                "city": (store["city"] or "").strip() or "未分地市",
                 "submitted_today": rep is not None,
                 "submitter_name": rep["submitter_name"] if rep else None,
                 "submitted_at": rep["submitted_at"] if rep else None,
@@ -233,6 +268,12 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
         for k in r["kpis"]:
             k["top_day"] = k["day"] > 0 and k["day"] == max_day[k["code"]]
             k["top_month"] = k["month"] > 0 and k["month"] == max_month[k["code"]]
+    ranked = insights.group_rows_by_city_order(
+        ranked, insights.catalog_city_order(stores), lambda r: r["city"]
+    )
+    city_groups = _board_city_groups(ranked, view)
+    if len(city_groups) <= 1:
+        city_groups = []
     n = len(rows)
     sum_day = {k: 0 for k, _n, _x in KPI_TARGETS}
     sum_month = {k: 0 for k, _n, _x in KPI_TARGETS}
@@ -284,10 +325,12 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
         "n": n,
         "cities": cities,
         "city": city,
+        "city_groups": city_groups,
         "chase_text": insights.chase_copy_text(
             as_of=biz_date,
             names=[store_label(r["store"]) for r in missing],
             kind="today" if view == "today" else "month",
+            scope_label=city,
         ),
     }
 
@@ -405,6 +448,14 @@ def register_admin(app) -> None:
                 scope["label"] = scope["label"] + " · 有顾问"
             elif advisor == "no":
                 scope["label"] = scope["label"] + " · 无顾问"
+            scope_label = scope["label"] if (scope["active"] or advisor) else ""
+            payload["chase_text"] = insights.chase_lag_copy_text(
+                as_of=payload["as_of"],
+                pace=payload["pace"],
+                missing_today=payload["missing_today"],
+                laggards=payload["laggards"],
+                scope_label=scope_label,
+            )
             payload.update({
                 "scope": scope,
                 "advisor": advisor,
@@ -454,16 +505,56 @@ def register_admin(app) -> None:
                 asof_raw=asof_raw,
                 month_end=month_end,
             )
-        has_mobile = bool(mobile)
+            bulletin_cities = [
+                ((s["city"] or "").strip() or "南通市")
+                for s in stores
+                if (s["mobile_code"] or "").strip()
+            ]
+            by_id = {int(s["id"]): s for s in stores}
+            city_order = insights.catalog_city_order(stores)
+            uncompared_n = len(stores) - len(rows)
+            for i, r in enumerate(rows, 1):
+                r["rank"] = i
+                r["bulletin_city"] = insights.store_bulletin_city(by_id.get(int(r["id"])), bulletin_cities)
+        has_mobile = bool(rows)
         under_n = sum(1 for r in rows if r["under"])
         over_n = sum(1 for r in rows if r["over"])
-        max_abs = max((int(r["abs_diff"]) for r in rows), default=0)
         net_diff = sum(int(r["diff"]) for r in rows)
+        show_all = (request.args.get("all") or "").strip() == "1"
+        side = (request.args.get("side") or "").strip()
+        if side not in ("under", "over"):
+            side = ""
+        hidden_small_n = sum(1 for r in rows if int(r["abs_diff"]) < insights.DEV_MIN_ABS)
+        shown = list(rows) if show_all else [r for r in rows if int(r["abs_diff"]) >= insights.DEV_MIN_ABS]
+        if side == "under":
+            shown = [r for r in shown if r["under"]]
+        elif side == "over":
+            shown = [r for r in shown if r["over"]]
+        shown = insights.group_rows_by_city_order(shown, city_order, lambda r: r["city"])
+        city_groups: List[Dict[str, Any]] = []
+        index: Dict[str, Dict[str, Any]] = {}
+        for r in shown:
+            g = index.get(r["city"])
+            if g is None:
+                g = {"city": r["city"], "n": 0, "net_diff": 0, "under_n": 0, "over_n": 0}
+                index[r["city"]] = g
+                city_groups.append(g)
+            g["n"] += 1
+            g["net_diff"] += int(r["diff"])
+            if r["under"]:
+                g["under_n"] += 1
+            if r["over"]:
+                g["over_n"] += 1
+        if len(city_groups) <= 1:
+            city_groups = []
+        max_abs = max((int(r["abs_diff"]) for r in shown), default=0)
         return render_template(
             "deviation.html",
             rows=rows,
+            shown=shown,
             month=month,
             month_key=month_key,
+            month_end=month_end,
             prev_month=prev_month,
             next_month=next_month,
             has_mobile=has_mobile,
@@ -472,6 +563,11 @@ def register_admin(app) -> None:
             even_n=len(rows) - under_n - over_n,
             max_abs=max_abs,
             net_diff=net_diff,
+            show_all=show_all,
+            side=side,
+            hidden_small_n=hidden_small_n,
+            uncompared_n=uncompared_n,
+            city_groups=city_groups,
         )
 
     @app.route("/board.xlsx")
