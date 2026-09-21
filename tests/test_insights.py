@@ -1,7 +1,14 @@
 from datetime import date
 
 from app import db
-from app.insights import build_deviation_board, build_insights, prev_week_span, week_span
+from app.insights import (
+    build_deviation_board,
+    build_insights,
+    clamp_mobile_asof,
+    fold_bisuan_reported,
+    prev_week_span,
+    week_span,
+)
 from app.metrics_seed import effective_month_bisuan
 
 
@@ -115,6 +122,8 @@ def test_insights_page_admin_only(client):
     assert filler.status_code in (302, 403)
     client.post("/logout")
     client.post("/login", data={"username": "admin", "pin": "123456"})
+    with db.get_db() as conn:
+        db.set_kpi_target(conn, "bisuan_total", 10)
     page = client.get("/insights").get_data(as_text=True)
     assert "洞察" in page
     assert "本月时间进度" in page
@@ -124,10 +133,14 @@ def test_insights_page_admin_only(client):
     assert "运营商顾问" in page
     assert "只看有顾问" in page
     assert "insight-metric-h" in page
+    assert "上是本月累计" in page
+    assert "环比" in page
+    assert "同比" not in page
     assert "复制文案" not in page
+    idle_page = client.get("/insights?idle=1").get_data(as_text=True)
+    assert "insight-month" in idle_page
     filtered = client.get("/insights?advisor=yes").get_data(as_text=True)
     assert 'value="yes"' in filtered
-
 
 def test_report_ignores_inactive_metric_facts(admin_client):
     """即使某天留下了停用指标的 day 值，报表也不能崩，应忽略。"""
@@ -208,17 +221,108 @@ def test_build_deviation_board_sorts_and_signs():
         {"id": 2, "short_name": "乙店", "name": "乙店", "city": "泰州"},
         {"id": 3, "short_name": "丙店", "name": "丙店", "city": ""},
     ]
-    facts = {
-        1: {"bisuan": 100, "bisuan_high": 20},  # 填报120 < 移动150 → +30 少报
-        2: {"bisuan": 200, "bisuan_high": 0},   # 填报200 > 移动150 → -50 多报
+    reported = {
+        1: 120,  # 填报120 < 移动150 → +30 少报
+        2: 200,  # 填报200 > 移动150 → -50 多报
     }
     mobile = {1: 150, 2: 150}
-    rows = build_deviation_board(stores=stores, month_facts=facts, mobile_bisuan=mobile)
+    rows = build_deviation_board(stores=stores, reported=reported, mobile_bisuan=mobile)
     assert [r["id"] for r in rows] == [2, 1]  # |−50| 排前
     by_id = {r["id"]: r for r in rows}
     assert by_id[1]["diff"] == 30 and by_id[1]["under"] is True
     assert by_id[2]["diff"] == -50 and by_id[2]["over"] is True
     assert 3 not in by_id  # 无移动校准数，排除
+
+
+def test_clamp_mobile_asof_and_fold_cuts_after_asof():
+    """空 asof 用 ref；非法回落；按店截止日后的填报不计入。"""
+    month_start = date(2026, 8, 1)
+    ref = date(2026, 8, 31)
+    assert clamp_mobile_asof("", month_start=month_start, ref=ref) == ref
+    assert clamp_mobile_asof("坏", month_start=month_start, ref=ref) == ref
+    assert clamp_mobile_asof("2026-08-10", month_start=month_start, ref=ref) == date(2026, 8, 10)
+    assert clamp_mobile_asof("2026-07-31", month_start=month_start, ref=ref) == month_start
+    assert clamp_mobile_asof("2026-09-01", month_start=month_start, ref=ref) == ref
+    daily = [
+        {"store_id": 1, "biz_date": "2026-08-05", "metric_code": "bisuan", "day_value": 50},
+        {"store_id": 1, "biz_date": "2026-08-05", "metric_code": "bisuan_high", "day_value": 10},
+        {"store_id": 1, "biz_date": "2026-08-20", "metric_code": "bisuan", "day_value": 80},
+        {"store_id": 2, "biz_date": "2026-08-20", "metric_code": "bisuan", "day_value": 30},
+    ]
+    folded = fold_bisuan_reported(
+        daily,
+        store_ids=[1, 2],
+        asof_by_store={1: date(2026, 8, 10), 2: date(2026, 8, 31)},
+    )
+    assert folded[1] == 60  # 8/20 的 80 被截掉
+    assert folded[2] == 30
+
+
+def test_build_deviation_board_asof_end_matches_old_full_month():
+    """asof=月末时，结果与「整月填报 vs 移动」相同。"""
+    stores = [{"id": 1, "short_name": "甲店", "name": "甲店", "city": "南通"}]
+    rows = build_deviation_board(
+        stores=stores,
+        reported={1: 120},
+        mobile_bisuan={1: 150},
+        asof_by_store={1: date(2026, 8, 31)},
+        asof_raw={1: "2026-08-31"},
+        month_end=date(2026, 8, 31),
+    )
+    assert rows[0]["diff"] == 30
+    assert rows[0]["asof_text"] == "8/31"
+    blank = build_deviation_board(
+        stores=stores,
+        reported={1: 120},
+        mobile_bisuan={1: 150},
+        asof_by_store={1: date(2026, 8, 31)},
+        asof_raw={1: ""},
+        month_end=date(2026, 8, 31),
+    )
+    assert blank[0]["asof_text"] == "月末"
+
+
+def test_board_ranks_by_bisuan_not_sum_and_hides_idle_month(admin_client):
+    """看板按比算排序，不按三项加总；本月未交店只出现在缺交区。"""
+    today = date.today()
+    with db.get_db() as conn:
+        alpha = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        beta = conn.execute("SELECT id FROM stores WHERE code='store-beta'").fetchone()["id"]
+        uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        db.save_daily(
+            conn,
+            store_id=alpha,
+            biz_date=today,
+            values={"bisuan": 20, "ai_contract": 1},
+            user_id=uid,
+        )
+        db.save_daily(
+            conn,
+            store_id=beta,
+            biz_date=today,
+            values={"bisuan": 5, "ai_contract": 80},
+            user_id=uid,
+        )
+    today_page = admin_client.get("/board?view=today").get_data(as_text=True)
+    assert "按比算新增排序" in today_page
+    assert "三项合计" not in today_page
+    ia = today_page.find("示例甲店")
+    ib = today_page.find("示例乙店")
+    assert 0 <= ia < ib  # 甲比算更高，排在乙前；若按加总会是乙在前
+    month_page = admin_client.get("/board?view=month").get_data(as_text=True)
+    assert "按比算新增排序" in month_page
+    assert "三 KPI 累计" not in month_page and "三项累计" not in month_page
+    assert "按本月比算新增累计排名" in month_page
+    assert "示例市丙路vivo体验店" in month_page  # 缺交
+    assert ">示例丙店<" not in month_page  # 不进排行
+
+
+def test_insights_monday_notes_one_day_week(admin_client):
+    page = admin_client.get("/insights?date=2026-09-21").get_data(as_text=True)
+    assert "本周仅 1 天" in page
+    assert "环比" in page
+    later = admin_client.get("/insights?date=2026-09-22").get_data(as_text=True)
+    assert "本周仅 1 天" not in later
 
 
 def test_deviation_page_admin_only(admin_client):
@@ -233,5 +337,26 @@ def test_deviation_page_admin_only(admin_client):
     assert r.status_code == 200
     assert "填报偏差榜" in html
     assert "温差" in html
+    assert "截止日同期" in html
     assert "元" not in html  # 计数单位是个，不是金额
     assert "少报" in html and "多报" in html
+
+
+def test_deviation_page_cuts_reported_at_asof(admin_client):
+    """月中 asof 之后的填报不算进温差；整月对照会得到 0。"""
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        db.save_daily(
+            conn, store_id=sid, biz_date=date(2026, 8, 5), values={"bisuan": 50}, user_id=uid
+        )
+        db.save_daily(
+            conn, store_id=sid, biz_date=date(2026, 8, 20), values={"bisuan": 50}, user_id=uid
+        )
+        db.save_bisuan_mobile(
+            conn, store_id=sid, month="2026-08", value_tenths=100, asof=date(2026, 8, 10)
+        )
+    html = admin_client.get("/deviation?month=2026-08-01").get_data(as_text=True)
+    assert "至 8/10" in html
+    assert "+5.0" in html
+    assert "一致" not in html

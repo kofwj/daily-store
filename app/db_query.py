@@ -254,6 +254,33 @@ def stores_reported_in_month(
     }
 
 
+def range_metric_days(
+    conn: sqlite3.Connection,
+    store_ids: Iterable[int],
+    start: date,
+    end: date,
+    metric_codes: Sequence[str],
+) -> List[sqlite3.Row]:
+    """区间内各店各指标按日明细，供按店不同截止日再截断。"""
+    ids = [int(sid) for sid in store_ids]
+    codes = [c for c in metric_codes if c]
+    if not ids or not codes or end < start:
+        return []
+    id_ph = ",".join("?" * len(ids))
+    code_ph = ",".join("?" * len(codes))
+    return list(
+        conn.execute(
+            f"""
+            SELECT store_id, biz_date, metric_code, day_value
+            FROM daily_facts
+            WHERE store_id IN ({id_ph}) AND biz_date>=? AND biz_date<=?
+              AND metric_code IN ({code_ph})
+            """,
+            [*ids, start.isoformat(), end.isoformat(), *codes],
+        )
+    )
+
+
 def range_metric_totals(
     conn: sqlite3.Connection,
     store_ids: Iterable[int],

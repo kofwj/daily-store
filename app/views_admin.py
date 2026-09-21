@@ -145,6 +145,15 @@ def _bulletin_rows(conn, stores, biz_date: date):
     return rows
 
 
+def _board_bisuan(row: Dict[str, Any], view: str) -> float:
+    """看板排序键：比算新增（今日用日值，本月用累计）。"""
+    key = "day" if view == "today" else "month"
+    for item in row.get("kpis") or []:
+        if item.get("code") == "bisuan_total":
+            return float(item.get(key) or 0)
+    return 0.0
+
+
 def _board_payload(conn, biz_date: date, view: str, city: str = ""):
     """看板页面和导出共用的取数。"""
     stores = accessible_stores(conn)
@@ -169,7 +178,6 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
         sid = store["id"]
         pairs = values_for_broadcast(conn, sid, biz_date)
         kpis = []
-        day_sum = 0
         for code, name, _note in KPI_TARGETS:
             if code == "ai_contract":
                 day, cum = pairs.get("ai_contract", (0, 0))
@@ -179,7 +187,6 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
             scale = "bisuan" if code == "bisuan_total" else code
             day_disp = from_stored(scale, day)
             month_disp = from_stored(scale, cum)
-            day_sum += day_disp
             kpis.append(
                 {
                     "code": code,
@@ -204,8 +211,6 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
                 "reported_this_month": bool(judged_map[sid].get("reported")),
                 "forecast": judged_map[sid],
                 "kpis": kpis,
-                "day_sum": day_sum,
-                "month_sum": sum(k["month"] for k in kpis),
                 "deal_today": deal_today,
                 "deal_month": deal_month,
             }
@@ -219,11 +224,10 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
     if view == "today":
         ranked = [r for r in rows if r["submitted_today"]]
         missing = [r for r in rows if not r["submitted_today"]]
-        ranked.sort(key=lambda r: (-r["day_sum"], store_label(r["store"])))
     else:
-        ranked = list(rows)
+        ranked = [r for r in rows if r["reported_this_month"]]
         missing = [r for r in rows if not r["reported_this_month"]]
-        ranked.sort(key=lambda r: (-r["month_sum"], store_label(r["store"])))
+    ranked.sort(key=lambda r: (-_board_bisuan(r, view), store_label(r["store"])))
     for rank, r in enumerate(ranked, 1):
         r["rank"] = rank
         for k in r["kpis"]:
@@ -406,9 +410,9 @@ def register_admin(app) -> None:
     @app.route("/deviation")
     @admin_required
     def deviation():
-        """填报偏差榜：当月填报比算 vs 移动校准比算。
+        """填报偏差榜：截止日同期填报比算 vs 移动校准比算。
 
-        温差=移动−填报。正=少报/低报，负=多报。只列有移动数的店。
+        温差=移动−asof 同期填报。正=少报，负=多报。只列有移动数的店。
         """
         today_d = db.today_local()
         month = parse_date(request.args.get("month"), today_d.replace(day=1)).replace(day=1)
@@ -416,15 +420,34 @@ def register_admin(app) -> None:
         month_key = month.strftime("%Y-%m")
         prev_month = (month - timedelta(days=1)).replace(day=1)
         next_month = _month_end(month) + timedelta(days=1)
+        # 对照截止日：当月到今天，往月到月末，未来月锁在月初（别让 asof 落到 ref 之后）
+        ref = max(month, min(today_d, month_end))
         with db.get_db() as conn:
             stores = accessible_stores(conn)
-            store_ids = [int(s["id"]) for s in stores]
-            month_facts = db.range_metric_totals(
-                conn, store_ids, month, month_end, ("bisuan", "bisuan_high")
-            )
             mobile = db.bisuan_mobile_map(conn, month_key)
+            asof_raw = db.bisuan_mobile_asof_map(conn, month_key)
+            asof_by_store = {
+                int(sid): insights.clamp_mobile_asof(
+                    asof_raw.get(int(sid), ""), month_start=month, ref=ref
+                )
+                for sid in mobile
+            }
+            if mobile:
+                daily = db.range_metric_days(
+                    conn, list(mobile), month, ref, ("bisuan", "bisuan_high")
+                )
+                reported = insights.fold_bisuan_reported(
+                    daily, store_ids=list(mobile), asof_by_store=asof_by_store
+                )
+            else:
+                reported = {}
             rows = insights.build_deviation_board(
-                stores=stores, month_facts=month_facts, mobile_bisuan=mobile
+                stores=stores,
+                reported=reported,
+                mobile_bisuan=mobile,
+                asof_by_store=asof_by_store,
+                asof_raw=asof_raw,
+                month_end=month_end,
             )
         has_mobile = bool(mobile)
         under_n = sum(1 for r in rows if r["under"])

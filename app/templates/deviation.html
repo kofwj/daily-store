@@ -4,7 +4,7 @@
 <div class="page-head">
   <div class="page-title">
     <h1>填报偏差榜 · {{ month.strftime('%Y年%m月') }}</h1>
-    <p class="muted">温差 = 移动校准 − 填报比算；正数少报、负数多报。</p>
+    <p class="muted">温差 = 移动校准 − 截止日同期填报；正数少报、负数多报。</p>
   </div>
   <div class="dev-nav">
     <a class="btn ghost" href="{{ url_for('deviation', month=prev_month.strftime('%Y-%m-01')) }}">‹ 上月</a>
@@ -29,7 +29,7 @@
     <div class="kpi-num">{{ over_n }}<span class="dev-unit">店</span></div>
   </div>
   <div class="dev-stat {{ 'warn' if net_diff > 0 else ('err' if net_diff < 0 else 'ok') }}">
-    <div class="dev-stat-label">全月净温差</div>
+    <div class="dev-stat-label">净温差合计</div>
     <div class="kpi-num">{{ '+' if net_diff > 0 else '' }}{{ (net_diff / 10)|round(1) }}</div>
   </div>
 </div>
@@ -52,7 +52,7 @@
         <td class="rank">{{ loop.index }}</td>
         <td class="store">
           <strong>{{ r.name }}</strong>
-          <span class="sub">{{ r.city }}</span>
+          <span class="sub">{{ r.city }}{% if r.asof_text %} · 至 {{ r.asof_text }}{% endif %}</span>
         </td>
         <td class="num">{{ (r.reported / 10)|round(1) }}</td>
         <td class="num">{{ (r.mobile / 10)|round(1) }}</td>

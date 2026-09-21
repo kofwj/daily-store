@@ -1,4 +1,4 @@
-"""运营洞察：本月进度对时间、周同比、未交/落后。只读聚合，不写库。"""
+"""运营洞察：本月进度对时间、周环比、未交/落后。只读聚合，不写库。"""
 
 from __future__ import annotations
 
@@ -34,37 +34,97 @@ def _store_name(store: Mapping[str, Any]) -> str:
     return (store["short_name"] or store["name"] or "").strip() or "未命名"
 
 
+def clamp_mobile_asof(raw: str, *, month_start: date, ref: date) -> date:
+    """偏差对照截止日：有 asof 用 asof，空/非法用 ref，再钳到 [月初, ref]。"""
+    parsed: Optional[date] = None
+    text = (raw or "").strip()[:10]
+    if text:
+        try:
+            parsed = date.fromisoformat(text)
+        except ValueError:
+            parsed = None
+    asof = parsed or ref
+    if asof < month_start:
+        return month_start
+    if asof > ref:
+        return ref
+    return asof
+
+
+def fold_bisuan_reported(
+    daily_rows: Sequence[Any],
+    *,
+    store_ids: Sequence[int],
+    asof_by_store: Mapping[int, date],
+) -> Dict[int, int]:
+    """按店 asof 截断后的比算填报合计（×10）。daily_rows 已是 bisuan / bisuan_high 日明细。"""
+    out = {int(sid): 0 for sid in store_ids}
+    for row in daily_rows:
+        sid = int(row["store_id"])
+        if sid not in out:
+            continue
+        asof = asof_by_store.get(sid)
+        if asof is None:
+            continue
+        raw_d = row["biz_date"]
+        try:
+            day = raw_d if isinstance(raw_d, date) else date.fromisoformat(str(raw_d)[:10])
+        except ValueError:
+            continue
+        if day > asof:
+            continue
+        out[sid] += int(row["day_value"] or 0)
+    return out
+
+
+def _asof_text(*, asof: Optional[date], raw: str, month_end: Optional[date]) -> str:
+    if asof is None:
+        return ""
+    if not (raw or "").strip() and month_end is not None and asof == month_end:
+        return "月末"
+    return f"{asof.month}/{asof.day}"
+
+
 def build_deviation_board(
     *,
     stores: Sequence[Mapping[str, Any]],
-    month_facts: Mapping[int, Mapping[str, int]],
+    reported: Mapping[int, int],
     mobile_bisuan: Mapping[int, int],
+    asof_by_store: Optional[Mapping[int, date]] = None,
+    asof_raw: Optional[Mapping[int, str]] = None,
+    month_end: Optional[date] = None,
 ) -> List[Dict[str, Any]]:
-    """填报偏差榜：各店当月填报比算 vs 移动校准比算，按偏差距降序。
+    """填报偏差榜：各店截止日同期填报比算 vs 移动校准，按偏差距降序。
 
-    只列填了移动校准数的店（没有就没得比）。填报、移动都是 ×10 整数。
-    diff = 移动 − 填报：正=填报比移动少（少报/低报），负=填报比移动多。
+    只列填了移动校准数的店。填报、移动都是 ×10 整数。
+    reported 必须已经按该店 asof 截断。
+    diff = 移动 − 填报：正=少报，负=多报。
     """
+    asof_by_store = asof_by_store or {}
+    asof_raw = asof_raw or {}
     rows = []
     for store in stores:
         sid = int(store["id"])
         if sid not in mobile_bisuan:
             continue
-        facts = month_facts.get(sid) or {}
-        reported = int(facts.get("bisuan") or 0) + int(facts.get("bisuan_high") or 0)
+        rep = int(reported.get(sid) or 0)
         mobile = int(mobile_bisuan[sid])
-        diff = mobile - reported
+        diff = mobile - rep
+        asof = asof_by_store.get(sid)
         rows.append(
             {
                 "id": sid,
                 "name": _store_name(store),
                 "city": (store["city"] or "").strip() or "未分地市",
-                "reported": reported,
+                "reported": rep,
                 "mobile": mobile,
                 "diff": diff,
                 "abs_diff": abs(diff),
                 "under": diff > 0,  # 填报 < 移动
                 "over": diff < 0,  # 填报 > 移动
+                "asof_text": _asof_text(
+                    asof=asof, raw=asof_raw.get(sid, ""), month_end=month_end
+                ),
             }
         )
     rows.sort(key=lambda r: (-int(r["abs_diff"]), r["name"]))
