@@ -705,6 +705,7 @@ def register_admin(app) -> None:
                 review_preset=active_preset,
                 has_custom_review=bool(saved_template),
                 bulletin_title=f"{title_city}vivo零售运营中心移动业务通报表" if title_city else "移动业务通报表",
+                kpi_heads=bulletin.kpi_target_heads(kpi_targets),
             )
 
     @app.route("/bulletin/review-preset", methods=["POST"])

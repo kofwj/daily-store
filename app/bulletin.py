@@ -153,16 +153,41 @@ def _target_text(target: int, scale_code: str) -> str:
 
 
 def _with_target(done_text: str, target: int, scale_code: str) -> str:
-    """「完成 / 目标」；没设目标（0）就只显示完成数，跟以前一样。"""
+    """合计行用「完成 / 目标 N」；没设目标就只显示完成数。单店格子不走这里。"""
     if not target:
         return done_text
-    return f"{done_text} / {_target_text(target, scale_code)}"
+    return f"{done_text} / 目标 {_target_text(target, scale_code)}"
 
 
-def _pct_text(done: float, target: int) -> str:
+def _pct_text(done: float, target: int, scale_code: str = "") -> str:
     if not target:
         return ""
-    return f"完成 {done / target * 100:.0f}%"
+    pct = f"完成 {done / target * 100:.0f}%"
+    if not scale_code:
+        return pct
+    return f"{pct} · 目标 {_target_text(target, scale_code)}"
+
+
+def kpi_target_heads(kpi_targets: Mapping[str, int] | None = None) -> Dict[str, str]:
+    """本月考核列表头小字，例如「目标 5」。没设目标（0）就空着。"""
+    t = kpi_targets or {}
+
+    def head(code: str, scale: str) -> str:
+        v = int(t.get(code, 0) or 0)
+        return f"目标 {_target_text(v, scale)}" if v else ""
+
+    return {
+        "ai": head("ai_contract", "ai_contract"),
+        "bisuan": head("bisuan_total", "bisuan"),
+        "coin": head("coin_cut", "coin_cut_old"),
+    }
+
+
+def _month_col_title(name: str, prefix: str, target: int, scale: str) -> str:
+    title = f"{prefix}{name}"
+    if not target:
+        return title
+    return f"{title}(目标{_target_text(target, scale)})"
 
 
 def build_row(
@@ -220,13 +245,13 @@ def build_row(
         "day_ai_text": fmt_metric("ai_contract", day_ai),
         "day_welcome_text": fmt_metric("welcome_back", day_welcome),
         "day_bisuan_text": fmt_metric("bisuan", day_bisuan),
-        # 三个考核指标的「完成 / 目标」（目标为 0 时跟以前一样只显示完成数）
-        "month_ai_cell": _with_target(fmt_metric("ai_contract", month_ai), ai_target, "ai_contract"),
-        "month_coin_cell": _with_target(fmt_metric("coin_cut_old", month_coin), coin_target, "coin_cut_old"),
-        "month_bisuan_cell": _with_target(fmt_metric("bisuan", month_bisuan), bisuan_target, "bisuan"),
-        "month_ai_pct": _pct_text(month_ai_disp, ai_target),
-        "month_coin_pct": _pct_text(month_coin_disp, coin_target),
-        "month_bisuan_pct": _pct_text(month_bisuan_disp, bisuan_target),
+        # 格子只放完成数；单店目标挂在表头，完成率放 title
+        "month_ai_cell": fmt_metric("ai_contract", month_ai),
+        "month_coin_cell": fmt_metric("coin_cut_old", month_coin),
+        "month_bisuan_cell": fmt_metric("bisuan", month_bisuan),
+        "month_ai_pct": _pct_text(month_ai_disp, ai_target, "ai_contract"),
+        "month_coin_pct": _pct_text(month_coin_disp, coin_target, "coin_cut_old"),
+        "month_bisuan_pct": _pct_text(month_bisuan_disp, bisuan_target, "bisuan"),
         "ai_zero": month_ai <= 0,
         "bisuan_zero": month_bisuan <= 0,
         "day_ai_zero": day_ai <= 0,
@@ -341,7 +366,7 @@ def apply_scales(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def totals_row(
     rows: Sequence[Mapping[str, Any]], kpi_targets: Mapping[str, int] | None = None
 ) -> Dict[str, Any]:
-    """合计行。传 kpi_targets（设置页月目标）时同时给出「完成 / 目标」。"""
+    """合计行。传 kpi_targets 时写出「完成 / 目标 N」（N 已按店数放大）。"""
     targets = kpi_targets or {}
     n = len(rows)
     month_coin = sum(int(r.get("month_coin") or 0) for r in rows)
@@ -428,9 +453,9 @@ def totals_row(
         "month_ai_cell": _with_target(fmt_metric("ai_contract", month_ai), target_ai, "ai_contract"),
         "month_coin_cell": _with_target(fmt_metric("coin_cut_old", month_coin), target_coin, "coin_cut_old"),
         "month_bisuan_cell": month_bisuan_cell,
-        "month_ai_pct": _pct_text(month_ai, target_ai),
-        "month_coin_pct": _pct_text(month_coin, target_coin),
-        "month_bisuan_pct": _pct_text(from_stored("bisuan", month_bisuan), target_bisuan),
+        "month_ai_pct": _pct_text(month_ai, target_ai, "ai_contract"),
+        "month_coin_pct": _pct_text(month_coin, target_coin, "coin_cut_old"),
+        "month_bisuan_pct": _pct_text(from_stored("bisuan", month_bisuan), target_bisuan, "bisuan"),
         "month_bisuan_mobile_stale": stale,
         "month_bisuan_diff_signed": mobile_diff_signed,
         "day_coin_text": fmt_metric("coin_cut_old", day_coin),
@@ -488,10 +513,10 @@ def tsv(
         "店长",
         "AI破0",
         "笔算破0",
-        "AI手机合约",
+        _month_col_title("AI手机合约", "", int((kpi_targets or {}).get("ai_contract", 0) or 0), "ai_contract"),
         "低销迎回",
-        "笔算业务",
-        "金币直降",
+        _month_col_title("笔算业务", "", int((kpi_targets or {}).get("bisuan_total", 0) or 0), "bisuan"),
+        _month_col_title("金币直降", "", int((kpi_targets or {}).get("coin_cut", 0) or 0), "coin_cut_old"),
         "AI手机合约",
         "低销迎回",
         "笔算业务",
@@ -565,10 +590,10 @@ def csv_rows(
             "店长",
             "AI破0",
             "笔算破0",
-            f"{month_label(biz_date)}AI手机合约",
+            _month_col_title("AI手机合约", month_label(biz_date), int((kpi_targets or {}).get("ai_contract", 0) or 0), "ai_contract"),
             f"{month_label(biz_date)}低销迎回",
-            f"{month_label(biz_date)}笔算业务",
-            f"{month_label(biz_date)}金币直降",
+            _month_col_title("笔算业务", month_label(biz_date), int((kpi_targets or {}).get("bisuan_total", 0) or 0), "bisuan"),
+            _month_col_title("金币直降", month_label(biz_date), int((kpi_targets or {}).get("coin_cut", 0) or 0), "coin_cut_old"),
             f"{day_label(biz_date)}AI手机合约",
             f"{day_label(biz_date)}低销迎回",
             f"{day_label(biz_date)}笔算业务",

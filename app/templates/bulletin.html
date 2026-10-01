@@ -106,10 +106,10 @@
         <th class="g-profile">店长</th>
         <th class="g-follow">AI破0</th>
         <th class="g-follow">笔算破0</th>
-        <th class="g-month">AI手机合约</th>
+        <th class="g-month">AI手机合约{% if kpi_heads.ai %}<div class="kpi-target-head">{{ kpi_heads.ai }}</div>{% endif %}</th>
         <th class="g-month">低销迎回</th>
-        <th class="g-month">笔算业务{% if mobile_asof_head %}<div class="bisuan-asof-head">{{ mobile_asof_head }}</div>{% endif %}</th>
-        <th class="g-month">金币直降</th>
+        <th class="g-month">笔算业务{% if kpi_heads.bisuan %}<div class="kpi-target-head">{{ kpi_heads.bisuan }}</div>{% endif %}{% if mobile_asof_head %}<div class="bisuan-asof-head">{{ mobile_asof_head }}</div>{% endif %}</th>
+        <th class="g-month">金币直降{% if kpi_heads.coin %}<div class="kpi-target-head">{{ kpi_heads.coin }}</div>{% endif %}</th>
         <th class="g-day">AI手机合约</th>
         <th class="g-day">低销迎回</th>
         <th class="g-day">笔算业务</th>

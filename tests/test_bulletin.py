@@ -7,6 +7,7 @@ from app.bulletin import (
     bisuan_total,
     build_row,
     csv_rows,
+    kpi_target_heads,
     scale_color,
     summary,
     totals_row,
@@ -699,7 +700,7 @@ def test_review_includes_welcome_back_everywhere():
 
 
 def test_bulletin_shows_kpi_targets(admin_client):
-    """通报表三个考核指标带「完成 / 目标」：目标取设置页月目标，合计按店数放大。"""
+    """通报表：单店目标写在本月列表头，格子只放完成数；合计写「完成 / 目标 N」。"""
     from datetime import date as _date
 
     day = _date.today()
@@ -719,9 +720,13 @@ def test_bulletin_shows_kpi_targets(admin_client):
         follow_redirects=True,
     )
     page = admin_client.get(f"/bulletin?date={day.isoformat()}").get_data(as_text=True)
-    assert "4 / 10" in page  # AI手机合约：完成 / 目标
-    assert "3 / 8" in page  # 金币直降（充值直降 3）
-    assert "0.0 / 20" in page  # 笔算新增：本月还没填
+    assert 'kpi-target-head">目标 10</div>' in page
+    assert 'kpi-target-head">目标 8</div>' in page
+    assert 'kpi-target-head">目标 20</div>' in page
+    assert "4 / 10" not in page
+    assert "4 / 目标 " in page
+    assert "3 / 目标 " in page
+    assert "0.0 / 目标 " in page
 
 
 def test_bulletin_target_defaults_to_zero_shows_only_done():
@@ -736,10 +741,11 @@ def test_bulletin_target_defaults_to_zero_shows_only_done():
     assert row["month_ai_cell"] == "2"
     assert row["month_bisuan_cell"] == "0.4"
     assert row["month_ai_pct"] == ""
+    assert kpi_target_heads({}) == {"ai": "", "bisuan": "", "coin": ""}
 
 
 def test_bulletin_target_pct_and_totals():
-    """设了目标：单店出「完成 / 目标」和完成率，合计目标按店数放大。"""
+    """设了目标：表头出「目标 N」，单店格子仍是完成数，合计按店数放大。"""
     store = {
         "id": 1, "code": "a", "name": "A", "region_group": "通泰", "city": "南通市",
         "mobile_code": "1", "area_manager": "", "store_manager": "",
@@ -751,15 +757,21 @@ def test_bulletin_target_pct_and_totals():
                   month_bisuan=0, day_coin=0, month_coin=0, submitted=True,
                   ai_target=10, bisuan_target=20, coin_target=8),
     ]
-    assert rows[0]["month_ai_cell"] == "5 / 10"
-    assert rows[0]["month_ai_pct"] == "完成 50%"
-    assert rows[0]["month_coin_cell"] == "3 / 8"
-    assert rows[0]["month_bisuan_cell"] == "0.8 / 20"
+    assert rows[0]["month_ai_cell"] == "5"
+    assert rows[0]["month_ai_pct"] == "完成 50% · 目标 10"
+    assert rows[0]["month_coin_cell"] == "3"
+    assert rows[0]["month_bisuan_cell"] == "0.8"
     total = totals_row(rows, {"ai_contract": 10, "bisuan_total": 20, "coin_cut": 8})
-    assert total["month_ai_cell"] == "5 / 20"
-    assert total["month_coin_cell"] == "3 / 16"
-    assert total["month_bisuan_cell"] == "0.8 / 40"
-    # TSV / Excel 也用带目标的格子，列数不变
+    assert total["month_ai_cell"] == "5 / 目标 20"
+    assert total["month_coin_cell"] == "3 / 目标 16"
+    assert total["month_bisuan_cell"] == "0.8 / 目标 40"
     lines = tsv(rows, date(2026, 8, 13), {"ai_contract": 10, "bisuan_total": 20, "coin_cut": 8})
-    assert "5 / 10" in lines
+    assert "AI手机合约(目标10)" in lines
+    assert "5 / 目标 20" in lines
+    assert "5 / 10" not in lines
     assert {len(line.split("\t")) for line in lines.strip().split("\n")} == {16}
+    assert kpi_target_heads({"ai_contract": 10, "bisuan_total": 20, "coin_cut": 8}) == {
+        "ai": "目标 10",
+        "bisuan": "目标 20",
+        "coin": "目标 8",
+    }
