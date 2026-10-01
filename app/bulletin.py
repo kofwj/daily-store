@@ -694,20 +694,30 @@ def _line(label: str, names: Sequence[str], empty: str = "") -> str:
     return empty
 
 
+def _combo_score(row: Mapping[str, Any]) -> int:
+    """综合标杆：本月 AI + 笔算（有移动用移动）+ 金币直降。"""
+    return _metric(row, "month_ai") + _month_bisuan_for_rank(row) + _metric(row, "month_coin")
+
+
+def _tied_best(
+    rows: Sequence[Mapping[str, Any]], score_fn: Callable[[Mapping[str, Any]], int]
+) -> List[Mapping[str, Any]]:
+    """分数最高且 >0 的店，保持通报表原顺序（目录序）。"""
+    if not rows:
+        return []
+    best = max(score_fn(r) for r in rows)
+    if best <= 0:
+        return []
+    return [r for r in rows if score_fn(r) == best]
+
+
 def _best_name(rows: Sequence[Mapping[str, Any]], key: str) -> str:
-    ranked = sorted(rows, key=lambda r: _metric(r, key), reverse=True)
-    if not ranked or _metric(ranked[0], key) <= 0:
-        return ""
-    return _row_name(ranked[0])
+    return _join_names(_row_name(r) for r in _tied_best(rows, lambda r: _metric(r, key)))
 
 
 def _rank_bisuan_best(rows: Sequence[Mapping[str, Any]]) -> str:
-    """当月笔算第一：用移动校准数（有则用）而不是填报。"""
-    ranked = sorted(rows, key=_month_bisuan_for_rank, reverse=True)
-    if not ranked or _month_bisuan_for_rank(ranked[0]) <= 0:
-        return ""
-    return _row_name(ranked[0])
-
+    """当月笔算第一：用移动校准数（有则用）而不是填报；并列都点名。"""
+    return _join_names(_row_name(r) for r in _tied_best(rows, _month_bisuan_for_rank))
 
 def summary(
     rows: Sequence[Mapping[str, Any]],
@@ -743,13 +753,8 @@ def summary(
     month_count, month_closed = int(month_deal[0] or 0), int(month_deal[1] or 0)
     day_rate = close_rate(day_closed, day_count)
     month_rate = close_rate(month_closed, month_count)
-    ranked = sorted(
-        rows,
-        key=lambda r: _metric(r, "month_ai") + _month_bisuan_for_rank(r) + _metric(r, "month_coin"),
-        reverse=True,
-    )
-    top = ranked[0]
-    top_name = _row_name(top)
+    tops = _tied_best(rows, _combo_score)
+    top_name = _join_names(_row_name(r) for r in tops)
     head = biz_date.isoformat()
     if title_city:
         head = f"{head} {title_city}vivo零售运营中心"
@@ -785,12 +790,26 @@ def summary(
 
     day_bisuan_text = fmt_metric("bisuan", day_bisuan)
     month_bisuan_text = fmt_metric("bisuan", month_bisuan)
-    top_bisuan_text = fmt_metric("bisuan", _month_bisuan_for_rank(top))
     praise_text = ("表扬\n" + "\n".join(praise)) if praise else "表扬：今日暂无单项破零，继续加油"
     month_bits_text = ("单项第一：" + " · ".join(month_bits)) if month_bits else ""
-    top_detail = (
-        f"{top_name}（AI {top['month_ai']}，笔算 {top_bisuan_text}，直降 {top.get('month_coin') or 0}）"
-    )
+    if not tops:
+        top_detail = "暂无"
+    else:
+        first = tops[0]
+        same = all(
+            _metric(r, "month_ai") == _metric(first, "month_ai")
+            and _month_bisuan_for_rank(r) == _month_bisuan_for_rank(first)
+            and _metric(r, "month_coin") == _metric(first, "month_coin")
+            for r in tops
+        )
+        if same:
+            top_bisuan_text = fmt_metric("bisuan", _month_bisuan_for_rank(first))
+            top_detail = (
+                f"{top_name}（AI {first['month_ai']}，笔算 {top_bisuan_text}，"
+                f"直降 {first.get('month_coin') or 0}）"
+            )
+        else:
+            top_detail = f"{top_name}（本月 AI+笔算+直降 并列最高）"
     mobile_compare = _mobile_compare_block(rows, biz_date)
     missing = _named(rows, lambda r: not r.get("submitted"))
     zero_day = _named(

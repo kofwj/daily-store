@@ -775,3 +775,28 @@ def test_bulletin_target_pct_and_totals():
         "bisuan": "目标 20",
         "coin": "目标 8",
     }
+
+
+def test_summary_combo_tie_lists_both():
+    """综合标杆 / 单项第一：三项合计相同就并列点名，不再按目录顺序只留一家。"""
+    rows = [
+        {
+            "name": "启东人民路", "short_name": "启东人民路",
+            "month_ai": 2, "month_bisuan": 10, "month_coin": 0,
+            "day_ai": 2, "day_bisuan": 10, "day_coin": 0,
+        },
+        {
+            "name": "通州金沙", "short_name": "通州金沙",
+            "month_ai": 2, "month_bisuan": 10, "month_coin": 0,
+            "day_ai": 2, "day_bisuan": 10, "day_coin": 0,
+        },
+        {
+            "name": "其他店", "short_name": "其他店",
+            "month_ai": 0, "month_bisuan": 0, "month_coin": 0,
+            "day_ai": 0, "day_bisuan": 0, "day_coin": 0,
+        },
+    ]
+    text = summary(rows, date(2026, 10, 1))
+    assert "综合标杆：启东人民路、通州金沙（AI 2，笔算 1.0，直降 0）" in text
+    assert "单项第一：AI 启东人民路、通州金沙 · 笔算 启东人民路、通州金沙" in text
+    assert "直降 " not in text.split("单项第一：")[1].split("\n")[0]

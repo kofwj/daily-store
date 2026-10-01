@@ -31,7 +31,7 @@ def test_store_manager_sees_only_own_store(client):
     report = client.get("/report").get_data(as_text=True)
     assert "示例甲店" in report
     bulletin = client.get("/bulletin").get_data(as_text=True)
-    assert "示例甲店" in bulletin
+    assert "示例市甲街" in bulletin
     # 另一家店（地区经理下同级但不绑）不该出现
     assert "示例丙店" not in bulletin
     # 垫资页可看
@@ -122,4 +122,4 @@ def test_admin_still_sees_all(client):
     client.post("/logout")
     client.post("/login", data={"username": "admin", "pin": "123456"})
     bulletin = client.get("/bulletin").get_data(as_text=True)
-    assert "示例甲店" in bulletin
+    assert "示例市甲街" in bulletin
