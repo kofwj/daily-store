@@ -2,7 +2,8 @@
 
 口径：
 - AI = Ai手机合约
-- 新用户直降 = 充值 + 芝麻免充 + 储蓄卡冻结 + 全品类
+- 金币直降 = 充值直降 + 储蓄卡冻结 + 全品类 + 低销迎回（10 月期起；全球通优惠不计入）
+  9 月及以前 = 充值 + 芝麻免充 + 储蓄卡冻结 + 全品类（旧口径不回头改）
 
 奖罚阈值 / 金额可从配置读（app.meta['incentive_rules']），季度可改；
 不配时用下方 DEFAULTS。
@@ -20,7 +21,7 @@ from typing import Any, Dict
 NEAR_MISS_FROM = date(2026, 9, 1)
 
 DEFAULTS: Dict[str, int] = {
-    # 有顾问：AI + 新用户直降 ≥ 总量阈值才可能达标
+    # 有顾问：AI + 金币直降 ≥ 总量阈值才可能达标
     "total_threshold": 10,   # 总量达标线
     # 未达标时按「接近度」分两档：总量差 ≤ near_miss_gap 算差一点，罚得轻些
     # 默认 4：达标 10 时，总量 6–9 差一点，≤5 差得远
@@ -42,7 +43,7 @@ DEFAULTS: Dict[str, int] = {
     "penal_advisor_zero": 100,     # AI 挂 0：顾问顶格（差一点/差得远相同）
     "penal_advisor_zero_near": 100, # AI 挂 0 差一点：顾问不减责
     # 无顾问：
-    "reward_no_advisor": 200,    # AI、新用户直降均破 0 → 奖门店
+    "reward_no_advisor": 200,    # AI、金币直降均破 0 → 奖门店
     "penal_store_one": 50,     # 单项破 0 → 罚门店
     "penal_store_none": 100,   # 双未破 0 → 罚门店
 }
@@ -152,10 +153,10 @@ def judge_without_advisor(ai: int, new_cut: int, r: Dict[str, int] | None = None
     ai_ok = ai >  0
     cut_ok = new_cut >  0
     if ai_ok and cut_ok:
-        return _result(True, "双破 0", "AI、新用户直降均已破 0", store_reward=r["reward_no_advisor"])
+        return _result(True, "双破 0", "AI、金币直降均已破 0", store_reward=r["reward_no_advisor"])
     if ai_ok or cut_ok:
         return _result(False, "单项未破 0", "只有一项破 0", store_penalty=r["penal_store_one"])
-    return _result(False, "双未破 0", "AI、新用户直降都是 0", store_penalty=r["penal_store_none"])
+    return _result(False, "双未破 0", "AI、金币直降都是 0", store_penalty=r["penal_store_none"])
 
 
 def judge(
@@ -172,11 +173,11 @@ def judge(
     if has_advisor:
         row = judge_with_advisor(ai, new_cut, r, near_enabled=near_enabled)
         row["scheme"] = "有运营商顾问"
-        row["goal"] = f"AI + 新用户直降 ≥ {r['total_threshold']}"
+        row["goal"] = f"AI + 金币直降 ≥ {r['total_threshold']}"
     else:
         row = judge_without_advisor(ai, new_cut, r)
         row["scheme"] = "无运营商顾问"
-        row["goal"] = "AI、新用户直降均破 0"
+        row["goal"] = "AI、金币直降均破 0"
     row["ai"] = int(ai or 0)
     row["new_cut"] = int(new_cut or 0)
     row["sesame"] = int(new_cut or 0)

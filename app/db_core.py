@@ -235,6 +235,7 @@ MIGRATIONS: List[Tuple[int, str, str]] = [
     (13, "bisuan_mobile_table", "_migrate_bisuan_mobile_from_settings"),
     (14, "expand_user_roles_city", "_expand_user_roles_city"),
     (15, "sesame_frozen_to_cents", "_sesame_frozen_to_cents"),
+    (16, "oct_coin_cut_rework", "_oct_coin_cut_rework"),
 ]
 
 def _now() -> str:
@@ -372,6 +373,7 @@ def migrate() -> None:
             "_admin_pin_six_digits": _admin_pin_six_digits,
             "_migrate_bisuan_mobile_from_settings": _bisuan_mobile_migration,
             "_sesame_frozen_to_cents": _sesame_frozen_to_cents,
+            "_oct_coin_cut_rework": _oct_coin_cut_rework,
         }
         for version, name, fn_name in sorted(MIGRATIONS):
             if version in applied:
@@ -1262,8 +1264,8 @@ def _seed_metrics(conn: sqlite3.Connection) -> None:
         "bisuan",
         "bisuan_high",
         "ai_contract",
+        "welcome_back",
         "coin_cut_new_recharge",
-        "coin_cut_new_sesame",
         "coin_cut_new_savings",
         "coin_cut_new_full",
     }
@@ -1367,6 +1369,17 @@ def _split_new_user_coin_cut(conn: sqlite3.Connection) -> None:
             )
     conn.execute("DELETE FROM daily_facts WHERE metric_code='coin_cut_new'")
     conn.execute("UPDATE metrics SET active=0, monthly_target=0 WHERE code='coin_cut_new'")
+
+def _oct_coin_cut_rework(conn: sqlite3.Connection) -> None:
+    """10 月期起金币直降改口径：芝麻免充下线，老用户直降拆成低销迎回 / 全球通优惠。
+
+    「低销迎回」沿用原「底部迎回」的 code（welcome_back），历史累计不丢；
+    老用户直降、芝麻免充只停用、不清数据，历史月份照旧能看、能导出。
+    """
+    conn.execute(
+        "UPDATE metrics SET active=0, monthly_target=0 WHERE code IN ('coin_cut_old', 'coin_cut_new_sesame')"
+    )
+
 
 def _seed_kpi_targets(conn: sqlite3.Connection) -> None:
     for code, _name, _note in KPI_TARGETS:

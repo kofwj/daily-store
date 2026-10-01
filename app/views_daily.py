@@ -169,7 +169,7 @@ def register_daily(app) -> None:
                 if code == "ai_contract":
                     day, cum = pairs.get("ai_contract", (0, 0))
                 else:
-                    day, cum = rollup_pair(pairs, code)
+                    day, cum = rollup_pair(pairs, code, biz_date)
                 target = kpi_targets.get(code, 0)
                 scale = "bisuan" if code == "bisuan_total" else code
                 day_disp = from_stored(scale, day)

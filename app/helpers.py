@@ -479,7 +479,7 @@ def store_forecast(
     if month_vals is None:
         month_vals = db.month_cum_through(conn, store["id"], as_of)
     ai = int(month_vals.get("ai_contract", 0) or 0)
-    new_cut = rollup_amount(month_vals, "coin_cut")
+    new_cut = rollup_amount(month_vals, "coin_cut", as_of)
     advisor_name = (store["advisor_name"] if "advisor_name" in store.keys() else "") or ""
     # rules 默认每次现查；批量循环时调用方应提前算一次传入，避免每店重复查设置
     if rules is None:

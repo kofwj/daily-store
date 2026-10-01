@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Dict, Iterable, Mapping, Tuple
 
-from .metrics_seed import ROLLUPS, SECTIONS, format_stored
+from .metrics_seed import SECTIONS, format_stored, rollup_codes
 
 DayCum = Tuple[int, int]
 
@@ -38,14 +38,16 @@ def render_broadcast(
     compact_set = set(compact_sections)
     lines = [format_biz_date(biz_date), store_name]
 
+    # 金币直降合成的口径随月份变（10 月期起含低销迎回、芝麻免充下线），按当次播报的日期取
+    coin_dates_codes = set(rollup_codes("coin_cut_all", biz_date))
+
     for section in SECTIONS:
         visible = []
         if section["code"] == "contract":
-            spec = ROLLUPS["coin_cut_all"]
-            day, cum = _sum_codes(values, spec["parts"] + spec["legacy"])
+            day, cum = _sum_codes(values, coin_dates_codes)
             visible.append(_line("金币直降", day, cum, code="coin_cut_old"))
         for code, name, _hint in section["metrics"]:
-            if code in ROLLUPS["coin_cut_all"]["parts"]:
+            if code in coin_dates_codes:
                 continue
             day, cum = values.get(code, (0, 0))
             hide = compact and section["code"] in compact_set and int(day or 0) == 0 and int(cum or 0) == 0

@@ -125,7 +125,7 @@ def test_effective_month_bisuan_is_single_caliber():
     assert effective_month_bisuan(None, 0) == 0
 
 
-def test_insights_page_admin_only(client):
+def test_insights_page_admin_only(client, monkeypatch):
     denied = client.get("/insights")
     assert denied.status_code in (302, 401, 403)
     client.post("/login", data={"username": "alpha", "pin": "123456"})
@@ -133,6 +133,9 @@ def test_insights_page_admin_only(client):
     assert filler.status_code in (302, 403)
     client.post("/logout")
     client.post("/login", data={"username": "admin", "pin": "123456"})
+    # 固定在月中：月初时间进度只有几个点，「落后于时间」名单必然为空，这个用例会看天吃饭
+    pinned = date(2026, 10, 25)
+    monkeypatch.setattr(db, "today_local", lambda: pinned)
     with db.get_db() as conn:
         db.set_kpi_target(conn, "bisuan_total", 10)
     page = client.get("/insights").get_data(as_text=True)
@@ -155,8 +158,8 @@ def test_insights_page_admin_only(client):
     with db.get_db() as conn:
         sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
     assert f"store_id={sid}" in page
-    assert f"start={date.today().replace(day=1).isoformat()}" in page
-    assert f"end={date.today().isoformat()}" in page
+    assert f"start={pinned.replace(day=1).isoformat()}" in page
+    assert f"end={pinned.isoformat()}" in page
     idle_page = client.get("/insights?idle=1").get_data(as_text=True)
     assert "insight-month" in idle_page
     filtered = client.get("/insights?advisor=yes").get_data(as_text=True)
@@ -182,6 +185,28 @@ def test_report_ignores_inactive_metric_facts(admin_client):
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
     assert "手机销量" in body
+
+
+def test_report_coin_kpi_keeps_retired_history(admin_client):
+    """9 月报表的金币直降 KPI 卡片要含已下线的芝麻免充：历史月份不回头改数。"""
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        # 模拟 10 月迁移之后的库：芝麻免充已停用（不进表单），但 9 月的 day 值还留着
+        conn.execute(
+            "INSERT OR REPLACE INTO metrics(code, name, section, sort_order, monthly_target, highlight, active)"
+            " VALUES ('coin_cut_new_sesame', '新用户直降·芝麻免充', 'contract', 3, 0, 0, 0)"
+        )
+        for code, value in (("coin_cut_new_recharge", 1), ("coin_cut_new_sesame", 2)):
+            conn.execute(
+                "INSERT OR REPLACE INTO daily_facts(biz_date, store_id, metric_code, day_value)"
+                " VALUES ('2026-09-20', ?, ?, ?)",
+                (sid, code, value),
+            )
+    page = admin_client.get("/report?view=month&start=2026-09-01").get_data(as_text=True)
+    # 9 月走旧口径：充值 1 + 芝麻免充 2 = 3；芝麻免充不单独出行（已停用），但合计不能漏
+    card = page.split('<div class="muted">金币直降</div>')[1].split("</div>")[0]
+    assert 'class="kpi-num">3' in card
+    assert "芝麻免充" not in page
 
 
 def test_week_report_range_clamped(admin_client):

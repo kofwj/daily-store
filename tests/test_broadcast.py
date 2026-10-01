@@ -47,15 +47,15 @@ def test_render_matches_wechat_log():
     assert text.startswith("8月13日\n示例戊店\n")
     assert "当天手机销量：日1，累13" in text
     assert "查询身份证数：日1，累4" in text
-    assert "\n重点业务\n比算新增：日0.0，累0.5\n比算新增[高]：日0.3，累0.3\nAi手机合约：日0，累0\n底部迎回：日0，累0\n" in text
+    assert "\n重点业务\n比算新增：日0.0，累0.5\n比算新增[高]：日0.3，累0.3\nAi手机合约：日0，累0\n低销迎回：日0，累0\n" in text
     assert "\n数字化\n" in text
     assert text.endswith("灵犀·晓伴：日0，累0\n")
     assert "\n新增类\n安心/副卡：日0，累0\n其他卡类：日0，累5\n" in text
     assert "\n家庭类\n宽带：日3，累10\n" in text
     assert "电视会员：日0，累0" in text
-    assert "\n终端合约\n金币直降：日0，累1\n购机让利：日2，累8\n" in text
-    # 底部迎回已挪到重点业务，终端合约段不该再有它
-    assert "底部迎回" not in text.split("\n终端合约\n")[1]
+    assert "\n终端合约\n金币直降：日0，累1\n全球通优惠：日0，累0\n购机让利：日2，累8\n" in text
+    # 低销迎回在重点业务段（8 月口径没并进金币直降），终端合约段不该再有它
+    assert "低销迎回" not in text.split("\n终端合约\n")[1]
     assert "老用户直降" not in text
     assert "定向包：日1，累1" in text
     assert "个人/全家保底：日0，累0" in text
@@ -114,7 +114,8 @@ def test_add_day_to_prev_is_month_running_total():
 
 def test_metric_codes_cover_all_seed_items():
     assert "direct_pack" in metric_codes()
-    assert "coin_cut_old" in metric_codes()
+    assert "coin_cut_old_cmcc" in metric_codes()  # 10 月期新增：全球通优惠
+    assert "welcome_back" in metric_codes()  # 低销迎回（沿用旧 code，历史不丢）
     assert "coin_cut_new_recharge" in metric_codes()
     assert "coin_cut_new_full" in metric_codes()
     assert "tv_member" in metric_codes()
@@ -123,10 +124,14 @@ def test_metric_codes_cover_all_seed_items():
     assert "lingxi_xiaoban" in metric_codes()
     assert "coin_cut_new" not in metric_codes()
     assert "coin_cut" not in metric_codes()
-    assert len(metric_codes()) == 42
+    # 10 月期下线的两项不再进表单（历史数据留在库里）
+    assert "coin_cut_old" not in metric_codes()
+    assert "coin_cut_new_sesame" not in metric_codes()
+    assert len(metric_codes()) == 41
 
 
-def test_broadcast_rolls_coin_cut_parts_into_one_line():
+def test_broadcast_rolls_legacy_coin_cut_parts_into_one_line():
+    """9 月及以前：金币直降 = 老用户直降 + 充值 + 芝麻免充 + 储蓄卡冻结 + 全品类 + 小天才。"""
     text = render_broadcast(
         "示例戊店",
         date(2026, 8, 14),
@@ -145,6 +150,33 @@ def test_broadcast_rolls_coin_cut_parts_into_one_line():
     assert "芝麻免充" not in text
     assert "全品类" not in text
     assert "小天才直降" not in text
+    # 8 月口径不含低销迎回，它还是单独一行
+    assert "低销迎回：日0，累0" in text
+
+
+def test_broadcast_rolls_october_coin_cut_parts_into_one_line():
+    """10 月期：金币直降 = 充值 + 储蓄卡冻结 + 全品类 + 低销迎回；芝麻免充下线、全球通优惠不计入。"""
+    text = render_broadcast(
+        "示例戊店",
+        date(2026, 10, 2),
+        {
+            "coin_cut_old": (0, 0),
+            "coin_cut_new_recharge": (1, 2),
+            "coin_cut_new_sesame": (1, 1),
+            "coin_cut_new_savings": (1, 1),
+            "coin_cut_new_full": (2, 3),
+            "welcome_back": (1, 4),
+            "coin_cut_old_cmcc": (1, 3),
+            "coin_cut_xtc": (0, 1),
+        },
+    )
+    # 1+1+2+1 = 5（日），2+1+3+4+1 = 11（累）；芝麻免充那 1 笔不再计入
+    assert "金币直降：日5，累11" in text
+    assert "低销迎回" not in text.split("\n终端合约\n")[1]
+    assert "芝麻免充" not in text
+    assert "全品类" not in text
+    # 全球通优惠不计入考核，但照常单独展示
+    assert "全球通优惠：日1，累3" in text
 
 
 def test_today_form_has_lingxi_xiaoban_under_digital(admin_client):

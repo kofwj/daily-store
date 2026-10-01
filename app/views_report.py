@@ -75,12 +75,13 @@ def register_report(app) -> None:
             grid: Dict[str, Dict[str, int]] = {m["code"]: {} for m in metrics}
             totals: Dict[str, int] = {m["code"]: 0 for m in metrics}
             for row in facts:
-                # 只累计/摆放“当前活跃”指标；历史停用指标的遗留 day 值不参与报表，避免 KeyError
-                if row["metric_code"] not in totals:
-                    continue
                 stored = int(row["day_value"] or 0)
+                # 合计兜住停用指标的历史值：芝麻免充 10 月下线，但 9 月的数还得进金币直降合计；
+                # 格子 / 指标行仍只铺当前活跃指标，历史停用项不冒出新行（也不进日均）
+                totals[row["metric_code"]] = totals.get(row["metric_code"], 0) + stored
+                if row["metric_code"] not in grid:
+                    continue
                 grid[row["metric_code"]][row["biz_date"]] = stored
-                totals[row["metric_code"]] += stored
 
             # 提交状态 + 区间总天数（自然日）
             submitted = {
@@ -113,7 +114,7 @@ def register_report(app) -> None:
                 if code == "ai_contract":
                     total = totals.get("ai_contract", 0)
                 else:
-                    total = rollup_amount(totals, code)
+                    total = rollup_amount(totals, code, start)
                 target = kpi_targets.get(code, 0)
                 scale_code = "bisuan" if code == "bisuan_total" else code
                 total_disp = from_stored(scale_code, total)

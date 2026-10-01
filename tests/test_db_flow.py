@@ -133,6 +133,11 @@ def test_legacy_coin_cut_moves_to_old_user(tmp_db):
         assert moved["day_value"] == 2
         assert leftover is None
         assert conn.execute("SELECT active FROM metrics WHERE code='coin_cut'").fetchone()["active"] == 0
+        # 模拟 10 月之前的库：芝麻免充那时还在表单里（现在已下线，save_daily 会丢掉它）
+        conn.execute(
+            "INSERT OR REPLACE INTO metrics(code, name, section, sort_order, monthly_target, highlight, active)"
+            " VALUES ('coin_cut_new_sesame', '新用户直降·芝麻免充', 'contract', 3, 0, 0, 1)"
+        )
         db.save_daily(
             conn,
             store_id=store_id,
@@ -149,8 +154,50 @@ def test_legacy_coin_cut_moves_to_old_user(tmp_db):
         through = db.month_cum_through(conn, store_id, date(2026, 8, 11))
         from app.metrics_seed import rollup_amount
 
-        assert rollup_amount(through, "coin_cut") == 2
-        assert rollup_amount(through, "coin_cut_all") == 6
+        # 9 月及以前：充值 + 芝麻免充 = 2；播报合成行再加老用户直降（迁移过来的 2）与小天才 1
+        assert rollup_amount(through, "coin_cut", date(2026, 9, 30)) == 2
+        assert rollup_amount(through, "coin_cut_all", date(2026, 9, 30)) == 5
+        # 10 月期起：芝麻免充下线，只剩充值 1
+        assert rollup_amount(through, "coin_cut", date(2026, 10, 1)) == 1
+
+
+def test_oct_coin_cut_migration_retires_and_renames(tmp_db):
+    """10 月期迁移：老用户直降 / 芝麻免充下线（历史留着），底部迎回改名低销迎回，全球通优惠上线。"""
+    with db.get_db() as conn:
+        store_id = conn.execute("SELECT id FROM stores LIMIT 1").fetchone()["id"]
+        # 模拟 10 月之前的库：两项还在表单里，底部迎回也还没改名
+        for code, name, sort in (
+            ("coin_cut_old", "老用户直降", 1),
+            ("coin_cut_new_sesame", "新用户直降·芝麻免充", 3),
+        ):
+            conn.execute(
+                "INSERT OR REPLACE INTO metrics(code, name, section, sort_order, monthly_target, highlight, active)"
+                " VALUES (?, ?, 'contract', ?, 5, 0, 1)",
+                (code, name, sort),
+            )
+        conn.execute("UPDATE metrics SET name='底部迎回' WHERE code='welcome_back'")
+        conn.execute(
+            "INSERT INTO daily_facts(biz_date, store_id, metric_code, day_value)"
+            " VALUES ('2026-09-20', ?, 'coin_cut_old', 4)",
+            (store_id,),
+        )
+        conn.execute("DELETE FROM schema_migrations")
+    db.init_db()
+    with db.get_db() as conn:
+        rows = {r["code"]: r for r in conn.execute("SELECT code, name, active FROM metrics")}
+        kept = conn.execute(
+            "SELECT day_value FROM daily_facts WHERE metric_code='coin_cut_old'"
+        ).fetchone()
+        active_codes = {m["code"] for m in db.list_metrics(conn)}
+    assert rows["coin_cut_old"]["active"] == 0
+    assert rows["coin_cut_new_sesame"]["active"] == 0
+    assert rows["welcome_back"]["name"] == "低销迎回"
+    assert rows["welcome_back"]["active"] == 1
+    assert rows["coin_cut_old_cmcc"]["active"] == 1
+    assert kept["day_value"] == 4  # 历史值不丢
+    assert "coin_cut_old" not in active_codes
+    assert "coin_cut_new_sesame" not in active_codes
+    assert {"coin_cut_old_cmcc", "welcome_back", "coin_cut_new_recharge"} <= active_codes
 
 
 def test_save_and_month_cum(tmp_db):
@@ -263,7 +310,7 @@ def test_broadcast_from_saved_facts(tmp_db):
                 "tv": 7,
                 "fttr": 1,
                 "gigabit": 2,
-                "coin_cut_old": 1,
+                "coin_cut_new_recharge": 1,
                 "phone_discount": 6,
                 "gift_2g": 1,
                 "fangzha": 3,

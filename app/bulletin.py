@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Callable, Dict, List, Mapping, Sequence, Tuple
 
-from .metrics_seed import effective_month_bisuan
+from .metrics_seed import effective_month_bisuan, format_display, from_stored
 
 # 设置页一键套用。key 稳定；正文用占位符，空段渲染时压掉。
 REVIEW_PRESETS: List[Dict[str, str]] = [
@@ -15,11 +15,11 @@ REVIEW_PRESETS: List[Dict[str, str]] = [
         "hint": "跟现在默认一样，适合每天贴群",
         "body": """{head}
 【今日】
-销量：AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 迎回 {day_welcome}
+销量：AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 低销迎回 {day_welcome}
 触客：{day_count} 笔（成交 {day_closed}）
 {praise}
 【本月】
-累计：AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin} · 迎回 {month_welcome}
+累计：AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin} · 低销迎回 {month_welcome}
 触客：{month_count} 笔（成交 {month_closed}）
 综合标杆：{top_detail}
 {month_bits}
@@ -30,10 +30,10 @@ REVIEW_PRESETS: List[Dict[str, str]] = [
         "name": "检查",
         "hint": "盯销量和触客，标杆放后面，适合周中盯进度",
         "body": """{head}
-【今日核销量】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 迎回 {day_welcome}
+【今日核销量】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 低销迎回 {day_welcome}
 触客 {day_count} 笔，成交 {day_closed}。没量的店对照通报表未交行。
 {praise}
-【本月进度】AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin} · 迎回 {month_welcome}
+【本月进度】AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin} · 低销迎回 {month_welcome}
 标杆 {top_detail}
 {month_bits}
 {mobile_compare}""",
@@ -47,8 +47,8 @@ REVIEW_PRESETS: List[Dict[str, str]] = [
 {praise}
 综合标杆：{top_detail}
 {month_bits}
-【今日销量】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 迎回 {day_welcome}；触客 {day_count}（成交 {day_closed}）
-【本月累计】AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin} · 迎回 {month_welcome}
+【今日销量】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 低销迎回 {day_welcome}；触客 {day_count}（成交 {day_closed}）
+【本月累计】AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin} · 低销迎回 {month_welcome}
 {mobile_compare}""",
     },
     {
@@ -56,8 +56,8 @@ REVIEW_PRESETS: List[Dict[str, str]] = [
         "name": "精简",
         "hint": "三行数字，适合群里快速过一眼",
         "body": """{head}
-今日 AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 迎回 {day_welcome} · 触客 {day_count}/{day_closed}（{day_rate}）
-本月 AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin} · 迎回 {month_welcome} · 标杆 {top_name}
+今日 AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 低销迎回 {day_welcome} · 触客 {day_count}/{day_closed}（{day_rate}）
+本月 AI {month_ai} · 笔算 {month_bisuan} · 直降 {month_coin} · 低销迎回 {month_welcome} · 标杆 {top_name}
 {month_bits}""",
     },
     {
@@ -65,7 +65,7 @@ REVIEW_PRESETS: List[Dict[str, str]] = [
         "name": "追差",
         "hint": "点未交、挂零、跟进没破0，适合早会点名",
         "body": """{head}
-【今日】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 迎回 {day_welcome} · 触客 {day_count}/{day_closed}（{day_rate}）
+【今日】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 低销迎回 {day_welcome} · 触客 {day_count}/{day_closed}（{day_rate}）
 已交 {submit_n}/{store_n}。{missing}
 {zero_day}
 【挂零】{zero_ai}
@@ -82,7 +82,7 @@ REVIEW_PRESETS: List[Dict[str, str]] = [
         "body": """{head}
 【触客】今日 {day_count} 笔，成交 {day_closed}，成功率 {day_rate}
 本月 {month_count} 笔，成交 {month_closed}，成功率 {month_rate}
-【今日销量】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 迎回 {day_welcome}
+【今日销量】AI {day_ai} · 笔算 {day_bisuan} · 直降 {day_coin} · 低销迎回 {day_welcome}
 {praise}
 {missing}""",
     },
@@ -145,6 +145,26 @@ def _store_short(store: Mapping[str, Any]) -> str:
         return ""
 
 
+def _target_text(target: int, scale_code: str) -> str:
+    """目标数展示：整数就不带小数点（20 而不是 20.0），笔算的 0.1 档口照常保留。"""
+    if scale_code == "bisuan" and float(target) == int(target):
+        return str(int(target))
+    return format_display(scale_code, target)
+
+
+def _with_target(done_text: str, target: int, scale_code: str) -> str:
+    """「完成 / 目标」；没设目标（0）就只显示完成数，跟以前一样。"""
+    if not target:
+        return done_text
+    return f"{done_text} / {_target_text(target, scale_code)}"
+
+
+def _pct_text(done: float, target: int) -> str:
+    if not target:
+        return ""
+    return f"完成 {done / target * 100:.0f}%"
+
+
 def build_row(
     store: Mapping[str, Any],
     *,
@@ -157,6 +177,9 @@ def build_row(
     day_welcome: int = 0,
     month_welcome: int = 0,
     submitted: bool,
+    bisuan_target: int = 0,
+    ai_target: int = 0,
+    coin_target: int = 0,
     month_bisuan_mobile: Any = None,
     month_bisuan_asof: Any = None,
     month_bisuan_sys_asof: Any = None,
@@ -164,6 +187,9 @@ def build_row(
     follow_ai = month_ai > 0
     # 跟进标记也走统一口径：有移动数看移动，否则看填报
     follow_bisuan = effective_month_bisuan(month_bisuan_mobile, month_bisuan) > 0
+    month_ai_disp = float(month_ai)
+    month_coin_disp = float(month_coin)
+    month_bisuan_disp = from_stored("bisuan", month_bisuan)
     return {
         "store_id": store["id"],
         "code": store["code"],
@@ -194,6 +220,13 @@ def build_row(
         "day_ai_text": fmt_metric("ai_contract", day_ai),
         "day_welcome_text": fmt_metric("welcome_back", day_welcome),
         "day_bisuan_text": fmt_metric("bisuan", day_bisuan),
+        # 三个考核指标的「完成 / 目标」（目标为 0 时跟以前一样只显示完成数）
+        "month_ai_cell": _with_target(fmt_metric("ai_contract", month_ai), ai_target, "ai_contract"),
+        "month_coin_cell": _with_target(fmt_metric("coin_cut_old", month_coin), coin_target, "coin_cut_old"),
+        "month_bisuan_cell": _with_target(fmt_metric("bisuan", month_bisuan), bisuan_target, "bisuan"),
+        "month_ai_pct": _pct_text(month_ai_disp, ai_target),
+        "month_coin_pct": _pct_text(month_coin_disp, coin_target),
+        "month_bisuan_pct": _pct_text(month_bisuan_disp, bisuan_target),
         "ai_zero": month_ai <= 0,
         "bisuan_zero": month_bisuan <= 0,
         "day_ai_zero": day_ai <= 0,
@@ -305,7 +338,11 @@ def apply_scales(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return rows
 
 
-def totals_row(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+def totals_row(
+    rows: Sequence[Mapping[str, Any]], kpi_targets: Mapping[str, int] | None = None
+) -> Dict[str, Any]:
+    """合计行。传 kpi_targets（设置页月目标）时同时给出「完成 / 目标」。"""
+    targets = kpi_targets or {}
     n = len(rows)
     month_coin = sum(int(r.get("month_coin") or 0) for r in rows)
     month_ai = sum(int(r["month_ai"] or 0) for r in rows)
@@ -351,17 +388,22 @@ def totals_row(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     else:
         sign = "+" if mobile_diff > 0 else ""
         mobile_diff_signed = f"{sign}{fmt_metric('bisuan', mobile_diff)}"
+    # 目标是每店一个，合计按店数放大（跟看板 / 洞察一致）
+    target_ai = int(targets.get("ai_contract", 0) or 0) * n
+    target_coin = int(targets.get("coin_cut", 0) or 0) * n
+    target_bisuan = int(targets.get("bisuan_total", 0) or 0) * n
     month_bisuan_text = fmt_metric("bisuan", month_bisuan)
+    month_bisuan_with_target = _with_target(month_bisuan_text, target_bisuan, "bisuan")
     stale = any(bool(r.get("month_bisuan_mobile_stale")) for r in rows)
     if mobile_text:
         # 截止日在表头；合计格只写 上报 / 移数 [差]
         tag = f"移{mobile_text}"
         if mobile_diff_signed and mobile_diff != 0:
-            month_bisuan_cell = f"{month_bisuan_text} / {tag} {mobile_diff_signed}"
+            month_bisuan_cell = f"{month_bisuan_with_target} / {tag} {mobile_diff_signed}"
         else:
-            month_bisuan_cell = f"{month_bisuan_text} / {tag}"
+            month_bisuan_cell = f"{month_bisuan_with_target} / {tag}"
     else:
-        month_bisuan_cell = month_bisuan_text
+        month_bisuan_cell = month_bisuan_with_target
     return {
         "name": f"合计（{n} 店）",
         "follow_ai": ai_ok == n and n > 0,
@@ -383,6 +425,12 @@ def totals_row(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "month_bisuan_mobile": mobile_text,
         "month_bisuan_sys_asof": sys_asof_text,
         "month_bisuan_asof_label": asof_label,
+        "month_ai_cell": _with_target(fmt_metric("ai_contract", month_ai), target_ai, "ai_contract"),
+        "month_coin_cell": _with_target(fmt_metric("coin_cut_old", month_coin), target_coin, "coin_cut_old"),
+        "month_bisuan_cell": month_bisuan_cell,
+        "month_ai_pct": _pct_text(month_ai, target_ai),
+        "month_coin_pct": _pct_text(month_coin, target_coin),
+        "month_bisuan_pct": _pct_text(from_stored("bisuan", month_bisuan), target_bisuan),
         "month_bisuan_mobile_stale": stale,
         "month_bisuan_diff_signed": mobile_diff_signed,
         "day_coin_text": fmt_metric("coin_cut_old", day_coin),
@@ -408,7 +456,11 @@ def day_label(biz_date: date) -> str:
     return f"{biz_date.month}月{biz_date.day}日"
 
 
-def tsv(rows: Sequence[Mapping[str, Any]], biz_date: date) -> str:
+def tsv(
+    rows: Sequence[Mapping[str, Any]],
+    biz_date: date,
+    kpi_targets: Mapping[str, int] | None = None,
+) -> str:
     header1 = [
         "门店概况",
         "",
@@ -437,11 +489,11 @@ def tsv(rows: Sequence[Mapping[str, Any]], biz_date: date) -> str:
         "AI破0",
         "笔算破0",
         "AI手机合约",
-        "底部迎回",
+        "低销迎回",
         "笔算业务",
         "金币直降",
         "AI手机合约",
-        "底部迎回",
+        "低销迎回",
         "笔算业务",
         "金币直降",
     ]
@@ -449,7 +501,7 @@ def tsv(rows: Sequence[Mapping[str, Any]], biz_date: date) -> str:
     for row in rows:
         lines.append(_tsv_data_line(row))
     if rows:
-        total = totals_row(rows)
+        total = totals_row(rows, kpi_targets)
         lines.append(
             "\t".join(
                 [
@@ -461,10 +513,10 @@ def tsv(rows: Sequence[Mapping[str, Any]], biz_date: date) -> str:
                     "",
                     total["follow_ai_text"],
                     total["follow_bisuan_text"],
-                    total["month_ai_text"],
+                    total["month_ai_cell"],
                     total["month_welcome_text"],
-                    total["month_bisuan_text"],
-                    total["month_coin_text"],
+                    total["month_bisuan_cell"],
+                    total["month_coin_cell"],
                     total["day_ai_text"],
                     total["day_welcome_text"],
                     total["day_bisuan_text"],
@@ -486,10 +538,10 @@ def _tsv_data_line(row: Mapping[str, Any]) -> str:
             str(row.get("store_manager") or ""),
             str(row.get("follow_ai_text") or ""),
             str(row.get("follow_bisuan_text") or ""),
-            str(row.get("month_ai_text") or ""),
+            str(row.get("month_ai_cell") or ""),
             str(row.get("month_welcome_text") or ""),
-            str(row.get("month_bisuan_text") or ""),
-            str(row.get("month_coin_text") or ""),
+            str(row.get("month_bisuan_cell") or ""),
+            str(row.get("month_coin_cell") or ""),
             str(row.get("day_ai_text") or ""),
             str(row.get("day_welcome_text") or ""),
             str(row.get("day_bisuan_text") or ""),
@@ -498,7 +550,11 @@ def _tsv_data_line(row: Mapping[str, Any]) -> str:
     )
 
 
-def csv_rows(rows: Sequence[Mapping[str, Any]], biz_date: date) -> List[List[str]]:
+def csv_rows(
+    rows: Sequence[Mapping[str, Any]],
+    biz_date: date,
+    kpi_targets: Mapping[str, int] | None = None,
+) -> List[List[str]]:
     out = [
         [
             "大区",
@@ -510,11 +566,11 @@ def csv_rows(rows: Sequence[Mapping[str, Any]], biz_date: date) -> List[List[str
             "AI破0",
             "笔算破0",
             f"{month_label(biz_date)}AI手机合约",
-            f"{month_label(biz_date)}底部迎回",
+            f"{month_label(biz_date)}低销迎回",
             f"{month_label(biz_date)}笔算业务",
             f"{month_label(biz_date)}金币直降",
             f"{day_label(biz_date)}AI手机合约",
-            f"{day_label(biz_date)}底部迎回",
+            f"{day_label(biz_date)}低销迎回",
             f"{day_label(biz_date)}笔算业务",
             f"{day_label(biz_date)}金币直降",
         ],
@@ -528,10 +584,10 @@ def csv_rows(rows: Sequence[Mapping[str, Any]], biz_date: date) -> List[List[str
                 row["store_manager"],
                 row["follow_ai_text"],
                 row["follow_bisuan_text"],
-                row["month_ai_text"],
+                row["month_ai_cell"],
                 row["month_welcome_text"],
-                row["month_bisuan_text"],
-                row["month_coin_text"],
+                row["month_bisuan_cell"],
+                row["month_coin_cell"],
                 row["day_ai_text"],
                 row["day_welcome_text"],
                 row["day_bisuan_text"],
@@ -541,7 +597,7 @@ def csv_rows(rows: Sequence[Mapping[str, Any]], biz_date: date) -> List[List[str
         ],
     ]
     if rows:
-        total = totals_row(rows)
+        total = totals_row(rows, kpi_targets)
         out.append(
             [
                 "",
@@ -552,10 +608,10 @@ def csv_rows(rows: Sequence[Mapping[str, Any]], biz_date: date) -> List[List[str
                 "",
                 total["follow_ai_text"],
                 total["follow_bisuan_text"],
-                total["month_ai_text"],
+                total["month_ai_cell"],
                 total["month_welcome_text"],
-                total["month_bisuan_text"],
-                total["month_coin_text"],
+                total["month_bisuan_cell"],
+                total["month_coin_cell"],
                 total["day_ai_text"],
                 total["day_welcome_text"],
                 total["day_bisuan_text"],
@@ -767,11 +823,11 @@ def summary(
     lines = [
         head,
         "【今日】",
-        f"销量：AI {day_ai} · 笔算 {day_bisuan_text} · 直降 {day_coin} · 迎回 {day_welcome}",
+        f"销量：AI {day_ai} · 笔算 {day_bisuan_text} · 直降 {day_coin} · 低销迎回 {day_welcome}",
         f"触客：{day_count} 笔（成交 {day_closed}）",
         praise_text,
         "【本月】",
-        f"累计：AI {month_ai} · 笔算 {month_bisuan_text} · 直降 {month_coin} · 迎回 {month_welcome}",
+        f"累计：AI {month_ai} · 笔算 {month_bisuan_text} · 直降 {month_coin} · 低销迎回 {month_welcome}",
         f"触客：{month_count} 笔（成交 {month_closed}）",
         f"综合标杆：{top_detail}",
     ]

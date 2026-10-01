@@ -38,7 +38,8 @@
   <div class="deal-grid">
     <p>
       <label>日期</label>
-      <input type="date" name="biz_date" value="{{ form.biz_date }}">
+      <input type="date" name="biz_date" value="{{ form.biz_date }}"{% if not is_admin %} min="{{ advance_window[0].isoformat() }}" max="{{ advance_window[1].isoformat() }}"{% endif %}>
+      {% if not is_admin %}<span class="muted">本月都能填；上月只在次月 1 日当天能补录</span>{% endif %}
     </p>
     <p>
       <label>号码</label>

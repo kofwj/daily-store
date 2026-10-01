@@ -32,6 +32,7 @@ from .db_advances import (  # noqa: F401
     parse_money,
     record_advance,
     set_advance_paid,
+    store_advance_window,
     yuan_to_cents,
 )
 from .db_bisuan_mobile import (  # noqa: F401

@@ -84,6 +84,7 @@ def _mobile_asof(raw: str, biz_date: date) -> date:
 def _bulletin_rows(conn, stores, biz_date: date):
     month_key = biz_date.strftime("%Y-%m")
     month_start = biz_date.replace(day=1)
+    kpi_targets = db.list_kpi_targets(conn)
     mobile_map = db.bisuan_mobile_map(conn, month_key)
     asof_map = db.bisuan_mobile_asof_map(conn, month_key)
     rows = []
@@ -100,7 +101,7 @@ def _bulletin_rows(conn, stores, biz_date: date):
         month_bisuan = bulletin.bisuan_total(
             {"bisuan": pairs.get("bisuan", (0, 0))[1], "bisuan_high": pairs.get("bisuan_high", (0, 0))[1]}
         )
-        day_coin, month_coin = rollup_pair(pairs, "coin_cut")
+        day_coin, month_coin = rollup_pair(pairs, "coin_cut", biz_date)
         report = db.get_report(conn, store["id"], biz_date)
         mobile = mobile_map.get(int(store["id"]))
         # 截止日按店取，没存就用默认（通报表日前一天）
@@ -124,6 +125,9 @@ def _bulletin_rows(conn, stores, biz_date: date):
                 day_coin=day_coin,
                 month_coin=month_coin,
                 submitted=report is not None,
+                bisuan_target=int(kpi_targets.get("bisuan_total", 0) or 0),
+                ai_target=int(kpi_targets.get("ai_contract", 0) or 0),
+                coin_target=int(kpi_targets.get("coin_cut", 0) or 0),
                 month_bisuan_mobile=mobile,
                 month_bisuan_asof=store_asof.isoformat() if mobile is not None else "",
                 month_bisuan_sys_asof=sys_asof,
@@ -216,7 +220,7 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
             if code == "ai_contract":
                 day, cum = pairs.get("ai_contract", (0, 0))
             else:
-                day, cum = rollup_pair(pairs, code)
+                day, cum = rollup_pair(pairs, code, biz_date)
             target = kpi_targets.get(code, 0)
             scale = "bisuan" if code == "bisuan_total" else code
             day_disp = from_stored(scale, day)
@@ -630,8 +634,9 @@ def register_admin(app) -> None:
             if area:
                 stores = [s for s in stores if (s["area_manager"] or "").strip() == area]
             stores = [s for s in stores if (s["city"] or "南通市") == city] if city else stores
+            kpi_targets = db.list_kpi_targets(conn)
             rows = _bulletin_rows(conn, stores, biz_date)
-            copy_text = bulletin.tsv(rows, biz_date)
+            copy_text = bulletin.tsv(rows, biz_date, kpi_targets)
             title_city = city.replace("市", "") if city else ""
             sid_list = [r["store_id"] for r in rows] if rows else []
             month_start = biz_date.replace(day=1)
@@ -683,7 +688,7 @@ def register_admin(app) -> None:
                 biz_date=biz_date,
                 rows=rows,
                 review=review,
-                totals=bulletin.totals_row(rows) if rows else None,
+                totals=bulletin.totals_row(rows, kpi_targets) if rows else None,
                 month_label=bulletin.month_label(biz_date),
                 day_label=bulletin.day_label(biz_date),
                 copy_text=copy_text,
@@ -1166,7 +1171,7 @@ def register_admin(app) -> None:
             if area:
                 stores = [s for s in stores if (s["area_manager"] or "").strip() == area]
             rows = _bulletin_rows(conn, stores, biz_date)
-            lines = bulletin.csv_rows(rows, biz_date)
+            lines = bulletin.csv_rows(rows, biz_date, db.list_kpi_targets(conn))
             header, data_rows = lines[0], lines[1:]
             filename = f"bulletin_{biz_date.isoformat()}.xlsx"
             return xlsx_response(

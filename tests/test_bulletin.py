@@ -101,11 +101,11 @@ def test_bulletin_row_and_tsv_match_sheet():
     headers = csv_rows([row], date(2026, 8, 13))[0]
     for col in (
         "8月AI手机合约",
-        "8月底部迎回",
+        "8月低销迎回",
         "8月笔算业务",
         "8月金币直降",
         "8月13日AI手机合约",
-        "8月13日底部迎回",
+        "8月13日低销迎回",
         "8月13日笔算业务",
         "8月13日金币直降",
         "AI破0",
@@ -346,14 +346,14 @@ def test_summary_review_text():
     lines = text.split("\n")
     assert lines[0] == "2026-08-13 南通vivo零售运营中心"
     assert "【今日】" in lines
-    assert "销量：AI 5 · 笔算 0.5 · 直降 1 · 迎回 4" in lines
+    assert "销量：AI 5 · 笔算 0.5 · 直降 1 · 低销迎回 4" in lines
     assert "触客：7 笔（成交 5）" in lines
     assert "AI有量：示例甲店、示例丙店" in lines
     assert "笔算有量：示例甲店、示例丙店" in lines
     assert "直降有量：示例甲店" in lines
     assert "今日三项都有：示例甲店" in lines
     assert "示例乙店" not in text  # 今日三项都是 0，不进表扬
-    assert "累计：AI 17 · 笔算 1.4 · 直降 8 · 迎回 9" in lines
+    assert "累计：AI 17 · 笔算 1.4 · 直降 8 · 低销迎回 9" in lines
     assert "触客：60 笔（成交 42）" in lines
     assert "综合标杆：示例丙店（AI 12，笔算 0.6，直降 5）" in lines
     assert "单项第一：AI 示例丙店 · 笔算 示例甲店 · 直降 示例丙店" in lines
@@ -612,7 +612,7 @@ def test_mobile_compare_block_single_asof_keeps_old_header():
     assert "部分店至" not in block
 
 def test_bulletin_shows_welcome_back_month_and_day(admin_client):
-    """底部迎回在通报表里有月累计和日两列；值取自当日填报。"""
+    """低销迎回（原底部迎回）在通报表里有月累计和日两列；值取自当日填报。"""
     from datetime import date as _date
 
     day = _date.today()
@@ -629,7 +629,7 @@ def test_bulletin_shows_welcome_back_month_and_day(admin_client):
         follow_redirects=True,
     )
     page = admin_client.get(f"/bulletin?date={day.isoformat()}").get_data(as_text=True)
-    assert page.count("底部迎回") >= 2  # 月、日两列表头
+    assert page.count("低销迎回") >= 2  # 月、日两列表头
     assert page.count('class="total-num">4</td>') >= 2  # 月累计与日各一处
     # 表头叶子列数 = 数据行列数，避免加列后表头和数据错位
     head_row = page.split('<th class="g-profile">大区</th>')[1].split("</tr>")[0]
@@ -642,12 +642,12 @@ def test_bulletin_shows_welcome_back_month_and_day(admin_client):
 
 
 def test_today_form_puts_welcome_back_under_focus_after_ai(admin_client):
-    """今日填报里 底部迎回 排在重点业务的 Ai手机合约 之后，且已不在终端合约。"""
+    """今日填报里 低销迎回 排在重点业务的 Ai手机合约 之后，且已不在终端合约。"""
     page = admin_client.get("/today").get_data(as_text=True)
     # 用表单里的指标行/section 标题定位，避开顶部 KPI 卡片里的同名文字
     focus = page.index('<div class="section-title">重点业务</div>')
     ai = page.index('<div class="name">Ai手机合约</div>')
-    welcome = page.index('<div class="name">底部迎回</div>')
+    welcome = page.index('<div class="name">低销迎回</div>')
     contract = page.index('<div class="section-title">终端合约</div>')
     assert focus < ai < welcome < contract
 
@@ -670,7 +670,7 @@ def test_export_column_counts_after_welcome_back():
 
 
 def test_review_includes_welcome_back_everywhere():
-    """底部迎回要进复盘：默认文案、每个内置预设模板都得有。"""
+    """低销迎回要进复盘：默认文案、每个内置预设模板都得有。"""
     from app.bulletin import REVIEW_PRESETS, preset_by_key
 
     rows = [
@@ -682,17 +682,84 @@ def test_review_includes_welcome_back_everywhere():
         }
     ]
     default = summary(rows, date(2026, 8, 13))
-    assert "· 迎回 3" in default
-    assert "· 迎回 7" in default
+    assert "· 低销迎回 3" in default
+    assert "· 低销迎回 7" in default
 
     # 预设模板：日/月销量行都要带迎回占位符
     for preset in REVIEW_PRESETS:
-        has_day = "迎回 {day_welcome}" in preset["body"]
-        has_month = "迎回 {month_welcome}" in preset["body"]
-        assert has_day or has_month, f'{preset["key"]} 缺迎回'
+        has_day = "低销迎回 {day_welcome}" in preset["body"]
+        has_month = "低销迎回 {month_welcome}" in preset["body"]
+        assert has_day or has_month, f'{preset["key"]} 缺低销迎回'
 
     # 套用「标准」预设后渲染，迎回要出真实数字
     body = preset_by_key("standard")["body"]
     custom = summary(rows, date(2026, 8, 13), template=body)
-    assert "· 迎回 3" in custom
-    assert "· 迎回 7" in custom
+    assert "· 低销迎回 3" in custom
+    assert "· 低销迎回 7" in custom
+
+
+def test_bulletin_shows_kpi_targets(admin_client):
+    """通报表三个考核指标带「完成 / 目标」：目标取设置页月目标，合计按店数放大。"""
+    from datetime import date as _date
+
+    day = _date.today()
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+        db.set_kpi_target(conn, "bisuan_total", 20)
+        db.set_kpi_target(conn, "ai_contract", 10)
+        db.set_kpi_target(conn, "coin_cut", 8)
+    admin_client.post(
+        "/today",
+        data={
+            "store_id": str(sid),
+            "date": day.isoformat(),
+            "m_ai_contract": "4",
+            "m_coin_cut_new_recharge": "3",
+        },
+        follow_redirects=True,
+    )
+    page = admin_client.get(f"/bulletin?date={day.isoformat()}").get_data(as_text=True)
+    assert "4 / 10" in page  # AI手机合约：完成 / 目标
+    assert "3 / 8" in page  # 金币直降（充值直降 3）
+    assert "0.0 / 20" in page  # 笔算新增：本月还没填
+
+
+def test_bulletin_target_defaults_to_zero_shows_only_done():
+    """没设目标（0）时不显示「/ 目标」，跟以前一样只出完成数。"""
+    row = build_row(
+        {
+            "id": 1, "code": "a", "name": "A", "region_group": "通泰", "city": "南通市",
+            "mobile_code": "1", "area_manager": "", "store_manager": "",
+        },
+        day_ai=1, month_ai=2, day_bisuan=3, month_bisuan=4, submitted=True,
+    )
+    assert row["month_ai_cell"] == "2"
+    assert row["month_bisuan_cell"] == "0.4"
+    assert row["month_ai_pct"] == ""
+
+
+def test_bulletin_target_pct_and_totals():
+    """设了目标：单店出「完成 / 目标」和完成率，合计目标按店数放大。"""
+    store = {
+        "id": 1, "code": "a", "name": "A", "region_group": "通泰", "city": "南通市",
+        "mobile_code": "1", "area_manager": "", "store_manager": "",
+    }
+    rows = [
+        build_row(store, day_ai=1, month_ai=5, day_bisuan=3, month_bisuan=8, day_coin=1,
+                  month_coin=3, submitted=True, ai_target=10, bisuan_target=20, coin_target=8),
+        build_row({**store, "id": 2, "name": "B"}, day_ai=0, month_ai=0, day_bisuan=0,
+                  month_bisuan=0, day_coin=0, month_coin=0, submitted=True,
+                  ai_target=10, bisuan_target=20, coin_target=8),
+    ]
+    assert rows[0]["month_ai_cell"] == "5 / 10"
+    assert rows[0]["month_ai_pct"] == "完成 50%"
+    assert rows[0]["month_coin_cell"] == "3 / 8"
+    assert rows[0]["month_bisuan_cell"] == "0.8 / 20"
+    total = totals_row(rows, {"ai_contract": 10, "bisuan_total": 20, "coin_cut": 8})
+    assert total["month_ai_cell"] == "5 / 20"
+    assert total["month_coin_cell"] == "3 / 16"
+    assert total["month_bisuan_cell"] == "0.8 / 40"
+    # TSV / Excel 也用带目标的格子，列数不变
+    lines = tsv(rows, date(2026, 8, 13), {"ai_contract": 10, "bisuan_total": 20, "coin_cut": 8})
+    assert "5 / 10" in lines
+    assert {len(line.split("\t")) for line in lines.strip().split("\n")} == {16}

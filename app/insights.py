@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from .metrics_seed import (
     KPI_TARGETS,
-    ROLLUPS,
+    coin_kpi_codes,
     effective_month_bisuan,
     format_display,
     from_stored,
@@ -16,12 +16,12 @@ from .metrics_seed import (
 )
 
 KPI_CODES = [code for code, _name, _note in KPI_TARGETS]
+# 取数超集：金币直降各个月份口径用到的指标都查出来，按月份在 _rollup_store 里筛
 FACT_CODES = (
     "bisuan",
     "bisuan_high",
     "ai_contract",
-    *ROLLUPS["coin_cut"]["parts"],
-    *ROLLUPS["coin_cut"]["legacy"],
+    *coin_kpi_codes(),
 )
 LAG_POINTS = 15  # 实际进度比时间进度落后超过 15 个百分点算落后
 CITY_UNASSIGNED = "未分地市"
@@ -226,13 +226,14 @@ def prev_week_span(as_of: date) -> tuple[date, date]:
     return this_start - timedelta(days=7), this_end - timedelta(days=7)
 
 
-def _rollup_store(facts: Mapping[str, int]) -> Dict[str, int]:
+def _rollup_store(facts: Mapping[str, int], as_of: date) -> Dict[str, int]:
+    """按指标口径汇总一家店：金币直降新旧口径的分界日由 as_of 决定。"""
     out: Dict[str, int] = {}
     for code, _name, _note in KPI_TARGETS:
         if code == "ai_contract":
             out[code] = int(facts.get("ai_contract") or 0)
         else:
-            out[code] = rollup_amount(facts, code)
+            out[code] = rollup_amount(facts, code, as_of)
     return out
 
 
@@ -261,18 +262,21 @@ def build_insights(
     pace = elapsed / days_in_month * 100
     n = len(stores)
     mobile_bisuan = mobile_bisuan or {}
+    this_start, this_end = week_span(as_of)
+    prev_start, prev_end = prev_week_span(as_of)
     month_by_store: Dict[int, Dict[str, int]] = {}
     week_by_store: Dict[int, Dict[str, int]] = {}
     prev_by_store: Dict[int, Dict[str, int]] = {}
     for store in stores:
         sid = int(store["id"])
-        facts = _rollup_store(month_facts.get(sid) or {})
+        # 口径按各段自己的起始日取：跨月那一周不会拿新口径去算上月的数
+        facts = _rollup_store(month_facts.get(sid) or {}, as_of)
         # 有移动校准数：当月比算总量用移动口径，评优/落后判断跟着改。
         # 周环比仍看填报（移动数只给整月）。口径统一走 effective_month_bisuan。
         facts["bisuan_total"] = effective_month_bisuan(mobile_bisuan.get(sid), facts.get("bisuan_total", 0))
         month_by_store[sid] = facts
-        week_by_store[sid] = _rollup_store(week_facts.get(sid) or {})
-        prev_by_store[sid] = _rollup_store(prev_week_facts.get(sid) or {})
+        week_by_store[sid] = _rollup_store(week_facts.get(sid) or {}, this_start)
+        prev_by_store[sid] = _rollup_store(prev_week_facts.get(sid) or {}, prev_start)
 
     month_total = _sum_maps(list(month_by_store.values()))
     week_total = _sum_maps(list(week_by_store.values()))
@@ -403,8 +407,6 @@ def build_insights(
         store_rows, catalog_city_order(stores), lambda r: r["city"]
     )
 
-    this_start, this_end = week_span(as_of)
-    prev_start, prev_end = prev_week_span(as_of)
     return {
         "as_of": as_of,
         "mobile_used": any(bool(r["mobile_based"]) for r in store_rows),

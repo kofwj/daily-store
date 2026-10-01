@@ -167,6 +167,45 @@ def test_filler_can_save_negative_amount(client):
         assert int(row["broadband"]) == -10000
 
 
+def test_store_advance_window_allows_last_month_only_on_first_day():
+    from app.db_advances import store_advance_window
+
+    # 10 月 1 日：还能补 9 月
+    assert store_advance_window(date(2026, 10, 1)) == (date(2026, 9, 1), date(2026, 10, 1))
+    # 10 月 2 日：只认 10 月
+    assert store_advance_window(date(2026, 10, 2)) == (date(2026, 10, 1), date(2026, 10, 2))
+    # 跨年：1 月 1 日能补 12 月
+    assert store_advance_window(date(2027, 1, 1)) == (date(2026, 12, 1), date(2027, 1, 1))
+
+
+def test_filler_cannot_backfill_last_month_after_the_first(client, monkeypatch):
+    """店员只在次月 1 日当天能补上月垫资；过期填不进去（管理员不受限）。"""
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
+    with db.get_db() as conn:
+        sid = conn.execute("SELECT id FROM stores WHERE code='store-alpha'").fetchone()["id"]
+    monkeypatch.setattr(db, "today_local", lambda: date(2026, 10, 2))
+    late = client.post(
+        "/advance",
+        data={"store_id": str(sid), "biz_date": "2026-09-30", "phone": "13900001234", "rebate": "10"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "只能记" in late
+    with db.get_db() as conn:
+        saved = conn.execute(
+            "SELECT COUNT(*) AS n FROM advance_posts WHERE store_id=? AND phone='13900001234'", (sid,)
+        ).fetchone()["n"]
+    assert saved == 0
+
+    # 次月 1 日当天：上月还能补
+    monkeypatch.setattr(db, "today_local", lambda: date(2026, 10, 1))
+    ok = client.post(
+        "/advance",
+        data={"store_id": str(sid), "biz_date": "2026-09-30", "phone": "13900001234", "rebate": "10"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "垫资已保存" in ok
+
+
 def test_advance_actions_are_audited(client):
     client.post("/login", data={"username": "alpha", "pin": "123456"})
     with db.get_db() as conn:

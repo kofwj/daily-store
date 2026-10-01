@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 # 播报分组：与现有微信群格式对齐
@@ -27,7 +28,7 @@ SECTIONS: List[Dict] = [
             ("bisuan", "比算新增", "可填到 0.1。周报可用移动官方数校准"),
             ("bisuan_high", "比算新增[高]", "可填到 0.1。上面这类里，折后主套105以上"),
             ("ai_contract", "Ai手机合约", ""),
-            ("welcome_back", "底部迎回", ""),
+            ("welcome_back", "低销迎回", "老用户；计入金币直降考核"),
         ],
     },
     {
@@ -59,11 +60,12 @@ SECTIONS: List[Dict] = [
         "header": "终端合约",
         "blank_before": True,
         "metrics": [
-            ("coin_cut_old", "老用户直降", "不算进考核"),
-            ("coin_cut_new_recharge", "新用户直降·充值", "考核看四项合计"),
-            ("coin_cut_new_sesame", "新用户直降·芝麻免充", "考核看四项合计"),
-            ("coin_cut_new_savings", "新用户直降·储蓄卡冻结", "考核看四项合计"),
-            ("coin_cut_new_full", "新用户直降·全品类", "考核看四项合计"),
+            # 10 月期起：老用户直降拆成「低销迎回」（原「底部迎回」，已挪到重点业务）和「全球通优惠」；
+            # 芝麻免充下线。老用户直降 / 芝麻免充保留历史数据，但不再进表单（active=0）。
+            ("coin_cut_old_cmcc", "全球通优惠", "老用户；不计入金币直降考核"),
+            ("coin_cut_new_recharge", "充值直降", "计入金币直降考核"),
+            ("coin_cut_new_savings", "储蓄卡冻结", "计入金币直降考核"),
+            ("coin_cut_new_full", "全品类", "计入金币直降考核"),
             ("coin_cut_xtc", "小天才直降", "不算进考核"),
             ("phone_discount", "购机让利", ""),
             ("gift_2g", "送2G流量", ""),
@@ -114,25 +116,63 @@ def metric_codes() -> List[str]:
     return [code for code, _name, _section, _sort in all_metrics()]
 
 
-COIN_NEW_PARTS = (
+# 10 月期（含）起金币直降换口径；之前的月份照旧重算，不回头改已过的数
+COIN_V2_FROM = date(2026, 10, 1)
+
+# 10 月期起考核口径：充值直降 + 储蓄卡冻结 + 全品类 + 低销迎回
+# （芝麻免充下线；全球通优惠不计入考核，但照常填报 / 展示）
+COIN_PARTS_OCT = (
+    "coin_cut_new_recharge",
+    "coin_cut_new_savings",
+    "coin_cut_new_full",
+    "welcome_back",
+)
+# 9 月及以前的考核口径：充值 + 芝麻免充 + 储蓄卡冻结 + 全品类
+COIN_PARTS_LEGACY = (
     "coin_cut_new_recharge",
     "coin_cut_new_sesame",
     "coin_cut_new_savings",
     "coin_cut_new_full",
 )
-COIN_ALL_PARTS = ("coin_cut_old",) + COIN_NEW_PARTS + ("coin_cut_xtc",)
+# 更早的合计项，数据已迁到充值；留着兜住存量库里的残留值
+COIN_MIGRATED_PARTS = ("coin_cut_new",)
 
-# 群播报把老用户/新用户/全品类/小天才合成「金币直降」一行；月指标只计新用户四项
+
+def _coin_parts(as_of: date | None) -> Tuple[str, ...]:
+    if as_of is None or as_of >= COIN_V2_FROM:
+        return COIN_PARTS_OCT
+    return COIN_PARTS_LEGACY
+
+
+def coin_kpi_parts(as_of: date | None = None) -> Tuple[str, ...]:
+    """金币直降考核合计用到哪些指标（口径随月份变）。"""
+    return (*_coin_parts(as_of), *COIN_MIGRATED_PARTS)
+
+
+def coin_kpi_codes() -> Tuple[str, ...]:
+    """所有可能进考核的指标（取数用超集，不随月份变）。"""
+    return tuple(dict.fromkeys((*COIN_PARTS_LEGACY, *COIN_PARTS_OCT, *COIN_MIGRATED_PARTS)))
+
+
+def coin_all_parts(as_of: date | None = None) -> Tuple[str, ...]:
+    """群播报 / 通报表「金币直降」一行：考核口径 + 小天才直降（老用户直降只留历史值）。"""
+    return (*_coin_parts(as_of), "coin_cut_old", "coin_cut_xtc", *COIN_MIGRATED_PARTS)
+
+
+COIN_NEW_PARTS = COIN_PARTS_OCT  # 兼容旧名：现口径的考核项
+COIN_ALL_PARTS = coin_all_parts()
+
+# 群播报把各项直降合成「金币直降」一行；parts 存全量取数超集，按月份筛在 _rollup_codes 里做
 ROLLUPS: Dict[str, Dict[str, Any]] = {
     "coin_cut": {
-        "name": "新用户直降",
-        "parts": COIN_NEW_PARTS,
-        "legacy": ("coin_cut_new",),
+        "name": "金币直降",
+        "parts": coin_kpi_codes(),
+        "legacy": (),
     },
     "coin_cut_all": {
         "name": "金币直降",
-        "parts": COIN_ALL_PARTS,
-        "legacy": ("coin_cut", "coin_cut_new"),
+        "parts": coin_all_parts(),
+        "legacy": (),
     },
     "bisuan_total": {
         "name": "比算新增",
@@ -141,11 +181,22 @@ ROLLUPS: Dict[str, Dict[str, Any]] = {
     },
 }
 
+
+def rollup_codes(key: str, as_of: date | None = None) -> Tuple[str, ...]:
+    """某个合计项实际要加哪些指标。coin_cut / coin_cut_all 按月份分新旧口径。"""
+    if key == "coin_cut":
+        return coin_kpi_parts(as_of)
+    if key == "coin_cut_all":
+        return coin_all_parts(as_of)
+    spec = ROLLUPS[key]
+    return (*spec["parts"], *spec.get("legacy", ()))
+
+
 # 月指标只盯这三项；目标存在 kpi_targets
 KPI_TARGETS = (
     ("bisuan_total", "比算新增", "日常分「比算新增」和「比算新增[高]」填，考核看合计"),
     ("ai_contract", "Ai手机合约", ""),
-    ("coin_cut", "金币直降", "只计新用户：充值 + 芝麻免充 + 储蓄卡冻结 + 全品类"),
+    ("coin_cut", "金币直降", "10 月期起 = 充值直降 + 储蓄卡冻结 + 全品类 + 低销迎回；全球通优惠不计入"),
 )
 
 
@@ -228,15 +279,13 @@ def metric_step(code: str) -> str:
     return "0.1" if is_decimal_metric(code) else "1"
 
 
-def rollup_pair(values: Mapping[str, Any], key: str) -> Tuple[int, int]:
-    spec = ROLLUPS[key]
-    codes: Sequence[str] = [*spec["parts"], *spec["legacy"]]
+def rollup_pair(values: Mapping[str, Any], key: str, as_of: date | None = None) -> Tuple[int, int]:
+    """(日, 累) 合计。as_of 决定金币直降用哪个月份的口径。"""
+    codes: Sequence[str] = rollup_codes(key, as_of)
     day = sum(int((values.get(code) or (0, 0))[0] or 0) for code in codes)
     cum = sum(int((values.get(code) or (0, 0))[1] or 0) for code in codes)
     return day, cum
 
 
-def rollup_amount(values: Mapping[str, int], key: str) -> int:
-    spec = ROLLUPS[key]
-    return sum(int(values.get(code, 0) or 0) for code in [*spec["parts"], *spec["legacy"]])
-
+def rollup_amount(values: Mapping[str, int], key: str, as_of: date | None = None) -> int:
+    return sum(int(values.get(code, 0) or 0) for code in rollup_codes(key, as_of))

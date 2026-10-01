@@ -85,21 +85,33 @@ def test_custom_rules_change_threshold():
     assert judge(True, 5, 7, rules)["store_reward"] == 800
 
 
-def test_new_user_cut_includes_full_category():
+def test_coin_cut_caliber_switches_in_october():
+    """金币直降口径：9 月及以前四项（含芝麻免充），10 月期起含低销迎回、芝麻免充下线。
+
+    全球通优惠、老用户直降、小天才直降都不进考核。
+    """
     month_vals = {
-        "coin_cut_new_recharge": 0,
-        "coin_cut_new_sesame": 0,
-        "coin_cut_new_savings": 0,
-        "coin_cut_new_full": 1,
-        "coin_cut_old": 4,
+        "coin_cut_new_recharge": 2,
+        "coin_cut_new_sesame": 1,
+        "coin_cut_new_savings": 3,
+        "coin_cut_new_full": 4,
+        "welcome_back": 5,
+        "coin_cut_old_cmcc": 6,
+        "coin_cut_old": 7,
         "coin_cut_xtc": 2,
     }
-    new_cut = rollup_amount(month_vals, "coin_cut")
-    assert new_cut == 1
+    # 9 月：2 + 1 + 3 + 4 = 10
+    assert rollup_amount(month_vals, "coin_cut", date(2026, 9, 30)) == 10
+    # 10 月期：2 + 3 + 4 + 5（低销迎回）= 14；芝麻免充 1 不算
+    assert rollup_amount(month_vals, "coin_cut", date(2026, 10, 1)) == 14
+    # 播报合成行另含老用户直降、小天才直降
+    assert rollup_amount(month_vals, "coin_cut_all", date(2026, 10, 1)) == 14 + 7 + 2
+
+    new_cut = rollup_amount(month_vals, "coin_cut", date(2026, 10, 1))
     row = judge(False, 1, new_cut)
-    assert row["new_cut"] == 1
+    assert row["new_cut"] == 14
     assert row["passed"] is True
-    assert row["goal"] == "AI、新用户直降均破 0"
+    assert row["goal"] == "AI、金币直降均破 0"
     assert judge(True, 0, 10)["label"] == "总量靠直降"
 
 

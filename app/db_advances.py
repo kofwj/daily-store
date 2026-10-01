@@ -5,8 +5,8 @@ import json
 import math
 import re
 import sqlite3
-from datetime import date
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from datetime import date, timedelta
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .db_core import _now, begin_immediate, month_bounds, today_local
 from .db_core import store_in_clause as _store_in
@@ -49,6 +49,18 @@ def money_ok(*amounts: float) -> bool:
         except (ValueError, TypeError):
             continue
     return False
+
+
+def store_advance_window(today: date) -> Tuple[date, date]:
+    """门店能填的垫资业务日窗口：本月，外加次月 1 日当天的上月补录。
+
+    也就是说 10 月 1 日还能补 9 月的垫资，10 月 2 日起就只认 10 月了。
+    管理员不受这条限制（见 views_advance）。
+    """
+    month_start = today.replace(day=1)
+    if today.day == 1:
+        return (month_start - timedelta(days=1)).replace(day=1), today
+    return month_start, today
 
 
 def _money_select(alias: str = "a") -> str:

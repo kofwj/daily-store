@@ -103,6 +103,7 @@ def _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d, *, 
         month=month,
         totals=totals,
         scope=scope,
+        advance_window=db.store_advance_window(today_d),
     )
 
 
@@ -153,12 +154,17 @@ def register_advance(app) -> None:
                 except ValueError:
                     flash("金额请填数字，可留空", "error")
                     return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
-                same_month = biz_date.year == today_d.year and biz_date.month == today_d.month
+                # 门店只能填「本月 + 次月 1 日当天的上月补录」；过期连次月 2 日都不行，管理员不受限
+                win_start, win_end = db.store_advance_window(today_d)
                 if not is_admin and biz_date > today_d:
                     flash("非管理员不能记未来日期", "error")
                     return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
-                if not is_admin and not same_month:
-                    flash("门店只能记本月垫资", "error")
+                if not is_admin and not (win_start <= biz_date <= win_end):
+                    flash(
+                        f"只能记 {win_start.month}月{win_start.day}日 起的垫资："
+                        "上月垫资只在次月 1 日当天能补录，过期请找管理员",
+                        "error",
+                    )
                     return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
                 if not is_admin and not phone:
                     flash("门店填垫资必须带号码", "error")
