@@ -386,3 +386,34 @@ def deal_counts(
         }
     return out
 
+def deal_daily_counts(
+    conn: sqlite3.Connection,
+    store_ids: Iterable[int],
+    start: date,
+    end: date,
+) -> Dict[int, Dict[str, int]]:
+    """各店各日的触客条数（COUNT(*)，不分是否成交）。
+
+    与 deal_counts 的区别是按日下钻：缺的日不补 0（稀疏），
+    调用方按 out.get(store_id, {}).get("2026-10-08", 0) 取值。
+    """
+    ids = [int(sid) for sid in store_ids]
+    if not ids or end < start:
+        return {}
+    placeholders = ",".join("?" * len(ids))
+    rows = conn.execute(
+        f"""
+        SELECT store_id, biz_date, COUNT(*) AS total
+        FROM deal_posts
+        WHERE store_id IN ({placeholders}) AND biz_date>=? AND biz_date<=?
+        GROUP BY store_id, biz_date
+        """,
+        [*ids, start.isoformat(), end.isoformat()],
+    )
+    out: Dict[int, Dict[str, int]] = {}
+    for row in rows:
+        out.setdefault(int(row["store_id"]), {})[str(row["biz_date"])] = int(
+            row["total"] or 0
+        )
+    return out
+

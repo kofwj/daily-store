@@ -1,4 +1,5 @@
 import sqlite3
+import time
 from pathlib import Path
 
 from app import backup, db
@@ -140,17 +141,24 @@ def test_offsite_fingerprint_skips_unchanged(tmp_path):
     assert run("check") == "COPY"
 
 
-def test_prune_keeps_latest_20():
+def test_prune_keeps_latest_20(tmp_path, monkeypatch):
+    """prune() 只留最新 MAX_KEEP 份。
+
+    本用例故意造 30 份假备份，所以必须跑在临时 DATA_DIR 里：写进真的
+    data/backups 会每次测试留下 10 个 1 字节垃圾文件（历史遗留就是这么来的）。
+    """
+    from app import db_core
+
+    monkeypatch.setattr(db_core, "DATA_DIR", tmp_path)
     d = backup.backup_dir()
+    d.mkdir(parents=True, exist_ok=True)
     for i in range(30):
         (d / f"store_daily_offsite_20260825_0000{i:02d}.db").write_bytes(b"x")
-        import time as _t
-
-        _t.sleep(0.01)
-    assert len(list(d.glob("store_daily_*.db"))) >= 20
+        time.sleep(0.01)
+    assert len(list(d.glob("store_daily_*.db"))) == 30
     backup.prune()
     left = sorted(d.glob("store_daily_*.db"), key=lambda p: p.stat().st_mtime)
-    assert len(left) <= backup.MAX_KEEP
+    assert len(left) == backup.MAX_KEEP
     # 最新一份仍在
     assert str(left[-1].name).endswith("000029.db")
 

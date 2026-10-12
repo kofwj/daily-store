@@ -5,6 +5,7 @@
 - views_auth  login/logout/me/home/health/admin
 - views_daily today / deal / deal_delete / deal_records
 - views_report report / report.csv / report/delete / report/cell
+- views_compare compare / compare/cell / compare.xlsx（手机销量 vs 触客对比）
 - views_admin board / bulletin / bulletin.csv / incentive / edits
 - views_settings settings
 
@@ -35,6 +36,7 @@ from .helpers import (
 from .views_admin import register_admin
 from .views_advance import register_advance
 from .views_auth import register_auth
+from .views_compare import register_compare
 from .views_daily import register_daily
 from .views_policies import register_policies
 from .views_report import register_report
@@ -143,6 +145,7 @@ def create_app(*, testing: bool = False) -> Flask:
     register_daily(app)
     register_advance(app)
     register_report(app)
+    register_compare(app)
     register_admin(app)
     register_settings(app)
     register_policies(app)

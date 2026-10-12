@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from datetime import date, timedelta
@@ -678,6 +679,79 @@ def build_diff(before: Dict[str, int], after: Dict[str, int], names=None) -> str
 
         parts.append(f"{name} {format_stored(k, b)}→{format_stored(k, a)}")
     return "；".join(parts) or "（无变化）"
+
+def _edit_int(raw_json: str, code: str) -> Optional[int]:
+    """从 report_edits 的 before_json / after_json 里取某指标的库内值。
+
+    空串 / 坏 JSON / 该指标不在快照里都返回 None：让调用方区分「没这个指标」
+    和「值是 0」。审计快照只装本次改动涉及的指标，所以缺键是常态。
+    """
+    if not raw_json:
+        return None
+    try:
+        payload = json.loads(raw_json)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict) or code not in payload:
+        return None
+    try:
+        return int(payload[code] or 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def phone_fix_marks(
+    conn,
+    store_ids: Sequence[int],
+    start: date,
+    end: date,
+    *,
+    metric_code: str = "phone_sales",
+) -> Dict[int, Dict[str, Dict[str, Any]]]:
+    """事后改过手机销量的痕迹：{store_id: {biz_date: {...}}}。
+
+    扫 report_edits，只看这个指标有前后变化的行，同一天改过多次取最后一次；
+    改完是 0 的（当前值 0）不算痕迹——那等于当天的数被抹掉，
+    格子显示 0 更直观，不必再挂一条「5→0」。
+    """
+    ids = [int(sid) for sid in store_ids]
+    if not ids or end < start:
+        return {}
+    clause, params = sql_in("e.store_id", ids)
+    rows = conn.execute(
+        f"""
+        SELECT e.store_id, e.biz_date, e.edited_at, e.before_json, e.after_json,
+               u.display_name AS editor_name
+        FROM report_edits e
+        LEFT JOIN users u ON u.id = e.user_id
+        WHERE e.biz_date>=? AND e.biz_date<=? AND {clause}
+        ORDER BY e.id
+        """,
+        [start.isoformat(), end.isoformat(), *params],
+    )
+    out: Dict[int, Dict[str, Dict[str, Any]]] = {}
+    for row in rows:
+        before = _edit_int(row["before_json"], metric_code)
+        after = _edit_int(row["after_json"], metric_code)
+        if before is None and after is None:
+            continue  # 这次改的是别的指标
+        before = before or 0
+        after = after or 0
+        if before == after:
+            continue
+        marks = out.setdefault(int(row["store_id"]), {})
+        key = str(row["biz_date"])
+        if not after:
+            marks.pop(key, None)
+            continue
+        marks[key] = {
+            "text": build_diff({metric_code: before}, {metric_code: after}),
+            "editor": (row["editor_name"] or "").strip(),
+            "at": (row["edited_at"] or "")[:16],
+            "before": before,
+            "after": after,
+        }
+    return out
 
 
 _DEAL_FIELD_LABELS = {

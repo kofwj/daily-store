@@ -97,6 +97,7 @@ from .db_core import get_db as _plain_get_db
 from .db_deals import (  # noqa: F401
     count_deal_posts,
     deal_counts,
+    deal_daily_counts,
     delete_deal_post,
     get_deal_post,
     list_all_deal_posts,

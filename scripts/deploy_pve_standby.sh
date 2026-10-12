@@ -6,6 +6,9 @@
 #   ./scripts/deploy_pve_standby.sh
 #   ./scripts/deploy_pve_standby.sh --skip-backup   # 不先跑 backup_offsite
 #   ./scripts/deploy_pve_standby.sh --stop          # 只停止灾备容器
+#
+# 灾备机地址取 DR_STANDBY_HOST（scripts/backup.env）。
+# PVE_HOST/PVE_USER/PVE_PORT 仍可临时覆盖；与备份仓库 REMOTE_BACKUP 无关。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,9 +21,10 @@ if [[ -f "${ROOT}/scripts/backup.env" ]]; then
   set +a
 fi
 
-PVE_HOST="${PVE_HOST:-${REMOTE_BACKUP:-}}"
-PVE_USER="${PVE_USER:-${REMOTE_BACKUP_USER:-root}}"
-PVE_PORT="${PVE_PORT:-${REMOTE_BACKUP_SSH_PORT:-22}}"
+# 灾备机 = DR_STANDBY_*；不再回落到 REMOTE_BACKUP（那是备份仓库，两种角色别混用）
+PVE_HOST="${PVE_HOST:-${DR_STANDBY_HOST:-}}"
+PVE_USER="${PVE_USER:-${DR_STANDBY_USER:-root}}"
+PVE_PORT="${PVE_PORT:-${DR_STANDBY_SSH_PORT:-22}}"
 PVE_DIR="${PVE_DIR:-/opt/store-daily}"
 PRIMARY_HOST="${PRIMARY_HOST:-}"
 PRIMARY_USER="${PRIMARY_USER:-root}"
@@ -31,13 +35,13 @@ for a in "$@"; do
   case "$a" in
     --skip-backup) SKIP_BACKUP=1 ;;
     --stop) STOP_ONLY=1 ;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
     *) echo "未知参数 $a" >&2; exit 1 ;;
   esac
 done
 
 if [[ -z "${PVE_HOST}" || -z "${PRIMARY_HOST}" ]]; then
-  echo "请在 scripts/backup.env 或环境变量里设置灾备机和 PRIMARY_HOST" >&2
+  echo "请在 scripts/backup.env 或环境变量里设置 DR_STANDBY_HOST（灾备机）和 PRIMARY_HOST" >&2
   exit 1
 fi
 SSH_PVE=(ssh -o BatchMode=yes -o ConnectTimeout=15 -p "${PVE_PORT}" "${PVE_USER}@${PVE_HOST}")

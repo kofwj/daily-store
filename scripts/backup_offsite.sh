@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 门店日报：从生产机拉一致性 SQLite 快照，推到局域网备份机 + 远端 VPS。
+# 门店日报：从生产机拉一致性 SQLite 快照，推到局域网备份机 + 异地备份机。
 #
 # 主机写在 scripts/backup.env（不进 git）。
 #
@@ -8,6 +8,17 @@
 #   LAN_BACKUP_SSH_PORT=22 LAN_BACKUP_USER=backup \
 #     REMOTE_BACKUP=ubuntu@standby-host ./scripts/backup_offsite.sh
 #   ./scripts/backup_offsite.sh --dry-run
+#
+# 告警（企业微信机器人）：
+#   失败/恢复推送到群里；webhook 默认取生产库 app_meta.wecom_global，
+#   也可用环境变量 ALERT_WEBHOOK 覆盖。
+#   ok→fail 立即发；fail→fail 24 小时内静默（超 24 小时再提醒）；fail→ok 发恢复。
+#   去重状态：${PRIMARY_DIR}/data/backups/.alert-state.json
+#   演练（只打印、不真发）：ALERT_DRY_RUN=1 ./scripts/backup_offsite.sh --dry-run
+#   只验通道：python3 scripts/notify_failure.py --probe
+# 落点探活（库未变化的小时也查一遍）：
+#   ssh 连得上且备份目录在 = 可用；全挂 → exit 1 并告警。
+#   关掉：SKIP_PROBE=0
 #
 # Termux 注意：
 #   - 端口用 LAN_BACKUP_SSH_PORT
@@ -45,7 +56,7 @@ for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
     -h|--help)
-      sed -n '2,28p' "$0"
+      sed -n '2,31p' "$0"
       exit 0
       ;;
     *)
@@ -79,7 +90,11 @@ fi
 STAMP="$(TZ=Asia/Shanghai date +%Y%m%d_%H%M%S)"
 TAG="offsite_${STAMP}"
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/store-daily-backup.XXXXXX")"
-cleanup() { rm -rf -- "${WORKDIR}"; }
+cleanup() {
+  local rc=$?
+  rm -rf -- "${WORKDIR}" 2>/dev/null || true
+  alert_notify "${rc}"
+}
 trap cleanup EXIT
 
 PRIMARY="${PRIMARY_USER}@${PRIMARY_HOST}"
@@ -120,6 +135,63 @@ rsync_p() {
   rsync -az -e "ssh -o ConnectTimeout=15 -o BatchMode=yes -p ${port}" "$@"
 }
 
+# ── 备份告警（企业微信机器人）──────────────────────────────────────────
+# 每次运行都调用一次 notify_failure.py，由它按 state 文件决定发不发：
+#   ok→fail 立即发；fail→fail 24h 内静默；fail→ok 发一条恢复。
+# webhook 复用生产库 app_meta.wecom_global；告警自身失败绝不影响备份，
+# 只往日志里写。state 放在 data/backups/ 下（该目录不随代码同步、不被清理）。
+NOTIFY_PY="${ROOT}/scripts/notify_failure.py"
+ALERT_STATE="${ALERT_STATE:-${PRIMARY_DIR}/data/backups/.alert-state.json}"
+FAIL_MSG=""
+
+alert_notify() {
+  local rc="$1" status detail
+  if [[ "${DRY_RUN:-0}" == "1" ]]; then
+    echo "  [dry-run] 跳过备份告警"
+    return 0
+  fi
+  if [[ ! -f "${NOTIFY_PY}" ]]; then
+    echo "警告: 找不到 ${NOTIFY_PY}，本次不发备份告警" >&2
+    return 0
+  fi
+  if [[ "${rc}" == "0" && -z "${FAIL_MSG:-}" ]]; then
+    status=ok
+    detail="门店日报备份成功 ${STAMP}（局域网 ${LAN_BACKUP_HOST:-未设} / 异地 ${REMOTE_BACKUP:-未设}）"
+  else
+    status=fail
+    detail="门店日报备份失败 ${STAMP}: ${FAIL_MSG:-脚本退出码 ${rc}}；日志 /var/log/store-daily-offsite.log"
+  fi
+  python3 "${NOTIFY_PY}" --status "${status}" --message "${detail}" \
+    --state-file "${ALERT_STATE}" --db "${PRIMARY_DIR}/data/store_daily.db" 2>&1 \
+    | sed 's/^/  [告警] /' >&2 || true
+}
+
+# ── 落点探活（库未变化的小时也要能发现掉线）────────────────────────────
+# 库没变时脚本会在拷贝前退出，落点是否还活着就没人管了（异地落点曾静默失效
+# 53 天就是这么漏掉的）。这里补一次轻量探测：ssh 连得上、备份目录存在即算可用，
+# 顺带报一下剩余空间。全挂 → exit 1 并告警；挂一半 → 保持 exit 0、由告警提示。
+# 关掉：SKIP_PROBE=0
+SKIP_PROBE="${SKIP_PROBE:-1}"
+probe_one() {
+  local label="$1" dest_host="$2" dest_dir="$3" dest_port="$4"
+  local out rc
+  if out="$(ssh_p "${dest_port}" "${dest_host}" "DIR=$(printf %q "${dest_dir}") bash -s" <<'EOS' 2>&1
+set -u
+if [[ ! -d "${DIR}" ]]; then
+  echo "备份目录不存在: ${DIR}" >&2
+  exit 3
+fi
+df -Pk "${DIR}" | awk 'NR==2 {printf "%.1fG", $4/1048576}'
+EOS
+  )"; then
+    echo "  ${label} 可达（${dest_host}，剩余 ${out:-?}）"
+    return 0
+  fi
+  rc=$?
+  echo "警告: ${label} 不可达（${dest_host}）：${out:-ssh 退出码 ${rc}}" >&2
+  return 1
+}
+
 ON_PRIMARY=0
 if [[ -f "${PRIMARY_DIR}/data/store_daily.db" ]]; then
   ON_PRIMARY=1
@@ -138,10 +210,36 @@ if [[ "${DRY_RUN}" != "1" ]]; then
     STATE="$(python3 "${FP_PY}" check --dir "${PRIMARY_DIR}")"
   else
     STATE="$(ssh_p "${PRIMARY_SSH_PORT}" "${PRIMARY}" \
-      "python3 '${PRIMARY_DIR}/scripts/offsite_fingerprint.py' check --dir '${PRIMARY_DIR}'")"
+      "python3 '${PRIMARY_DIR}/scripts/offsite_fingerprint.py' check --dir '${PRIMARY_DIR}'" </dev/null)"
   fi
   if [[ "${STATE}" == "SKIP" ]]; then
     echo "库未变化，跳过拷贝"
+    if [[ "${SKIP_PROBE}" == "1" ]]; then
+      PROBE_OK=0
+      if [[ -n "${LAN_BACKUP_HOST}" ]]; then
+        if probe_one "局域网备份机" "${LAN}" "${LAN_BACKUP_DIR}" "${LAN_BACKUP_SSH_PORT}"; then
+          PROBE_OK=1
+        else
+          FAIL_MSG="局域网备份机不可达（${LAN}）"
+        fi
+      fi
+      if [[ -n "${REMOTE_TARGET}" ]]; then
+        if probe_one "异地备份机" "${REMOTE_TARGET}" "${REMOTE_BACKUP_DIR}" "${REMOTE_BACKUP_SSH_PORT}"; then
+          PROBE_OK=1
+        else
+          FAIL_MSG="${FAIL_MSG:+${FAIL_MSG}；}异地备份机不可达（${REMOTE_TARGET}）"
+        fi
+      fi
+      if [[ -n "${LAN_BACKUP_HOST}" || -n "${REMOTE_TARGET}" ]]; then
+        if [[ "${PROBE_OK}" != "1" ]]; then
+          echo "错误: 机外备份落点全部不可达（库未变化，本次无拷贝）" >&2
+          exit 1
+        fi
+        if [[ -n "${FAIL_MSG}" ]]; then
+          echo "（部分落点不可达，见上方警告；已按需告警）"
+        fi
+      fi
+    fi
     exit 0
   fi
 fi
@@ -185,6 +283,7 @@ snapshot_primary() {
   if [[ -d "${PRIMARY_DIR}/data/uploads" ]]; then
     tar czf "${PRIMARY_DIR}/data/backups/${REMOTE_UPLOADS_NAME}" -C "${PRIMARY_DIR}/data" uploads
     echo "已附带 uploads -> ${REMOTE_UPLOADS_NAME}"
+    chmod 600 "${PRIMARY_DIR}/data/backups/${REMOTE_UPLOADS_NAME}" 2>/dev/null || true
   fi
   ls -la "${host_snap}" "${host_env}" 2>/dev/null || ls -la "${host_snap}"
 }
@@ -231,6 +330,7 @@ else
 fi
 if [[ -d "${PRIMARY_DIR}/data/uploads" ]]; then
   tar czf "${PRIMARY_DIR}/data/backups/${UPLOADS_NAME}" -C "${PRIMARY_DIR}/data" uploads
+  chmod 600 "${PRIMARY_DIR}/data/backups/${UPLOADS_NAME}" 2>/dev/null || true
   echo "已附带 uploads -> ${UPLOADS_NAME}"
 fi
 ls -la "${HOST_SNAP}" "${HOST_ENV}" 2>/dev/null || ls -la "${HOST_SNAP}"
@@ -279,7 +379,8 @@ push_one() {
     echo "  [dry-run] rsync → ${dest_host}"
     return
   fi
-  ssh_p "${dest_port}" "${dest_host}" "mkdir -p '${dest_dir}/db' '${dest_dir}/env' '${dest_dir}/uploads'"
+  # </dev/null：ssh 会把自己 stdin 转给远端，不加会把调用者（如 bash -s）的剩余脚本吃掉
+  ssh_p "${dest_port}" "${dest_host}" "mkdir -p '${dest_dir}/db' '${dest_dir}/env' '${dest_dir}/uploads'" </dev/null
   # Termux 常只有 scp、没有 rsync；统一用 scp，兼容安卓备份机
   scp_p "${dest_port}" "${LOCAL_DB}" "${dest_host}:${dest_dir}/db/"
   if [[ -f "${LOCAL_ENV}" ]]; then
@@ -293,6 +394,7 @@ push_one() {
 set -euo pipefail
 chmod 600 "${DIR}/db/${DB}" 2>/dev/null || true
 chmod 600 "${DIR}/env/${ENV}" 2>/dev/null || true
+chmod 600 "${DIR}"/uploads/*.tar.gz 2>/dev/null || true
 find "${DIR}/db" -type f -name 'store_daily_offsite_*.db' -mtime +"${DAYS}" -delete 2>/dev/null || true
 find "${DIR}/env" -type f -name 'env_offsite_*.env' -mtime +"${DAYS}" -delete 2>/dev/null || true
 find "${DIR}/uploads" -type f -name 'uploads_offsite_*.tar.gz' -mtime +"${DAYS}" -delete 2>/dev/null || true
@@ -308,6 +410,7 @@ if [[ -n "${LAN_BACKUP_HOST}" ]]; then
     PUSH_OK=1
   else
     echo "警告: 局域网备份失败（${LAN}），继续远端" >&2
+    FAIL_MSG="局域网备份失败（${LAN}）"
     PUSH_FAIL=1
   fi
 fi
@@ -316,7 +419,8 @@ if [[ -n "${REMOTE_TARGET}" ]]; then
   if push_one "${REMOTE_TARGET}" "${REMOTE_BACKUP_DIR}" "${REMOTE_BACKUP_SSH_PORT}"; then
     PUSH_OK=1
   else
-    echo "警告: 远端备份失败（${REMOTE_TARGET})" >&2
+    echo "警告: 远端备份失败（${REMOTE_TARGET}）" >&2
+    FAIL_MSG="${FAIL_MSG:+${FAIL_MSG}；}异地备份失败（${REMOTE_TARGET}）"
     PUSH_FAIL=1
   fi
 fi
@@ -358,17 +462,18 @@ if [[ "${DRY_RUN}" != "1" && ( "${PUSH_OK}" == "1" || ( -z "${LAN_BACKUP_HOST}" 
     python3 "${FP_PY}" save --dir "${PRIMARY_DIR}" >/dev/null
   else
     ssh_p "${PRIMARY_SSH_PORT}" "${PRIMARY}" \
-      "python3 '${PRIMARY_DIR}/scripts/offsite_fingerprint.py' save --dir '${PRIMARY_DIR}'" >/dev/null || true
+      "python3 '${PRIMARY_DIR}/scripts/offsite_fingerprint.py' save --dir '${PRIMARY_DIR}'" </dev/null >/dev/null || true
   fi
 fi
 
 echo "== 备份完成 =="
 echo "恢复步骤：docs/backup-dr.md"
-# 至少推成功一处（通常是 pve）即成功；109 关机不让整次失败
-if [[ "${PUSH_OK}" != "1" && ( -n "${LAN_BACKUP_HOST}" || -n "${REMOTE_TARGET}" ) ]]; then
+# 「至少一处成功」只说明还有副本，不等于健康；单点失败靠上面的告警提示。
+# 两个落点全部失败才 exit 1（旧的「109 关机不让整次失败」语义保留）。
+if [[ "${DRY_RUN}" != "1" && "${PUSH_OK}" != "1" && ( -n "${LAN_BACKUP_HOST}" || -n "${REMOTE_TARGET}" ) ]]; then
   echo "错误: 机外备份全部失败" >&2
   exit 1
 fi
 if [[ "${PUSH_FAIL}" == "1" ]]; then
-  echo "（部分目标失败，见上方警告）"
+  echo "（部分目标失败，见上方警告；已按需告警）"
 fi

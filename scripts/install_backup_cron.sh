@@ -27,7 +27,7 @@ if [[ ! -f "${KEY}" ]]; then
   echo "已生成本机钥匙: ${KEY}.pub"
 fi
 
-echo "本机公钥（请加到 pve / 109 的 authorized_keys）："
+echo "本机公钥（请加到局域网备份机 / 异地备份机的 authorized_keys）："
 cat "${KEY}.pub"
 echo
 
@@ -48,3 +48,4 @@ touch "${LOG}"
 chmod 640 "${LOG}" || true
 echo "日志: ${LOG}"
 echo "试跑: ${SCRIPT}"
+echo "告警自检（不会真发消息）: python3 ${DIR}/scripts/notify_failure.py --probe"

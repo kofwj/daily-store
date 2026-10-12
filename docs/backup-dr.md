@@ -1,4 +1,4 @@
-# 备份与容错（局域网 + 远端）
+# 备份与容错（局域网 + 异地）
 
 主机名写在 `scripts/backup.env`（不进 git）。下面用占位符。
 
@@ -8,12 +8,13 @@
 |---|---|---|
 | **生产** | `PRIMARY_HOST` | 店员每天写的那台，Docker 跑着 |
 | **局域网备份** | `LAN_BACKUP_HOST`（NAS / 安卓等） | 每天收一份库，断网/坏盘时最快救 |
-| **远端备份** | `REMOTE_BACKUP` | 机房断电、整网挂了时的底牌 |
+| **异地备份** | `REMOTE_BACKUP` | 整网/机房出事时的底牌（放在另一处场地） |
 | **开发机** | 本机 | 改代码；**不要**拿开发库盖生产 |
+| **灾备热备**（可选） | `DR_STANDBY_HOST` | 预装一套代码+库，随时切过去；平时不接店员流量 |
 
 原则：
 
-1. **只在一处写库**（生产）。备份机、远端默认只收文件，不接店员流量。
+1. **只在一处写库**（生产）。备份机、异地机默认只收文件，不接店员流量。
 2. **拷库必须用 SQLite backup API**，不要 `cp store_daily.db`（有 WAL 会拷残）。
 3. **代码** 在 git；**数据 + `.env`** 靠备份脚本，不进 git。
 
@@ -41,7 +42,8 @@
 
 ## 二、机外备份（推荐）
 
-脚本：`scripts/backup_offsite.sh`。库和 `.env` 没变会跳过拷贝，只打日志「库未变化，跳过拷贝」。
+脚本：`scripts/backup_offsite.sh`。库和 `.env` 没变会跳过拷贝，只打日志「库未变化，跳过拷贝」；
+这一小时仍会探活两个落点（见 4. 失败/恢复告警）。
 
 ### 1. 准备 SSH 免密
 
@@ -86,15 +88,38 @@ ssh user@your-primary-host /opt/store-daily/scripts/install_backup_cron.sh
 5 * * * * /opt/store-daily/scripts/backup_offsite.sh >>/var/log/store-daily-offsite.log 2>&1
 ```
 
-并生成本机 SSH 钥匙。把打印出的公钥加到局域网备份机和远端灾备机。
+并生成本机 SSH 钥匙。把打印出的公钥加到局域网备份机和异地备份机。
 
-局域网备份暂时连不上时脚本会告警，**仍会推远端**。
+局域网或异地暂时连不上时脚本会告警；只要还有一个落点收到，整次仍算有副本。
 
 看日志：
 
 ```bash
 ssh user@your-primary-host 'tail -50 /var/log/store-daily-offsite.log'
 ```
+
+### 4. 失败/恢复告警（企业微信）
+
+备份失败会主动推到企业微信群，不再只躺在日志里（2026-10 之前远端落点静默失效 53 天，
+就是因为只写日志、exit code 仍是 0）：
+
+```bash
+# 通道自检（用非法 msgtype 探活：企微会拒绝，群里不会出现消息）
+python3 scripts/notify_failure.py --probe
+
+# 演练：只打印将要发送的内容，不真发
+ALERT_DRY_RUN=1 ./scripts/backup_offsite.sh --dry-run
+```
+
+- webhook 默认读生产库 `app_meta.wecom_global`（设置页那个机器人），可用 `ALERT_WEBHOOK` 覆盖
+- 通知规则：`ok→fail` 立即发；`fail→fail` 24 小时内静默（超 24 小时再提醒一次）；`fail→ok` 发一条恢复
+- 去重状态：`data/backups/.alert-state.json`（不随代码同步、不被清理）
+- 告警自己发不出去**不影响**备份，只往日志里写
+
+「库未变化」这一小时的落点探活：库没变化时脚本本来会直接退出、不连备份机，落点掉线得等到
+下次有数据变化才暴露（远端那次静默失效就是这么漏了很久）。现在这个小时也会做一次轻量探活：
+ssh 连得上且备份目录在 = 可用（顺带打一行剩余空间）；全挂 → `exit 1` + 告警，挂一半 → 仍
+`exit 0`、由告警提示。不想要这层检查可设 `SKIP_PROBE=0`。
 
 生产机自己也还有应用内备份（设置页「立即备份」）。
 
@@ -104,7 +129,7 @@ ssh user@your-primary-host 'tail -50 /var/log/store-daily-offsite.log'
 
 ### 级别 A：只备份，不双活（够用，推荐先做）
 
-- 生产挂了 → 从局域网或远端把最新 `.db` 拷回，重启 Docker
+- 生产挂了 → 从局域网或异地把最新 `.db` 拷回，重启 Docker
 - RPO：最多丢「上次备份到故障」之间的数据
 - RTO：半小时内能恢复（有文档 + SSH）
 
@@ -126,11 +151,11 @@ cd /opt/store-daily && docker compose up -d --build
 
 不要两台同时写同一个业务库。
 
-### 级别 C：公网入口 + 远端灾备
+### 级别 C：公网入口 + 异地灾备
 
 - 日常仍写局域网生产（延迟低）
 - 公网机只做：备份落点，或 Cloudflare Tunnel 反代到家里
-- 整网挂了：在远端起 docker，导入最近备份，改 Tunnel/DNS 指向远端
+- 整网挂了：在异地把 docker 起起来，导入最近备份，改 Tunnel/DNS 指向它
 
 TLS：生产若走公网，用 `STORE_DAILY_SECURE=1` + tunnel/Caddy HTTPS（见 `docs/deploy-vps.md`）。
 
@@ -193,8 +218,8 @@ sqlite3 data/store_daily.db "SELECT COUNT(*) FROM stores; SELECT COUNT(*) FROM d
 
 ## 六、建议先做的最小集
 
-1. 备份机上建目录：`mkdir -p ~/store-daily-backups/{db,env}`
-2. 配好到生产和远端的 SSH 免密
+1. 备份机上建目录：`mkdir -p ~/store-daily-backups/{db,env,uploads}`
+2. 配好到生产和异地备份机的 SSH 免密
 3. 跑通一次：`./scripts/backup_offsite.sh`
 4. 写上 cron（每天一次；重要档期可改每小时）
 5. 故意在测试目录恢复一份，确认能登录、店数对
