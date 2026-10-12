@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from functools import wraps
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from flask import Response, flash, g, redirect, render_template, request, url_for
 
@@ -23,12 +23,14 @@ from . import db, insights, policy
 from .helpers import (
     accessible_stores,
     default_home,
+    filter_stores,
     login_required,
     month_end,
     parse_date,
     parse_int,
     phone_fix_marks,
     pick_store,
+    scope_options,
     sql_in,
     xlsx_bytes,
     xlsx_response,
@@ -116,6 +118,28 @@ def _reports_on(conn, store_ids: Sequence[int], biz_date: date) -> Dict[int, Any
 def _city_of(store) -> str:
     return (store["city"] or "").strip() or "未分地市"
 
+def _day_scope(stores) -> Dict[str, Any]:
+    """单日视图的地市 / 区域经理筛选：跟通报表同一套控件，只有默认值不同。
+
+    通报表默认落在南通市，这页默认「全部」——打开是单日全店视野，想看某个
+    地市 / 哪位区域经理再选。传了不认识的值当没传，别把表滤成空的。
+    """
+    cities, managers = scope_options(stores)
+    city = (request.args.get("city") or "").strip()
+    area = (request.args.get("area") or "").strip()
+    if city not in cities:
+        city = ""
+    if area not in managers:
+        area = ""
+    return {
+        "stores": filter_stores(stores, city, area),
+        "city": city,
+        "cities": cities,
+        "area": area,
+        "areas": managers,
+        "label": " · ".join(b for b in (city, area) if b),
+    }
+
 
 def _order_rows(
     rows: List[Dict[str, Any]], city_order: Sequence[str], sort: str
@@ -132,7 +156,53 @@ def _order_rows(
     return insights.group_rows_by_city_order(ordered, city_order, lambda r: r["city"])
 
 
-def _day_payload(conn, stores, biz_date: date, *, role: str, today: date, sort: str):
+def day_copy_text(
+    *,
+    biz_date: date,
+    rows: Sequence[Mapping[str, Any]],
+    totals: Mapping[str, Any],
+    missing_names: Sequence[str],
+    silent_n: int = 0,
+    scope_label: str = "",
+) -> str:
+    """单日通报文案（贴微信群）：一句合计 + 少报 / 多报 / 一致 / 未交点名。
+
+    行序固定按 |差| 降序，与页面排序开关无关——同一份数据不该复制出两种顺序。
+    没交日报又没触客的那批只报个数，不把名单铺满。
+    """
+    if not rows:
+        return ""  # 没有店进表（全静默）：没有可通报的内容
+    label = (scope_label or "").strip()
+    head = f"【手机销量对比触客】{biz_date.month}月{biz_date.day}日"
+    if label:
+        head += f"（{label}）"
+    parts: List[str] = [head]
+    if int(totals["n"]):
+        parts.append(
+            f"合计（已交 {totals['n']} 家）：触客 {totals['touch']} 条 · "
+            f"手机销量 {totals['sold']} 台 · 差 {totals['diff_text']}"
+        )
+    under = [r for r in rows if r["side"] == "under"]
+    over = [r for r in rows if r["side"] == "over"]
+    even = [r["name"] for r in rows if r["side"] == "even"]
+    if under:
+        bits = "、".join(f"{r['name']} {r['diff_text']}" for r in under)
+        parts.append(f"少报 {len(under)} 家：{bits}")
+    if over:
+        bits = "、".join(f"{r['name']} {r['diff_text']}" for r in over)
+        parts.append(f"多报 {len(over)} 家：{bits}")
+    if even:
+        parts.append(f"一致 {len(even)} 家：" + "、".join(even))
+    if missing_names:
+        parts.append(f"未交日报 {len(missing_names)} 家：" + "、".join(missing_names))
+    if silent_n:
+        parts.append(f"另有 {silent_n} 家没交日报也没触客记录")
+    return "\n".join(parts) if len(parts) > 1 else ""
+
+
+def _day_payload(
+    conn, stores, biz_date: date, *, role: str, today: date, sort: str, scope_label: str = ""
+):
     """单日主表：全店一行，触客条数 vs 日报手机销量。"""
     ids = [int(s["id"]) for s in stores]
     day_key = biz_date.isoformat()
@@ -204,19 +274,33 @@ def _day_payload(conn, stores, biz_date: date, *, role: str, today: date, sort: 
         else:
             g["missing"] += 1
     for g in city_groups:
+        # 小计行跟店铺行用同一套徽标口径（少报 / 多报 / 一致），别一边是词一边是裸数字
         g["diff_text"] = _diff_text(g["diff"]) if g["n"] else "—"
+        g["side"] = _side(g["diff"]) if g["n"] else "none"
     if len(city_groups) <= 1:
         city_groups = []
 
+    missing_names = [r["name"] for r in ordered if not r["submitted"]]
+    cities, _managers = scope_options(stores)
+    # 抬头：筛了就地市+区域经理；没筛时只有「本来就看得到单市」才带城市名
+    label = (scope_label or "").strip() or (cities[0] if len(cities) == 1 else "")
     return {
         "rows": ordered,
         "city_groups": city_groups,
         "totals": totals,
         "missing_n": len(ordered) - totals["n"],
-        "missing_names": [r["name"] for r in ordered if not r["submitted"]],
+        "missing_names": missing_names,
         "silent_n": silent_n,
         "can_edit": _can_edit_cell(role, biz_date, today),
-        "max_abs": max((abs(int(r["diff"])) for r in ordered if r["diff"]), default=0),
+        "scope_label": label,
+        "copy_text": day_copy_text(
+            biz_date=biz_date,
+            rows=_order_rows(rows, city_order, "abs"),
+            totals=totals,
+            missing_names=missing_names,
+            silent_n=silent_n,
+            scope_label=label,
+        ),
     }
 
 
@@ -317,6 +401,10 @@ def _back_kwargs(form) -> Dict[str, Any]:
     kwargs = {}
     if form.get("date"):
         kwargs["date"] = form.get("date")
+    # 筛选也得带回：改完一格还回到同一个地市 / 区域经理视野
+    for key in ("city", "area"):
+        if form.get(key):
+            kwargs[key] = form.get(key)
     if (form.get("sort") or "") == "catalog":
         kwargs["sort"] = "catalog"
     return kwargs
@@ -354,8 +442,15 @@ def register_compare(app) -> None:
                     **payload,
                 )
             biz_date = parse_date(request.args.get("date"), today - timedelta(days=1))
+            scope = _day_scope(stores)
             payload = _day_payload(
-                conn, stores, biz_date, role=role, today=today, sort=sort
+                conn,
+                scope["stores"],
+                biz_date,
+                role=role,
+                today=today,
+                sort=sort,
+                scope_label=scope["label"],
             )
         return render_template(
             "compare.html",
@@ -365,6 +460,10 @@ def register_compare(app) -> None:
             prev_date=biz_date - timedelta(days=1),
             next_date=None if biz_date >= today else biz_date + timedelta(days=1),
             today=today,
+            city=scope["city"],
+            cities=scope["cities"],
+            area=scope["area"],
+            areas=scope["areas"],
             **payload,
         )
 
@@ -449,6 +548,8 @@ def register_compare(app) -> None:
                     "差",
                     "差率",
                     "日报",
+                    "日报提交人",
+                    "提交时间",
                     "手机销量修正",
                 ]
                 data_rows = [
@@ -460,6 +561,8 @@ def register_compare(app) -> None:
                         r["diff_text"],
                         r["rate_text"],
                         "已交" if r["submitted"] else "未交日报",
+                        r["submitter"],
+                        r["submitted_at"],
                         (r["fix"] or {}).get("text", ""),
                     ]
                     for r in payload["days"]
@@ -472,8 +575,15 @@ def register_compare(app) -> None:
                 biz_date = parse_date(request.args.get("date"), today - timedelta(days=1))
                 sort = (request.args.get("sort") or "").strip()
                 sort = sort if sort in ("abs", "catalog") else "abs"
+                scope = _day_scope(stores)
                 payload = _day_payload(
-                    conn, stores, biz_date, role=role, today=today, sort=sort
+                    conn,
+                    scope["stores"],
+                    biz_date,
+                    role=role,
+                    today=today,
+                    sort=sort,
+                    scope_label=scope["label"],
                 )
                 header = [
                     "日期",
@@ -484,6 +594,8 @@ def register_compare(app) -> None:
                     "差",
                     "差率",
                     "日报",
+                    "日报提交人",
+                    "提交时间",
                     "手机销量修正",
                 ]
                 data_rows = [
@@ -496,6 +608,8 @@ def register_compare(app) -> None:
                         r["diff_text"],
                         r["rate_text"],
                         "已交" if r["submitted"] else "未交日报",
+                        r["submitter"],
+                        r["submitted_at"],
                         (r["fix"] or {}).get("text", ""),
                     ]
                     for r in payload["rows"]
@@ -508,4 +622,4 @@ def register_compare(app) -> None:
 
 
 # 供模板 / 测试复用（避免在模板里写口径判断）
-COMPARE_HELPERS: Tuple[Any, ...] = (_diff_text, _rate_text, _side)
+COMPARE_HELPERS: Tuple[Any, ...] = (_diff_text, _rate_text, _side, day_copy_text)
