@@ -2,9 +2,11 @@
 
 口径（与 app/views_compare.py 顶部说明一致）：
 - 触客条数 = 当天 deal_posts 条数（不分成交）；手机销量 = 当天日报 phone_sales
-- 差 = 触客 − 销量（正=少报、负=多报）；未交日报的店留行但差不计算
+- 触客/销量 = 触客 ÷ 手机销量（两位小数百分比）：理论要 >100.00%，低于 100.00% 都不好；
+  销量 0 写「-」，没交日报写「未交日报」徽标（不参与排名）
 - 合计只算已交日报的店 / 天；改手机销量只给 admin / city
 - 业辅查询登记：每店每天一个整数，跟手机销量一样就地填 / 就地改（只给 admin / city）
+- 门店顺序固定（启东 → 海门 → 开发区 → 港闸 → 通州 → 如皋 → 海安），没有排序开关
 """
 import io
 import re
@@ -15,7 +17,7 @@ from conftest import store_id
 from openpyxl import load_workbook
 
 from app import db
-from app.views_compare import _diff_text, _rate_text, _side, day_copy_text
+from app.views_compare import _AREA_ORDER, _area_rank, _diff_text, _ratio_text, day_copy_text
 
 
 def _uid(conn) -> int:
@@ -122,20 +124,20 @@ def foot_of(body: str, label: str) -> str:
 # ---------------------------------------------------------------- 文案（纯函数）
 
 
-def test_diff_and_rate_text():
+def test_diff_and_ratio_text():
     assert _diff_text(None) == "—"
     assert _diff_text(0) == "0"
     assert _diff_text(4) == "+4"
     assert _diff_text(-4) == "-4"
-    assert _rate_text(None) == "—"
-    assert _rate_text(0.0) == "0%"
-    assert _rate_text(0.004) == "0%"  # 不到 0.5% 显示 0%
-    assert _rate_text(0.44) == "+44%"
-    assert _rate_text(-0.5) == "-50%"
-    assert _side(None) == "none"
-    assert _side(0) == "even"
-    assert _side(3) == "under"  # 正差 = 少报
-    assert _side(-3) == "over"
+    # 触客 ÷ 手机销量，两位小数；理论要 >100.00%
+    assert _ratio_text(23, 13) == "176.92%"
+    assert _ratio_text(8, 8) == "100.00%"
+    assert _ratio_text(4, 10) == "40.00%"
+    assert _ratio_text(0, 5) == "0.00%"  # 触客一条没有也照算，不当成「没得比」
+    assert _ratio_text(5, 0) == "-"  # 销量 0 台：当天才会出现，不进排名
+    assert _ratio_text(0, 0) == "-"
+    assert _ratio_text(None, 5) == "—"  # 没交日报 → 缺一边
+    assert _ratio_text(5, None) == "—"
 
 
 # ---------------------------------------------------------------- 主表口径
@@ -143,7 +145,7 @@ def test_diff_and_rate_text():
 
 @pytest.fixture()
 def day_scene(admin_client):
-    """口径示例：乙店少报、甲店一致、巳店/戊店多报、丁店未交日报、丙店静默。"""
+    """口径示例：乙店 180.00%、甲店 100.00%、巳店 / 戊店销量 0 写「-」、丁店未交日报、丙店静默。"""
     day = work_day()
     seed_report("store-beta", day, 5)
     seed_touch("store-beta", day, 9)
@@ -160,20 +162,23 @@ def day_scene(admin_client):
 def test_day_table_numbers_and_unsubmitted(admin_client, day_scene):
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
     assert "触客通报" in body
-    # 已交 4 家：触客 9+8+2+4=23，销量 5+8+0+0=13，差 +10
+    # 已交 4 家：触客 9+8+2+4=23，销量 5+8+0+0=13 → 23 ÷ 13 = 176.92%
     assert "合计（已交 4 家）" in body
-    assert ">23<" in body and ">13<" in body and "+10" in body
-    # 未交日报的店：留行、差不计算、单独点名
-    assert "未交日报" in body
-    assert "未交日报 1 家：示例市丁路vivo体验店" in body
-    # 差 0 也列，显示「一致」
-    assert "示例甲店" in body and "一致" in body
+    assert ">23<" in body and ">13<" in body and "176.92%" in body
+    # 未交日报的店：留行、那格写「未交日报」徽标；名单不再单独铺一段
+    assert "未交日报" in row_of(body, "示例丁店")
+    assert "未交日报 1 家" not in body
+    # 比例 100.00% 就是「刚好持平」；少报 / 多报 / 一致这些字样全没了
+    assert "100.00%" in row_of(body, "示例甲店")
+    assert "少报" not in body and "多报" not in body and "一致" not in body
     # 地市小计：邻市 2 家已交 + 1 家未交
     assert "示例市 · 2 家" in body
     assert "邻市 · 2 家（未交 1）" in body
     # 静默店（无日报无触客）不占表行，只报个数
     assert "另有 1 家当天没交日报也没触客记录" in body
     assert "示例丙店" not in body
+    # 门店格下面不再挂地市名（地市由分组小计行交代）
+    assert '<span class="sub">' not in row_of(body, "示例甲店")
 
 
 
@@ -204,14 +209,14 @@ def test_unsubmitted_store_shows_touch_but_no_diff(admin_client, day_scene):
     assert "+6" not in row and "-6" not in row
 
 
-def test_touch_zero_keeps_row_and_no_rate(admin_client):
-    """触客 0 条：店还在表里（有日报），差不写 0、差率算不出。"""
+def test_touch_zero_keeps_row_and_zero_percent(admin_client):
+    """触客 0 条：店还在表里（有日报），触客 ÷ 销量 照算 0.00%（不是「没得比」）。"""
     day = work_day()
     seed_report("store-gamma", day, 3)
     body = admin_client.get(f"/compare?date={day.isoformat()}").get_data(as_text=True)
     row = row_of(body, "示例丙店")
-    assert "-3" in row  # 差 = 0 − 3
-    assert "—" in row
+    assert "0.00%" in row  # 0 ÷ 3
+    assert "差率" not in row and "少报" not in row  # 旧口径的字样一个都不留
 
 
 def test_touch_cross_day_note_visible(admin_client, day_scene):
@@ -224,28 +229,24 @@ def test_touch_cross_day_note_visible(admin_client, day_scene):
 
 
 def test_day_copy_text_lines():
-    """纯函数：一行合计 + 少报 / 多报 / 一致 / 未交 / 静默，缺的段不出现。"""
+    """纯函数：一行合计 + 「不足 100.00% N 家」点名（最差在前）；旧的三段不再出现。"""
     rows = [
-        {"name": "示例乙店", "side": "under", "diff_text": "+4"},
-        {"name": "示例甲店", "side": "even", "diff_text": "0"},
-        {"name": "示例戊店", "side": "over", "diff_text": "-4"},
+        {"name": "示例乙店", "ratio": 1.8, "ratio_text": "180.00%"},
+        {"name": "示例甲店", "ratio": 1.0, "ratio_text": "100.00%"},
+        {"name": "示例戊店", "ratio": 0.4, "ratio_text": "40.00%"},
     ]
-    totals = {"n": 3, "touch": 21, "sold": 13, "diff_text": "+8"}
+    totals = {"n": 3, "touch": 21, "sold": 13, "ratio_text": "161.54%"}
     text = day_copy_text(
         biz_date=date(2026, 10, 11),
         rows=rows,
         totals=totals,
-        missing_names=["示例丁店"],
         silent_n=1,
         scope_label="示例市",
     )
     assert text.splitlines() == [
         "【触客通报】10月11日（示例市）",
-        "合计（已交 3 家）：触客 21 条 · 手机销量 13 台 · 差 +8",
-        "少报 1 家：示例乙店 +4",
-        "多报 1 家：示例戊店 -4",
-        "一致 1 家：示例甲店",
-        "未交日报 1 家：示例丁店",
+        "合计（已交 3 家）：触客 21 条 · 手机销量 13 台 · 触客/销量 161.54%",
+        "不足 100.00% 1 家：示例戊店 40.00%",
         "另有 1 家没交日报也没触客记录",
     ]
 
@@ -255,9 +256,9 @@ def test_day_copy_text_empty_day():
     text = day_copy_text(
         biz_date=date(2026, 10, 11),
         rows=[],
-        totals={"n": 0, "touch": 0, "sold": 0, "diff_text": "0"},
-        missing_names=[],
+        totals={"n": 0, "touch": 0, "sold": 0, "ratio_text": "—"},
     )
+    assert text == ""
     assert text == ""
 
 
@@ -265,10 +266,10 @@ def test_copy_block_matches_page_numbers(admin_client, day_scene):
     """页面上的通报文案块，数字跟表格口径一致，且可一键复制。"""
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
     assert 'id="copyText"' in body and "复制通报" in body
-    assert "合计（已交 4 家）：触客 23 条 · 手机销量 13 台 · 差 +10" in body
-    assert "少报 3 家：示例市乙街vivo专卖店 +4、邻市戊路vivo体验店 +4、邻市巳街vivo专卖店 +2" in body
-    assert "一致 1 家：示例市甲街vivo体验店" in body
-    assert "未交日报 1 家：示例市丁路vivo体验店" in body
+    assert "合计（已交 4 家）：触客 23 条 · 手机销量 13 台 · 触客/销量 176.92%" in body
+    assert "未交日报 1 家" not in body
+    # 卖过货的只有甲（100.00%）、乙（180.00%）：没到 100.00% 的段不出现
+    assert "不足 100.00%" not in body
 
 
 def test_copy_block_hidden_on_empty_day(admin_client):
@@ -277,14 +278,20 @@ def test_copy_block_hidden_on_empty_day(admin_client):
     assert 'id="copyText"' not in body
 
 
-def test_sort_switch_keeps_abs_order(admin_client, day_scene):
-    """默认按 |差| 降序（地市分组内），目录顺序照旧。拿同城三家比：邻市 戊(+4) / 巳(+2) / 丁(未交)。"""
-    day = day_scene.isoformat()
-    by_abs = admin_client.get(f"/compare?date={day}").get_data(as_text=True)
-    catalog = admin_client.get(f"/compare?date={day}&sort=catalog").get_data(as_text=True)
-    names = ("示例丁店", "示例戊店", "示例巳店")
-    assert store_order(by_abs, names) == ["示例戊店", "示例巳店", "示例丁店"]
-    assert store_order(catalog, names) == ["示例丁店", "示例戊店", "示例巳店"]
+def test_store_order_is_fixed(admin_client, day_scene):
+    """没有排序开关：门店顺序固定（区县序，没命中就按目录序），地市仍按目录序分组。"""
+    body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
+    assert "按差排序" not in body and "sort=" not in body
+    names = ("示例甲店", "示例乙店", "示例丁店", "示例戊店", "示例巳店")
+    assert store_order(body, names) == list(names)
+
+
+def test_area_order_rank_is_fixed():
+    """固定门店顺序：启东 → 海门 → 开发区 → 港闸 → 通州 → 如皋 → 海安，没命中的排最后。"""
+    assert list(_AREA_ORDER) == ["启东", "海门", "开发区", "港闸", "通州", "如皋", "海安"]
+    assert [_area_rank(f"示例市{x}路vivo体验店") for x in ("海安", "启东", "通州")] == [6, 0, 4]
+    assert _area_rank("示例市甲街vivo体验店") == len(_AREA_ORDER)  # 全称里没命中区县关键词
+    assert _area_rank("示例市甲街vivo体验店", "启东店") == 0  # 退到简称再找一遍
 
 
 def test_empty_day(admin_client):
@@ -318,19 +325,20 @@ def test_shot_block_on_day_view(admin_client, day_scene):
 
 
 def test_shot_content_matches_table(admin_client, day_scene):
-    """截图容器里就是这张表：抬头、四列表格、未交名单都在图里。"""
+    """截图容器里就是这张表：抬头、两行表头、未交日报的店都在图里。"""
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
     shot = shot_of(body)
     assert "触客通报" in shot
     assert f"{day_scene.month}月{day_scene.day}日" in shot
     assert "合计（已交 4 家）" in shot
-    assert "少报 +10" in shot  # 合计行的差（徽标写法）
-    assert "未交日报 1 家：示例市丁路vivo体验店" in shot
+    assert "176.92%" in shot  # 合计行的触客/销量
+    assert "示例市丁路vivo体验店" in shot  # 未交日报的店还在表里
+    assert "未交日报 1 家" not in shot  # 名单那段不再上屏
     assert "示例乙店" in shot
 
 
 def test_day_shot_table_header_groups(admin_client, day_scene):
-    """通报图两行表头：当日 4 列 + 本月累计 4 列；差率不占列、日报列不上图。"""
+    """通报图两行表头：本月累计 4 列 + 当日 4 列；列名统一「触客/销量」，没有「差率」小字。"""
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
     shot = shot_of(body)
     head = shot[: shot.index("</thead>")]
@@ -338,36 +346,59 @@ def test_day_shot_table_header_groups(admin_client, day_scene):
     assert '<th colspan="4" class="g-day">当日</th>' in head
     assert 'class="g-month"' in head and "本月累计（" in head
     assert "业辅查询登记" in head
-    assert "差率" in shot  # 差格里的补充说明，不占一列
+    assert head.count("触客/销量") == 2  # 月 + 当日都用这个列名
+    assert "差率" not in shot and "少报" not in shot and "多报" not in shot
     assert "dev-bar" not in shot
     assert "<th>日报</th>" not in shot
 
 
-def test_diff_column_uses_words_not_bare_numbers(admin_client, day_scene):
-    """差列写「少报 +4 / 多报 -3 / 一致」：光看数字也知道往哪偏。"""
-    seed_report("store-gamma", day_scene, 3)  # 触客 0 条 → 多报
+def test_ratio_column_shows_percent(admin_client, day_scene):
+    """「差」列改成「触客/销量」百分比：乙店 180.00%、甲店 100.00%、销量 0 写「-」。"""
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
-    assert "少报 +4" in row_of(body, "示例乙店")
-    assert "多报 -3" in row_of(body, "示例丙店")
-    assert "一致" in row_of(body, "示例甲店")
+    assert "180.00%" in row_of(body, "示例乙店")
+    assert "100.00%" in row_of(body, "示例甲店")
+    assert '<td class="num">-</td>' in row_of(body, "示例戊店")  # 销量 0 台
     row = row_of(body, "示例丁店")
-    assert "未交日报" in row and "+6" not in row and "-6" not in row
+    assert "未交日报" in row and "%" not in row
 
 
 
-def test_city_subtotal_uses_words_too(admin_client, day_scene):
-    """城市小计跟店铺行同一套写法：一行是「少报 +4」，不是裸数字 +4。"""
+def test_city_subtotal_uses_same_ratio(admin_client, day_scene):
+    """城市小计跟店铺行同一套算法：合计触客 ÷ 合计销量；合计销量 0 写「-」。"""
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
-    assert '<span class="dev-badge under">少报 +4</span>' in foot_of(body, "示例市 · 2 家")
-    assert '<span class="dev-badge under">少报 +6</span>' in foot_of(body, "邻市 · 2 家")
+    # 示例市：触客 8+9=17 ÷ 销量 8+5=13 = 130.77%
+    assert "130.77%" in foot_of(body, "示例市 · 2 家")
+    # 邻市：触客 2+4=6 ÷ 销量 0 台 → 「-」
+    assert '<td class="num">-</td>' in foot_of(body, "邻市 · 2 家（未交 1）")
 
 
-def test_even_row_drops_zero_rate(admin_client, day_scene):
-    """「一致」旁边不再挂「差率 0%」；真偏了的行照旧带差率。"""
+def test_worst_three_get_red_flag(admin_client, tmp_db):
+    """排名最差 3 家：只给当日「触客/销量」那一格加红底，小计 / 合计行不参与。"""
+    day = work_day()
+    for code, sold, touch in (
+        ("store-alpha", 10, 2),  # 20.00% ← 最差
+        ("store-beta", 10, 5),  # 50.00%
+        ("store-gamma", 10, 9),  # 90.00%
+        ("store-zeta", 10, 20),  # 200.00% ← 最好，不标
+    ):
+        seed_report(code, day, sold)
+        seed_touch(code, day, touch)
+    body = admin_client.get(f"/compare?date={day.isoformat()}").get_data(as_text=True)
+    assert body.count("color: #b91c1c") == 3  # 全表一个池子，只标最差 3 家
+    for name in ("示例甲店", "示例乙店", "示例丙店"):
+        assert "color: #b91c1c" in row_of(body, name)
+    assert "color: #b91c1c" not in row_of(body, "示例巳店")
+    assert "color: #b91c1c" not in foot_of(body, "合计（已交 4 家）")
+    assert "20.00%" in row_of(body, "示例甲店")
+    assert "color: #b91c1c" in shot_of(body)  # 贴群的图里也是同一套标色
+
+
+def test_row_drops_city_subtitle(admin_client, day_scene):
+    """门店格下面不再挂地市名；本月累计那一列也是百分比。"""
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
-    even = row_of(body, "示例甲店")
-    assert "一致" in even and "差率" not in even
-    assert "差率 +44%" in row_of(body, "示例乙店")
+    assert '<span class="sub">示例市</span>' not in row_of(body, "示例甲店")
+    assert month_of(body, "示例甲店") == ["8", "8", "100.00%", "—"]
+    assert "差率" not in body
 
 def test_shot_has_no_permission_footnote(admin_client, day_scene):
     """贴群的图不带页面说明（谁能改、去哪儿补录）：那是给登录进来的人看的。"""
@@ -429,7 +460,7 @@ def test_store_month_matrix_and_total(admin_client):
     earlier = day.replace(day=1)
     if earlier != day:
         seed_report("store-alpha", earlier, 2)
-        seed_touch("store-alpha", earlier, 5)  # 多报 3
+        seed_touch("store-alpha", earlier, 5)  # 触客 5 ÷ 销量 2 = 250.00%
     sid = store_id("store-alpha")
     body = admin_client.get(
         f"/compare?view=store&store_id={sid}&month={day.replace(day=1).isoformat()}"
@@ -700,14 +731,14 @@ def test_filter_controls_stay_out_of_shot(admin_client, day_scene):
     assert "区域经理" not in shot and "前一天" not in shot
 
 
-def test_front_sort_and_export_keep_filter(admin_client, day_scene):
-    """前一天 / 排序 / 导出都带着当前筛选。"""
+def test_front_and_export_keep_filter(admin_client, day_scene):
+    """前一天 / 导出都带着当前筛选（没有排序开关）。"""
     day = day_scene.isoformat()
     prev = (day_scene - timedelta(days=1)).isoformat()
     body = admin_client.get(f"/compare?date={day}&city=示例市&area=张管理").get_data(as_text=True)
     links = hrefs(body)
     assert any(f"date={prev}" in h and "city=" in h and "area=" in h for h in links)
-    assert any("sort=catalog" in h and "city=" in h for h in links)
+    assert not any("sort=" in h for h in links)  # 排序开关撤了
     xlsx = [h for h in links if h.startswith("/compare.xlsx")]
     assert xlsx and "city=" in xlsx[0] and "area=" in xlsx[0]
 
@@ -754,7 +785,7 @@ def test_day_export_respects_filter(admin_client, day_scene):
     assert f"compare_{day_scene.isoformat()}.xlsx" in resp.headers["Content-Disposition"]
     ws = load_workbook(io.BytesIO(resp.data)).active
     header = [cell.value for cell in ws[1]]
-    assert len(header) == 16
+    assert len(header) == 15
     assert any(str(h).startswith("本月累计触客条数（") for h in header)
     labels = [str(row[1] or "") for row in ws.iter_rows(min_row=2, values_only=True)]
     names = [x for x in labels if x and not x.startswith("合计（")]
@@ -784,10 +815,9 @@ def test_store_view_table_wears_bulletin_style(admin_client, tmp_db):
 
 
 def month_of(body: str, name: str) -> list[str]:
-    """某家店那一行「门店」之后的 4 格：本月累计 触客 / 手机销量 / 差 / 业辅（去掉标签和差率小字）。"""
+    """某家店那一行「门店」之后的 4 格：本月累计 触客 / 手机销量 / 触客÷销量 / 业辅。"""
     tds = re.findall(r"<td[^>]*>(.*?)</td>", row_of(body, name), re.S)
-    cells = [re.sub(r"<[^>]+>", "", t).strip() for t in tds[0:4]]
-    return [re.sub(r"差率.*$", "", t).strip() for t in cells]
+    return [re.sub(r"<[^>]+>", "", t).strip() for t in tds[0:4]]
 
 
 def seed_aux(code: str, day: date, n: int, user_id=None) -> None:
@@ -861,7 +891,9 @@ def test_aux_zero_deletes_row(admin_client, tmp_db):
         ).fetchone()
     assert row is None
     body = admin_client.get(f"/compare?date={day.isoformat()}").get_data(as_text=True)
-    assert "合计（已交 1 家）：触客 0 条 · 手机销量 8 台 · 差 -8" in body
+    assert "合计（已交 1 家）：触客 0 条 · 手机销量 8 台 · 触客/销量 0.00%" in body
+    # 当日合计那条尾巴只在有数时才挂（0 等于没登记）
+    assert "合计（已交 1 家）：触客 0 条 · 手机销量 8 台 · 触客/销量 0.00% · 业辅" not in body
 
 
 def test_aux_needs_submitted_report(admin_client, tmp_db):
@@ -926,7 +958,7 @@ def test_aux_feeds_subtotal_total_and_copy_text(admin_client, day_scene):
     for code, n in (("store-alpha", 3), ("store-beta", 5), ("store-zeta", 1), ("store-epsilon", 2)):
         seed_aux(code, day_scene, n)
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
-    assert "合计（已交 4 家）：触客 23 条 · 手机销量 13 台 · 差 +10 · 业辅查询登记 11 条" in body
+    assert "合计（已交 4 家）：触客 23 条 · 手机销量 13 台 · 触客/销量 176.92% · 业辅查询登记 11 条" in body
     assert '<td class="num">8</td>' in foot_of(body, "示例市 · 2 家")
     assert '<td class="num">3</td>' in foot_of(body, "邻市 · 2 家（未交 1）")
     total = re.findall(r"<td[^>]*>(.*?)</td>", foot_of(body, "合计（已交 4 家）"), re.S)
@@ -961,14 +993,14 @@ def test_month_columns_follow_filter(admin_client, day_scene):
     body = admin_client.get(f"/compare?date={day}").get_data(as_text=True)
     span = r'<th colspan="4" class="g-month">本月累计（\d+月1日(–\d+月\d+日)?）</th>'
     assert re.search(span, shot_of(body))
-    assert month_of(body, "示例乙店") == ["9", "5", "少报 +4", "—"]
-    assert "差率 +44%" in shot_of(body)  # 月累计差也挂差率小字（跟当日列一个写法）
+    assert month_of(body, "示例乙店") == ["9", "5", "180.00%", "—"]
+    assert "180.00%" in shot_of(body)  # 月累计同一口径（本月触客 ÷ 本月销量）
     assert month_of(body, "示例丁店") == ["6", "—", "—", "—"]  # 没交日报：销量 / 差不比
     scoped = admin_client.get(f"/compare?date={day}&city=示例市").get_data(as_text=True)
     assert "示例丁店" not in shot_of(scoped)
     foot = re.findall(r"<td[^>]*>(.*?)</td>", foot_of(scoped, "合计（已交 2 家）"), re.S)
-    tail = [re.sub(r"差率.*$", "", re.sub(r"<[^>]+>", "", t)).strip() for t in foot[1:5]]
-    assert tail == ["17", "13", "少报 +4", "0"]  # 合计行的月累计差也带差率小字（这里剥掉再比）
+    tail = [re.sub(r"<[^>]+>", "", t).strip() for t in foot[1:5]]
+    assert tail == ["17", "13", "130.77%", "0"]  # 小计 / 合计行也是「合计触客 ÷ 合计销量」
 
 
 def test_shot_has_month_group_header(admin_client, tmp_db):
@@ -981,7 +1013,7 @@ def test_shot_has_month_group_header(admin_client, tmp_db):
         admin_client.get(f"/compare?date={day.isoformat()}").get_data(as_text=True)
     )
     assert re.search(r'<th colspan="4" class="g-month">本月累计（[^）]+）</th>', shot)
-    assert month_of(shot, "示例甲店") == ["8", "8", "一致", "6"]
+    assert month_of(shot, "示例甲店") == ["8", "8", "100.00%", "6"]
     assert "管理员" not in shot and "报表" not in shot
 
 
@@ -991,21 +1023,22 @@ def test_day_export_includes_aux(admin_client, day_scene):
     resp = admin_client.get(f"/compare.xlsx?view=day&date={day_scene.isoformat()}")
     ws = load_workbook(io.BytesIO(resp.data)).active
     header = [cell.value for cell in ws[1]]
-    assert len(header) == 16
+    assert len(header) == 15  # 去掉了「日报」列
     assert str(header[3]).startswith("本月累计触客条数（")
     assert str(header[4]).startswith("本月累计手机销量（")
     assert str(header[5]).startswith("本月累计差（")
     assert str(header[6]).startswith("本月累计业辅查询登记（")
     assert header[7:11] == ["触客条数", "手机销量", "差", "差率"]
-    assert header[11] == "业辅查询登记" and header[12] == "日报"
+    assert header[11] == "业辅查询登记" and header[12] == "日报提交人"
     values = list(ws.iter_rows(min_row=2, values_only=True))
     alpha = next(row for row in values if row[1] == "示例市甲街vivo体验店")
     assert (alpha[3], alpha[4], alpha[5], alpha[6]) == (8, 8, "0", 6)  # 本月累计
     assert (alpha[7], alpha[8], alpha[9], alpha[11]) == (8, 8, "0", 6)  # 当日
     foot = next(row for row in values if str(row[1] or "").startswith("合计（已交"))
     # 差列带 ' 前缀：xlsx 的公式注入防护（_xlsx_safe）给 +/− 开头的文本加引号
+    # 月累计差 = 各店差之和（未交日报的店当天不进这一列），所以不等于 29 − 13
     assert (foot[3], foot[4], foot[5], foot[6]) == (29, 13, "'+10", 6)
-    assert (foot[7], foot[8], foot[9], foot[10], foot[11]) == (23, 13, "'+10", "'+43%", 6)
+    assert (foot[7], foot[8], foot[9], foot[10], foot[11]) == (23, 13, "'+10", "176.92%", 6)
     assert not any(str(row[1] or "").startswith("本月累计（") for row in values)
 
 
@@ -1065,13 +1098,13 @@ def test_advisor_filter_keeps_only_that_kind(admin_client, day_scene):
 
 
 def test_advisor_filter_reaches_links_and_export(admin_client, day_scene):
-    """顾问筛选跟着前一天 / 排序 / 导出一起走。"""
+    """顾问筛选跟着前一天 / 导出一起走（排序开关撤了）。"""
     day = day_scene.isoformat()
     prev = (day_scene - timedelta(days=1)).isoformat()
     body = admin_client.get(f"/compare?date={day}&advisor=yes").get_data(as_text=True)
     links = hrefs(body)
     assert any(f"date={prev}" in h and "advisor=yes" in h for h in links)
-    assert any("sort=catalog" in h and "advisor=yes" in h for h in links)
+    assert not any("sort=" in h for h in links)  # 排序开关撤了，链接里不该再出现它
     xlsx = [h for h in links if h.startswith("/compare.xlsx")]
     assert xlsx and "advisor=yes" in xlsx[0]
 

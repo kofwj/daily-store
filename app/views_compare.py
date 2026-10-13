@@ -2,14 +2,17 @@
 口径（与 README「口径」一致）：
 - 触客条数 = 该店当日 deal_posts 的全部记录数（COUNT(*)，不看是否成交）
 - 手机销量 = 该店当日日报的 phone_sales
-- 差 = 触客条数 − 手机销量（正 = 少报，负 = 多报，与偏差榜同向）
-- 没交日报的店也留一行，差写「—」而不是 0；触客 0 时不算差率（分母 0）
+- 触客/销量 = 触客条数 ÷ 手机销量（两位小数百分比）：理论要 >100.00%，低于 100.00% 都不好
+- 没交日报的店也留一行，那一格写「未交日报」；手机销量 0（分母 0）那一格写「-」
 - 表里的合计只算「已交日报」的店 / 天，未交那部分单独点名
+- 排名：当日已交日报、手机销量 >0 的店按 触客/销量 升序，最差 3 家的当日那一格标红（合计行不参与）
+- 门店顺序固定：启东 → 海门 → 开发区 → 港闸 → 通州 → 如皋 → 海安，没命中的接在后面，
+  组内再按门店档案顺序；地市仍按目录顺序分组，没有排序开关（同一份数据只该有一种顺序）
 - 改手机销量只给管理员 / 地市负责人（沿用 policy.daily_edit_gate），改完不重发群播报
 - 业辅查询登记：每店每天一个整数，跟手机销量一样就地填 / 就地改（管理员 / 地市负责人，
   city 限本市），同样只有已交日报的店行可填；只留「谁什么时候写的」两个字段，不写 report_edits
-- 表里 4 列「本月累计」= 当月 1 日 → 所选日的触客 / 手机销量 / 差 / 业辅查询登记，每个店一行；
-  触客含未交日报那几天，销量只可能出自已交日报，某店这月没交过日报就差写「—」
+- 表里 4 列「本月累计」= 当月 1 日 → 所选日的触客 / 手机销量 / 触客与销量之比 / 业辅查询登记，
+  每个店一行；触客含未交日报那几天，销量只可能出自已交日报，某店这月没交过日报那格写「—」
 - 触客按定义就是当天的：deal_posts.biz_date 恒等于录入当天，没有补交一说，
   所以「昨天触客 0 条」就是当天真没录，本表不做任何回填
 """
@@ -45,6 +48,10 @@ COMPARE_TITLE = "触客通报"
 _WEEKDAYS = ("一", "二", "三", "四", "五", "六", "日")
 # 只有这两个角色能进这页（地市负责人要用它改本市手机销量）
 _EDIT_ROLES = ("admin", "city")
+# 门店固定顺序：按这几个区县关键词在门店名里首次命中的先后排，都没命中的接在后面
+_AREA_ORDER = ("启东", "海门", "开发区", "港闸", "通州", "如皋", "海安")
+# 触客/销量 升序里最差的几家标红（全表一个池子，只标当日那一格）
+_WORST_N = 3
 
 
 def compare_required(fn):
@@ -82,23 +89,28 @@ def _diff_text(diff: Optional[int]) -> str:
     return "0" if diff == 0 else f"{diff:+d}"
 
 
-def _rate_text(rate: Optional[float]) -> str:
-    """差率 = 差 ÷ 触客条数。触客 0（分母 0）与未交日报都给「—」，不给 0%。"""
-    if rate is None:
+def _ratio_text(touch: Optional[int], sold: Optional[int]) -> str:
+    """触客/销量 = 触客条数 ÷ 手机销量，两位小数百分比：理论要 >100.00%。
+
+    分母 0（当天一台没卖）写「-」；两边缺一（这店没交过日报）写「—」——
+    这两种「没得比」得分开，不然看不出是没交日报还是真卖了 0 台。
+    """
+    if touch is None or sold is None:
         return "—"
-    pct = rate * 100
-    return "0%" if abs(pct) < 0.5 else f"{pct:+.0f}%"
+    if int(sold) <= 0:
+        return "-"
+    return f"{int(touch) / int(sold) * 100:.2f}%"
 
 
-def _side(diff: Optional[int]) -> str:
-    """underr=少报（正差）/ over=多报（负差）/ even=一致 / none=没得比。"""
-    if diff is None:
-        return "none"
-    if diff > 0:
-        return "under"
-    if diff < 0:
-        return "over"
-    return "even"
+def _area_rank(name: str, short_name: str = "") -> int:
+    """门店固定顺序：先拿全称找区县关键词，没命中再拿简称找，都不命中排最后。"""
+    for rank, key in enumerate(_AREA_ORDER):
+        if key in (name or ""):
+            return rank
+    for rank, key in enumerate(_AREA_ORDER):
+        if key in (short_name or ""):
+            return rank
+    return len(_AREA_ORDER)
 
 
 def _aux_title(meta: Optional[Mapping[str, Any]]) -> str:
@@ -108,6 +120,15 @@ def _aux_title(meta: Optional[Mapping[str, Any]]) -> str:
     bits = [(meta.get("editor") or "").strip(), (meta.get("at") or "").strip()]
     bits = [b for b in bits if b]
     return f"业辅查询登记：{' · '.join(bits)}" if bits else ""
+
+
+def _fix_title(fix: Optional[Mapping[str, Any]]) -> str:
+    """手机销量改过的留痕：只说「改了什么、什么时候」，不写谁改的（图里要干净）。"""
+    if not fix:
+        return ""
+    bits = [(fix.get("text") or "").strip(), (fix.get("at") or "").strip()]
+    bits = [b for b in bits if b]
+    return f"已修正：{' · '.join(bits)}" if bits else ""
 
 
 def _report_days(conn, store_ids: Sequence[int], start: date, end: date) -> Dict[int, int]:
@@ -160,7 +181,11 @@ def _month_stats(conn, store_ids: Sequence[int], biz_date: date) -> Dict[str, An
 
 
 def _month_total(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
-    """月累计合计 = 表里看得见那几行的加总（合计跟行对得上，别偷偷多算）。"""
+    """月累计合计 = 表里看得见那几行的加总（合计跟行对得上，别偷偷多算）。
+
+    比 = 合计触客 ÷ 合计销量（跟店铺行同一个算法）；销量 0 写「-」，
+    一行都没有（n=0）写「—」。
+    """
     with_diff = [r for r in rows if r["m_diff"] is not None]
     total: Dict[str, Any] = {
         "n": len(with_diff),
@@ -168,12 +193,10 @@ def _month_total(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "sold": sum(int(r["m_sold"]) for r in rows),
         "aux": sum(int(r["m_aux"]) for r in rows),
         "diff": sum(int(r["m_diff"]) for r in with_diff),
-        "_touch_base": sum(int(r["m_touch"]) for r in with_diff),
     }
     total["diff_text"] = _diff_text(total["diff"])
-    total["side"] = _side(total["diff"])
-    total["rate_text"] = _rate_text(
-        None if total["_touch_base"] <= 0 else total["diff"] / total["_touch_base"]
+    total["ratio_text"] = (
+        _ratio_text(total["touch"], total["sold"]) if total["n"] else "—"
     )
     return total
 
@@ -197,6 +220,7 @@ def _reports_on(conn, store_ids: Sequence[int], biz_date: date) -> Dict[int, Any
 
 def _city_of(store) -> str:
     return (store["city"] or "").strip() or "未分地市"
+
 
 def _day_scope(stores) -> Dict[str, Any]:
     """单日视图的地市 / 区域经理 / 顾问筛选：跟通报表、洞察页同一套控件，只有默认值不同。
@@ -235,17 +259,21 @@ def _day_scope(stores) -> Dict[str, Any]:
 
 
 def _order_rows(
-    rows: List[Dict[str, Any]], city_order: Sequence[str], sort: str
+    rows: List[Dict[str, Any]], city_order: Sequence[str], stores
 ) -> List[Dict[str, Any]]:
-    """地市按目录顺序分组；组内默认 |差| 从大到小（未交日报垫底），可切目录顺序。"""
-    if sort == "catalog":
-        ordered = list(rows)  # 目录顺序 = accessible_stores 的顺序（目录表顺序）
-    else:
-        # 未交日报没有差，排在本组最后；其余按 |差| 降序；同 |差| 保持目录顺序
-        ordered = sorted(
-            rows,
-            key=lambda r: (1 if r["diff"] is None else 0, -abs(int(r["diff"] or 0))),
-        )
+    """地市按目录顺序分组；组内按区县固定顺序（启东 → … → 海安），没命中的接在最后。
+
+    组内并列时按门店档案顺序（catalog）。没有排序开关——同一份数据只该有一种顺序，
+    不然前一天 / 导出的 Excel / 抄群的文案会对不上同一张表。
+    """
+    catalog = {int(s["id"]): i for i, s in enumerate(stores)}
+    ordered = sorted(
+        rows,
+        key=lambda r: (
+            _area_rank(r["name"], r.get("short_name", "")),
+            catalog.get(r["id"], 0),
+        ),
+    )
     return insights.group_rows_by_city_order(ordered, city_order, lambda r: r["city"])
 
 
@@ -254,15 +282,14 @@ def day_copy_text(
     biz_date: date,
     rows: Sequence[Mapping[str, Any]],
     totals: Mapping[str, Any],
-    missing_names: Sequence[str],
     silent_n: int = 0,
     scope_label: str = "",
     month: Optional[Mapping[str, Any]] = None,
 ) -> str:
-    """单日通报文案（贴微信群）：一句合计 + 本月累计 + 少报 / 多报 / 一致 / 未交点名。
+    """单日通报文案（贴微信群）：一句合计 + 本月累计 + 不足 100.00% 点名。
 
-    行序固定按 |差| 降序，与页面排序开关无关——同一份数据不该复制出两种顺序。
-    没交日报又没触客的那批只报个数，不把名单铺满。
+    点名的就是「触客 ÷ 手机销量 < 100.00%」那几家，按比值升序（最差在前）——
+    谁的口子最大一眼看得出。没交日报又没触客的那批只报个数，不把名单铺满。
     业辅查询登记那天没登记就不出这一段（天天挂个「0 条」只是噪音）；
     本月累计给两行：一行是全表合计、一行按店铺开（跟着当前筛选走）。
     """
@@ -276,7 +303,7 @@ def day_copy_text(
     if int(totals["n"]):
         line = (
             f"合计（已交 {totals['n']} 家）：触客 {totals['touch']} 条 · "
-            f"手机销量 {totals['sold']} 台 · 差 {totals['diff_text']}"
+            f"手机销量 {totals['sold']} 台 · 触客/销量 {totals['ratio_text']}"
         )
         aux_n = int(totals.get("aux", 0) or 0)
         if aux_n:
@@ -286,7 +313,7 @@ def day_copy_text(
         total = month.get("total") or {}
         parts.append(
             f"本月累计（{month.get('label') or ''}）：触客 {total.get('touch', 0)} 条 · "
-            f"手机销量 {total.get('sold', 0)} 台 · 差 {total.get('diff_text', '—')} · "
+            f"手机销量 {total.get('sold', 0)} 台 · 触客/销量 {total.get('ratio_text', '—')} · "
             f"业辅查询登记 {total.get('aux', 0)} 条"
         )
         # 每家店的月累计单独一行：通报里也要看得出是哪个店拉的口子
@@ -294,7 +321,7 @@ def day_copy_text(
         for r in rows:
             bit = (
                 f"{r['name']} 触客 {int(r.get('m_touch') or 0)} · "
-                f"销量 {int(r.get('m_sold') or 0)} · 差 {r.get('m_diff_text') or '—'}"
+                f"销量 {int(r.get('m_sold') or 0)} · 触客/销量 {r.get('m_ratio_text') or '—'}"
             )
             m_aux = int(r.get("m_aux") or 0)
             if m_aux:
@@ -302,26 +329,20 @@ def day_copy_text(
             per_store.append(bit)
         if per_store:
             parts.append("本月累计 · 各店：" + "；".join(per_store))
-    under = [r for r in rows if r["side"] == "under"]
-    over = [r for r in rows if r["side"] == "over"]
-    even = [r["name"] for r in rows if r["side"] == "even"]
-    if under:
-        bits = "、".join(f"{r['name']} {r['diff_text']}" for r in under)
-        parts.append(f"少报 {len(under)} 家：{bits}")
-    if over:
-        bits = "、".join(f"{r['name']} {r['diff_text']}" for r in over)
-        parts.append(f"多报 {len(over)} 家：{bits}")
-    if even:
-        parts.append(f"一致 {len(even)} 家：" + "、".join(even))
-    if missing_names:
-        parts.append(f"未交日报 {len(missing_names)} 家：" + "、".join(missing_names))
+    weak = [r for r in rows if r.get("ratio") is not None and float(r["ratio"]) < 1]
+    if weak:
+        bits = "、".join(
+            f"{r['name']} {r['ratio_text']}"
+            for r in sorted(weak, key=lambda r: float(r["ratio"]))
+        )
+        parts.append(f"不足 100.00% {len(weak)} 家：{bits}")
     if silent_n:
         parts.append(f"另有 {silent_n} 家没交日报也没触客记录")
     return "\n".join(parts) if len(parts) > 1 else ""
 
 
 def _day_payload(
-    conn, stores, biz_date: date, *, role: str, today: date, sort: str, scope_label: str = ""
+    conn, stores, biz_date: date, *, role: str, today: date, scope_label: str = ""
 ):
     """单日主表：全店一行，触客条数 vs 日报手机销量 + 业辅查询登记。"""
     ids = [int(s["id"]) for s in stores]
@@ -357,12 +378,13 @@ def _day_payload(
                 "sold": sold,
                 "diff": diff,
                 "diff_text": _diff_text(diff),
-                "rate_text": _rate_text(None if diff is None or touch <= 0 else diff / touch),
-                "side": _side(diff),
+                "ratio": (touch / sold) if (report is not None and sold > 0) else None,
+                "ratio_text": _ratio_text(touch, sold) if report is not None else "—",
                 "submitted": report is not None,
                 "submitter": (report["submitter_name"] or "").strip() if report else "",
                 "submitted_at": (report["submitted_at"] or "")[:16] if report else "",
                 "fix": (marks.get(sid) or {}).get(day_key),
+                "fix_title": _fix_title((marks.get(sid) or {}).get(day_key)),
                 "aux": aux_n,
                 "aux_title": _aux_title(aux_meta),
             }
@@ -377,15 +399,19 @@ def _day_payload(
         r["m_aux"] = int(month["aux"].get(sid, 0))
         r["m_diff"] = month["diff"].get(sid)
         r["m_diff_text"] = _diff_text(r["m_diff"])
-        r["m_side"] = _side(r["m_diff"])
         r["m_reported"] = r["m_diff"] is not None
-        r["m_rate_text"] = _rate_text(
-            None if r["m_diff"] is None or r["m_touch"] <= 0 else r["m_diff"] / r["m_touch"]
+        r["m_ratio_text"] = (
+            _ratio_text(r["m_touch"], r["m_sold"]) if r["m_reported"] else "—"
         )
     month["total"] = _month_total(rows)
 
     city_order = insights.catalog_city_order(stores)
-    ordered = _order_rows(rows, city_order, sort)
+    ordered = _order_rows(rows, city_order, stores)
+    # 最差 3 家标红：只数「已交日报 + 当天卖了」的店，合计 / 小计行不参与
+    ranked = [r for r in ordered if r["submitted"] and int(r["sold"]) > 0]
+    worst_ids = {r["id"] for r in sorted(ranked, key=lambda r: r["ratio"])[:_WORST_N]}
+    for r in ordered:
+        r["worst"] = r["id"] in worst_ids
 
     reported_rows = [r for r in ordered if r["submitted"]]
     totals: Dict[str, Any] = {
@@ -396,10 +422,10 @@ def _day_payload(
         "diff": sum(int(r["diff"]) for r in reported_rows),
     }
     totals["diff_text"] = _diff_text(totals["diff"])
-    totals["side"] = _side(totals["diff"])
-    totals["rate_text"] = _rate_text(
-        None if totals["touch"] <= 0 else totals["diff"] / totals["touch"]
+    totals["ratio_text"] = (
+        _ratio_text(totals["touch"], totals["sold"]) if totals["n"] else "—"
     )
+    totals["below"] = totals["n"] > 0 and totals["touch"] < totals["sold"]
 
     city_groups: List[Dict[str, Any]] = []
     index: Dict[str, Dict[str, Any]] = {}
@@ -438,11 +464,13 @@ def _day_payload(
             g["m_n"] += 1
             g["m_diff"] += int(row["m_diff"])
     for g in city_groups:
-        # 小计行跟店铺行用同一套徽标口径（少报 / 多报 / 一致），别一边是词一边是裸数字
+        # 小计行跟店铺行同一套算法：合计触客 ÷ 合计销量（一个店都没算就写「—」）
         g["diff_text"] = _diff_text(g["diff"]) if g["n"] else "—"
-        g["side"] = _side(g["diff"]) if g["n"] else "none"
+        g["ratio_text"] = _ratio_text(g["touch"], g["sold"]) if g["n"] else "—"
         g["m_diff_text"] = _diff_text(g["m_diff"])
-        g["m_side"] = _side(g["m_diff"])
+        g["m_ratio_text"] = (
+            _ratio_text(g["m_touch"], g["m_sold"]) if g["m_n"] else "—"
+        )
     if len(city_groups) <= 1:
         city_groups = []
 
@@ -461,9 +489,8 @@ def _day_payload(
         "scope_label": label,
         "copy_text": day_copy_text(
             biz_date=biz_date,
-            rows=_order_rows(rows, city_order, "abs"),
+            rows=ordered,
             totals=totals,
-            missing_names=missing_names,
             silent_n=silent_n,
             scope_label=label,
             month=month,
@@ -520,12 +547,12 @@ def _store_month_payload(conn, store, month: date, *, role: str, today: date):
                 "sold": sold,
                 "diff": diff,
                 "diff_text": _diff_text(diff),
-                "rate_text": _rate_text(None if diff is None or touch <= 0 else diff / touch),
-                "side": _side(diff),
+                "ratio_text": _ratio_text(touch, sold) if report is not None else "—",
                 "submitted": report is not None,
                 "submitter": (report["submitter_name"] or "").strip() if report else "",
                 "submitted_at": (report["submitted_at"] or "")[:16] if report else "",
                 "fix": marks.get(key),
+                "fix_title": _fix_title(marks.get(key)),
                 "aux": aux_n,
                 "aux_title": _aux_title(aux_meta),
                 "editable": _can_edit_cell(role, cursor, today),
@@ -545,10 +572,8 @@ def _store_month_payload(conn, store, month: date, *, role: str, today: date):
         "touch_unsubmitted": sum(int(r["touch"]) for r in day_rows if not r["submitted"]),
     }
     totals["diff_text"] = _diff_text(totals["diff"])
-    totals["side"] = _side(totals["diff"])
-    totals["rate_text"] = _rate_text(
-        None if totals["touch"] <= 0 else totals["diff"] / totals["touch"]
-    )
+    totals["ratio_text"] = _ratio_text(totals["touch"], totals["sold"]) if totals["n"] else "—"
+    totals["below"] = totals["n"] > 0 and totals["touch"] < totals["sold"]
 
     return {
         "store": store,
@@ -579,8 +604,6 @@ def _back_kwargs(form) -> Dict[str, Any]:
     for key in ("city", "area", "advisor"):
         if form.get(key):
             kwargs[key] = form.get(key)
-    if (form.get("sort") or "") == "catalog":
-        kwargs["sort"] = "catalog"
     return kwargs
 
 
@@ -593,9 +616,6 @@ def register_compare(app) -> None:
         view = (request.args.get("view") or "day").strip()
         if view not in ("day", "store"):
             view = "day"
-        sort = (request.args.get("sort") or "").strip()
-        if sort not in ("abs", "catalog"):
-            sort = "abs"
         with db.get_db() as conn:
             stores = accessible_stores(conn)
             if not stores:
@@ -611,7 +631,6 @@ def register_compare(app) -> None:
                 return render_template(
                     "compare.html",
                     view="store",
-                    sort=sort,
                     stores=stores,
                     **payload,
                 )
@@ -623,13 +642,11 @@ def register_compare(app) -> None:
                 biz_date,
                 role=role,
                 today=today,
-                sort=sort,
                 scope_label=scope["label"],
             )
         return render_template(
             "compare.html",
             view="day",
-            sort=sort,
             date=biz_date,
             prev_date=biz_date - timedelta(days=1),
             next_date=None if biz_date >= today else biz_date + timedelta(days=1),
@@ -779,7 +796,7 @@ def register_compare(app) -> None:
                         r["touch"],
                         r["sold"],
                         r["diff_text"],
-                        r["rate_text"],
+                        r["ratio_text"],
                         r["aux"],
                         "已交" if r["submitted"] else "未交日报",
                         r["submitter"],
@@ -796,7 +813,7 @@ def register_compare(app) -> None:
                         store_totals["touch"],
                         store_totals["sold"],
                         store_totals["diff_text"],
-                        store_totals["rate_text"],
+                        store_totals["ratio_text"],
                         store_totals["aux"],
                         "",
                         "",
@@ -810,8 +827,6 @@ def register_compare(app) -> None:
                 sheet = "逐日对比"
             else:
                 biz_date = parse_date(request.args.get("date"), today - timedelta(days=1))
-                sort = (request.args.get("sort") or "").strip()
-                sort = sort if sort in ("abs", "catalog") else "abs"
                 scope = _day_scope(stores)
                 payload = _day_payload(
                     conn,
@@ -819,7 +834,6 @@ def register_compare(app) -> None:
                     biz_date,
                     role=role,
                     today=today,
-                    sort=sort,
                     scope_label=scope["label"],
                 )
                 month = payload["month"]
@@ -836,7 +850,6 @@ def register_compare(app) -> None:
                     "差",
                     "差率",
                     "业辅查询登记",
-                    "日报",
                     "日报提交人",
                     "提交时间",
                     "手机销量修正",
@@ -853,9 +866,8 @@ def register_compare(app) -> None:
                         r["touch"],
                         r["sold"],
                         r["diff_text"],
-                        r["rate_text"],
+                        r["ratio_text"],
                         r["aux"],
-                        "已交" if r["submitted"] else "未交日报",
                         r["submitter"],
                         r["submitted_at"],
                         (r["fix"] or {}).get("text", ""),
@@ -878,9 +890,8 @@ def register_compare(app) -> None:
                         day_totals["touch"],
                         day_totals["sold"],
                         day_totals["diff_text"],
-                        day_totals["rate_text"],
+                        day_totals["ratio_text"],
                         day_totals["aux"],
-                        "",
                         "",
                         "",
                         "",
@@ -894,4 +905,4 @@ def register_compare(app) -> None:
 
 
 # 供模板 / 测试复用（避免在模板里写口径判断）
-COMPARE_HELPERS: Tuple[Any, ...] = (_diff_text, _rate_text, _side, day_copy_text)
+COMPARE_HELPERS: Tuple[Any, ...] = (_diff_text, _ratio_text, day_copy_text)
