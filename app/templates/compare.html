@@ -114,6 +114,21 @@
     <div class="kpi-num">{{ totals.diff_text }}</div>
   </div>
 </div>
+<div class="dev-summary" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr))">
+  <div class="dev-stat">
+    <div class="dev-stat-label">本月累计手机销量</div>
+    <div class="kpi-num">{{ month_kpi.sold }}</div>
+  </div>
+  <div class="dev-stat">
+    <div class="dev-stat-label">本月累计触客条数</div>
+    <div class="kpi-num">{{ month_kpi.touch }}</div>
+  </div>
+  <div class="dev-stat">
+    <div class="dev-stat-label">本月累计业辅查询登记</div>
+    <div class="kpi-num">{{ month_kpi.aux }}</div>
+  </div>
+</div>
+<p class="muted" style="font-size: 12px">本月累计按当前筛选（地市 / 区域经理）统计：{{ month_kpi.label }}；触客含未交日报那几天。</p>
 
 {% if copy_text %}
 <div class="card">
@@ -128,12 +143,13 @@
 </div>
 {% endif %}
 
-<p class="muted" style="font-size: 12px">点销量格子就能改（管理员 / 地市负责人，地市限本市、本月）；改完留痕、不重发群播报。未交日报的店请到「报表」页补录当天日报。</p>
+<p class="muted" style="font-size: 12px">点销量格子就能改，业辅查询登记格子也一样（管理员 / 地市负责人，地市限本市、本月）；改完留痕、不重发群播报。未交日报的店请到「报表」页补录当天日报。</p>
 <div class="card bulletin-wrap">
-  <div id="compareShot" class="bulletin-shot" style="display: block; min-width: 0; width: fit-content; max-width: 100%; max-width: min(760px, 100%); margin: 0 auto">
+  <div id="compareShot" class="bulletin-shot" style="display: block; min-width: 0; width: fit-content; max-width: min(880px, 100%); margin: 0 auto">
     <div style="border-bottom: 2px solid #111827; padding-bottom: 10px; margin-bottom: 12px">
       <div class="bulletin-shot-title" style="margin: 0 0 3px">手机销量对比触客</div>
       <div class="bulletin-shot-date" style="margin: 0">{{ date.strftime('%Y年%m月%d日') }}{% if scope_label %} · {{ scope_label }}{% endif %}</div>
+      <div class="bulletin-shot-date" style="margin: 6px 0 0">本月累计（{{ month_kpi.label }}）：触客 {{ month_kpi.touch }} 条 · 手机销量 {{ month_kpi.sold }} 台 · 业辅查询登记 {{ month_kpi.aux }} 条</div>
     </div>
   {% if rows %}
   <table class="data dev-table bulletin" style="min-width: 0; width: auto; max-width: 100%; font-size: 14px">
@@ -143,6 +159,7 @@
         <th style="width: 130px">触客条数</th>
         <th style="width: 130px">手机销量</th>
         <th style="width: 170px" title="差 = 触客条数 − 手机销量：正数少报、负数多报">差</th>
+        <th style="width: 140px" title="业辅查询登记：当天这店查了几条，就地填、只改这一格">业辅查询登记</th>
       </tr>
     </thead>
     <tbody>
@@ -178,6 +195,25 @@
           {% endif %}
         </td>
         {{ diff_cell(r.side, r.diff_text, r.rate_text) }}
+        <td class="num">
+          {% if can_edit and r.submitted %}
+          <form method="post" action="{{ url_for('compare_aux') }}" class="cell-edit" onsubmit="return confirm('把 {{ r.name }} {{ date.isoformat() }} 的业辅查询登记改成这个数？只改这一格。')">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="store_id" value="{{ r.id }}">
+            <input type="hidden" name="date" value="{{ date.isoformat() }}">
+            <input type="hidden" name="view" value="day">
+            <input type="hidden" name="sort" value="{{ sort }}">
+            <input type="hidden" name="city" value="{{ city }}">
+            <input type="hidden" name="area" value="{{ area }}">
+            <input type="number" min="0" step="1" name="value" value="{{ r.aux }}" title="{{ r.aux_title or '点格子填业辅查询登记，回车保存这一格' }}">
+          </form>
+          <span class="cell-plain" style="display:none">{{ r.aux }}</span>
+          {% elif r.submitted or r.aux %}
+          <span style="font-weight: 650">{{ r.aux }}</span>
+          {% else %}
+          <span class="muted">—</span>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>
@@ -188,6 +224,7 @@
         <td class="num">{{ g.touch }}</td>
         <td class="num">{{ g.sold }}</td>
         <td class="num">{% if g.n %}{{ diff_pill(g.side, g.diff_text) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="num">{{ g.aux }}</td>
       </tr>
       {% endfor %}
       <tr class="city-sub">
@@ -195,6 +232,7 @@
         <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.touch }}</td>
         <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.sold }}</td>
         {{ total_cell(totals.n, totals.side, totals.diff_text, totals.rate_text, 'border-top: 2px solid #94a3b8') }}
+        <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.aux }}</td>
       </tr>
     </tfoot>
   </table>
@@ -225,6 +263,8 @@
     buttonIds: ['btnCopyShot', 'btnDownShot'],
     previewId: 'shotPreview',
     previewCardId: 'shotPreviewCard',
+    // 手机上表比屏幕宽：拍之前先把容器按内容撑宽，省得右边被裁
+    fitContent: true,
     // 截图前把可编辑格子换成纯数字（拍完自动还原）
     plainCells: { form: '#compareShot .cell-edit', text: '#compareShot .cell-plain' }
   };
@@ -232,7 +272,7 @@
 {% endif %}
 
 {% else %}
-<div class="dev-summary">
+<div class="dev-summary" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr))">
   <div class="dev-stat">
     <div class="dev-stat-label">本月已交</div>
     <div class="kpi-num">{{ totals.n }}<span class="dev-unit">/ {{ totals.days }} 天</span></div>
@@ -245,13 +285,17 @@
     <div class="dev-stat-label">手机销量合计</div>
     <div class="kpi-num">{{ totals.sold }}</div>
   </div>
+  <div class="dev-stat">
+    <div class="dev-stat-label">业辅查询登记合计</div>
+    <div class="kpi-num">{{ totals.aux }}</div>
+  </div>
   <div class="dev-stat {{ 'warn' if totals.side == 'under' else ('err' if totals.side == 'over' else 'ok') }}">
     <div class="dev-stat-label">净差合计{% if totals.rate_text != '—' %} · {{ totals.rate_text }}{% endif %}</div>
     <div class="kpi-num">{{ totals.diff_text }}</div>
   </div>
 </div>
 
-<p class="muted" style="font-size: 12px">点销量格子就能改（管理员 / 地市负责人，地市限本市、本月）；改完留痕、不重发群播报。未交日报的店请到「报表」页补录当天日报。</p>
+<p class="muted" style="font-size: 12px">点销量格子就能改，业辅查询登记格子也一样（管理员 / 地市负责人，地市限本市、本月）；改完留痕、不重发群播报。未交日报的店请到「报表」页补录当天日报。</p>
 <div class="card dev-card">
   <div class="report-table-scroll">
   <table class="data dev-table bulletin" style="min-width: 0; width: auto; max-width: 760px; margin: 0 auto; font-size: 14px">
@@ -261,6 +305,7 @@
         <th style="width: 130px">触客条数</th>
         <th style="width: 130px">手机销量</th>
         <th style="width: 170px" title="差 = 触客条数 − 手机销量：正数少报、负数多报">差</th>
+        <th style="width: 140px" title="业辅查询登记：当天这店查了几条，就地填、只改这一格">业辅查询登记</th>
       </tr>
     </thead>
     <tbody>
@@ -291,6 +336,23 @@
           {% endif %}
         </td>
         {{ diff_cell(r.side, r.diff_text, r.rate_text) }}
+        <td class="num">
+          {% if can_edit and r.editable and r.submitted %}
+          <form method="post" action="{{ url_for('compare_aux') }}" class="cell-edit" onsubmit="return confirm('把 {{ store.short_name or store.name }} {{ r.iso }} 的业辅查询登记改成这个数？只改这一格。')">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="store_id" value="{{ store.id }}">
+            <input type="hidden" name="date" value="{{ r.iso }}">
+            <input type="hidden" name="view" value="store">
+            <input type="hidden" name="month" value="{{ month.isoformat() }}">
+            <input type="number" min="0" step="1" name="value" value="{{ r.aux }}" title="{{ r.aux_title or '点格子填业辅查询登记，回车保存这一格' }}">
+          </form>
+          <span class="cell-plain" style="display:none">{{ r.aux }}</span>
+          {% elif r.submitted or r.aux %}
+          <span style="font-weight: 650">{{ r.aux }}</span>
+          {% else %}
+          <span class="muted">—</span>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>
@@ -300,6 +362,7 @@
         <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.touch }}</td>
         <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.sold }}</td>
         {{ total_cell(totals.n, totals.side, totals.diff_text, totals.rate_text, 'border-top: 2px solid #94a3b8') }}
+        <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.aux }}</td>
       </tr>
     </tfoot>
   </table>

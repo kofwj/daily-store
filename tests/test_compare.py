@@ -4,6 +4,7 @@
 - 触客条数 = 当天 deal_posts 条数（不分成交）；手机销量 = 当天日报 phone_sales
 - 差 = 触客 − 销量（正=少报、负=多报）；未交日报的店留行但差不计算
 - 合计只算已交日报的店 / 天；改手机销量只给 admin / city
+- 业辅查询登记：每店每天一个整数，跟手机销量一样就地填 / 就地改（只给 admin / city）
 """
 import io
 import re
@@ -270,6 +271,8 @@ def test_shot_block_on_day_view(admin_client, day_scene):
     setup = m.group(1)
     assert "sourceId: 'compareShot'" in setup
     assert "text: '#compareShot .cell-plain'" in setup
+    # 手机屏比表窄时靠这个开关把容器撑宽再拍，不然右边的业辅列会被 html2canvas 裁掉
+    assert "fitContent: true" in setup
 
 
 def test_shot_content_matches_table(admin_client, day_scene):
@@ -284,12 +287,13 @@ def test_shot_content_matches_table(admin_client, day_scene):
     assert "示例乙店" in shot
 
 
-def test_shot_table_is_four_columns(admin_client, day_scene):
-    """通报图只留 门店 / 触客条数 / 手机销量 / 差：差率并进差格，日报列和进度条去掉。"""
+def test_shot_table_has_five_columns(admin_client, day_scene):
+    """通报图留 门店 / 触客条数 / 手机销量 / 差 / 业辅查询登记：差率并进差格，日报列和进度条去掉。"""
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
     shot = shot_of(body)
     head = shot[: shot.index("</thead>")]
-    assert len(re.findall(r"<th[ >]", head)) == 4
+    assert len(re.findall(r"<th[ >]", head)) == 5
+    assert "业辅查询登记" in head
     assert "差率" in shot  # 差格里的补充说明，不占一列
     assert "dev-bar" not in shot
     assert "<th>日报</th>" not in shot
@@ -392,15 +396,16 @@ def test_store_month_matrix_and_total(admin_client):
     assert (db.today_local() + timedelta(days=1)).isoformat() not in body
 
 
-def test_store_month_view_has_four_columns(admin_client, tmp_db):
-    """单店逐日跟单日同一套表：四列，没有空进度条、没有「日报」列。"""
+def test_store_month_view_has_five_columns(admin_client, tmp_db):
+    """单店逐日跟单日同一套表：五列（多一列业辅查询登记），没有空进度条、没有「日报」列。"""
     day = work_day()
     seed_report("store-alpha", day, 8)
     sid = store_id("store-alpha")
     body = admin_client.get(
         f"/compare?view=store&store_id={sid}&month={day.replace(day=1).isoformat()}"
     ).get_data(as_text=True)
-    assert len(re.findall(r"<th[ >]", body)) == 4
+    assert len(re.findall(r"<th[ >]", body)) == 5
+    assert "业辅查询登记" in body
     assert "dev-bar" not in body
     assert "<th>日报</th>" not in body
 
@@ -698,13 +703,16 @@ def test_edit_cell_goes_back_to_same_filter(admin_client, day_scene):
 
 
 def test_day_export_respects_filter(admin_client, day_scene):
-    """导出的 Excel 跟着筛选走，文件名不变。"""
+    """导出的 Excel 跟着筛选走、文件名不变；表尾「合计 / 本月累计」两行不算门店。"""
     resp = admin_client.get(f"/compare.xlsx?view=day&date={day_scene.isoformat()}&city=示例市")
     assert resp.status_code == 200
     assert f"compare_{day_scene.isoformat()}.xlsx" in resp.headers["Content-Disposition"]
     ws = load_workbook(io.BytesIO(resp.data)).active
-    names = [row[1] for row in ws.iter_rows(min_row=2, values_only=True)]
+    labels = [str(row[1] or "") for row in ws.iter_rows(min_row=2, values_only=True)]
+    names = [x for x in labels if x and not x.startswith(("合计（", "本月累计（"))]
     assert sorted(names) == sorted(["示例甲店", "示例乙店"])
+    assert any(x.startswith("合计（已交 2 家）") for x in labels)
+    assert any(x.startswith("本月累计（") for x in labels)
 
 
 def test_table_wears_bulletin_style(admin_client, day_scene):
@@ -724,3 +732,261 @@ def test_store_view_table_wears_bulletin_style(admin_client, tmp_db):
     ).get_data(as_text=True)
     assert 'class="data dev-table bulletin"' in body
     assert "border-top: 2px solid #94a3b8" in foot_of(body, "合计（已交")
+
+
+# ---------------------------------------------------------------- 业辅查询登记
+
+
+def _kpi(body: str, label: str) -> str:
+    """页头某张卡的数（紧跟在标签后面的那个 kpi-num）。"""
+    m = re.search(re.escape(label) + r"</div>\s*<div class=\"kpi-num\">([^<]*)</div>", body)
+    assert m is not None, f"页头没有「{label}」这张卡"
+    return m.group(1)
+
+
+def seed_aux(code: str, day: date, n: int, user_id=None) -> None:
+    """直接写一格业辅查询登记。不传 user_id 就不带「谁改的」，hover 溯源留空。"""
+    with db.get_db() as conn:
+        db.set_aux(conn, store_id=store_id(code), biz_date=day, n=n, user_id=user_id)
+
+
+def test_aux_column_editable_only_when_report_submitted(admin_client, day_scene):
+    """第五列：已交日报的店行能就地填，未交日报的行根本没格子。"""
+    body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
+    assert "业辅查询登记" in shot_of(body)
+    filled = row_of(body, "示例甲店")
+    assert 'action="/compare/aux"' in filled
+    assert 'name="value" value="0"' in filled  # 还没登记就是 0
+    assert '<span class="cell-plain" style="display:none">0</span>' in filled
+    missed = row_of(body, "示例丁店")
+    assert "compare/aux" not in missed and "cell-plain" not in missed
+
+
+def test_aux_only_row_shows_plain_number(admin_client, tmp_db):
+    """只有业辅登记、当天没交日报的店也进表：格子出纯数字，但没有输入框。"""
+    day = work_day()
+    seed_aux("store-gamma", day, 4)
+    body = admin_client.get(f"/compare?date={day.isoformat()}").get_data(as_text=True)
+    row = row_of(body, "示例丙店")
+    assert '<span style="font-weight: 650">4</span>' in row
+    assert "compare/aux" not in row
+    assert "未交日报" in row
+
+
+def test_admin_writes_aux_and_sees_it(admin_client, tmp_db):
+    """管理员填一格业辅查询登记：落库、记下谁什么时候写的、页面出数字。"""
+    day = work_day()
+    seed_report("store-alpha", day, 8)
+    sid = store_id("store-alpha")
+    resp = admin_client.post(
+        "/compare/aux",
+        data={"store_id": sid, "date": day.isoformat(), "value": "6", "view": "day"},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert f"已把 {day.isoformat()} 的业辅查询登记改成 6 条" in body
+    assert '<span class="cell-plain" style="display:none">6</span>' in row_of(body, "示例甲店")
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT n, updated_by, updated_at FROM aux_queries WHERE store_id=? AND biz_date=?",
+            (sid, day.isoformat()),
+        ).fetchone()
+        admin_id = int(conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"])
+    assert int(row["n"]) == 6
+    assert int(row["updated_by"]) == admin_id
+    assert row["updated_at"]
+
+
+def test_aux_zero_deletes_row(admin_client, tmp_db):
+    """填 0 等于没登记：整行删掉，合计那行不挂「业辅查询登记 0 条」的尾巴。"""
+    day = work_day()
+    seed_report("store-alpha", day, 8)
+    sid = store_id("store-alpha")
+    seed_aux("store-alpha", day, 6)
+    admin_client.post(
+        "/compare/aux",
+        data={"store_id": sid, "date": day.isoformat(), "value": "0", "view": "day"},
+    )
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT n FROM aux_queries WHERE store_id=? AND biz_date=?",
+            (sid, day.isoformat()),
+        ).fetchone()
+    assert row is None
+    body = admin_client.get(f"/compare?date={day.isoformat()}").get_data(as_text=True)
+    assert "合计（已交 1 家）：触客 0 条 · 手机销量 8 台 · 差 -8" in body
+
+
+def test_aux_needs_submitted_report(admin_client, tmp_db):
+    """未交日报的店不给填业辅：先去「报表」页补录，别经由这里悄悄建日报。"""
+    day = work_day()
+    sid = store_id("store-delta")
+    resp = admin_client.post(
+        "/compare/aux",
+        data={"store_id": sid, "date": day.isoformat(), "value": "3"},
+        follow_redirects=True,
+    )
+    assert "该店当天未交日报" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        assert db.get_report(conn, sid, day) is None
+        row = conn.execute(
+            "SELECT n FROM aux_queries WHERE store_id=? AND biz_date=?",
+            (sid, day.isoformat()),
+        ).fetchone()
+    assert row is None
+
+
+def test_filler_cannot_post_aux(filler_client, tmp_db):
+    resp = filler_client.post(
+        "/compare/aux",
+        data={"store_id": store_id("store-alpha"), "date": work_day().isoformat(), "value": "5"},
+    )
+    assert resp.status_code == 403
+
+
+def test_city_writes_aux_for_own_city_only(city_client, tmp_db):
+    day = work_day()
+    seed_report("store-alpha", day, 5)  # 示例市
+    seed_report("store-delta", day, 5)  # 邻市
+    ok = city_client.post(
+        "/compare/aux",
+        data={"store_id": store_id("store-alpha"), "date": day.isoformat(), "value": "4"},
+    )
+    assert ok.status_code == 302
+    other = city_client.post(
+        "/compare/aux",
+        data={"store_id": store_id("store-delta"), "date": day.isoformat(), "value": "4"},
+    )
+    assert other.status_code == 403
+    with db.get_db() as conn:
+        assert db.aux_range_total(conn, [store_id("store-alpha")], day, day) == 4
+        assert db.aux_range_total(conn, [store_id("store-delta")], day, day) == 0
+
+
+def test_aux_cell_readonly_outside_current_month(city_client, tmp_db):
+    """地市负责人看上月：格子出纯数字、没有输入框（跟手机销量同一套权限口径）。"""
+    prev = db.today_local().replace(day=1) - timedelta(days=1)
+    seed_report("store-alpha", prev, 4)
+    seed_aux("store-alpha", prev, 2)
+    body = city_client.get(f"/compare?date={prev.isoformat()}").get_data(as_text=True)
+    row = row_of(body, "示例甲店")
+    assert '<span style="font-weight: 650">2</span>' in row
+    assert "compare/aux" not in row
+
+
+def test_aux_feeds_subtotal_total_and_copy_text(admin_client, day_scene):
+    """业辅进城市小计、进合计行尾巴（有数才挂）、进通报文案。"""
+    for code, n in (("store-alpha", 3), ("store-beta", 5), ("store-zeta", 1), ("store-epsilon", 2)):
+        seed_aux(code, day_scene, n)
+    body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
+    assert "合计（已交 4 家）：触客 23 条 · 手机销量 13 台 · 差 +10 · 业辅查询登记 11 条" in body
+    assert '<td class="num">8</td>' in foot_of(body, "示例市 · 2 家")
+    assert '<td class="num">3</td>' in foot_of(body, "邻市 · 2 家（未交 1）")
+    total = re.findall(r"<td[^>]*>(.*?)</td>", foot_of(body, "合计（已交 4 家）"), re.S)
+    assert len(total) == 5
+    assert total[-1].strip() == "11"
+
+
+
+def test_aux_range_total_normalizes_each_legacy_row(tmp_db):
+    """汇总时逐条截断历史负数，避免负值抵消合法登记。"""
+    day = work_day()
+    day2 = day + timedelta(days=1)
+    sid_a = store_id("store-alpha")
+    sid_b = store_id("store-beta")
+    with db.get_db() as conn:
+        conn.executemany(
+            "INSERT INTO aux_queries(biz_date, store_id, n) VALUES (?, ?, ?)",
+            [
+                (day.isoformat(), sid_a, -12),
+                (day2.isoformat(), sid_a, 7),
+                (day.isoformat(), sid_b, 4),
+            ],
+        )
+        assert db.aux_range_total(conn, [sid_a], day, day2) == 7
+        assert db.aux_range_total(conn, [sid_a, sid_b], day, day2) == 11
+
+
+def test_month_kpi_cards_follow_filter(admin_client, day_scene):
+    """页头三张本月累计卡：手机销量 / 触客 / 业辅，跟着地市筛选一起缩。"""
+    day = day_scene.isoformat()
+    body = admin_client.get(f"/compare?date={day}").get_data(as_text=True)
+    head = body[: body.index('<div id="compareShot"')]
+    assert re.search(r"本月累计（\d+月1日(–\d+月\d+日)?）", head)
+    assert _kpi(head, "本月累计手机销量") == "13"
+    assert _kpi(head, "本月累计触客条数") == "29"  # 含没交日报的丁店那 6 条
+    assert _kpi(head, "本月累计业辅查询登记") == "0"
+    scoped = admin_client.get(f"/compare?date={day}&city=示例市").get_data(as_text=True)
+    assert _kpi(scoped, "本月累计触客条数") == "17"
+    assert _kpi(scoped, "本月累计手机销量") == "13"
+
+
+def test_shot_has_month_kpi_line(admin_client, tmp_db):
+    """图里抬头下多一行本月累计；这行不带「管理员 / 报表」这类给登录的人看的说明。"""
+    day = work_day()
+    seed_report("store-alpha", day, 8)
+    seed_touch("store-alpha", day, 8)
+    seed_aux("store-alpha", day, 6)  # 不传 user_id：溯源不带人名，进不了图
+    shot = shot_of(
+        admin_client.get(f"/compare?date={day.isoformat()}").get_data(as_text=True)
+    )
+    m = re.search(
+        r"本月累计（([^）]*)）：触客 (\d+) 条 · 手机销量 (\d+) 台 · 业辅查询登记 (\d+) 条", shot
+    )
+    assert m is not None, "图里没有本月累计那一行"
+    assert m.groups()[1:] == ("8", "8", "6")
+    assert "管理员" not in shot and "报表" not in shot
+
+
+def test_day_export_includes_aux(admin_client, day_scene):
+    """导出带上业辅查询登记列，表尾「合计 / 本月累计」两行都有这个数。"""
+    seed_aux("store-alpha", day_scene, 6)
+    resp = admin_client.get(f"/compare.xlsx?view=day&date={day_scene.isoformat()}")
+    ws = load_workbook(io.BytesIO(resp.data)).active
+    header = [cell.value for cell in ws[1]]
+    assert header.index("业辅查询登记") == header.index("差率") + 1
+    idx = header.index("业辅查询登记")
+    values = list(ws.iter_rows(min_row=2, values_only=True))
+    alpha = next(row for row in values if row[1] == "示例甲店")
+    assert alpha[idx] == 6
+    foot = next(row for row in values if str(row[1] or "").startswith("合计（已交"))
+    assert foot[idx] == 6
+    month = next(row for row in values if str(row[1] or "").startswith("本月累计（"))
+    assert month[idx] == 6
+    assert month[header.index("差")] == "—"  # 月累计含未交日报的天，差不比
+
+
+def test_store_view_aux_cell_and_total(admin_client, tmp_db):
+    """单店逐日也有业辅格子：能就地填，合计卡和合计行跟着走。"""
+    day = work_day()
+    seed_report("store-alpha", day, 8)
+    sid = store_id("store-alpha")
+    body = admin_client.get(
+        f"/compare?view=store&store_id={sid}&month={day.replace(day=1).isoformat()}"
+    ).get_data(as_text=True)
+    assert 'action="/compare/aux"' in body
+    assert "业辅查询登记合计" in body
+    tds = re.findall(r"<td[^>]*>(.*?)</td>", foot_of(body, "合计（已交"), re.S)
+    assert len(tds) == 5
+    assert tds[-1].strip() == "0"
+
+
+def test_store_view_export_includes_aux(admin_client, tmp_db):
+    """单店逐日导出：11 列，表尾合计行带业辅查询登记。"""
+    day = work_day()
+    seed_report("store-alpha", day, 8)
+    sid = store_id("store-alpha")
+    seed_aux("store-alpha", day, 5)
+    resp = admin_client.get(
+        f"/compare.xlsx?view=store&store_id={sid}&month={day.replace(day=1).isoformat()}"
+    )
+    ws = load_workbook(io.BytesIO(resp.data)).active
+    header = [cell.value for cell in ws[1]]
+    assert len(header) == 11 and header.index("业辅查询登记") == 6
+    idx = 6
+    values = list(ws.iter_rows(min_row=2, values_only=True))
+    day_row = next(row for row in values if row[0] == day.isoformat())
+    assert day_row[idx] == 5
+    foot = next(row for row in values if str(row[0] or "").startswith("合计（已交"))
+    assert foot[idx] == 5

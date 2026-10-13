@@ -35,6 +35,11 @@ from .db_advances import (  # noqa: F401
     store_advance_window,
     yuan_to_cents,
 )
+from .db_aux import (  # noqa: F401
+    aux_days,
+    aux_range_total,
+    set_aux,
+)
 from .db_bisuan_mobile import (  # noqa: F401
     bisuan_mobile_asof_map,
     bisuan_mobile_map,

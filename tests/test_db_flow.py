@@ -602,6 +602,22 @@ def test_store_has_data_counts_invoice_edits(tmp_db):
         assert db_core.store_has_data(conn, sid)
 
 
+def test_store_has_data_counts_aux_queries(tmp_db):
+    """业辅登记引用门店：不能误判为空店并删除。"""
+    from app import db_core
+
+    with db.get_db() as conn:
+        sid = db.create_store(conn, "业辅登记店", "x-aux")
+        conn.execute(
+            "INSERT INTO aux_queries(biz_date, store_id, n) VALUES ('2026-09-12', ?, 3)",
+            (sid,),
+        )
+        assert db_core.store_has_data(conn, sid)
+        with pytest.raises(ValueError, match="已有填报"):
+            db.delete_store(conn, sid)
+        assert db.get_store(conn, sid) is not None
+
+
 def test_abandon_request_conn_resets_depth(tmp_db):
     """abandon 后同一请求再开 get_db 要能正常 commit，不能被残留 depth 吞掉写入。"""
     import sqlite3 as sq3

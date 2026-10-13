@@ -12,6 +12,8 @@
  *   previewCardId 预览卡片容器 id（默认 shotPreviewCard），会被取消 hidden 并滚进视野
  *   plainCells 可选 {form, text}：截图前把 form 选择器命中的元素藏起来、text 命中的露出来
  *              （把可编辑的 <input> 换成纯数字，拍完自动还原）
+ *   fitContent 可选 true：容器比内容窄时（手机上贴宽表），截图前按内容撑宽容器、拍完还原，
+ *              免得 html2canvas 只画容器那么大、把表右边裁掉
  * 然后调用 shotCopyImage() / shotDownloadImage()。
  */
 (function () {
@@ -49,6 +51,9 @@
     if (typeof html2canvas !== 'function') return Promise.reject(new Error('截图组件未加载'));
     // 手机内存紧，缩放别太高
     var scale = Math.min(isMobile() ? 1.5 : 2, window.devicePixelRatio || 2);
+    var undoFit = cfg().fitContent ? fitContent(el) : null;
+    function putBack() { if (undoFit) undoFit(); }
+    var box = el.getBoundingClientRect();
     return html2canvas(el, {
       backgroundColor: '#ffffff',
       scale: scale,
@@ -57,8 +62,31 @@
       // 避免把页面滚动条裁进画布
       scrollX: 0,
       scrollY: -window.scrollY,
-      windowWidth: document.documentElement.clientWidth,
+      windowWidth: Math.max(document.documentElement.clientWidth, Math.ceil(box.width)),
+    }).then(function (canvas) {
+      putBack();
+      return canvas;
+    }, function (err) {
+      putBack();
+      throw err;
     });
+  }
+
+  // 手机屏比宽表窄：容器 overflow 是 visible，但 html2canvas 只画容器那么大，图右边会被裁。
+  // 页面开 fitContent 时按内容撑宽容器、量好再拍，返回还原函数；放得下就不动（通报页没开这个开关）。
+  function fitContent(el) {
+    var prevWidth = el.style.width;
+    var prevMax = el.style.maxWidth;
+    if (el.scrollWidth <= el.getBoundingClientRect().width + 1) return null;
+    el.style.maxWidth = 'none';
+    var w = Math.ceil(el.scrollWidth);
+    el.style.width = w + 'px';
+    var w2 = Math.ceil(el.scrollWidth);
+    if (w2 > w) el.style.width = w2 + 'px';
+    return function () {
+      el.style.width = prevWidth;
+      el.style.maxWidth = prevMax;
+    };
   }
 
   function canvasToBlob(canvas) {

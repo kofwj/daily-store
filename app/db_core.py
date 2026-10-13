@@ -154,6 +154,17 @@ CREATE TABLE IF NOT EXISTS daily_facts (
     UNIQUE (biz_date, store_id, metric_code)
 );
 
+CREATE TABLE IF NOT EXISTS aux_queries (
+    biz_date TEXT NOT NULL,
+    store_id INTEGER NOT NULL REFERENCES stores(id),
+    n INTEGER NOT NULL DEFAULT 0,
+    updated_by INTEGER REFERENCES users(id),
+    updated_at TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (biz_date, store_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_aux_queries_date ON aux_queries(biz_date);
+
 CREATE TABLE IF NOT EXISTS report_edits (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     biz_date TEXT NOT NULL,
@@ -1949,6 +1960,8 @@ def store_has_data(conn: sqlite3.Connection, store_id: int) -> bool:
         "advance_posts",
         "invoice_months",
         "bisuan_mobile",
+        # 辅助登记同样引用门店；有登记时必须保留门店档案
+        "aux_queries",
         # 审计表也引用 stores(id) 且无级联，删业务行后审计行仍在，漏查会让 delete_store 撞外键
         "report_edits",
         "deal_edits",
