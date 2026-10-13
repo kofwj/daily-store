@@ -121,6 +121,9 @@ def foot_of(body: str, label: str) -> str:
     assert m is not None, f"tfoot 里没有含 {label} 的行"
     return m.group(0)
 
+
+TOTAL_HEAD = '<td class="store" style="border-top: 2px solid #94a3b8">合计</td>'  # 合计行第一格
+
 # ---------------------------------------------------------------- 文案（纯函数）
 
 
@@ -163,7 +166,7 @@ def test_day_table_numbers_and_unsubmitted(admin_client, day_scene):
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
     assert "触客通报" in body
     # 已交 4 家：触客 9+8+2+4=23，销量 5+8+0+0=13 → 23 ÷ 13 = 176.92%
-    assert "合计（已交 4 家）" in body
+    assert TOTAL_HEAD in body  # 合计行只写「合计」，不再带「（已交 N 家）」
     assert ">23<" in body and ">13<" in body and "176.92%" in body
     # 未交日报的店：留行、那格写「未交日报」徽标；名单不再单独铺一段
     assert "未交日报" in row_of(body, "示例丁店")
@@ -245,7 +248,7 @@ def test_day_copy_text_lines():
     )
     assert text.splitlines() == [
         "【触客通报】10月11日（示例市）",
-        "合计（已交 3 家）：触客 21 条 · 手机销量 13 台 · 触客/销量 161.54%",
+        "合计：触客 21 条 · 手机销量 13 台 · 触客/销量 161.54%",
         "不足 100.00% 1 家：示例戊店 40.00%",
         "另有 1 家没交日报也没触客记录",
     ]
@@ -266,7 +269,7 @@ def test_copy_block_matches_page_numbers(admin_client, day_scene):
     """页面上的通报文案块，数字跟表格口径一致，且可一键复制。"""
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
     assert 'id="copyText"' in body and "复制通报" in body
-    assert "合计（已交 4 家）：触客 23 条 · 手机销量 13 台 · 触客/销量 176.92%" in body
+    assert "合计：触客 23 条 · 手机销量 13 台 · 触客/销量 176.92%" in body
     assert "未交日报 1 家" not in body
     # 卖过货的只有甲（100.00%）、乙（180.00%）：没到 100.00% 的段不出现
     assert "不足 100.00%" not in body
@@ -330,7 +333,7 @@ def test_shot_content_matches_table(admin_client, day_scene):
     shot = shot_of(body)
     assert "触客通报" in shot
     assert f"{day_scene.month}月{day_scene.day}日" in shot
-    assert "合计（已交 4 家）" in shot
+    assert TOTAL_HEAD in shot  # 图里合计行也只写「合计」
     assert "176.92%" in shot  # 合计行的触客/销量
     assert "示例市丁路vivo体验店" in shot  # 未交日报的店还在表里
     assert "未交日报 1 家" not in shot  # 名单那段不再上屏
@@ -388,7 +391,7 @@ def test_worst_three_get_red_flag(admin_client, tmp_db):
     for name in ("示例甲店", "示例乙店", "示例丙店"):
         assert "color: #b91c1c" in row_of(body, name)
     assert "color: #b91c1c" not in row_of(body, "示例巳店")
-    assert "color: #b91c1c" not in foot_of(body, "合计（已交 4 家）")
+    assert "color: #b91c1c" not in foot_of(body, "合计")
     assert "20.00%" in row_of(body, "示例甲店")
     assert "color: #b91c1c" in shot_of(body)  # 贴群的图里也是同一套标色
 
@@ -466,7 +469,7 @@ def test_store_month_matrix_and_total(admin_client):
         f"/compare?view=store&store_id={sid}&month={day.replace(day=1).isoformat()}"
     ).get_data(as_text=True)
     assert "示例甲店" in body
-    assert "合计（已交 2 天）" in body if earlier != day else "合计（已交 1 天）" in body
+    assert TOTAL_HEAD in body  # 合计行只写「合计」，不再带「（已交 N 天）」
     # 未来日期不铺行：最后一行不晚于今天
     assert (db.today_local() + timedelta(days=1)).isoformat() not in body
 
@@ -690,7 +693,7 @@ def test_city_filter_keeps_only_that_city(admin_client, day_scene):
     assert "示例甲店" in body and "示例乙店" in body
     assert "示例丁店" not in body and "示例戊店" not in body and "示例巳店" not in body
     assert "示例市 · 2 家" not in body  # 只剩一个地市，不插小计
-    assert "合计（已交 2 家）" in body  # 触客 8+9=17 · 销量 8+5=13
+    assert TOTAL_HEAD in body  # 合计行只写「合计」；触客 8+9=17 · 销量 8+5=13
     assert ">17<" in body and ">13<" in body
 
 
@@ -788,15 +791,15 @@ def test_day_export_respects_filter(admin_client, day_scene):
     assert len(header) == 15
     assert any(str(h).startswith("本月累计触客条数（") for h in header)
     labels = [str(row[1] or "") for row in ws.iter_rows(min_row=2, values_only=True)]
-    names = [x for x in labels if x and not x.startswith("合计（")]
+    names = [x for x in labels if x and x != "合计"]
     assert sorted(names) == sorted(["示例市甲街vivo体验店", "示例市乙街vivo专卖店"])
-    assert any(x.startswith("合计（已交 2 家）") for x in labels)
+    assert labels.count("合计") == 1  # 表尾合计行只写「合计」，不再带「（已交 N 家）」
 
 def test_table_wears_bulletin_style(admin_client, day_scene):
     """表格套通报表同款网格：1px 细线 + 表头浅灰加粗，合计行压一道深线。"""
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
     assert 'class="data dev-table bulletin"' in shot_of(body)
-    assert "border-top: 2px solid #94a3b8" in foot_of(body, "合计（已交 4 家）")
+    assert "border-top: 2px solid #94a3b8" in foot_of(body, "合计")
 
 
 def test_store_view_table_wears_bulletin_style(admin_client, tmp_db):
@@ -808,7 +811,7 @@ def test_store_view_table_wears_bulletin_style(admin_client, tmp_db):
         f"/compare?view=store&store_id={sid}&month={day.replace(day=1).isoformat()}"
     ).get_data(as_text=True)
     assert 'class="data dev-table bulletin"' in body
-    assert "border-top: 2px solid #94a3b8" in foot_of(body, "合计（已交")
+    assert "border-top: 2px solid #94a3b8" in foot_of(body, "合计")
 
 
 # ---------------------------------------------------------------- 业辅 / 本月累计
@@ -891,9 +894,9 @@ def test_aux_zero_deletes_row(admin_client, tmp_db):
         ).fetchone()
     assert row is None
     body = admin_client.get(f"/compare?date={day.isoformat()}").get_data(as_text=True)
-    assert "合计（已交 1 家）：触客 0 条 · 手机销量 8 台 · 触客/销量 0.00%" in body
+    assert "合计：触客 0 条 · 手机销量 8 台 · 触客/销量 0.00%" in body
     # 当日合计那条尾巴只在有数时才挂（0 等于没登记）
-    assert "合计（已交 1 家）：触客 0 条 · 手机销量 8 台 · 触客/销量 0.00% · 业辅" not in body
+    assert "合计：触客 0 条 · 手机销量 8 台 · 触客/销量 0.00% · 业辅" not in body
 
 
 def test_aux_needs_submitted_report(admin_client, tmp_db):
@@ -958,10 +961,10 @@ def test_aux_feeds_subtotal_total_and_copy_text(admin_client, day_scene):
     for code, n in (("store-alpha", 3), ("store-beta", 5), ("store-zeta", 1), ("store-epsilon", 2)):
         seed_aux(code, day_scene, n)
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
-    assert "合计（已交 4 家）：触客 23 条 · 手机销量 13 台 · 触客/销量 176.92% · 业辅查询登记 11 条" in body
+    assert "合计：触客 23 条 · 手机销量 13 台 · 触客/销量 176.92% · 业辅查询登记 11 条" in body
     assert '<td class="num">8</td>' in foot_of(body, "示例市 · 2 家")
     assert '<td class="num">3</td>' in foot_of(body, "邻市 · 2 家（未交 1）")
-    total = re.findall(r"<td[^>]*>(.*?)</td>", foot_of(body, "合计（已交 4 家）"), re.S)
+    total = re.findall(r"<td[^>]*>(.*?)</td>", foot_of(body, "合计"), re.S)
     assert len(total) == 9  # 门店 + 4 列本月累计 + 4 列当日
     assert total[8].strip() == "11"  # 当日业辅
     assert total[4].strip() == "11"  # 本月累计业辅（就这一天，跟当日同数）
@@ -998,7 +1001,7 @@ def test_month_columns_follow_filter(admin_client, day_scene):
     assert month_of(body, "示例丁店") == ["6", "—", "—", "—"]  # 没交日报：销量 / 差不比
     scoped = admin_client.get(f"/compare?date={day}&city=示例市").get_data(as_text=True)
     assert "示例丁店" not in shot_of(scoped)
-    foot = re.findall(r"<td[^>]*>(.*?)</td>", foot_of(scoped, "合计（已交 2 家）"), re.S)
+    foot = re.findall(r"<td[^>]*>(.*?)</td>", foot_of(scoped, "合计"), re.S)
     tail = [re.sub(r"<[^>]+>", "", t).strip() for t in foot[1:5]]
     assert tail == ["17", "13", "130.77%", "0"]  # 小计 / 合计行也是「合计触客 ÷ 合计销量」
 
@@ -1034,7 +1037,7 @@ def test_day_export_includes_aux(admin_client, day_scene):
     alpha = next(row for row in values if row[1] == "示例市甲街vivo体验店")
     assert (alpha[3], alpha[4], alpha[5], alpha[6]) == (8, 8, "0", 6)  # 本月累计
     assert (alpha[7], alpha[8], alpha[9], alpha[11]) == (8, 8, "0", 6)  # 当日
-    foot = next(row for row in values if str(row[1] or "").startswith("合计（已交"))
+    foot = next(row for row in values if str(row[1] or "") == "合计")
     # 差列带 ' 前缀：xlsx 的公式注入防护（_xlsx_safe）给 +/− 开头的文本加引号
     # 月累计差 = 各店差之和（未交日报的店当天不进这一列），所以不等于 29 − 13
     assert (foot[3], foot[4], foot[5], foot[6]) == (29, 13, "'+10", 6)
@@ -1052,7 +1055,7 @@ def test_store_view_aux_cell_and_total(admin_client, tmp_db):
     ).get_data(as_text=True)
     assert 'action="/compare/aux"' in body
     assert "业辅查询登记合计" in body
-    tds = re.findall(r"<td[^>]*>(.*?)</td>", foot_of(body, "合计（已交"), re.S)
+    tds = re.findall(r"<td[^>]*>(.*?)</td>", foot_of(body, "合计"), re.S)
     assert len(tds) == 5
     assert tds[-1].strip() == "0"
 
@@ -1073,7 +1076,7 @@ def test_store_view_export_includes_aux(admin_client, tmp_db):
     values = list(ws.iter_rows(min_row=2, values_only=True))
     day_row = next(row for row in values if row[0] == day.isoformat())
     assert day_row[idx] == 5
-    foot = next(row for row in values if str(row[0] or "").startswith("合计（已交"))
+    foot = next(row for row in values if str(row[0] or "") == "合计")
     assert foot[idx] == 5
 
 

@@ -302,7 +302,7 @@ def day_copy_text(
     parts: List[str] = [head]
     if int(totals["n"]):
         line = (
-            f"合计（已交 {totals['n']} 家）：触客 {totals['touch']} 条 · "
+            f"合计：触客 {totals['touch']} 条 · "
             f"手机销量 {totals['sold']} 台 · 触客/销量 {totals['ratio_text']}"
         )
         aux_n = int(totals.get("aux", 0) or 0)
@@ -808,7 +808,7 @@ def register_compare(app) -> None:
                 store_totals = payload["totals"]
                 data_rows.append(
                     [
-                        f"合计（已交 {store_totals['n']} 天）",
+                        "合计",
                         "",
                         store_totals["touch"],
                         store_totals["sold"],
@@ -881,7 +881,7 @@ def register_compare(app) -> None:
                 data_rows.append(
                     [
                         "",
-                        f"合计（已交 {day_totals['n']} 家）",
+                        "合计",
                         "",
                         month_total["touch"],
                         month_total["sold"],

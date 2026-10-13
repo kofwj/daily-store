@@ -234,7 +234,7 @@
       </tr>
       {% endfor %}
       <tr class="city-sub">
-        <td class="store" style="border-top: 2px solid #94a3b8">合计（已交 {{ totals.n }} 家）</td>
+        <td class="store" style="border-top: 2px solid #94a3b8">合计</td>
         {{ month_total_cells(month.total.touch, month.total.sold, month.total.n, month.total.ratio_text, month.total.aux, 'border-top: 2px solid #94a3b8') }}
         <td class="num" style="border-top: 2px solid #94a3b8; border-left: 2px solid #cbd5e1">{{ totals.touch }}</td>
         <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.sold }}</td>
@@ -246,7 +246,6 @@
   {% if silent_n %}
   <p class="muted board-note">另有 {{ silent_n }} 家当天没交日报也没触客记录。</p>
   {% endif %}
-  <p class="muted board-note" style="margin-top: 6px">本月累计：触客含未交日报那几天，销量 / 触客÷销量只算交过日报的店。</p>
   {% else %}
   <p class="muted">{% if city or area %}筛选范围内这一天没有店交日报，也没有触客记录。{% else %}这一天没有店交日报，也没有触客记录。{% endif %}</p>
   {% endif %}
@@ -361,7 +360,7 @@
     </tbody>
     <tfoot>
       <tr class="city-sub">
-        <td class="store" style="border-top: 2px solid #94a3b8">合计（已交 {{ totals.n }} 天）</td>
+        <td class="store" style="border-top: 2px solid #94a3b8">合计</td>
         <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.touch }}</td>
         <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.sold }}</td>
         {{ total_cell(totals.n, totals.ratio_text, 'border-top: 2px solid #94a3b8') }}
