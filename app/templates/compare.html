@@ -18,6 +18,18 @@
 {% macro total_cell(n, side, diff_text, rate_text, style='') %}
         <td class="num"{% if style %} style="{{ style }}"{% endif %}>{% if n %}{{ diff_pill(side, diff_text) }}{% if side not in ('none', 'even') %}<span style="margin-left: 6px; font-size: 11px; color: #6b7280">差率 {{ rate_text }}</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
 {% endmacro %}
+{% macro month_row_cells(r) %}
+        <td class="num" style="border-left: 2px solid #cbd5e1"><span style="font-weight: 650">{{ r.m_touch }}</span></td>
+        <td class="num">{% if r.m_reported %}<span style="font-weight: 650">{{ r.m_sold }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="num">{% if r.m_reported %}{{ diff_pill(r.m_side, r.m_diff_text) }}{% if r.m_side not in ('none', 'even') %}<span style="margin-left: 6px; font-size: 11px; color: #6b7280">差率 {{ r.m_rate_text }}</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="num">{% if r.m_aux %}<span style="font-weight: 650">{{ r.m_aux }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+{% endmacro %}
+{% macro month_total_cells(touch, sold, n, side, diff_text, aux, style='', rate_text='') %}
+        <td class="num"{% if style %} style="{{ style }}; border-left: 2px solid #cbd5e1"{% else %} style="border-left: 2px solid #cbd5e1"{% endif %}>{{ touch }}</td>
+        <td class="num"{% if style %} style="{{ style }}"{% endif %}>{{ sold }}</td>
+        <td class="num"{% if style %} style="{{ style }}"{% endif %}>{% if n %}{{ diff_pill(side, diff_text) }}{% if side not in ('none', 'even') and rate_text %}<span style="margin-left: 6px; font-size: 11px; color: #6b7280">差率 {{ rate_text }}</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="num"{% if style %} style="{{ style }}"{% endif %}>{{ aux }}</td>
+{% endmacro %}
 <div class="page-head">
   <div class="page-title">
     <h1>
@@ -114,21 +126,6 @@
     <div class="kpi-num">{{ totals.diff_text }}</div>
   </div>
 </div>
-<div class="dev-summary" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr))">
-  <div class="dev-stat">
-    <div class="dev-stat-label">本月累计手机销量</div>
-    <div class="kpi-num">{{ month_kpi.sold }}</div>
-  </div>
-  <div class="dev-stat">
-    <div class="dev-stat-label">本月累计触客条数</div>
-    <div class="kpi-num">{{ month_kpi.touch }}</div>
-  </div>
-  <div class="dev-stat">
-    <div class="dev-stat-label">本月累计业辅查询登记</div>
-    <div class="kpi-num">{{ month_kpi.aux }}</div>
-  </div>
-</div>
-<p class="muted" style="font-size: 12px">本月累计按当前筛选（地市 / 区域经理）统计：{{ month_kpi.label }}；触客含未交日报那几天。</p>
 
 {% if copy_text %}
 <div class="card">
@@ -145,21 +142,29 @@
 
 <p class="muted" style="font-size: 12px">点销量格子就能改，业辅查询登记格子也一样（管理员 / 地市负责人，地市限本市、本月）；改完留痕、不重发群播报。未交日报的店请到「报表」页补录当天日报。</p>
 <div class="card bulletin-wrap">
-  <div id="compareShot" class="bulletin-shot" style="display: block; min-width: 0; width: fit-content; max-width: min(880px, 100%); margin: 0 auto">
+  <div id="compareShot" class="bulletin-shot" style="display: block; min-width: 0; width: fit-content; max-width: min(1180px, 100%); margin: 0 auto">
     <div style="border-bottom: 2px solid #111827; padding-bottom: 10px; margin-bottom: 12px">
       <div class="bulletin-shot-title" style="margin: 0 0 3px">手机销量对比触客</div>
       <div class="bulletin-shot-date" style="margin: 0">{{ date.strftime('%Y年%m月%d日') }}{% if scope_label %} · {{ scope_label }}{% endif %}</div>
-      <div class="bulletin-shot-date" style="margin: 6px 0 0">本月累计（{{ month_kpi.label }}）：触客 {{ month_kpi.touch }} 条 · 手机销量 {{ month_kpi.sold }} 台 · 业辅查询登记 {{ month_kpi.aux }} 条</div>
     </div>
   {% if rows %}
   <table class="data dev-table bulletin" style="min-width: 0; width: auto; max-width: 100%; font-size: 14px">
     <thead>
       <tr>
-        <th class="store">门店</th>
-        <th style="width: 130px">触客条数</th>
-        <th style="width: 130px">手机销量</th>
-        <th style="width: 170px" title="差 = 触客条数 − 手机销量：正数少报、负数多报">差</th>
-        <th style="width: 140px" title="业辅查询登记：当天这店查了几条，就地填、只改这一格">业辅查询登记</th>
+        <th class="g-profile"></th>
+        <th colspan="4" class="g-day">当日</th>
+        <th colspan="4" class="g-month">本月累计（{{ month.label }}）</th>
+      </tr>
+      <tr>
+        <th class="store g-profile">门店</th>
+        <th class="g-day" style="width: 120px">触客条数</th>
+        <th class="g-day" style="width: 120px">手机销量</th>
+        <th class="g-day" style="width: 150px" title="差 = 触客条数 − 手机销量：正数少报、负数多报">差</th>
+        <th class="g-day" style="width: 140px" title="业辅查询登记：当天这店查了几条，就地填、只改这一格">业辅查询登记</th>
+        <th class="g-month" style="width: 110px">触客条数</th>
+        <th class="g-month" style="width: 110px">手机销量</th>
+        <th class="g-month" style="width: 150px" title="本月累计差 = 本月累计触客 − 本月累计手机销量；某店这月没交过日报就写「—」">差</th>
+        <th class="g-month" style="width: 120px" title="本月累计业辅查询登记：这店这个月一共填了几条">业辅查询登记</th>
       </tr>
     </thead>
     <tbody>
@@ -214,6 +219,7 @@
           <span class="muted">—</span>
           {% endif %}
         </td>
+        {{ month_row_cells(r) }}
       </tr>
       {% endfor %}
     </tbody>
@@ -225,6 +231,7 @@
         <td class="num">{{ g.sold }}</td>
         <td class="num">{% if g.n %}{{ diff_pill(g.side, g.diff_text) }}{% else %}<span class="muted">—</span>{% endif %}</td>
         <td class="num">{{ g.aux }}</td>
+        {{ month_total_cells(g.m_touch, g.m_sold, g.m_n, g.m_side, g.m_diff_text, g.m_aux) }}
       </tr>
       {% endfor %}
       <tr class="city-sub">
@@ -233,6 +240,7 @@
         <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.sold }}</td>
         {{ total_cell(totals.n, totals.side, totals.diff_text, totals.rate_text, 'border-top: 2px solid #94a3b8') }}
         <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.aux }}</td>
+        {{ month_total_cells(month.total.touch, month.total.sold, month.total.n, month.total.side, month.total.diff_text, month.total.aux, 'border-top: 2px solid #94a3b8', month.total.rate_text) }}
       </tr>
     </tfoot>
   </table>
@@ -241,6 +249,7 @@
     {% if missing_n %}未交日报 {{ missing_n }} 家：{{ missing_names|join('、') }}（触客照记，差不计算）。{% endif %}{% if silent_n %}{% if missing_n %}另有 {% endif %}{{ silent_n }} 家当天没交日报也没触客记录。{% endif %}
   </p>
   {% endif %}
+  <p class="muted board-note" style="margin-top: 6px">本月累计：触客含未交日报那几天，销量 / 差只算交过日报的店。</p>
   {% else %}
   <p class="muted">{% if city or area %}筛选范围内这一天没有店交日报，也没有触客记录。{% else %}这一天没有店交日报，也没有触客记录。{% endif %}</p>
   {% endif %}

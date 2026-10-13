@@ -9,8 +9,8 @@
 - 改手机销量只给管理员 / 地市负责人（沿用 policy.daily_edit_gate），改完不重发群播报
 - 业辅查询登记：每店每天一个整数，跟手机销量一样就地填 / 就地改（管理员 / 地市负责人，
   city 限本市），同样只有已交日报的店行可填；只留「谁什么时候写的」两个字段，不写 report_edits
-- 页头「本月累计」= 当月 1 日 → 所选日，跟着当前地市 / 区域经理筛选走；触客含未交日报那几天，
-  与表内「只算已交日报」的合计口径不同，各自标签写明
+- 表里 4 列「本月累计」= 当月 1 日 → 所选日的触客 / 手机销量 / 差 / 业辅查询登记，每个店一行；
+  触客含未交日报那几天，销量只可能出自已交日报，某店这月没交过日报就差写「—」
 - 触客按定义就是当天的：deal_posts.biz_date 恒等于录入当天，没有补交一说，
   所以「昨天触客 0 条」就是当天真没录，本表不做任何回填
 """
@@ -111,12 +111,29 @@ def _aux_title(meta: Optional[Mapping[str, Any]]) -> str:
     return f"业辅查询登记：{' · '.join(bits)}" if bits else ""
 
 
-def _month_kpi(conn, store_ids: Sequence[int], biz_date: date) -> Dict[str, Any]:
-    """本月累计（当月 1 日 → 所选日）：触客条数 / 手机销量 / 业辅查询登记。
+def _report_days(conn, store_ids: Sequence[int], start: date, end: date) -> Dict[int, int]:
+    """区间内各店交过日报的天数：月累计差要不要出，就看这个是不是 0。"""
+    clause, params = sql_in("r.store_id", store_ids)
+    if clause == "1=0" or end < start:
+        return {}
+    rows = conn.execute(
+        f"""
+        SELECT r.store_id, COUNT(*) AS n
+        FROM daily_reports r
+        WHERE r.biz_date>=? AND r.biz_date<=? AND {clause}
+        GROUP BY r.store_id
+        """,
+        [start.isoformat(), end.isoformat(), *params],
+    )
+    return {int(row["store_id"]): int(row["n"]) for row in rows}
 
-    传进来的就是当前筛选后的门店，所以这几张卡跟着地市 / 区域经理走。
-    触客按当天全量记录算、含未交日报那几天；手机销量只可能出自已交日报，
-    两者口径本来就不同：这里是「这段时间干出来多少」，不是表里那个「已交日报的合计」。
+
+def _month_stats(conn, store_ids: Sequence[int], biz_date: date) -> Dict[str, Any]:
+    """本月累计（当月 1 日 → 所选日）按店拆开：触客 / 手机销量 / 业辅查询登记 / 差。
+
+    这几个数以前是页头三张卡，现在直接进表里每个店一行，所以本体是 {store_id: 数字}。
+    口径：触客含未交日报那几天（触客只有当天，没有补交），手机销量只可能出自已交日报；
+    差 = 触客 − 销量，某店这月一天日报都没交就写「—」（跟单日格子一个规矩）。
     """
     month_start = biz_date.replace(day=1)
     ids = [int(sid) for sid in store_ids]
@@ -124,14 +141,42 @@ def _month_kpi(conn, store_ids: Sequence[int], biz_date: date) -> Dict[str, Any]
         span = f"{month_start.month}月1日"
     else:
         span = f"{month_start.month}月1日–{biz_date.month}月{biz_date.day}日"
+    if not ids:
+        empty: Dict[int, Any] = {}
+        return {"label": span, "touch": empty, "sold": empty, "aux": empty, "diff": empty}
     deals = db.deal_daily_counts(conn, ids, month_start, biz_date)
     sales = db.range_metric_totals(conn, ids, month_start, biz_date, (PHONE_CODE,))
-    return {
-        "label": span,
-        "touch": sum(sum(int(v or 0) for v in days.values()) for days in deals.values()),
-        "sold": sum(int((row or {}).get(PHONE_CODE, 0) or 0) for row in sales.values()),
-        "aux": db.aux_range_total(conn, ids, month_start, biz_date),
+    aux_days = db.aux_days(conn, ids, month_start, biz_date)
+    reported = _report_days(conn, ids, month_start, biz_date)
+    touch = {sid: sum(int(v or 0) for v in deals.get(sid, {}).values()) for sid in ids}
+    sold = {sid: int((sales.get(sid) or {}).get(PHONE_CODE, 0) or 0) for sid in ids}
+    aux = {
+        sid: sum(int((meta or {}).get("n") or 0) for meta in aux_days.get(sid, {}).values())
+        for sid in ids
     }
+    diff: Dict[int, Optional[int]] = {
+        sid: (touch[sid] - sold[sid] if reported.get(sid) else None) for sid in ids
+    }
+    return {"label": span, "touch": touch, "sold": sold, "aux": aux, "diff": diff}
+
+
+def _month_total(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    """月累计合计 = 表里看得见那几行的加总（合计跟行对得上，别偷偷多算）。"""
+    with_diff = [r for r in rows if r["m_diff"] is not None]
+    total: Dict[str, Any] = {
+        "n": len(with_diff),
+        "touch": sum(int(r["m_touch"]) for r in rows),
+        "sold": sum(int(r["m_sold"]) for r in rows),
+        "aux": sum(int(r["m_aux"]) for r in rows),
+        "diff": sum(int(r["m_diff"]) for r in with_diff),
+        "_touch_base": sum(int(r["m_touch"]) for r in with_diff),
+    }
+    total["diff_text"] = _diff_text(total["diff"])
+    total["side"] = _side(total["diff"])
+    total["rate_text"] = _rate_text(
+        None if total["_touch_base"] <= 0 else total["diff"] / total["_touch_base"]
+    )
+    return total
 
 
 def _reports_on(conn, store_ids: Sequence[int], biz_date: date) -> Dict[int, Any]:
@@ -200,14 +245,14 @@ def day_copy_text(
     missing_names: Sequence[str],
     silent_n: int = 0,
     scope_label: str = "",
-    month_kpi: Optional[Mapping[str, Any]] = None,
+    month: Optional[Mapping[str, Any]] = None,
 ) -> str:
     """单日通报文案（贴微信群）：一句合计 + 本月累计 + 少报 / 多报 / 一致 / 未交点名。
 
     行序固定按 |差| 降序，与页面排序开关无关——同一份数据不该复制出两种顺序。
     没交日报又没触客的那批只报个数，不把名单铺满。
     业辅查询登记那天没登记就不出这一段（天天挂个「0 条」只是噪音）；
-    本月累计那行照给，口径跟页头三张卡一致，跟着当前筛选走。
+    本月累计给两行：一行是全表合计、一行按店铺开（跟着当前筛选走）。
     """
     if not rows:
         return ""  # 没有店进表（全静默）：没有可通报的内容
@@ -225,11 +270,26 @@ def day_copy_text(
         if aux_n:
             line += f" · 业辅查询登记 {aux_n} 条"
         parts.append(line)
-    if month_kpi:
+    if month:
+        total = month.get("total") or {}
         parts.append(
-            f"本月累计（{month_kpi['label']}）：触客 {month_kpi['touch']} 条 · "
-            f"手机销量 {month_kpi['sold']} 台 · 业辅查询登记 {month_kpi['aux']} 条"
+            f"本月累计（{month.get('label') or ''}）：触客 {total.get('touch', 0)} 条 · "
+            f"手机销量 {total.get('sold', 0)} 台 · 差 {total.get('diff_text', '—')} · "
+            f"业辅查询登记 {total.get('aux', 0)} 条"
         )
+        # 每家店的月累计单独一行：通报里也要看得出是哪个店拉的口子
+        per_store = []
+        for r in rows:
+            bit = (
+                f"{r['name']} 触客 {int(r.get('m_touch') or 0)} · "
+                f"销量 {int(r.get('m_sold') or 0)} · 差 {r.get('m_diff_text') or '—'}"
+            )
+            m_aux = int(r.get("m_aux") or 0)
+            if m_aux:
+                bit += f" · 业辅 {m_aux}"
+            per_store.append(bit)
+        if per_store:
+            parts.append("本月累计 · 各店：" + "；".join(per_store))
     under = [r for r in rows if r["side"] == "under"]
     over = [r for r in rows if r["side"] == "over"]
     even = [r["name"] for r in rows if r["side"] == "even"]
@@ -295,6 +355,22 @@ def _day_payload(
             }
         )
 
+    # 本月累计按店算：先把要显示的行定下来，再算这 4 列（合计才等于看得见的行之和）
+    month = _month_stats(conn, [r["id"] for r in rows], biz_date)
+    for r in rows:
+        sid = r["id"]
+        r["m_touch"] = int(month["touch"].get(sid, 0))
+        r["m_sold"] = int(month["sold"].get(sid, 0))
+        r["m_aux"] = int(month["aux"].get(sid, 0))
+        r["m_diff"] = month["diff"].get(sid)
+        r["m_diff_text"] = _diff_text(r["m_diff"])
+        r["m_side"] = _side(r["m_diff"])
+        r["m_reported"] = r["m_diff"] is not None
+        r["m_rate_text"] = _rate_text(
+            None if r["m_diff"] is None or r["m_touch"] <= 0 else r["m_diff"] / r["m_touch"]
+        )
+    month["total"] = _month_total(rows)
+
     city_order = insights.catalog_city_order(stores)
     ordered = _order_rows(rows, city_order, sort)
 
@@ -325,6 +401,11 @@ def _day_payload(
                 "sold": 0,
                 "diff": 0,
                 "aux": 0,
+                "m_touch": 0,
+                "m_sold": 0,
+                "m_diff": 0,
+                "m_aux": 0,
+                "m_n": 0,
             }
             index[row["city"]] = g
             city_groups.append(g)
@@ -336,10 +417,19 @@ def _day_payload(
             g["aux"] += int(row["aux"])
         else:
             g["missing"] += 1
+        # 本月累计不受「已交」限制：这一组所有店的月数（触客含未交日报那几天）
+        g["m_touch"] += int(row["m_touch"])
+        g["m_sold"] += int(row["m_sold"])
+        g["m_aux"] += int(row["m_aux"])
+        if row["m_diff"] is not None:
+            g["m_n"] += 1
+            g["m_diff"] += int(row["m_diff"])
     for g in city_groups:
         # 小计行跟店铺行用同一套徽标口径（少报 / 多报 / 一致），别一边是词一边是裸数字
         g["diff_text"] = _diff_text(g["diff"]) if g["n"] else "—"
         g["side"] = _side(g["diff"]) if g["n"] else "none"
+        g["m_diff_text"] = _diff_text(g["m_diff"])
+        g["m_side"] = _side(g["m_diff"])
     if len(city_groups) <= 1:
         city_groups = []
 
@@ -347,7 +437,6 @@ def _day_payload(
     cities, _managers = scope_options(stores)
     # 抬头：筛了就地市+区域经理；没筛时只有「本来就看得到单市」才带城市名
     label = (scope_label or "").strip() or (cities[0] if len(cities) == 1 else "")
-    month_kpi = _month_kpi(conn, ids, biz_date)
     return {
         "rows": ordered,
         "city_groups": city_groups,
@@ -364,9 +453,9 @@ def _day_payload(
             missing_names=missing_names,
             silent_n=silent_n,
             scope_label=label,
-            month_kpi=month_kpi,
+            month=month,
         ),
-        "month_kpi": month_kpi,
+        "month": month,
     }
 
 
@@ -719,6 +808,7 @@ def register_compare(app) -> None:
                     sort=sort,
                     scope_label=scope["label"],
                 )
+                month = payload["month"]
                 header = [
                     "日期",
                     "门店",
@@ -728,6 +818,10 @@ def register_compare(app) -> None:
                     "差",
                     "差率",
                     "业辅查询登记",
+                    f"本月累计触客条数（{month['label']}）",
+                    f"本月累计手机销量（{month['label']}）",
+                    f"本月累计差（{month['label']}）",
+                    f"本月累计业辅查询登记（{month['label']}）",
                     "日报",
                     "日报提交人",
                     "提交时间",
@@ -743,6 +837,10 @@ def register_compare(app) -> None:
                         r["diff_text"],
                         r["rate_text"],
                         r["aux"],
+                        r["m_touch"],
+                        r["m_sold"],
+                        r["m_diff_text"],
+                        r["m_aux"],
                         "已交" if r["submitted"] else "未交日报",
                         r["submitter"],
                         r["submitted_at"],
@@ -750,9 +848,9 @@ def register_compare(app) -> None:
                     ]
                     for r in payload["rows"]
                 ]
-                # 表尾两行：合计只算已交日报的店；本月累计按当前筛选统计（触客含未交那几天）
+                # 表尾合计：前几列只算已交日报的店，后 4 列是本月的（跟着上面的列走）
                 day_totals = payload["totals"]
-                month_kpi = payload["month_kpi"]
+                month_total = payload["month"]["total"]
                 data_rows.append(
                     [
                         "",
@@ -763,22 +861,10 @@ def register_compare(app) -> None:
                         day_totals["diff_text"],
                         day_totals["rate_text"],
                         day_totals["aux"],
-                        "",
-                        "",
-                        "",
-                        "",
-                    ]
-                )
-                data_rows.append(
-                    [
-                        "",
-                        f"本月累计（{month_kpi['label']}）",
-                        "",
-                        month_kpi["touch"],
-                        month_kpi["sold"],
-                        "—",
-                        "—",
-                        month_kpi["aux"],
+                        month_total["touch"],
+                        month_total["sold"],
+                        month_total["diff_text"],
+                        month_total["aux"],
                         "",
                         "",
                         "",

@@ -287,12 +287,14 @@ def test_shot_content_matches_table(admin_client, day_scene):
     assert "示例乙店" in shot
 
 
-def test_shot_table_has_five_columns(admin_client, day_scene):
-    """通报图留 门店 / 触客条数 / 手机销量 / 差 / 业辅查询登记：差率并进差格，日报列和进度条去掉。"""
+def test_day_shot_table_header_groups(admin_client, day_scene):
+    """通报图两行表头：当日 4 列 + 本月累计 4 列；差率不占列、日报列不上图。"""
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
     shot = shot_of(body)
     head = shot[: shot.index("</thead>")]
-    assert len(re.findall(r"<th[ >]", head)) == 5
+    assert len(re.findall(r"<th[ >]", head)) == 12  # 3 个分组格 + 9 个列名
+    assert '<th colspan="4" class="g-day">当日</th>' in head
+    assert 'class="g-month"' in head and "本月累计（" in head
     assert "业辅查询登记" in head
     assert "差率" in shot  # 差格里的补充说明，不占一列
     assert "dev-bar" not in shot
@@ -703,17 +705,18 @@ def test_edit_cell_goes_back_to_same_filter(admin_client, day_scene):
 
 
 def test_day_export_respects_filter(admin_client, day_scene):
-    """导出的 Excel 跟着筛选走、文件名不变；表尾「合计 / 本月累计」两行不算门店。"""
+    """导出的 Excel 跟着筛选走、文件名不变；表尾只剩合计一行，月累计写成表头。"""
     resp = admin_client.get(f"/compare.xlsx?view=day&date={day_scene.isoformat()}&city=示例市")
     assert resp.status_code == 200
     assert f"compare_{day_scene.isoformat()}.xlsx" in resp.headers["Content-Disposition"]
     ws = load_workbook(io.BytesIO(resp.data)).active
+    header = [cell.value for cell in ws[1]]
+    assert len(header) == 16
+    assert any(str(h).startswith("本月累计触客条数（") for h in header)
     labels = [str(row[1] or "") for row in ws.iter_rows(min_row=2, values_only=True)]
-    names = [x for x in labels if x and not x.startswith(("合计（", "本月累计（"))]
+    names = [x for x in labels if x and not x.startswith("合计（")]
     assert sorted(names) == sorted(["示例甲店", "示例乙店"])
     assert any(x.startswith("合计（已交 2 家）") for x in labels)
-    assert any(x.startswith("本月累计（") for x in labels)
-
 
 def test_table_wears_bulletin_style(admin_client, day_scene):
     """表格套通报表同款网格：1px 细线 + 表头浅灰加粗，合计行压一道深线。"""
@@ -734,14 +737,14 @@ def test_store_view_table_wears_bulletin_style(admin_client, tmp_db):
     assert "border-top: 2px solid #94a3b8" in foot_of(body, "合计（已交")
 
 
-# ---------------------------------------------------------------- 业辅查询登记
+# ---------------------------------------------------------------- 业辅 / 本月累计
 
 
-def _kpi(body: str, label: str) -> str:
-    """页头某张卡的数（紧跟在标签后面的那个 kpi-num）。"""
-    m = re.search(re.escape(label) + r"</div>\s*<div class=\"kpi-num\">([^<]*)</div>", body)
-    assert m is not None, f"页头没有「{label}」这张卡"
-    return m.group(1)
+def month_of(body: str, name: str) -> list[str]:
+    """某家店那一行最后 4 格：本月累计 触客 / 手机销量 / 差 / 业辅（去掉标签和差率小字）。"""
+    tds = re.findall(r"<td[^>]*>(.*?)</td>", row_of(body, name), re.S)
+    cells = [re.sub(r"<[^>]+>", "", t).strip() for t in tds[-4:]]
+    return [re.sub(r"差率.*$", "", t).strip() for t in cells]
 
 
 def seed_aux(code: str, day: date, n: int, user_id=None) -> None:
@@ -884,8 +887,9 @@ def test_aux_feeds_subtotal_total_and_copy_text(admin_client, day_scene):
     assert '<td class="num">8</td>' in foot_of(body, "示例市 · 2 家")
     assert '<td class="num">3</td>' in foot_of(body, "邻市 · 2 家（未交 1）")
     total = re.findall(r"<td[^>]*>(.*?)</td>", foot_of(body, "合计（已交 4 家）"), re.S)
-    assert len(total) == 5
-    assert total[-1].strip() == "11"
+    assert len(total) == 9  # 5 列当日 + 4 列本月累计
+    assert total[4].strip() == "11"  # 当日业辅
+    assert total[8].strip() == "11"  # 本月累计业辅（就这一天，跟当日同数）
 
 
 
@@ -908,22 +912,24 @@ def test_aux_range_total_normalizes_each_legacy_row(tmp_db):
         assert db.aux_range_total(conn, [sid_a, sid_b], day, day2) == 11
 
 
-def test_month_kpi_cards_follow_filter(admin_client, day_scene):
-    """页头三张本月累计卡：手机销量 / 触客 / 业辅，跟着地市筛选一起缩。"""
+def test_month_columns_follow_filter(admin_client, day_scene):
+    """本月累计是表里的 4 列（页头不再挂卡）：每家店一行，跟着地市筛选一起缩。"""
     day = day_scene.isoformat()
     body = admin_client.get(f"/compare?date={day}").get_data(as_text=True)
-    head = body[: body.index('<div id="compareShot"')]
-    assert re.search(r"本月累计（\d+月1日(–\d+月\d+日)?）", head)
-    assert _kpi(head, "本月累计手机销量") == "13"
-    assert _kpi(head, "本月累计触客条数") == "29"  # 含没交日报的丁店那 6 条
-    assert _kpi(head, "本月累计业辅查询登记") == "0"
+    span = r'<th colspan="4" class="g-month">本月累计（\d+月1日(–\d+月\d+日)?）</th>'
+    assert re.search(span, shot_of(body))
+    assert month_of(body, "示例乙店") == ["9", "5", "少报 +4", "—"]
+    assert "差率 +44%" in shot_of(body)  # 月累计差也挂差率小字（跟当日列一个写法）
+    assert month_of(body, "示例丁店") == ["6", "—", "—", "—"]  # 没交日报：销量 / 差不比
     scoped = admin_client.get(f"/compare?date={day}&city=示例市").get_data(as_text=True)
-    assert _kpi(scoped, "本月累计触客条数") == "17"
-    assert _kpi(scoped, "本月累计手机销量") == "13"
+    assert "示例丁店" not in shot_of(scoped)
+    foot = re.findall(r"<td[^>]*>(.*?)</td>", foot_of(scoped, "合计（已交 2 家）"), re.S)
+    tail = [re.sub(r"差率.*$", "", re.sub(r"<[^>]+>", "", t)).strip() for t in foot[-4:]]
+    assert tail == ["17", "13", "少报 +4", "0"]  # 合计行的月累计差也带差率小字（这里剥掉再比）
 
 
-def test_shot_has_month_kpi_line(admin_client, tmp_db):
-    """图里抬头下多一行本月累计；这行不带「管理员 / 报表」这类给登录的人看的说明。"""
+def test_shot_has_month_group_header(admin_client, tmp_db):
+    """图里表头多一层「本月累计（区间）」分组；这层不带「管理员 / 报表」这类给登录的人看的说明。"""
     day = work_day()
     seed_report("store-alpha", day, 8)
     seed_touch("store-alpha", day, 8)
@@ -931,30 +937,34 @@ def test_shot_has_month_kpi_line(admin_client, tmp_db):
     shot = shot_of(
         admin_client.get(f"/compare?date={day.isoformat()}").get_data(as_text=True)
     )
-    m = re.search(
-        r"本月累计（([^）]*)）：触客 (\d+) 条 · 手机销量 (\d+) 台 · 业辅查询登记 (\d+) 条", shot
-    )
-    assert m is not None, "图里没有本月累计那一行"
-    assert m.groups()[1:] == ("8", "8", "6")
+    assert re.search(r'<th colspan="4" class="g-month">本月累计（[^）]+）</th>', shot)
+    assert month_of(shot, "示例甲店") == ["8", "8", "一致", "6"]
     assert "管理员" not in shot and "报表" not in shot
 
 
 def test_day_export_includes_aux(admin_client, day_scene):
-    """导出带上业辅查询登记列，表尾「合计 / 本月累计」两行都有这个数。"""
+    """导出 16 列：业辅查询登记后面跟 4 列本月累计，合计行两段都有数。"""
     seed_aux("store-alpha", day_scene, 6)
     resp = admin_client.get(f"/compare.xlsx?view=day&date={day_scene.isoformat()}")
     ws = load_workbook(io.BytesIO(resp.data)).active
     header = [cell.value for cell in ws[1]]
-    assert header.index("业辅查询登记") == header.index("差率") + 1
+    assert len(header) == 16
     idx = header.index("业辅查询登记")
+    assert header.index("差率") + 1 == idx
+    assert str(header[idx + 1]).startswith("本月累计触客条数（")
+    assert str(header[idx + 2]).startswith("本月累计手机销量（")
+    assert str(header[idx + 3]).startswith("本月累计差（")
+    assert str(header[idx + 4]).startswith("本月累计业辅查询登记（")
+    assert header[idx + 5] == "日报"
     values = list(ws.iter_rows(min_row=2, values_only=True))
     alpha = next(row for row in values if row[1] == "示例甲店")
-    assert alpha[idx] == 6
+    assert alpha[idx] == 6 and alpha[idx + 4] == 6
+    assert (alpha[idx + 1], alpha[idx + 2], alpha[idx + 3]) == (8, 8, "0")
     foot = next(row for row in values if str(row[1] or "").startswith("合计（已交"))
-    assert foot[idx] == 6
-    month = next(row for row in values if str(row[1] or "").startswith("本月累计（"))
-    assert month[idx] == 6
-    assert month[header.index("差")] == "—"  # 月累计含未交日报的天，差不比
+    assert (foot[idx], foot[idx + 4]) == (6, 6)
+    # 差列带 ' 前缀：xlsx 的公式注入防护（_xlsx_safe）给 +/− 开头的文本加引号
+    assert (foot[idx + 1], foot[idx + 2], foot[idx + 3]) == (29, 13, "'+10")
+    assert not any(str(row[1] or "").startswith("本月累计（") for row in values)
 
 
 def test_store_view_aux_cell_and_total(admin_client, tmp_db):
