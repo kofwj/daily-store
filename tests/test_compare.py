@@ -71,16 +71,38 @@ def work_day() -> date:
 # ---------------------------------------------------------------- HTML 辅助
 
 
+# 报表现已写门店全称：用例正文照旧用简称点店，辅助函数里翻一道。
+SHORT_TO_FULL = {
+    "示例甲店": "示例市甲街vivo体验店",
+    "示例乙店": "示例市乙街vivo专卖店",
+    "示例丙店": "示例市丙路vivo体验店",
+    "示例丁店": "示例市丁路vivo体验店",
+    "示例戊店": "邻市戊路vivo体验店",
+    "示例巳店": "邻市巳街vivo专卖店",
+}
+FULL_TO_SHORT = {v: k for k, v in SHORT_TO_FULL.items()}
+
+
+def _full(name: str) -> str:
+    """简称 → 全称（本来就传全称就原样返回）。"""
+    return SHORT_TO_FULL.get(name, name)
+
+
 def row_of(body: str, name: str) -> str:
-    """取表里某家店的那一行（<strong> 里的店名唯一）。"""
-    m = re.search(r"<strong>" + re.escape(name) + r"</strong>.*?</tr>", body, re.S)
+    """取表里某家店的那一行（<strong> 里的店名唯一；表里写的是全称）。"""
+    m = re.search(r"<strong>" + re.escape(_full(name)) + r"</strong>.*?</tr>", body, re.S)
     assert m is not None, f"表里没有 {name} 这一行"
     return m.group(0)
 
+
 def store_order(body: str, names) -> list[str]:
-    """表里这几家店的出现顺序（只认 <strong> 里的店名，通报文案里的不算）。"""
+    """表里这几家店的出现顺序（只认 <strong> 里的店名，通报文案里的不算）。
+
+    表里是全称，出去换成简称，用例正文照旧读得懂。
+    """
+    wanted = {_full(n) for n in names}
     found = re.findall(r"<strong>(.*?)</strong>", body)
-    return [n for n in found if n in names]
+    return [FULL_TO_SHORT.get(n, n) for n in found if n in wanted]
 
 def shot_of(body: str) -> str:
     """截图容器（#compareShot）里的那段 HTML：贴群的图就是这一段。"""
@@ -143,7 +165,7 @@ def test_day_table_numbers_and_unsubmitted(admin_client, day_scene):
     assert ">23<" in body and ">13<" in body and "+10" in body
     # 未交日报的店：留行、差不计算、单独点名
     assert "未交日报" in body
-    assert "未交日报 1 家：示例丁店" in body
+    assert "未交日报 1 家：示例市丁路vivo体验店" in body
     # 差 0 也列，显示「一致」
     assert "示例甲店" in body and "一致" in body
     # 地市小计：邻市 2 家已交 + 1 家未交
@@ -152,6 +174,26 @@ def test_day_table_numbers_and_unsubmitted(admin_client, day_scene):
     # 静默店（无日报无触客）不占表行，只报个数
     assert "另有 1 家当天没交日报也没触客记录" in body
     assert "示例丙店" not in body
+
+
+
+def test_day_table_shows_full_store_name(admin_client, day_scene):
+    """表里门店写全称（表 / 文案 / 图片共用一份数据）；简称只留在 hover 提示里对号。"""
+    body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
+    assert "<strong>示例市甲街vivo体验店</strong>" in body
+    assert '<td class="store" title="示例甲店">' in body  # 简称退到 tooltip
+    assert "<strong>示例甲店</strong>" not in body
+
+
+def test_store_view_header_uses_full_name(admin_client, tmp_db):
+    """单店逐日抬头也写全称，跟单日表一个口径。"""
+    sid = store_id("store-alpha")
+    month = work_day().replace(day=1).isoformat()
+    body = admin_client.get(
+        f"/compare?view=store&store_id={sid}&month={month}"
+    ).get_data(as_text=True)
+    assert "· 示例市甲街vivo体验店 ·" in body
+    assert "· 示例甲店 ·" not in body
 
 
 def test_unsubmitted_store_shows_touch_but_no_diff(admin_client, day_scene):
@@ -224,9 +266,9 @@ def test_copy_block_matches_page_numbers(admin_client, day_scene):
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
     assert 'id="copyText"' in body and "复制通报" in body
     assert "合计（已交 4 家）：触客 23 条 · 手机销量 13 台 · 差 +10" in body
-    assert "少报 3 家：示例乙店 +4、示例戊店 +4、示例巳店 +2" in body
-    assert "一致 1 家：示例甲店" in body
-    assert "未交日报 1 家：示例丁店" in body
+    assert "少报 3 家：示例市乙街vivo专卖店 +4、邻市戊路vivo体验店 +4、邻市巳街vivo专卖店 +2" in body
+    assert "一致 1 家：示例市甲街vivo体验店" in body
+    assert "未交日报 1 家：示例市丁路vivo体验店" in body
 
 
 def test_copy_block_hidden_on_empty_day(admin_client):
@@ -283,7 +325,7 @@ def test_shot_content_matches_table(admin_client, day_scene):
     assert f"{day_scene.month}月{day_scene.day}日" in shot
     assert "合计（已交 4 家）" in shot
     assert "少报 +10" in shot  # 合计行的差（徽标写法）
-    assert "未交日报 1 家：示例丁店" in shot
+    assert "未交日报 1 家：示例市丁路vivo体验店" in shot
     assert "示例乙店" in shot
 
 
@@ -716,7 +758,7 @@ def test_day_export_respects_filter(admin_client, day_scene):
     assert any(str(h).startswith("本月累计触客条数（") for h in header)
     labels = [str(row[1] or "") for row in ws.iter_rows(min_row=2, values_only=True)]
     names = [x for x in labels if x and not x.startswith("合计（")]
-    assert sorted(names) == sorted(["示例甲店", "示例乙店"])
+    assert sorted(names) == sorted(["示例市甲街vivo体验店", "示例市乙街vivo专卖店"])
     assert any(x.startswith("合计（已交 2 家）") for x in labels)
 
 def test_table_wears_bulletin_style(admin_client, day_scene):
@@ -957,7 +999,7 @@ def test_day_export_includes_aux(admin_client, day_scene):
     assert header[7:11] == ["触客条数", "手机销量", "差", "差率"]
     assert header[11] == "业辅查询登记" and header[12] == "日报"
     values = list(ws.iter_rows(min_row=2, values_only=True))
-    alpha = next(row for row in values if row[1] == "示例甲店")
+    alpha = next(row for row in values if row[1] == "示例市甲街vivo体验店")
     assert (alpha[3], alpha[4], alpha[5], alpha[6]) == (8, 8, "0", 6)  # 本月累计
     assert (alpha[7], alpha[8], alpha[9], alpha[11]) == (8, 8, "0", 6)  # 当日
     foot = next(row for row in values if str(row[1] or "").startswith("合计（已交"))

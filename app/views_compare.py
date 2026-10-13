@@ -349,8 +349,9 @@ def _day_payload(
         rows.append(
             {
                 "id": sid,
-                "name": (store["short_name"] or store["name"] or "").strip() or "未命名",
-                "full_name": store["name"],
+                # 表 / 文案 / 图片 / 导出里的门店一律写全称；简称留给 hover 提示对号
+                "name": (store["name"] or store["short_name"] or "").strip() or "未命名",
+                "short_name": (store["short_name"] or "").strip(),
                 "city": _city_of(store),
                 "touch": touch,
                 "sold": sold,

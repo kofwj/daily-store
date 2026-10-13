@@ -35,7 +35,7 @@
     <h1>
       触客通报
       {%- if view == 'day' %} · {{ date.strftime('%Y年%m月%d日') }}
-      {%- else %} · {{ store.short_name or store.name }} · {{ month.strftime('%Y年%m月') }}{% endif %}
+      {%- else %} · {{ store.name or store.short_name }} · {{ month.strftime('%Y年%m月') }}{% endif %}
     </h1>
     <p class="muted">差 = 触客条数 − 手机销量（正数少报、负数多报）。触客取当天全部记录，手机销量取当天日报；触客只有当天，没有补交一说。</p>
   </div>
@@ -180,7 +180,7 @@
       {% for r in rows %}
       <tr class="{{ 'city-start' if ns.prev is not none and ns.prev != r.city else '' }}">
         {% set ns.prev = r.city %}
-        <td class="store" title="{{ r.full_name or r.name }}">
+        <td class="store" title="{{ r.short_name or r.name }}">
           <strong>{{ r.name }}</strong>
           <span class="sub">{{ r.city }}</span>
         </td>
@@ -337,7 +337,7 @@
         <td class="num"><span style="font-weight: 650">{{ r.touch }}</span></td>
         <td class="num">
           {% if can_edit and r.editable and r.submitted %}
-          <form method="post" action="{{ url_for('compare_cell') }}" class="cell-edit" onsubmit="return confirm('把 {{ store.short_name or store.name }} {{ r.iso }} 的手机销量改成这个数？只改这一格。')">
+          <form method="post" action="{{ url_for('compare_cell') }}" class="cell-edit" onsubmit="return confirm('把 {{ store.name or store.short_name }} {{ r.iso }} 的手机销量改成这个数？只改这一格。')">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="store_id" value="{{ store.id }}">
             <input type="hidden" name="date" value="{{ r.iso }}">
@@ -357,7 +357,7 @@
         {{ diff_cell(r.side, r.diff_text, r.rate_text) }}
         <td class="num">
           {% if can_edit and r.editable and r.submitted %}
-          <form method="post" action="{{ url_for('compare_aux') }}" class="cell-edit" onsubmit="return confirm('把 {{ store.short_name or store.name }} {{ r.iso }} 的业辅查询登记改成这个数？只改这一格。')">
+          <form method="post" action="{{ url_for('compare_aux') }}" class="cell-edit" onsubmit="return confirm('把 {{ store.name or store.short_name }} {{ r.iso }} 的业辅查询登记改成这个数？只改这一格。')">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="store_id" value="{{ store.id }}">
             <input type="hidden" name="date" value="{{ r.iso }}">
