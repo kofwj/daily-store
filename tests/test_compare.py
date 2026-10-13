@@ -439,18 +439,45 @@ def test_shot_scope_label_for_single_city(city_client, tmp_db):
     assert f"{day.month}月{day.day}日 · 示例市" in body
 
 
-def test_shot_hidden_on_empty_day_and_store_view(admin_client, day_scene):
-    """空日没有图可截（按钮和脚本都不出）；单店逐日视图压根没有截图容器。"""
+def test_shot_hidden_on_empty_day(admin_client, day_scene):
+    """空日没有图可截（按钮和脚本都不出）。"""
     empty = (work_day() - timedelta(days=40)).isoformat()
     body = admin_client.get(f"/compare?date={empty}").get_data(as_text=True)
     assert "复制图片" not in body and 'id="btnCopyShot"' not in body
     assert 'id="shotPreviewCard"' not in body
+
+
+def test_store_view_shot_and_no_missing_note(admin_client, tmp_db):
+    """单店逐日也能截图：容器 / 按钮 / 预览位 / 文件名带门店和月份；「另有 N 天未交日报」那句口径说明撤了。"""
+    day = work_day()
+    seed_report("store-alpha", day, 8)
+    seed_touch("store-alpha", day, 8)
     sid = store_id("store-alpha")
     body = admin_client.get(
-        f"/compare?view=store&store_id={sid}&month={day_scene.replace(day=1).isoformat()}"
+        f"/compare?view=store&store_id={sid}&month={day.replace(day=1).isoformat()}"
     ).get_data(as_text=True)
-    assert '<div id="compareShot"' not in body
-    assert "复制图片" not in body
+    assert '<div id="compareShot"' in body
+    assert "复制图片" in body and 'id="btnCopyShot"' in body
+    assert 'id="btnDownShot"' in body
+    assert 'id="shotPreview"' in body and 'id="shotPreviewCard"' in body
+    assert "html2canvas.min.js" in body and "shot.js" in body
+    m = re.search(r"window\.__shotSetup = \{(.*?)\n  \};", body, re.S)
+    assert m is not None, "没找到 window.__shotSetup"
+    setup = m.group(1)
+    assert "sourceId: 'compareShot'" in setup
+    assert "fitContent: true" in setup
+    assert "text: '#compareShot .cell-plain'" in setup
+    assert f"触客通报_示例甲店_{day.strftime('%Y-%m')}.png" in setup
+    shot = shot_of(body)
+    assert "触客通报" in shot
+    assert _full("示例甲店") in shot and f"{day.month}月" in shot  # 抬头：店名 + 月份
+    assert TOTAL_HEAD in shot  # 图里合计行也只写「合计」
+    assert "管理员" not in shot and "报表" not in shot  # 页面说明不进图
+    assert len(re.findall(r"<th[ >]", shot)) == 5  # 标题不是 <th>，表还是五列
+    # 可编辑格子旁备着纯数字：截图时拿数字换掉输入框，图里不出输入框外观
+    assert '<span class="cell-plain" style="display:none">8</span>' in body
+    # 「另有 N 天未交日报（触客照记，不进触客÷销量）」整句都撤了
+    assert "另有" not in body and "不进触客÷销量" not in body
 
 
 # ---------------------------------------------------------------- 单店逐日

@@ -106,6 +106,11 @@
     <a class="btn ghost" href="{{ url_for('compare', view='store', store_id=store.id, month=month_prev.isoformat()) }}">‹ 上月</a>
     <a class="btn ghost" href="{{ url_for('compare', view='store', store_id=store.id, month=month_next.isoformat()) }}">下月 ›</a>
     <a class="btn ghost" href="{{ url_for('compare_xlsx', view='store', store_id=store.id, month=month.isoformat()) }}">导出 Excel</a>
+    {% if days %}
+    <button type="button" id="btnCopyShot" onclick="shotCopyImage()">复制图片</button>
+    <button type="button" id="btnDownShot" class="ghost" onclick="shotDownloadImage()">下载图片</button>
+    <span class="chip" id="shotHint">可贴进微信</span>
+    {% endif %}
     {% endif %}
   </form>
 </div>
@@ -301,8 +306,12 @@
 </div>
 
 <p class="muted" style="font-size: 12px">点销量格子就能改，业辅查询登记格子也一样（管理员 / 地市负责人，地市限本市、本月）；改完留痕、不重发群播报。未交日报的店请到「报表」页补录当天日报。</p>
-<div class="card dev-card">
-  <div class="report-table-scroll">
+<div class="card bulletin-wrap">
+  <div id="compareShot" class="bulletin-shot" style="display: block; min-width: 0; width: fit-content; max-width: min(1180px, 100%); margin: 0 auto">
+    <div style="border-bottom: 2px solid #111827; padding-bottom: 10px; margin-bottom: 12px">
+      <div class="bulletin-shot-title" style="margin: 0 0 3px">触客通报</div>
+      <div class="bulletin-shot-date" style="margin: 0">{{ store.name or store.short_name }} · {{ month.strftime('%Y年%m月') }}</div>
+    </div>
   <table class="data dev-table bulletin" style="min-width: 0; width: auto; max-width: 760px; margin: 0 auto; font-size: 14px">
     <thead>
       <tr>
@@ -331,6 +340,7 @@
             <input type="hidden" name="month" value="{{ month.isoformat() }}">
             <input type="number" min="0" step="1" name="value" value="{{ r.sold }}" title="点格子改手机销量，回车保存这一格{% if r.fix_title %} · {{ r.fix_title }}{% endif %}">
           </form>
+          <span class="cell-plain" style="display:none">{{ r.sold }}</span>
           {% elif r.submitted %}
           <span style="font-weight: 650"{% if r.fix_title %} title="{{ r.fix_title }}"{% endif %}>{{ r.sold }}</span>
           {% else %}
@@ -369,9 +379,30 @@
     </tfoot>
   </table>
   </div>
-  {% if totals.missing %}
-  <p class="muted board-note">另有 {{ totals.missing }} 天未交日报（触客照记，不进触客÷销量）。</p>
-  {% endif %}
 </div>
+{% if days %}
+<div class="card" id="shotPreviewCard" hidden>
+  <h2>图片预览</h2>
+  <img id="shotPreview" class="shot-preview" alt="触客通报图">
+</div>
+<script src="{{ url_for('static', filename='html2canvas.min.js') }}"></script>
+<script src="{{ url_for('static', filename='shot.js') }}?v={{ app_version }}"></script>
+<script>
+  // 单店逐日也能截图：把这店整月逐日表截成图贴微信群。
+  window.__shotSetup = {
+    sourceId: 'compareShot',
+    {# 店名里万一有引号 / 反斜杠，先剔掉再拼进 JS 字符串，免得整个脚本语法错 #}
+    fileName: '触客通报_{{ (store.short_name or store.name) | replace("'", "") | replace('"', "") | replace("\\", "") | replace("/", "") }}_{{ month.strftime('%Y-%m') }}.png',
+    hintId: 'shotHint',
+    buttonIds: ['btnCopyShot', 'btnDownShot'],
+    previewId: 'shotPreview',
+    previewCardId: 'shotPreviewCard',
+    // 手机上表比屏幕宽：拍之前先把容器按内容撑宽，省得右边被裁
+    fitContent: true,
+    // 截图前把可编辑格子换成纯数字（拍完自动还原）
+    plainCells: { form: '#compareShot .cell-edit', text: '#compareShot .cell-plain' }
+  };
+</script>
+{% endif %}
 {% endif %}
 {% endblock %}
