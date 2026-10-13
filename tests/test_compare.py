@@ -1,4 +1,4 @@
-"""手机销量对比触客：口径、权限、改格、导出（`/compare`）。
+"""触客通报（手机销量 vs 触客）：口径、权限、改格、导出（`/compare`）。
 
 口径（与 app/views_compare.py 顶部说明一致）：
 - 触客条数 = 当天 deal_posts 条数（不分成交）；手机销量 = 当天日报 phone_sales
@@ -137,7 +137,7 @@ def day_scene(admin_client):
 
 def test_day_table_numbers_and_unsubmitted(admin_client, day_scene):
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
-    assert "手机销量对比触客" in body
+    assert "触客通报" in body
     # 已交 4 家：触客 9+8+2+4=23，销量 5+8+0+0=13，差 +10
     assert "合计（已交 4 家）" in body
     assert ">23<" in body and ">13<" in body and "+10" in body
@@ -198,7 +198,7 @@ def test_day_copy_text_lines():
         scope_label="示例市",
     )
     assert text.splitlines() == [
-        "【手机销量对比触客】10月11日（示例市）",
+        "【触客通报】10月11日（示例市）",
         "合计（已交 3 家）：触客 21 条 · 手机销量 13 台 · 差 +8",
         "少报 1 家：示例乙店 +4",
         "多报 1 家：示例戊店 -4",
@@ -279,7 +279,7 @@ def test_shot_content_matches_table(admin_client, day_scene):
     """截图容器里就是这张表：抬头、四列表格、未交名单都在图里。"""
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
     shot = shot_of(body)
-    assert "手机销量对比触客" in shot
+    assert "触客通报" in shot
     assert f"{day_scene.month}月{day_scene.day}日" in shot
     assert "合计（已交 4 家）" in shot
     assert "少报 +10" in shot  # 合计行的差（徽标写法）
@@ -513,7 +513,7 @@ def test_admin_fix_cell_writes_edit_mark(admin_client, tmp_db):
         ).fetchone()
     assert int(fact["day_value"]) == 9
     assert '"phone_sales": 5' in edit["before_json"] and '"phone_sales": 9' in edit["after_json"]
-    assert "销量对比表校准手机销量" in edit["note"]
+    assert "触客通报校准手机销量" in edit["note"]
 
 
 def test_admin_fix_back_to_zero_clears_mark(admin_client, tmp_db):
@@ -671,9 +671,9 @@ def test_front_sort_and_export_keep_filter(admin_client, day_scene):
 
 
 def test_unknown_filter_is_ignored(admin_client, day_scene):
-    """传了不认识的地市 / 经理：当没传，别把表滤空。"""
+    """传了不认识的地市 / 经理 / 顾问：当没传，别把表滤空。"""
     body = admin_client.get(
-        f"/compare?date={day_scene.isoformat()}&city=不存在市&area=无此人"
+        f"/compare?date={day_scene.isoformat()}&city=不存在市&area=无此人&advisor=随便"
     ).get_data(as_text=True)
     assert "示例甲店" in body and "示例戊店" in body
     assert "示例市 · 2 家" in body  # 小计回来了 = 全店视野
@@ -687,7 +687,7 @@ def test_empty_day_wording_with_filter(admin_client, day_scene):
 
 
 def test_edit_cell_goes_back_to_same_filter(admin_client, day_scene):
-    """改完一格回到同一个筛选视野。"""
+    """改完一格回到同一个筛选视野（地市 / 经理 / 顾问都别丢）。"""
     resp = admin_client.post(
         "/compare/cell",
         data={
@@ -697,11 +697,12 @@ def test_edit_cell_goes_back_to_same_filter(admin_client, day_scene):
             "view": "day",
             "city": "示例市",
             "area": "张管理",
+            "advisor": "yes",
         },
     )
     assert resp.status_code == 302
     loc = resp.headers["Location"]
-    assert "date=" in loc and "city=" in loc and "area=" in loc
+    assert "date=" in loc and "city=" in loc and "area=" in loc and "advisor=yes" in loc
 
 
 def test_day_export_respects_filter(admin_client, day_scene):
@@ -741,9 +742,9 @@ def test_store_view_table_wears_bulletin_style(admin_client, tmp_db):
 
 
 def month_of(body: str, name: str) -> list[str]:
-    """某家店那一行最后 4 格：本月累计 触客 / 手机销量 / 差 / 业辅（去掉标签和差率小字）。"""
+    """某家店那一行「门店」之后的 4 格：本月累计 触客 / 手机销量 / 差 / 业辅（去掉标签和差率小字）。"""
     tds = re.findall(r"<td[^>]*>(.*?)</td>", row_of(body, name), re.S)
-    cells = [re.sub(r"<[^>]+>", "", t).strip() for t in tds[-4:]]
+    cells = [re.sub(r"<[^>]+>", "", t).strip() for t in tds[0:4]]
     return [re.sub(r"差率.*$", "", t).strip() for t in cells]
 
 
@@ -887,9 +888,9 @@ def test_aux_feeds_subtotal_total_and_copy_text(admin_client, day_scene):
     assert '<td class="num">8</td>' in foot_of(body, "示例市 · 2 家")
     assert '<td class="num">3</td>' in foot_of(body, "邻市 · 2 家（未交 1）")
     total = re.findall(r"<td[^>]*>(.*?)</td>", foot_of(body, "合计（已交 4 家）"), re.S)
-    assert len(total) == 9  # 5 列当日 + 4 列本月累计
-    assert total[4].strip() == "11"  # 当日业辅
-    assert total[8].strip() == "11"  # 本月累计业辅（就这一天，跟当日同数）
+    assert len(total) == 9  # 门店 + 4 列本月累计 + 4 列当日
+    assert total[8].strip() == "11"  # 当日业辅
+    assert total[4].strip() == "11"  # 本月累计业辅（就这一天，跟当日同数）
 
 
 
@@ -924,7 +925,7 @@ def test_month_columns_follow_filter(admin_client, day_scene):
     scoped = admin_client.get(f"/compare?date={day}&city=示例市").get_data(as_text=True)
     assert "示例丁店" not in shot_of(scoped)
     foot = re.findall(r"<td[^>]*>(.*?)</td>", foot_of(scoped, "合计（已交 2 家）"), re.S)
-    tail = [re.sub(r"差率.*$", "", re.sub(r"<[^>]+>", "", t)).strip() for t in foot[-4:]]
+    tail = [re.sub(r"差率.*$", "", re.sub(r"<[^>]+>", "", t)).strip() for t in foot[1:5]]
     assert tail == ["17", "13", "少报 +4", "0"]  # 合计行的月累计差也带差率小字（这里剥掉再比）
 
 
@@ -943,27 +944,26 @@ def test_shot_has_month_group_header(admin_client, tmp_db):
 
 
 def test_day_export_includes_aux(admin_client, day_scene):
-    """导出 16 列：业辅查询登记后面跟 4 列本月累计，合计行两段都有数。"""
+    """导出 16 列：4 列本月累计在前、当日 9 列在后，合计行两段都有数。"""
     seed_aux("store-alpha", day_scene, 6)
     resp = admin_client.get(f"/compare.xlsx?view=day&date={day_scene.isoformat()}")
     ws = load_workbook(io.BytesIO(resp.data)).active
     header = [cell.value for cell in ws[1]]
     assert len(header) == 16
-    idx = header.index("业辅查询登记")
-    assert header.index("差率") + 1 == idx
-    assert str(header[idx + 1]).startswith("本月累计触客条数（")
-    assert str(header[idx + 2]).startswith("本月累计手机销量（")
-    assert str(header[idx + 3]).startswith("本月累计差（")
-    assert str(header[idx + 4]).startswith("本月累计业辅查询登记（")
-    assert header[idx + 5] == "日报"
+    assert str(header[3]).startswith("本月累计触客条数（")
+    assert str(header[4]).startswith("本月累计手机销量（")
+    assert str(header[5]).startswith("本月累计差（")
+    assert str(header[6]).startswith("本月累计业辅查询登记（")
+    assert header[7:11] == ["触客条数", "手机销量", "差", "差率"]
+    assert header[11] == "业辅查询登记" and header[12] == "日报"
     values = list(ws.iter_rows(min_row=2, values_only=True))
     alpha = next(row for row in values if row[1] == "示例甲店")
-    assert alpha[idx] == 6 and alpha[idx + 4] == 6
-    assert (alpha[idx + 1], alpha[idx + 2], alpha[idx + 3]) == (8, 8, "0")
+    assert (alpha[3], alpha[4], alpha[5], alpha[6]) == (8, 8, "0", 6)  # 本月累计
+    assert (alpha[7], alpha[8], alpha[9], alpha[11]) == (8, 8, "0", 6)  # 当日
     foot = next(row for row in values if str(row[1] or "").startswith("合计（已交"))
-    assert (foot[idx], foot[idx + 4]) == (6, 6)
     # 差列带 ' 前缀：xlsx 的公式注入防护（_xlsx_safe）给 +/− 开头的文本加引号
-    assert (foot[idx + 1], foot[idx + 2], foot[idx + 3]) == (29, 13, "'+10")
+    assert (foot[3], foot[4], foot[5], foot[6]) == (29, 13, "'+10", 6)
+    assert (foot[7], foot[8], foot[9], foot[10], foot[11]) == (23, 13, "'+10", "'+43%", 6)
     assert not any(str(row[1] or "").startswith("本月累计（") for row in values)
 
 
@@ -1000,3 +1000,61 @@ def test_store_view_export_includes_aux(admin_client, tmp_db):
     assert day_row[idx] == 5
     foot = next(row for row in values if str(row[0] or "").startswith("合计（已交"))
     assert foot[idx] == 5
+
+
+# ---------------------------------------------------------------- 顾问筛选 + 改名
+
+
+def test_advisor_filter_keeps_only_that_kind(admin_client, day_scene):
+    """顾问筛选照洞察页：yes 只留设了顾问的店、no 只留没设的，抬头记一笔。"""
+    with db.get_db() as conn:
+        conn.execute(
+            "UPDATE stores SET advisor_name='王顾问' WHERE code IN ('store-alpha', 'store-beta')"
+        )
+    day = day_scene.isoformat()
+    yes = admin_client.get(f"/compare?date={day}&advisor=yes").get_data(as_text=True)
+    assert "示例甲店" in yes and "示例乙店" in yes
+    assert "示例戊店" not in yes and "示例丁店" not in yes
+    assert f"{day_scene.month}月{day_scene.day}日 · 有顾问" in yes  # 图上抬头
+    assert "（有顾问）" in yes  # 通报文案抬头也带
+    no = admin_client.get(f"/compare?date={day}&advisor=no").get_data(as_text=True)
+    assert "示例戊店" in no and "示例甲店" not in no
+    assert f"{day_scene.month}月{day_scene.day}日 · 无顾问" in no
+
+
+def test_advisor_filter_reaches_links_and_export(admin_client, day_scene):
+    """顾问筛选跟着前一天 / 排序 / 导出一起走。"""
+    day = day_scene.isoformat()
+    prev = (day_scene - timedelta(days=1)).isoformat()
+    body = admin_client.get(f"/compare?date={day}&advisor=yes").get_data(as_text=True)
+    links = hrefs(body)
+    assert any(f"date={prev}" in h and "advisor=yes" in h for h in links)
+    assert any("sort=catalog" in h and "advisor=yes" in h for h in links)
+    xlsx = [h for h in links if h.startswith("/compare.xlsx")]
+    assert xlsx and "advisor=yes" in xlsx[0]
+
+
+def test_advisor_control_is_bulletin_style_and_out_of_shot(admin_client, day_scene):
+    """顾问下拉跟地市 / 经理一个模子，且不进贴群的图。"""
+    body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
+    assert '<select name="advisor"' in body
+    assert "只看有顾问" in body and "只看无顾问" in body
+    shot = shot_of(body)
+    assert '<select name="advisor"' not in shot and "顾问" not in shot
+
+
+def test_page_renamed_to_touch_bulletin(admin_client, day_scene):
+    """改名：抬头 / 导航 / 通报文案统一叫「触客通报」，旧名不再出现。"""
+    body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
+    assert "手机销量对比触客" not in body and "销量对比" not in body
+    assert "<title>触客通报</title>" in body
+    assert '<span class="full">触客通报</span>' in body  # 导航
+    assert "【触客通报】" in body  # 通报文案抬头
+    assert "触客通报" in shot_of(body)  # 图里抬头
+
+
+def test_compare_title_constant():
+    """改名落在常量上（模板 / 文案共用同一个名字）。"""
+    from app.views_compare import COMPARE_TITLE
+
+    assert COMPARE_TITLE == "触客通报"

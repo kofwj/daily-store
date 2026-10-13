@@ -1,5 +1,4 @@
-"""手机销量 vs 触客条数对比表：单日全店主表 + 单店逐日下钻，可事后修正手机销量。
-
+"""触客通报：手机销量 vs 触客条数的单日全店主表 + 单店逐日下钻，可事后修正手机销量。
 口径（与 README「口径」一致）：
 - 触客条数 = 该店当日 deal_posts 的全部记录数（COUNT(*)，不看是否成交）
 - 手机销量 = 该店当日日报的 phone_sales
@@ -42,7 +41,7 @@ from .helpers import (
 from .metrics_seed import format_stored, to_stored
 
 PHONE_CODE = "phone_sales"
-COMPARE_TITLE = "手机销量对比触客"
+COMPARE_TITLE = "触客通报"
 _WEEKDAYS = ("一", "二", "三", "四", "五", "六", "日")
 # 只有这两个角色能进这页（地市负责人要用它改本市手机销量）
 _EDIT_ROLES = ("admin", "city")
@@ -200,25 +199,38 @@ def _city_of(store) -> str:
     return (store["city"] or "").strip() or "未分地市"
 
 def _day_scope(stores) -> Dict[str, Any]:
-    """单日视图的地市 / 区域经理筛选：跟通报表同一套控件，只有默认值不同。
+    """单日视图的地市 / 区域经理 / 顾问筛选：跟通报表、洞察页同一套控件，只有默认值不同。
 
     通报表默认落在南通市，这页默认「全部」——打开是单日全店视野，想看某个
-    地市 / 哪位区域经理再选。传了不认识的值当没传，别把表滤成空的。
+    地市 / 哪位区域经理 / 哪类顾问再选。传了不认识的值当没传，别把表滤成空的。
+    顾问筛选照洞察页（`?advisor=yes|no`），只作用于单日视图，单店逐日不涉及。
     """
     cities, managers = scope_options(stores)
     city = (request.args.get("city") or "").strip()
     area = (request.args.get("area") or "").strip()
+    advisor = (request.args.get("advisor") or "").strip()
     if city not in cities:
         city = ""
     if area not in managers:
         area = ""
+    if advisor not in ("yes", "no"):
+        advisor = ""
+    picked = filter_stores(stores, city, area)
+    if advisor == "yes":
+        picked = [s for s in picked if (s["advisor_name"] or "").strip()]
+    elif advisor == "no":
+        picked = [s for s in picked if not (s["advisor_name"] or "").strip()]
+    bits = [b for b in (city, area) if b]
+    if advisor:
+        bits.append("有顾问" if advisor == "yes" else "无顾问")
     return {
-        "stores": filter_stores(stores, city, area),
+        "stores": picked,
         "city": city,
         "cities": cities,
         "area": area,
         "areas": managers,
-        "label": " · ".join(b for b in (city, area) if b),
+        "advisor": advisor,
+        "label": " · ".join(bits),
     }
 
 
@@ -257,7 +269,7 @@ def day_copy_text(
     if not rows:
         return ""  # 没有店进表（全静默）：没有可通报的内容
     label = (scope_label or "").strip()
-    head = f"【手机销量对比触客】{biz_date.month}月{biz_date.day}日"
+    head = f"【触客通报】{biz_date.month}月{biz_date.day}日"
     if label:
         head += f"（{label}）"
     parts: List[str] = [head]
@@ -563,7 +575,7 @@ def _back_kwargs(form) -> Dict[str, Any]:
     if form.get("date"):
         kwargs["date"] = form.get("date")
     # 筛选也得带回：改完一格还回到同一个地市 / 区域经理视野
-    for key in ("city", "area"):
+    for key in ("city", "area", "advisor"):
         if form.get(key):
             kwargs[key] = form.get(key)
     if (form.get("sort") or "") == "catalog":
@@ -625,6 +637,7 @@ def register_compare(app) -> None:
             cities=scope["cities"],
             area=scope["area"],
             areas=scope["areas"],
+            advisor=scope["advisor"],
             **payload,
         )
 
@@ -670,7 +683,7 @@ def register_compare(app) -> None:
                     metric_code=PHONE_CODE,
                     value=value,
                     user_id=g.user["id"],
-                    note="销量对比表校准手机销量",
+                    note="触客通报校准手机销量",
                 )
             except ValueError as exc:
                 flash(str(exc), "error")
@@ -813,15 +826,15 @@ def register_compare(app) -> None:
                     "日期",
                     "门店",
                     "地市",
+                    f"本月累计触客条数（{month['label']}）",
+                    f"本月累计手机销量（{month['label']}）",
+                    f"本月累计差（{month['label']}）",
+                    f"本月累计业辅查询登记（{month['label']}）",
                     "触客条数",
                     "手机销量",
                     "差",
                     "差率",
                     "业辅查询登记",
-                    f"本月累计触客条数（{month['label']}）",
-                    f"本月累计手机销量（{month['label']}）",
-                    f"本月累计差（{month['label']}）",
-                    f"本月累计业辅查询登记（{month['label']}）",
                     "日报",
                     "日报提交人",
                     "提交时间",
@@ -832,15 +845,15 @@ def register_compare(app) -> None:
                         biz_date.isoformat(),
                         r["name"],
                         r["city"],
+                        r["m_touch"],
+                        r["m_sold"],
+                        r["m_diff_text"],
+                        r["m_aux"],
                         r["touch"],
                         r["sold"],
                         r["diff_text"],
                         r["rate_text"],
                         r["aux"],
-                        r["m_touch"],
-                        r["m_sold"],
-                        r["m_diff_text"],
-                        r["m_aux"],
                         "已交" if r["submitted"] else "未交日报",
                         r["submitter"],
                         r["submitted_at"],
@@ -848,7 +861,8 @@ def register_compare(app) -> None:
                     ]
                     for r in payload["rows"]
                 ]
-                # 表尾合计：前几列只算已交日报的店，后 4 列是本月的（跟着上面的列走）
+                # 表尾合计：前 4 列是本月累计（表里看得见的行加总），后面 5 列是当日的
+                # （当日只算已交日报的店，月累计口径见 _month_stats）
                 day_totals = payload["totals"]
                 month_total = payload["month"]["total"]
                 data_rows.append(
@@ -856,15 +870,15 @@ def register_compare(app) -> None:
                         "",
                         f"合计（已交 {day_totals['n']} 家）",
                         "",
+                        month_total["touch"],
+                        month_total["sold"],
+                        month_total["diff_text"],
+                        month_total["aux"],
                         day_totals["touch"],
                         day_totals["sold"],
                         day_totals["diff_text"],
                         day_totals["rate_text"],
                         day_totals["aux"],
-                        month_total["touch"],
-                        month_total["sold"],
-                        month_total["diff_text"],
-                        month_total["aux"],
                         "",
                         "",
                         "",

@@ -27,7 +27,7 @@
       <a href="{{ url_for('sesame_week_page') }}" class="{{ 'active' if request.endpoint in ('sesame_week_page', 'sesame_week_xlsx') else '' }}"><span class="full">芝麻周报</span><span class="short">芝麻</span></a>
       {% endif %}
       {% if g.user['role'] in ('admin', 'city') %}
-      <a href="{{ url_for('compare') }}" class="{{ 'active' if request.endpoint in ('compare', 'compare_xlsx') else '' }}"><span class="full">销量对比</span><span class="short">对比</span></a>
+      <a href="{{ url_for('compare') }}" class="{{ 'active' if request.endpoint in ('compare', 'compare_xlsx') else '' }}"><span class="full">触客通报</span></a>
       {% endif %}
       {% if g.user['role'] == 'admin' %}
       <a href="{{ url_for('board') }}" class="{{ 'active' if request.endpoint == 'board' else '' }}">看板</a>

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_store_picker.html" import store_picker %}
-{% block title %}手机销量对比触客{% endblock %}
+{% block title %}触客通报{% endblock %}
 {% block body %}
 {# 差的几个小构件：行内徽标 + 差格 + 合计格。两个视图共用，免得两边各写一套、改一处漏一处。 #}
 {% macro diff_pill(side, diff_text) -%}
@@ -33,7 +33,7 @@
 <div class="page-head">
   <div class="page-title">
     <h1>
-      手机销量对比触客
+      触客通报
       {%- if view == 'day' %} · {{ date.strftime('%Y年%m月%d日') }}
       {%- else %} · {{ store.short_name or store.name }} · {{ month.strftime('%Y年%m月') }}{% endif %}
     </h1>
@@ -42,7 +42,7 @@
   {# 筛选 + 动作同一个 flex 行（跟通报表一个模子）；控件放不下时折行，故把动作组整条压到第二行。 #}
   <form method="get" class="page-filters">
     <div class="seg">
-      <a class="{{ 'active' if view == 'day' else '' }}" href="{{ url_for('compare', view='day', date=(date.isoformat() if view == 'day' else none), store_id=(store.id if view == 'store' else none), month=(month.isoformat() if view == 'store' else none)) }}">单日全店</a>
+      <a class="{{ 'active' if view == 'day' else '' }}" href="{{ url_for('compare', view='day', date=(date.isoformat() if view == 'day' else none), store_id=(store.id if view == 'store' else none), month=(month.isoformat() if view == 'store' else none), advisor=advisor or none) }}">单日全店</a>
       <a class="{{ 'active' if view == 'store' else '' }}" href="{{ url_for('compare', view='store', store_id=(store.id if view == 'store' else none), month=(month.isoformat() if view == 'store' else none), date=(date.isoformat() if view == 'day' else none)) }}">单店逐日</a>
     </div>
     {% if view == 'day' %}
@@ -72,14 +72,22 @@
       </select>
     </label>
     {% endif %}
-    <a class="btn ghost" href="{{ url_for('compare', view='day', date=prev_date.isoformat(), city=city or none, area=area or none, sort=(sort if sort != 'abs' else none)) }}">‹ 前一天</a>
-    {% if next_date %}<a class="btn ghost" href="{{ url_for('compare', view='day', date=next_date.isoformat(), city=city or none, area=area or none, sort=(sort if sort != 'abs' else none)) }}">后一天 ›</a>{% endif %}
+    <label class="filter">
+      <span>顾问</span>
+      <select name="advisor" onchange="this.form.submit()">
+        <option value="" {% if not advisor %}selected{% endif %}>全部</option>
+        <option value="yes" {% if advisor == 'yes' %}selected{% endif %}>只看有顾问</option>
+        <option value="no" {% if advisor == 'no' %}selected{% endif %}>只看无顾问</option>
+      </select>
+    </label>
+    <a class="btn ghost" href="{{ url_for('compare', view='day', date=prev_date.isoformat(), city=city or none, area=area or none, advisor=advisor or none, sort=(sort if sort != 'abs' else none)) }}">‹ 前一天</a>
+    {% if next_date %}<a class="btn ghost" href="{{ url_for('compare', view='day', date=next_date.isoformat(), city=city or none, area=area or none, advisor=advisor or none, sort=(sort if sort != 'abs' else none)) }}">后一天 ›</a>{% endif %}
     <div class="page-filters" style="flex: 0 0 100%">
       <div class="seg">
-        <a class="{{ 'active' if sort == 'abs' else '' }}" href="{{ url_for('compare', view='day', date=date.isoformat(), city=city or none, area=area or none) }}">按差排序</a>
-        <a class="{{ 'active' if sort == 'catalog' else '' }}" href="{{ url_for('compare', view='day', date=date.isoformat(), city=city or none, area=area or none, sort='catalog') }}">目录顺序</a>
+        <a class="{{ 'active' if sort == 'abs' else '' }}" href="{{ url_for('compare', view='day', date=date.isoformat(), city=city or none, area=area or none, advisor=advisor or none) }}">按差排序</a>
+        <a class="{{ 'active' if sort == 'catalog' else '' }}" href="{{ url_for('compare', view='day', date=date.isoformat(), city=city or none, area=area or none, advisor=advisor or none, sort='catalog') }}">目录顺序</a>
       </div>
-      <a class="btn ghost" href="{{ url_for('compare_xlsx', view='day', date=date.isoformat(), sort=sort, city=city or none, area=area or none) }}">导出 Excel</a>
+      <a class="btn ghost" href="{{ url_for('compare_xlsx', view='day', date=date.isoformat(), sort=sort, city=city or none, area=area or none, advisor=advisor or none) }}">导出 Excel</a>
       {% if rows %}
       <button type="button" id="btnCopyShot" onclick="shotCopyImage()">复制图片</button>
       <button type="button" id="btnDownShot" class="ghost" onclick="shotDownloadImage()">下载图片</button>
@@ -144,7 +152,7 @@
 <div class="card bulletin-wrap">
   <div id="compareShot" class="bulletin-shot" style="display: block; min-width: 0; width: fit-content; max-width: min(1180px, 100%); margin: 0 auto">
     <div style="border-bottom: 2px solid #111827; padding-bottom: 10px; margin-bottom: 12px">
-      <div class="bulletin-shot-title" style="margin: 0 0 3px">手机销量对比触客</div>
+      <div class="bulletin-shot-title" style="margin: 0 0 3px">触客通报</div>
       <div class="bulletin-shot-date" style="margin: 0">{{ date.strftime('%Y年%m月%d日') }}{% if scope_label %} · {{ scope_label }}{% endif %}</div>
     </div>
   {% if rows %}
@@ -152,19 +160,19 @@
     <thead>
       <tr>
         <th class="g-profile"></th>
-        <th colspan="4" class="g-day">当日</th>
         <th colspan="4" class="g-month">本月累计（{{ month.label }}）</th>
+        <th colspan="4" class="g-day">当日</th>
       </tr>
       <tr>
         <th class="store g-profile">门店</th>
-        <th class="g-day" style="width: 120px">触客条数</th>
-        <th class="g-day" style="width: 120px">手机销量</th>
-        <th class="g-day" style="width: 150px" title="差 = 触客条数 − 手机销量：正数少报、负数多报">差</th>
-        <th class="g-day" style="width: 140px" title="业辅查询登记：当天这店查了几条，就地填、只改这一格">业辅查询登记</th>
         <th class="g-month" style="width: 110px">触客条数</th>
         <th class="g-month" style="width: 110px">手机销量</th>
         <th class="g-month" style="width: 150px" title="本月累计差 = 本月累计触客 − 本月累计手机销量；某店这月没交过日报就写「—」">差</th>
         <th class="g-month" style="width: 120px" title="本月累计业辅查询登记：这店这个月一共填了几条">业辅查询登记</th>
+        <th class="g-day" style="width: 120px">触客条数</th>
+        <th class="g-day" style="width: 120px">手机销量</th>
+        <th class="g-day" style="width: 150px" title="差 = 触客条数 − 手机销量：正数少报、负数多报">差</th>
+        <th class="g-day" style="width: 140px" title="业辅查询登记：当天这店查了几条，就地填、只改这一格">业辅查询登记</th>
       </tr>
     </thead>
     <tbody>
@@ -176,7 +184,8 @@
           <strong>{{ r.name }}</strong>
           <span class="sub">{{ r.city }}</span>
         </td>
-        <td class="num"><span style="font-weight: 650">{{ r.touch }}</span></td>
+        {{ month_row_cells(r) }}
+        <td class="num" style="border-left: 2px solid #cbd5e1"><span style="font-weight: 650">{{ r.touch }}</span></td>
         <td class="num">
           {% if can_edit and r.submitted %}
           <form method="post" action="{{ url_for('compare_cell') }}" class="cell-edit" onsubmit="return confirm('把 {{ r.name }} {{ date.isoformat() }} 的手机销量改成这个数？只改这一格。')">
@@ -187,6 +196,7 @@
             <input type="hidden" name="sort" value="{{ sort }}">
             <input type="hidden" name="city" value="{{ city }}">
             <input type="hidden" name="area" value="{{ area }}">
+            <input type="hidden" name="advisor" value="{{ advisor }}">
             <input type="number" min="0" step="1" name="value" value="{{ r.sold }}" title="点格子改手机销量，回车保存这一格">
           </form>
           <span class="cell-plain" style="display:none">{{ r.sold }}</span>
@@ -210,6 +220,7 @@
             <input type="hidden" name="sort" value="{{ sort }}">
             <input type="hidden" name="city" value="{{ city }}">
             <input type="hidden" name="area" value="{{ area }}">
+            <input type="hidden" name="advisor" value="{{ advisor }}">
             <input type="number" min="0" step="1" name="value" value="{{ r.aux }}" title="{{ r.aux_title or '点格子填业辅查询登记，回车保存这一格' }}">
           </form>
           <span class="cell-plain" style="display:none">{{ r.aux }}</span>
@@ -219,7 +230,6 @@
           <span class="muted">—</span>
           {% endif %}
         </td>
-        {{ month_row_cells(r) }}
       </tr>
       {% endfor %}
     </tbody>
@@ -227,20 +237,20 @@
       {% for g in city_groups %}
       <tr class="city-sub">
         <td class="store">{{ g.city }} · {{ g.n }} 家{% if g.missing %}（未交 {{ g.missing }}）{% endif %}</td>
-        <td class="num">{{ g.touch }}</td>
+        {{ month_total_cells(g.m_touch, g.m_sold, g.m_n, g.m_side, g.m_diff_text, g.m_aux) }}
+        <td class="num" style="border-left: 2px solid #cbd5e1">{{ g.touch }}</td>
         <td class="num">{{ g.sold }}</td>
         <td class="num">{% if g.n %}{{ diff_pill(g.side, g.diff_text) }}{% else %}<span class="muted">—</span>{% endif %}</td>
         <td class="num">{{ g.aux }}</td>
-        {{ month_total_cells(g.m_touch, g.m_sold, g.m_n, g.m_side, g.m_diff_text, g.m_aux) }}
       </tr>
       {% endfor %}
       <tr class="city-sub">
         <td class="store" style="border-top: 2px solid #94a3b8">合计（已交 {{ totals.n }} 家）</td>
-        <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.touch }}</td>
+        {{ month_total_cells(month.total.touch, month.total.sold, month.total.n, month.total.side, month.total.diff_text, month.total.aux, 'border-top: 2px solid #94a3b8', month.total.rate_text) }}
+        <td class="num" style="border-top: 2px solid #94a3b8; border-left: 2px solid #cbd5e1">{{ totals.touch }}</td>
         <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.sold }}</td>
         {{ total_cell(totals.n, totals.side, totals.diff_text, totals.rate_text, 'border-top: 2px solid #94a3b8') }}
         <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.aux }}</td>
-        {{ month_total_cells(month.total.touch, month.total.sold, month.total.n, month.total.side, month.total.diff_text, month.total.aux, 'border-top: 2px solid #94a3b8', month.total.rate_text) }}
       </tr>
     </tfoot>
   </table>
@@ -259,7 +269,7 @@
 {% if rows %}
 <div class="card" id="shotPreviewCard" hidden>
   <h2>图片预览</h2>
-  <img id="shotPreview" class="shot-preview" alt="手机销量对比触客通报图">
+  <img id="shotPreview" class="shot-preview" alt="触客通报图">
 </div>
 <script src="{{ url_for('static', filename='html2canvas.min.js') }}"></script>
 <script src="{{ url_for('static', filename='shot.js') }}?v={{ app_version }}"></script>
@@ -267,7 +277,7 @@
   // 「复制图片 / 下载图片」只在单日视图出现：把这页的表截成图贴微信群。
   window.__shotSetup = {
     sourceId: 'compareShot',
-    fileName: '手机销量对比触客_{{ date.isoformat() }}.png',
+    fileName: '触客通报_{{ date.isoformat() }}.png',
     hintId: 'shotHint',
     buttonIds: ['btnCopyShot', 'btnDownShot'],
     previewId: 'shotPreview',
