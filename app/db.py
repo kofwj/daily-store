@@ -39,6 +39,14 @@ from .db_audit import (  # noqa: F401
     count_audit_edits,
     list_audit_edits,
 )
+from .db_auth import (  # noqa: F401
+    DEFAULT_ADMIN_PIN,
+    DEFAULT_FILLER_PIN,
+    burn_pin_time,
+    hash_pin,
+    new_pin_error,
+    verify_pin,
+)
 from .db_aux import (  # noqa: F401
     aux_days,
     aux_range_total,
@@ -53,13 +61,10 @@ from .db_bisuan_mobile import (  # noqa: F401
 )
 from .db_core import (  # noqa: F401
     DB_PATH,
-    DEFAULT_ADMIN_PIN,
-    DEFAULT_FILLER_PIN,
     TZ,
     _now,  # noqa: F401 — 测试直接调用 db._now()
     active_area_managers,
     active_store_ids,
-    burn_pin_time,
     clear_login_failures,
     connect,
     count_auth_events,
@@ -72,7 +77,6 @@ from .db_core import (  # noqa: F401
     get_store,
     get_user,
     get_user_by_username,
-    hash_pin,
     hot_settings,
     init_db,
     is_locked,
@@ -87,7 +91,6 @@ from .db_core import (  # noqa: F401
     metric_target_map,
     month_bounds,
     month_cum_through_many,
-    new_pin_error,
     record_auth_event,
     record_edit,
     record_login_failure,
@@ -105,7 +108,6 @@ from .db_core import (  # noqa: F401
     upsert_advisor_score,
     user_can_access_store,
     user_store_ids,
-    verify_pin,
 )
 from .db_core import connect as _connect
 from .db_core import get_db as _plain_get_db
