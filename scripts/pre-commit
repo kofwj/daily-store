@@ -25,7 +25,7 @@ fi
 echo "→ ruff check"
 "$RUFF" check .
 
-# 静态类型检查：只盯算钱的几个模块，防类型错误静默变成错数字
+# 静态类型检查：全量扫描 app 目录，持续保障数据计算与视图层安全
 if [ -x "./.venv/bin/mypy" ]; then
   MYPY="./.venv/bin/mypy"
 elif command -v mypy >/dev/null 2>&1; then
@@ -37,7 +37,7 @@ else
   exit 1
 fi
 
-echo "→ mypy (算钱模块)"
+echo "→ mypy (全量 app 检查)"
 "$MYPY" || exit 1
 
 # 回归测试：全量用例必须在提交前通过。

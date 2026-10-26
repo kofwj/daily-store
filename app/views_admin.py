@@ -305,7 +305,7 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
                 "progress": (month_v / target_v * 100) if target_v and n else None,
             }
         )
-    deal_grand = {
+    deal_grand: Dict[str, Any] = {
         "day_total": sum(int(r["deal_today"]["total"]) for r in rows),
         "day_closed": sum(int(r["deal_today"]["closed"]) for r in rows),
         "month_total": sum(int(r["deal_month"]["total"]) for r in rows),

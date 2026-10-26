@@ -7,6 +7,7 @@ import os
 import secrets
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 from flask import (
     Response,
@@ -76,10 +77,10 @@ def _resize_policy_image(data: bytes, ext: str) -> bytes:
     elif fmt in ("JPEG", "WEBP") and im.mode not in ("RGB", "L"):
         im = im.convert("RGB")
     out = BytesIO()
-    save_kwargs: dict[str, object] = {"format": fmt, "optimize": True}
     if fmt in ("JPEG", "WEBP"):
-        save_kwargs["quality"] = _POLICY_IMG_JPEG_QUALITY
-    im.save(out, **save_kwargs)
+        im.save(out, format=fmt, optimize=True, quality=_POLICY_IMG_JPEG_QUALITY)
+    else:
+        im.save(out, format=fmt, optimize=True)
     return out.getvalue()
 
 
@@ -138,7 +139,7 @@ def _change_own_pin() -> None:
 
 def _server_status_stats() -> dict:
     """采集服务器负载与数据库状态，只给管理员看。"""
-    stats = {"db": {}, "load": None, "mem": None, "procs": None, "app": None}
+    stats: dict[str, Any] = {"db": {}, "load": None, "mem": None, "procs": None, "app": None}
     # 本应用进程自身占用的物理内存（RSS）
     try:
         for line in open("/proc/self/status", encoding="utf-8"):
@@ -206,8 +207,8 @@ def _render_settings(conn, tab: str):
         ]
     user_map = {u["id"]: db.user_store_ids(conn, u["id"]) for u in users}
     store_by_id = {s["id"]: s for s in stores}
-    grouped_cities = {}
-    city_order = []
+    grouped_cities: dict[str, list[Any]] = {}
+    city_order: list[str] = []
     for s in stores:
         city = (s["city"] or "").strip() or "未分地市"
         if city not in grouped_cities:
@@ -228,8 +229,8 @@ def _render_settings(conn, tab: str):
         current_store = store_by_id.get(sid)
         store_selection_invalid = current_store is None
     people = []
-    people_by_store = {s["id"]: [] for s in stores}
-    area_by_store = {s["id"]: [] for s in stores}
+    people_by_store: dict[int, list[Any]] = {s["id"]: [] for s in stores}
+    area_by_store: dict[int, list[Any]] = {s["id"]: [] for s in stores}
     area_people = []
     unassigned_people = []
     for u in users:
@@ -260,6 +261,8 @@ def _render_settings(conn, tab: str):
         for sid in sids:
             if sid in people_by_store:
                 people_by_store[sid].append(item)
+    policy_id_raw = (request.args.get("policy_id") or "").strip()
+    policy_id = int(policy_id_raw) if policy_id_raw.isdigit() else None
     return render_template(
         "settings.html",
         tab=tab,
@@ -280,16 +283,8 @@ def _render_settings(conn, tab: str):
         filler_edit_month=db.get_setting(conn, "filler_edit_month", "0") == "1",
         policy_require_read=db.policy_require_read(conn),
         policies=db.list_policies(conn) if g.user["role"] == "admin" else [],
-        policy_edit=(
-            db.get_policy(conn, int(request.args.get("policy_id")))
-            if (request.args.get("policy_id") or "").isdigit()
-            else None
-        ),
-        policy_revisions=(
-            db.list_revisions(conn, int(request.args.get("policy_id")))
-            if (request.args.get("policy_id") or "").isdigit()
-            else []
-        ),
+        policy_edit=(db.get_policy(conn, policy_id) if policy_id is not None else None),
+        policy_revisions=(db.list_revisions(conn, policy_id) if policy_id is not None else []),
         broadcast_compact=db.get_setting(conn, "broadcast_compact", "1") == "1",
         broadcast_compact_family=db.get_setting(conn, "broadcast_compact_family", "0") == "1",
         wecom_global=db.get_setting(conn, "wecom_global", ""),
@@ -322,7 +317,7 @@ def _settings_post(conn, tab: str):
             raise ValueError("先改掉默认口令")
         if g.user["role"] != "admin":
             raise ValueError("需要管理员权限")
-        handler = _SETTINGS_ACTIONS.get(action)
+        handler = _SETTINGS_ACTIONS.get(action or "")
         if handler is None:
             flash("未知操作", "error")
         else:

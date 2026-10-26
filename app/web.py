@@ -89,7 +89,7 @@ def create_app(*, testing: bool = False) -> Flask:
     # 容器只对 Caddy 暴露 5055，默认信一层反代，登录日志才能记下真实 IP。
     # 若把 app 端口直接打到公网，必须设 STORE_DAILY_TRUST_PROXY=0，否则头可被伪造。
     if os.environ.get("STORE_DAILY_TRUST_PROXY", "1") == "1":
-        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)  # type: ignore[method-assign]
     db.init_db()
     backup.prune()
 
