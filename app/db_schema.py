@@ -230,6 +230,7 @@ def init_db() -> None:
         _ensure_policy_tables(conn)
         # 种子（建表/加列/回填默认）每次幂等执行即可；真正“动数据”的迁移走 migrate() 一次
         # seed 是"先 SELECT 再 INSERT"，多 worker 同时启动会撞 UNIQUE；和 migrate() 一样先抢写锁
+        conn.commit()
         begin_immediate(conn)
         _seed_metrics(conn)
         _seed_kpi_targets(conn)

@@ -10,12 +10,11 @@ import logging
 import os
 import sqlite3
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from zoneinfo import ZoneInfo
 
-from .db_auth import _ensure_auth_events
 from .metrics_seed import KPI_TARGETS
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -23,16 +22,6 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("STORE_DAILY_DATA", ROOT / "data"))
 
 DB_PATH = Path(os.environ.get("STORE_DAILY_DB", DATA_DIR / "store_daily.db"))
-
-LOGIN_FAIL_LIMIT = 5
-
-LOGIN_LOCK_SECONDS = 15 * 60
-
-# 账号级锁定：阈值高于单 IP，避免别人拿用户名刷失败把店员锁死；
-# 仍能挡住换 IP 扫 6/8 位数字口令。
-LOGIN_ACCOUNT_FAIL_LIMIT = 15
-
-LOGIN_ACCOUNT_LOCK_SECONDS = 30 * 60
 
 TZ = ZoneInfo("Asia/Shanghai")
 
@@ -161,167 +150,9 @@ def sesame_tier_rows(conn: sqlite3.Connection, start: str, end: str) -> List[Dic
         )
     return out
 
-AUTH_EVENT_KEEP_DAYS = 90
-
-def record_auth_event(
-    conn: sqlite3.Connection,
-    *,
-    user,
-    action: str,
-    ip: str = "",
-) -> None:
-    _ensure_auth_events(conn)
-    name = ""
-    display = ""
-    role = ""
-    uid = None
-    if user is not None:
-        uid = int(user["id"])
-        name = user["username"] or ""
-        display = user["display_name"] or ""
-        role = user["role"] or ""
-    conn.execute(
-        """
-        INSERT INTO auth_events(user_id, username, display_name, role, action, ip, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (uid, name, display, role, action, (ip or "").strip()[:80], _now()),
-    )
-    cutoff = (datetime.now(TZ) - timedelta(days=AUTH_EVENT_KEEP_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
-    conn.execute("DELETE FROM auth_events WHERE created_at < ?", (cutoff,))
-
-def count_auth_events(
-    conn: sqlite3.Connection,
-    *,
-    cutoff: str,
-    action: str = "",
-    role: str = "",
-    q: str = "",
-) -> int:
-    where, params = _auth_event_where(cutoff, action, role, q)
-    return int(conn.execute(f"SELECT COUNT(*) FROM auth_events WHERE {where}", params).fetchone()[0] or 0)
-
-def list_auth_events(
-    conn: sqlite3.Connection,
-    *,
-    cutoff: str,
-    action: str = "",
-    role: str = "",
-    q: str = "",
-    limit: int = 50,
-    offset: int = 0,
-) -> List[sqlite3.Row]:
-    where, params = _auth_event_where(cutoff, action, role, q)
-    params.extend([limit, offset])
-    return list(
-        conn.execute(
-            f"SELECT * FROM auth_events WHERE {where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
-            params,
-        )
-    )
-
-def _auth_event_where(cutoff: str, action: str, role: str, q: str) -> Tuple[str, List]:
-    where = ["created_at >= ?"]
-    params: List = [cutoff]
-    if action in ("login", "logout"):
-        where.append("action=?")
-        params.append(action)
-    if role in ("admin", "filler", "readonly", "city"):
-        where.append("role=?")
-        params.append(role)
-    text = (q or "").strip()
-    if text:
-        where.append("(username LIKE ? OR display_name LIKE ? OR ip LIKE ?)")
-        like = f"%{text}%"
-        params.extend([like, like, like])
-    return " AND ".join(where), params
-
 def bump_all_session_epochs(conn: sqlite3.Connection) -> None:
     """整库作废现有登录会话（备份恢复后用）。"""
     conn.execute("UPDATE users SET session_epoch = COALESCE(session_epoch, 0) + 1")
-
-def _login_key_specs(username: str, ip: str) -> List[Tuple[str, str, int, int]]:
-    """(kind, key, fail_limit, lock_seconds)。"""
-    name = (username or "").strip().lower() or "-"
-    addr = (ip or "").strip() or "-"
-    return [
-        ("uip", f"uip:{name}|{addr}", LOGIN_FAIL_LIMIT, LOGIN_LOCK_SECONDS),
-        ("ip", f"ip:{addr}", LOGIN_FAIL_LIMIT, LOGIN_LOCK_SECONDS),
-        ("u", f"u:{name}", LOGIN_ACCOUNT_FAIL_LIMIT, LOGIN_ACCOUNT_LOCK_SECONDS),
-    ]
-
-def login_lock_remaining(conn: sqlite3.Connection, username: str, ip: str) -> int:
-    """还在冷却的秒数；0 表示可以继续试。"""
-    now = datetime.now(TZ)
-    remaining = 0
-    for _kind, key, _limit, _lock_for in _login_key_specs(username, ip):
-        row = conn.execute(
-            "SELECT locked_until FROM login_attempts WHERE key=?", (key,)
-        ).fetchone()
-        if not row or not row["locked_until"]:
-            continue
-        try:
-            until = datetime.strptime(row["locked_until"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ)
-        except ValueError:
-            continue
-        left = int((until - now).total_seconds())
-        if left > remaining:
-            remaining = left
-    return remaining
-
-def record_login_failure(conn: sqlite3.Connection, username: str, ip: str) -> int:
-    """记一次失败。单 IP / 用户+IP 满 5 次锁 15 分钟；账号满 15 次锁 30 分钟。"""
-    begin_immediate(conn)
-    now = datetime.now(TZ)
-    # 顺带清理 7 天没动静的行：键是 (用户名, IP) 组合，被扫的用户名/IP 会永久留行
-    stale_cutoff = (now - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-    conn.execute("DELETE FROM login_attempts WHERE updated_at < ?", (stale_cutoff,))
-    remaining = 0
-    for _kind, key, fail_limit, lock_seconds in _login_key_specs(username, ip):
-        row = conn.execute(
-            "SELECT fail_count, locked_until FROM login_attempts WHERE key=?", (key,)
-        ).fetchone()
-        count = int(row["fail_count"] or 0) + 1 if row else 1
-        locked_until = ""
-        if row and row["locked_until"]:
-            try:
-                until = datetime.strptime(row["locked_until"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ)
-                if until > now:
-                    locked_until = row["locked_until"]
-                    count = max(count, fail_limit)
-                else:
-                    count = 1
-            except ValueError:
-                pass
-        if count >= fail_limit and not locked_until:
-            locked_until = (now + timedelta(seconds=lock_seconds)).strftime("%Y-%m-%d %H:%M:%S")
-        conn.execute(
-            """
-            INSERT INTO login_attempts(key, fail_count, locked_until, updated_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(key) DO UPDATE SET
-                fail_count=excluded.fail_count,
-                locked_until=excluded.locked_until,
-                updated_at=excluded.updated_at
-            """,
-            (key, count, locked_until, _now()),
-        )
-        if locked_until:
-            try:
-                until = datetime.strptime(locked_until, "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ)
-                left = int((until - now).total_seconds())
-                if left > remaining:
-                    remaining = left
-            except ValueError:
-                remaining = max(remaining, lock_seconds)
-    return remaining
-
-def clear_login_failures(conn: sqlite3.Connection, username: str, ip: str) -> None:
-    keys = [spec[1] for spec in _login_key_specs(username, ip)]
-    conn.execute(
-        f"DELETE FROM login_attempts WHERE key IN ({','.join('?' * len(keys))})",
-        keys,
-    )
 
 def get_setting(conn: sqlite3.Connection, key: str, default: str = "") -> str:
     row = conn.execute("SELECT value FROM app_meta WHERE key=?", (key,)).fetchone()
@@ -343,19 +174,6 @@ def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
         "INSERT INTO app_meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         (key, value),
     )
-
-def is_locked(biz_date: date, now: Optional[datetime] = None) -> bool:
-    """当天日期在锁定时间点之后即锁定；非当天日期不锁。
-
-    传入 now 用于测试（naive 或 aware 均可）；默认用业务时区（北京时间）。
-    """
-    local_now = now or datetime.now(TZ)
-    if local_now.tzinfo is not None:
-        local_now = local_now.astimezone(TZ).replace(tzinfo=None)
-    local_today = today_local()
-    if biz_date != local_today:
-        return False
-    return (local_now.hour, local_now.minute) >= (LOCK_HOUR, LOCK_MINUTE)
 
 def record_edit(
     conn: sqlite3.Connection,

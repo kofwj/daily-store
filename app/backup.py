@@ -184,8 +184,6 @@ def restore_bytes(data: bytes) -> Path:
             dst.close()
         # 旧备份可能缺新列/表，恢复后补上，避免当场把登录打挂
         with db_core.get_db() as conn:
-            cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
-            had_flag = "must_change_pin" in cols
             db_schema._ensure_user_columns(conn)
             db_auth._ensure_login_attempts(conn)
             db_auth._ensure_auth_events(conn)
@@ -196,8 +194,6 @@ def restore_bytes(data: bytes) -> Path:
 
             _ensure_invoice_tables(conn)
             _ensure_policy_tables(conn)
-            if not had_flag:
-                db_schema._add_must_change_pin(conn)
         # 旧备份可能停在更早的 schema 版本，恢复后再补索引/金额单位
         db_schema.migrate()
         with db_core.get_db() as conn:

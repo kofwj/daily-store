@@ -230,7 +230,7 @@ def test_restore_corrupt_sqlite_file_is_valueerror(tmp_db, tmp_path):
 
 
 def test_restore_legacy_backup_without_must_change_pin(tmp_db, tmp_path):
-    """恢复缺失 must_change_pin 列的旧备份，能成功补齐列并给默认口令标记改密（覆盖 backup.py:200）。"""
+    """恢复缺失 must_change_pin 列的旧备份，能成功补齐列并给默认口令标记改密。"""
     import shutil
 
     legacy_db_path = tmp_path / "legacy.db"
@@ -256,7 +256,8 @@ def test_restore_legacy_backup_without_must_change_pin(tmp_db, tmp_path):
         )
         """
     )
-    conn.execute("INSERT INTO users SELECT * FROM users_old")
+    cols = "id, username, display_name, pin_hash, role, scope, active, created_at"
+    conn.execute(f"INSERT INTO users ({cols}) SELECT {cols} FROM users_old")
     conn.execute("DROP TABLE users_old")
     conn.commit()
     conn.close()

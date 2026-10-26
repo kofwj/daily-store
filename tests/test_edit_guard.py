@@ -2,14 +2,14 @@
 
 from datetime import date, datetime, timedelta
 
-from app import db, db_core
+from app import db, db_auth
 from tests.conftest import store_id
 
 
 def _freeze_lock_now(biz_date, now=None):
     """用真实 is_locked 逻辑，把「现在」冻结到 23:30 —— 让锁定分支端到端可测。"""
     t = date.today()
-    return db_core.is_locked(biz_date, now=datetime(t.year, t.month, t.day, 23, 30))
+    return db_auth.is_locked(biz_date, now=datetime(t.year, t.month, t.day, 23, 30))
 
 
 def test_filler_cannot_save_past_date(filler_client):
