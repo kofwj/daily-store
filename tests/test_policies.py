@@ -267,3 +267,62 @@ def test_policy_image_upload_is_resized_down(admin_client):
     im = Image.open(BytesIO(saved.data))
     assert max(im.width, im.height) <= 1600, (im.width, im.height)
 
+
+def test_resize_policy_image_formats_and_guards():
+    """政策插图尺寸调整与格式转换覆盖：PNG/JPEG/WEBP/GIF 及非法数据校验。"""
+    from io import BytesIO
+
+    import pytest
+    from PIL import Image
+
+    from app.views_settings import _resize_policy_image
+
+    # 1. 正常 PNG（RGBA）
+    buf = BytesIO()
+    Image.new("RGBA", (100, 100), (255, 0, 0, 128)).save(buf, "PNG")
+    out_png = _resize_policy_image(buf.getvalue(), ".png")
+    im_png = Image.open(BytesIO(out_png))
+    assert im_png.format == "PNG"
+
+    # 2. 正常 JPEG
+    buf = BytesIO()
+    Image.new("RGB", (2000, 1000), (0, 255, 0)).save(buf, "JPEG")
+    out_jpg = _resize_policy_image(buf.getvalue(), ".jpg")
+    im_jpg = Image.open(BytesIO(out_jpg))
+    assert im_jpg.format == "JPEG"
+    assert max(im_jpg.width, im_jpg.height) <= 1600
+
+    # 3. 正常 WEBP
+    buf = BytesIO()
+    Image.new("RGB", (100, 100), (0, 0, 255)).save(buf, "WEBP")
+    out_webp = _resize_policy_image(buf.getvalue(), ".webp")
+    im_webp = Image.open(BytesIO(out_webp))
+    assert im_webp.format == "WEBP"
+
+    # 4. GIF 直通（不重新编码）
+    gif_data = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
+    out_gif = _resize_policy_image(gif_data, ".gif")
+    assert out_gif == gif_data
+
+    # 5. 非法数据抛 ValueError
+    with pytest.raises(ValueError, match="图片无法解码"):
+        _resize_policy_image(b"not-an-image", ".png")
+
+
+def test_settings_policies_tab_renders_edit_and_new(admin_client):
+    """设置页面政策标签页：带 policy_id 渲染编辑态与历史版本；不带 policy_id 渲染新增态。"""
+    with db.get_db() as conn:
+        admin = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()
+        pid = db.save_policy(conn, title="测试制度", body="第一版正文", user_id=admin["id"])
+
+    # 带 policy_id：编辑政策
+    r_edit = admin_client.get(f"/settings?tab=policies&policy_id={pid}")
+    assert r_edit.status_code == 200
+    assert "编辑政策" in r_edit.text
+    assert "第一版正文" in r_edit.text
+    assert "版本历史" in r_edit.text
+
+    # 不带 policy_id：新增政策
+    r_new = admin_client.get("/settings?tab=policies")
+    assert r_new.status_code == 200
+    assert "新增政策" in r_new.text

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Dict
+from typing import Any, Dict
 
 from flask import Response, flash, g, redirect, render_template, request, url_for
 
@@ -287,7 +287,7 @@ def register_report(app) -> None:
                 flash(str(exc), "error")
             else:
                 flash(f"已校准 {biz_date.isoformat()} 的该指标为 {format_stored(code, value)}", "ok")
-        kwargs = {"store_id": sid, "view": view}
+        kwargs: dict[str, Any] = {"store_id": sid, "view": view}
         if start:
             kwargs["start"] = start
         if end and view != "day":

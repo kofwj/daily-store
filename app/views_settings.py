@@ -435,7 +435,7 @@ def _do_add_user(conn):
         scope = (request.form.get("scope") or "").strip()
         if not scope:
             raise ValueError("区域经理没填区域经理姓名")
-        store_ids = []
+        store_ids: list[int] = []
     elif kind == "city":
         role = "city"
         scope = (request.form.get("scope") or "").strip()

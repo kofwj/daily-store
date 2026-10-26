@@ -28,8 +28,8 @@ def _catalog():
         from . import stores_seed as seed
         return seed.STORES, seed.filler_accounts, seed.NINGHAI_CODE
     try:
-        from . import stores_seed_local as seed
-        return seed.STORES, seed.filler_accounts, seed.NINGHAI_CODE
+        from . import stores_seed_local as local_seed
+        return local_seed.STORES, local_seed.filler_accounts, local_seed.NINGHAI_CODE
     except ImportError:
         return [], (lambda: []), ""
 

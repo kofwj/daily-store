@@ -327,7 +327,7 @@ def register_advance(app) -> None:
     @admin_required
     def advance_pay_post():
         action = request.form.get("action") or "pay"
-        back = {
+        back: dict[str, Any] = {
             "month": request.form.get("month") or "",
             "store_id": request.form.get("store_id") or "",
             "paid": request.form.get("paid") or "0",
@@ -594,7 +594,7 @@ def register_advance(app) -> None:
             return redirect(url_for("advance_sesame_page"))
         # 订单信息（可选）：用于按档位分类；不传则档位统计进「未分类」
         order_error = ""
-        orders = []
+        orders: list[Any] = []
         order_file = request.files.get("order_file")
         if order_file is not None and order_file.filename:
             if not (order_file.filename or "").lower().endswith(".xlsx"):
@@ -605,7 +605,7 @@ def register_advance(app) -> None:
                         rules = sesame.tier_rules(conn)
                     orders, order_warnings = sesame.parse_orders_xlsx(order_file.read())
                     for o in orders:
-                        o["category"] = sesame.tier_category(o.get("order_title"), rules)
+                        o["category"] = sesame.tier_category(o.get("order_title") or "", rules)
                     if order_warnings:
                         order_error = "；".join(order_warnings)
                 except ValueError as exc:
@@ -624,7 +624,7 @@ def register_advance(app) -> None:
                 for r in groups["ready"]
             )
         else:
-            tier_preview = {}
+            tier_preview = Counter()
         preview = {
             "ready": groups["ready"],
             "ready_shown": groups["ready"][:200],
