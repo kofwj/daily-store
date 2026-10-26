@@ -357,11 +357,8 @@ def accessible_stores(conn) -> List[Any]:
     return db.list_user_stores(conn, g.user)
 
 
-def sql_in(column: str, ids: Sequence[int]) -> Tuple[str, List[int]]:
-    clean = [int(i) for i in ids]
-    if not clean:
-        return "1=0", []
-    return f"{column} IN ({','.join('?' * len(clean))})", clean
+# 统一使用 db 层下沉的 sql_in 实现，消除重复
+sql_in = db.sql_in
 
 
 def scope_options(stores: Sequence[Any]) -> Tuple[List[str], List[str]]:

@@ -84,16 +84,7 @@ def register_report(app) -> None:
                 grid[row["metric_code"]][row["biz_date"]] = stored
 
             # 提交状态 + 区间总天数（自然日）
-            submitted = {
-                row["biz_date"]
-                for row in conn.execute(
-                    """
-                    SELECT biz_date FROM daily_reports
-                    WHERE store_id=? AND biz_date>=? AND biz_date<=?
-                    """,
-                    (store["id"], start.isoformat(), end.isoformat()),
-                )
-            }
+            submitted = db.store_reported_dates(conn, store["id"], start, end)
             submitted_dates = sorted(submitted & set(dates))
             all_days = [
                 (start + timedelta(days=i)).isoformat()

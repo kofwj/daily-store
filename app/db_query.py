@@ -3,9 +3,17 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date
-from typing import Any, Dict, Iterable, List, Sequence
+from typing import Any, Dict, Iterable, List, Sequence, Set
 
-from .db_core import _now, begin_immediate, get_report, list_metrics, month_bounds, record_edit
+from .db_core import (
+    _now,
+    begin_immediate,
+    get_report,
+    list_metrics,
+    month_bounds,
+    record_edit,
+    sql_in,
+)
 from .metrics_seed import to_stored
 
 
@@ -233,25 +241,118 @@ def dashboard_today(conn: sqlite3.Connection, store_ids: Iterable[int], biz_date
     return out
 
 
-def stores_reported_in_month(
-    conn: sqlite3.Connection, store_ids: Iterable[int], as_of: date
-) -> set:
-    """本月 1 号到 as_of 交过日报的店 id。空列表返回空集。"""
-    ids = [int(sid) for sid in store_ids]
-    if not ids:
+def stores_reported_in_range(
+    conn: sqlite3.Connection,
+    store_ids: Iterable[int],
+    start: date,
+    end: date,
+) -> Set[int]:
+    """区间内交过日报的门店 ID 集合。空列表或非法区间返回空集。"""
+    if end < start:
         return set()
-    start, end = month_bounds(as_of)
-    placeholders = ",".join("?" * len(ids))
+    clause, params = sql_in("store_id", list(store_ids))
+    if clause == "1=0":
+        return set()
     return {
         int(row["store_id"])
         for row in conn.execute(
             f"""
             SELECT DISTINCT store_id FROM daily_reports
-            WHERE biz_date>=? AND biz_date<=? AND store_id IN ({placeholders})
+            WHERE biz_date>=? AND biz_date<=? AND {clause}
             """,
-            [str(start), str(end), *ids],
+            [start.isoformat(), end.isoformat(), *params],
         )
     }
+
+
+def stores_reported_in_month(
+    conn: sqlite3.Connection, store_ids: Iterable[int], as_of: date
+) -> Set[int]:
+    """本月 1 号到 as_of 交过日报的店 id。空列表返回空集（保持向后兼容）。"""
+    start = as_of.replace(day=1)
+    return stores_reported_in_range(conn, store_ids, start, as_of)
+
+
+def store_reported_days(
+    conn: sqlite3.Connection,
+    store_ids: Sequence[int],
+    start: date,
+    end: date,
+) -> Dict[int, int]:
+    """区间内各店交过日报的天数：{store_id: 交报天数}。"""
+    if end < start:
+        return {}
+    clause, params = sql_in("store_id", store_ids)
+    if clause == "1=0":
+        return {}
+    rows = conn.execute(
+        f"""
+        SELECT store_id, COUNT(*) AS n
+        FROM daily_reports
+        WHERE biz_date>=? AND biz_date<=? AND {clause}
+        GROUP BY store_id
+        """,
+        [start.isoformat(), end.isoformat(), *params],
+    )
+    return {int(row["store_id"]): int(row["n"]) for row in rows}
+
+
+def daily_reports_on_date(
+    conn: sqlite3.Connection,
+    store_ids: Sequence[int],
+    day: date,
+) -> Dict[int, sqlite3.Row]:
+    """某天指定门店的交报元数据（含提交人姓名与备注）：{store_id: row}。"""
+    clause, params = sql_in("r.store_id", store_ids)
+    if clause == "1=0":
+        return {}
+    rows = conn.execute(
+        f"""
+        SELECT r.store_id, r.submitted_at, r.note, u.display_name AS submitter_name
+        FROM daily_reports r
+        LEFT JOIN users u ON u.id = r.submitted_by
+        WHERE r.biz_date=? AND {clause}
+        """,
+        [day.isoformat(), *params],
+    )
+    return {int(row["store_id"]): row for row in rows}
+
+
+def store_month_daily_reports(
+    conn: sqlite3.Connection,
+    store_id: int,
+    start: date,
+    end: date,
+) -> Dict[str, sqlite3.Row]:
+    """单店在指定区间逐日的交报元数据：{biz_date: row}。"""
+    rows = conn.execute(
+        """
+        SELECT r.biz_date, r.submitted_at, u.display_name AS submitter_name
+        FROM daily_reports r
+        LEFT JOIN users u ON u.id = r.submitted_by
+        WHERE r.store_id=? AND r.biz_date>=? AND r.biz_date<=?
+        ORDER BY r.biz_date
+        """,
+        (int(store_id), start.isoformat(), end.isoformat()),
+    )
+    return {str(row["biz_date"]): row for row in rows}
+
+
+def store_reported_dates(
+    conn: sqlite3.Connection,
+    store_id: int,
+    start: date,
+    end: date,
+) -> Set[str]:
+    """单店在指定区间内已交日报的日期集合（ISO 字符串）。"""
+    rows = conn.execute(
+        """
+        SELECT biz_date FROM daily_reports
+        WHERE store_id=? AND biz_date>=? AND biz_date<=?
+        """,
+        (int(store_id), start.isoformat(), end.isoformat()),
+    )
+    return {row["biz_date"] for row in rows}
 
 
 def range_metric_days(

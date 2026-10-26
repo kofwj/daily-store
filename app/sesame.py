@@ -491,7 +491,7 @@ def sesame_week_rows(
     ids = [int(i) for i in store_ids]
     if not ids:
         return []
-    clause, params = db_core.store_in_clause("a.store_id", ids)
+    clause, params = db_core.sql_in("a.store_id", ids)
     if order == "city":
         city_key = _city_sql("st")
         # 地市顺序 = 该地市启用门店的最小 sort_order, id，跟门店目录 / 下拉一致；

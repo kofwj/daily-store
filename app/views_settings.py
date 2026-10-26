@@ -454,10 +454,7 @@ def _do_add_user(conn):
             for x in request.form.getlist("store_ids")
             if str(x).strip().isdigit()
         ]
-        active_ids = {
-            int(row["id"])
-            for row in conn.execute("SELECT id FROM stores WHERE active=1")
-        }
+        active_ids = db.active_store_ids(conn)
         if any(store_id not in active_ids for store_id in store_ids):
             raise ValueError("只能绑定已启用的门店")
         if not store_ids:
@@ -470,10 +467,7 @@ def _do_add_user(conn):
             for x in request.form.getlist("store_ids")
             if str(x).strip().isdigit()
         ]
-        active_ids = {
-            int(row["id"])
-            for row in conn.execute("SELECT id FROM stores WHERE active=1")
-        }
+        active_ids = db.active_store_ids(conn)
         if any(store_id not in active_ids for store_id in store_ids):
             raise ValueError("只能绑定已启用的门店")
     if not username or not display or not pin:
@@ -561,10 +555,7 @@ def _do_set_stores(conn):
             for x in request.form.getlist("store_ids")
             if str(x).strip().isdigit()
         ]
-        active_ids = {
-            int(row["id"])
-            for row in conn.execute("SELECT id FROM stores WHERE active=1")
-        }
+        active_ids = db.active_store_ids(conn)
         if any(store_id not in active_ids for store_id in submitted_ids):
             raise ValueError("只能绑定已启用的门店")
         if target["role"] == "readonly" and not target["scope"] and not submitted_ids:

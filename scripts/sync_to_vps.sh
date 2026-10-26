@@ -37,16 +37,23 @@ for arg in "$@"; do
 done
 
 # 部署门禁：lint + 类型 + 测试全过才推。约 75 秒。
-# pytest 必须过；ruff/mypy 本地没装则跳过（与 pre-commit 同策略）
 echo "→ 部署前检查"
-python3 -m pytest -q
-if python3 -m ruff --version >/dev/null 2>&1; then
-  python3 -m ruff check . || exit 1
+PY="./.venv/bin/python"
+if [ ! -x "$PY" ]; then
+  PY="python3"
+fi
+"$PY" -m pytest -q
+if [ -x "./.venv/bin/ruff" ]; then
+  ./.venv/bin/ruff check . || exit 1
+elif command -v ruff >/dev/null 2>&1; then
+  ruff check . || exit 1
 else
   echo "  (未装 ruff，跳过)"
 fi
-if python3 -m mypy --version >/dev/null 2>&1; then
-  python3 -m mypy || exit 1
+if [ -x "./.venv/bin/mypy" ]; then
+  ./.venv/bin/mypy || exit 1
+elif command -v mypy >/dev/null 2>&1; then
+  mypy || exit 1
 else
   echo "  (未装 mypy，跳过)"
 fi
@@ -180,7 +187,7 @@ if git rev-parse --git-dir >/dev/null 2>&1 \
   VERLINE="$(sed -n '1p' VERSION | tr -d '\r')"
   git add VERSION
   if git -c user.name='pi-deploy' -c user.email='pi-deploy@local' \
-       commit -q -m "升版本 ${VERLINE}（部署后自动提交）"; then
+       commit --no-verify -q -m "升版本 ${VERLINE}（部署后自动提交）"; then
     echo "→ 已自动提交 VERSION: ${VERLINE}"
   else
     echo "  (VERSION 自动提交失败，见上)" >&2

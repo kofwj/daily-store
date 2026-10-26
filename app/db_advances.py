@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .db_core import _now, begin_immediate, month_bounds, today_local
-from .db_core import store_in_clause as _store_in
+from .db_core import sql_in as _store_in
 
 MAX_AMOUNT = 10_000_000.0
 

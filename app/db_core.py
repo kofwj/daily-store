@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta
 from hashlib import pbkdf2_hmac
 from pathlib import Path
 from secrets import compare_digest, token_hex
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from zoneinfo import ZoneInfo
 
 from .metrics_seed import KPI_TARGETS, all_metrics
@@ -256,12 +256,13 @@ def today_local() -> date:
     """业务时区（北京时间）的今天。"""
     return datetime.now(TZ).date()
 
-def store_in_clause(column: str, store_ids: Optional[Sequence[int]]) -> Tuple[str, List[int]]:
-    """生成门店 ID 的 IN 子句。占位符拼接，值仍走参数绑定。"""
-    ids = [int(i) for i in (store_ids or [])]
-    if not ids:
+def sql_in(column: str, ids: Optional[Sequence[int]]) -> Tuple[str, List[int]]:
+    """生成 IN 子句与参数列表：(column IN (?, ?, ...), [ids])。空集合返回 ('1=0', [])。"""
+    clean = [int(i) for i in (ids or [])]
+    if not clean:
         return "1=0", []
-    return f"{column} IN ({','.join('?' * len(ids))})", ids
+    return f"{column} IN ({','.join('?' * len(clean))})", clean
+
 
 def hash_pin(pin: str, salt: Optional[str] = None) -> str:
     if salt is None:
@@ -1652,7 +1653,7 @@ def month_cum_through_many(
     if not store_ids:
         return {}
     start, end = month_bounds(biz_date)
-    in_clause, ids = store_in_clause("store_id", store_ids)
+    in_clause, ids = sql_in("store_id", store_ids)
     out: Dict[int, Dict[str, int]] = {}
     rows = conn.execute(
         f"""
@@ -1684,6 +1685,12 @@ def list_users(conn: sqlite3.Connection) -> List[sqlite3.Row]:
 
 def list_all_stores(conn: sqlite3.Connection) -> List[sqlite3.Row]:
     return list(conn.execute("SELECT * FROM stores ORDER BY sort_order, id"))
+
+
+def active_store_ids(conn: sqlite3.Connection) -> Set[int]:
+    """返回当前所有已启用门店的 ID 集合。"""
+    return {int(row["id"]) for row in conn.execute("SELECT id FROM stores WHERE active=1")}
+
 
 def user_store_ids(conn: sqlite3.Connection, user_id: int) -> List[int]:
     return [

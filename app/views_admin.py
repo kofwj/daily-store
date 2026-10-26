@@ -424,17 +424,7 @@ def register_admin(app) -> None:
             week_facts = db.range_metric_totals(conn, store_ids, this_start, this_end, insights.FACT_CODES)
             prev_facts = db.range_metric_totals(conn, store_ids, prev_start, prev_end, insights.FACT_CODES)
             reported_month = db.stores_reported_in_month(conn, store_ids, as_of)
-            if store_ids:
-                clause, params = sql_in("store_id", store_ids)
-                reported_today = {
-                    int(row["store_id"])
-                    for row in conn.execute(
-                        f"SELECT store_id FROM daily_reports WHERE biz_date=? AND {clause}",
-                        [as_of.isoformat(), *params],
-                    )
-                }
-            else:
-                reported_today = set()
+            reported_today = db.stores_reported_in_range(conn, store_ids, as_of, as_of)
             month_key = as_of.strftime("%Y-%m")
             mobile_bisuan = db.bisuan_mobile_map(conn, month_key)
             payload = insights.build_insights(

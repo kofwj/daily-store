@@ -6,7 +6,7 @@ from datetime import date
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from .db_core import _now, begin_immediate, today_local
-from .db_core import store_in_clause as _store_in
+from .db_core import sql_in as _store_in
 
 
 def _deal_payload(

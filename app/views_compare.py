@@ -37,7 +37,6 @@ from .helpers import (
     phone_fix_marks,
     pick_store,
     scope_options,
-    sql_in,
     xlsx_bytes,
     xlsx_response,
 )
@@ -131,22 +130,6 @@ def _fix_title(fix: Optional[Mapping[str, Any]]) -> str:
     return f"已修正：{' · '.join(bits)}" if bits else ""
 
 
-def _report_days(conn, store_ids: Sequence[int], start: date, end: date) -> Dict[int, int]:
-    """区间内各店交过日报的天数：月累计差要不要出，就看这个是不是 0。"""
-    clause, params = sql_in("r.store_id", store_ids)
-    if clause == "1=0" or end < start:
-        return {}
-    rows = conn.execute(
-        f"""
-        SELECT r.store_id, COUNT(*) AS n
-        FROM daily_reports r
-        WHERE r.biz_date>=? AND r.biz_date<=? AND {clause}
-        GROUP BY r.store_id
-        """,
-        [start.isoformat(), end.isoformat(), *params],
-    )
-    return {int(row["store_id"]): int(row["n"]) for row in rows}
-
 
 def _month_stats(conn, store_ids: Sequence[int], biz_date: date) -> Dict[str, Any]:
     """本月累计（当月 1 日 → 所选日）按店拆开：触客 / 手机销量 / 业辅查询登记 / 差。
@@ -167,7 +150,7 @@ def _month_stats(conn, store_ids: Sequence[int], biz_date: date) -> Dict[str, An
     deals = db.deal_daily_counts(conn, ids, month_start, biz_date)
     sales = db.range_metric_totals(conn, ids, month_start, biz_date, (PHONE_CODE,))
     aux_days = db.aux_days(conn, ids, month_start, biz_date)
-    reported = _report_days(conn, ids, month_start, biz_date)
+    reported = db.store_reported_days(conn, ids, month_start, biz_date)
     touch = {sid: sum(int(v or 0) for v in deals.get(sid, {}).values()) for sid in ids}
     sold = {sid: int((sales.get(sid) or {}).get(PHONE_CODE, 0) or 0) for sid in ids}
     aux = {
@@ -200,22 +183,6 @@ def _month_total(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     )
     return total
 
-
-def _reports_on(conn, store_ids: Sequence[int], biz_date: date) -> Dict[int, Any]:
-    """当天哪些店交了日报（按 daily_reports 有没有行判定）。"""
-    clause, params = sql_in("r.store_id", store_ids)
-    if clause == "1=0":
-        return {}
-    rows = conn.execute(
-        f"""
-        SELECT r.store_id, r.submitted_at, r.note, u.display_name AS submitter_name
-        FROM daily_reports r
-        LEFT JOIN users u ON u.id = r.submitted_by
-        WHERE r.biz_date=? AND {clause}
-        """,
-        [biz_date.isoformat(), *params],
-    )
-    return {int(row["store_id"]): row for row in rows}
 
 
 def _city_of(store) -> str:
@@ -349,7 +316,7 @@ def _day_payload(
     day_key = biz_date.isoformat()
     deals = db.deal_daily_counts(conn, ids, biz_date, biz_date)
     sales = db.range_metric_totals(conn, ids, biz_date, biz_date, (PHONE_CODE,))
-    reports = _reports_on(conn, ids, biz_date)
+    reports = db.daily_reports_on_date(conn, ids, biz_date)
     marks = phone_fix_marks(conn, ids, biz_date, biz_date, metric_code=PHONE_CODE)
     aux = db.aux_days(conn, ids, biz_date, biz_date)
 
@@ -512,19 +479,7 @@ def _store_month_payload(conn, store, month: date, *, role: str, today: date):
     facts = db.range_metric_days(conn, [sid], month_start, end, (PHONE_CODE,))
     sales = {str(row["biz_date"]): int(row["day_value"] or 0) for row in facts}
     # 日报按天取：一次查完整月，避免逐日查库
-    clause, params = sql_in("r.store_id", [sid])
-    report_days = {
-        str(row["biz_date"]): row
-        for row in conn.execute(
-            f"""
-            SELECT r.biz_date, r.submitted_at, u.display_name AS submitter_name
-            FROM daily_reports r
-            LEFT JOIN users u ON u.id = r.submitted_by
-            WHERE r.biz_date>=? AND r.biz_date<=? AND {clause}
-            """,
-            [month_start.isoformat(), end.isoformat(), *params],
-        )
-    }
+    report_days = db.store_month_daily_reports(conn, sid, month_start, end)
     marks = phone_fix_marks(conn, [sid], month_start, end, metric_code=PHONE_CODE).get(sid, {})
     aux_days = db.aux_days(conn, [sid], month_start, end).get(sid, {})
 

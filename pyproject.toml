@@ -1,6 +1,6 @@
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py311"
 exclude = [".git", ".pytest_cache", "data"]
 
 [tool.ruff.lint]
@@ -13,7 +13,7 @@ ignore = ["E501", "DTZ"]
 known-first-party = ["app", "tests"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.11"
 # 只盯算钱的三个模块 + 它们的直接依赖，防类型错误静默变成错数字
 files = [
     "app/metrics_seed.py",

@@ -53,6 +53,7 @@ from .db_core import (  # noqa: F401
     DEFAULT_FILLER_PIN,
     TZ,
     _now,  # noqa: F401 — 测试直接调用 db._now()
+    active_store_ids,
     burn_pin_time,
     clear_login_failures,
     connect,
@@ -89,6 +90,7 @@ from .db_core import (  # noqa: F401
     set_user_active,
     set_user_scope,
     set_user_stores,
+    sql_in,
     today_local,
     update_store_profile,
     update_user_pin,
@@ -136,6 +138,7 @@ from .db_policies import (  # noqa: F401
     unread_policies,
 )
 from .db_query import (  # noqa: F401
+    daily_reports_on_date,
     dashboard_today,
     day_values,
     facts_in_range,
@@ -145,7 +148,11 @@ from .db_query import (  # noqa: F401
     range_metric_totals,
     save_daily,
     set_day_value,
+    store_month_daily_reports,
+    store_reported_dates,
+    store_reported_days,
     stores_reported_in_month,
+    stores_reported_in_range,
     week_metric_total,
 )
 from .sesame import (  # noqa: F401

@@ -1,41 +1,50 @@
 #!/usr/bin/env bash
 # 提交前 lint + 回归：ruff check → mypy（算钱模块）→ pytest 全量。
-# 工具未装则跳过并提示（不阻塞提交）。
 # 安装：ln -sf ../../scripts/pre-commit .git/hooks/pre-commit  (见 scripts/install_precommit.sh)
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
-if command -v ruff >/dev/null 2>&1; then
-  RUFF=ruff
+# 部署脚本等自动更新 VERSION 时跳过耗时全量回归
+STAGED="$(git diff --cached --name-only)"
+if [ "$STAGED" = "VERSION" ]; then
+  echo "→ 仅提交 VERSION，跳过 pre-commit 测试门禁"
+  exit 0
+fi
+
+if [ -x "./.venv/bin/ruff" ]; then
+  RUFF="./.venv/bin/ruff"
+elif command -v ruff >/dev/null 2>&1; then
+  RUFF="ruff"
 elif [ -x "$HOME/Library/Python/3.9/bin/ruff" ]; then
   RUFF="$HOME/Library/Python/3.9/bin/ruff"
 else
-  echo "⚠️  未找到 ruff（pip install ruff 后生效），本次跳过 lint"
-  exit 0
+  echo "❌ 未找到 ruff（请激活 .venv 或安装：./.venv/bin/pip install ruff），提交被拒绝" >&2
+  exit 1
 fi
 
 echo "→ ruff check"
 "$RUFF" check .
 
 # 静态类型检查：只盯算钱的几个模块，防类型错误静默变成错数字
-# mypy 未装则跳过（与 ruff 同样不阻塞未装环境）
-if command -v mypy >/dev/null 2>&1; then
-  MYPY=mypy
+if [ -x "./.venv/bin/mypy" ]; then
+  MYPY="./.venv/bin/mypy"
+elif command -v mypy >/dev/null 2>&1; then
+  MYPY="mypy"
 elif [ -x "$HOME/Library/Python/3.9/bin/mypy" ]; then
   MYPY="$HOME/Library/Python/3.9/bin/mypy"
 else
-  MYPY=""
-fi
-if [ -n "$MYPY" ]; then
-  echo "→ mypy (算钱模块)"
-  "$MYPY" || exit 1
+  echo "❌ 未找到 mypy（请激活 .venv 或安装：./.venv/bin/pip install mypy），提交被拒绝" >&2
+  exit 1
 fi
 
-# 回归测试：全量用例必须在提交前通过。未建 .venv 或没装 pytest 时跳过（不阻塞）。
-# 用 python -m 运行，保证仓库根在 sys.path（.venv/bin/pytest 入口脚本拿不到）
-if [ -x "./.venv/bin/pytest" ]; then
+echo "→ mypy (算钱模块)"
+"$MYPY" || exit 1
+
+# 回归测试：全量用例必须在提交前通过。
+if [ -x "./.venv/bin/python" ] && ./.venv/bin/python -c "import pytest" >/dev/null 2>&1; then
   echo "→ pytest（全量回归）"
   ./.venv/bin/python -m pytest -q || exit 1
 else
-  echo "⚠️  .venv 里没有 pytest（python3 -m venv .venv && .venv/bin/pip install -r requirements.txt pytest），本次跳过测试"
+  echo "❌ .venv 中未找到 pytest（请运行：./.venv/bin/pip install pytest），提交被拒绝" >&2
+  exit 1
 fi
