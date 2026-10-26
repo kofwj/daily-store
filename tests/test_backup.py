@@ -228,3 +228,45 @@ def test_restore_corrupt_sqlite_file_is_valueerror(tmp_db, tmp_path):
     with pytest.raises(ValueError, match="备份文件损坏"):
         backup.restore_bytes(corrupt.read_bytes())
 
+
+def test_restore_legacy_backup_without_must_change_pin(tmp_db, tmp_path):
+    """恢复缺失 must_change_pin 列的旧备份，能成功补齐列并给默认口令标记改密（覆盖 backup.py:200）。"""
+    import shutil
+
+    legacy_db_path = tmp_path / "legacy.db"
+    shutil.copyfile(tmp_db, legacy_db_path)
+
+    conn = sqlite3.connect(str(legacy_db_path))
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE users_old AS SELECT id, username, display_name, pin_hash, role, scope, active, created_at FROM users"
+    )
+    conn.execute("DROP TABLE users")
+    conn.execute(
+        """
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            pin_hash TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('admin', 'filler', 'readonly', 'city')),
+            scope TEXT NOT NULL DEFAULT '',
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("INSERT INTO users SELECT * FROM users_old")
+    conn.execute("DROP TABLE users_old")
+    conn.commit()
+    conn.close()
+
+    backup.restore_bytes(legacy_db_path.read_bytes())
+
+    with db.get_db() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+        assert "must_change_pin" in cols
+        row = conn.execute("SELECT must_change_pin FROM users WHERE username='admin'").fetchone()
+        assert int(row["must_change_pin"]) == 1
+
+
