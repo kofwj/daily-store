@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from hashlib import pbkdf2_hmac
 from secrets import compare_digest, token_hex
 from typing import Optional
@@ -69,3 +70,36 @@ def new_pin_error(pin: str) -> Optional[str]:
     if is_weak_new_pin(pin):
         return "口令太弱：不能用默认口令、重复数字或连续数字"
     return None
+
+
+def _ensure_auth_events(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS auth_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT NOT NULL DEFAULT '',
+            display_name TEXT NOT NULL DEFAULT '',
+            role TEXT NOT NULL DEFAULT '',
+            action TEXT NOT NULL DEFAULT 'login',
+            ip TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_auth_events_created ON auth_events(created_at DESC, id DESC)"
+    )
+
+
+def _ensure_login_attempts(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS login_attempts (
+            key TEXT PRIMARY KEY,
+            fail_count INTEGER NOT NULL DEFAULT 0,
+            locked_until TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL
+        )
+        """
+    )

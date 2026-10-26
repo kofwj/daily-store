@@ -8,7 +8,7 @@ from pathlib import Path
 from secrets import token_hex
 from typing import List, Optional
 
-from . import db_core
+from . import db_auth, db_core, db_schema
 
 BACKUP_DIR_NAME = "backups"
 BACKUP_PREFIX = "store_daily_"
@@ -186,23 +186,23 @@ def restore_bytes(data: bytes) -> Path:
         with db_core.get_db() as conn:
             cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
             had_flag = "must_change_pin" in cols
-            db_core._ensure_user_columns(conn)
-            db_core._ensure_login_attempts(conn)
-            db_core._ensure_auth_events(conn)
-            db_core._ensure_advance_edits(conn)
-            db_core._ensure_advance_sesame(conn)
+            db_schema._ensure_user_columns(conn)
+            db_auth._ensure_login_attempts(conn)
+            db_auth._ensure_auth_events(conn)
+            db_schema._ensure_advance_edits(conn)
+            db_schema._ensure_advance_sesame(conn)
             from .db_invoice import _ensure_invoice_tables
             from .db_policies import _ensure_policy_tables
 
             _ensure_invoice_tables(conn)
             _ensure_policy_tables(conn)
             if not had_flag:
-                db_core._add_must_change_pin(conn)
+                db_schema._add_must_change_pin(conn)
         # 旧备份可能停在更早的 schema 版本，恢复后再补索引/金额单位
-        db_core.migrate()
+        db_schema.migrate()
         with db_core.get_db() as conn:
-            db_core._ensure_user_columns(conn)
-            db_core._add_must_change_pin(conn)
+            db_schema._ensure_user_columns(conn)
+            db_schema._add_must_change_pin(conn)
             db_core.bump_all_session_epochs(conn)
     finally:
         try:

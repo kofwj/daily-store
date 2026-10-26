@@ -70,7 +70,6 @@ from .db_core import (  # noqa: F401
     get_report,
     get_setting,
     hot_settings,
-    init_db,
     is_locked,
     list_advisor_scores,
     list_auth_events,
@@ -145,6 +144,10 @@ from .db_query import (  # noqa: F401
     stores_reported_in_month,
     stores_reported_in_range,
     week_metric_total,
+)
+from .db_schema import (  # noqa: F401
+    init_db,
+    migrate,
 )
 from .db_stores import (  # noqa: F401
     active_area_managers,

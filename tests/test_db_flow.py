@@ -410,7 +410,7 @@ def test_migration_is_idempotent(tmp_db, version, seed, query, expected, marker_
         conn.execute("DELETE FROM schema_migrations WHERE version=?", (version,))
         conn.commit()
         before = conn.execute(query).fetchone()[0]
-    db_core.migrate()
+    db.migrate()
     with db.get_db() as conn:
         after = conn.execute(query).fetchone()[0]
         marker = (
@@ -449,8 +449,6 @@ def test_sesame_orders_upsert_stores_cents(tmp_db):
 
 def test_sesame_frozen_migration_converts_legacy_real(tmp_db):
     """旧库 frozen 按元存（REAL 列）：迁移后转成整数分。"""
-    from app import db_core
-
     with db.get_db() as conn:
         conn.execute("DROP TABLE sesame_orders")
         conn.execute(
@@ -476,7 +474,7 @@ def test_sesame_frozen_migration_converts_legacy_real(tmp_db):
         # 真正的旧库从未跑过该迁移，也就没有 marker；fresh 库 init 时已写，这里要一并清掉
         conn.execute("DELETE FROM app_meta WHERE key='sesame_frozen_cents_marker'")
         conn.commit()
-    db_core.migrate()
+    db.migrate()
     with db.get_db() as conn:
         rows = {
             r["order_no"]: int(r["frozen"])

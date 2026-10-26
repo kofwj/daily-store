@@ -403,16 +403,16 @@ def test_advance_old_real_whole_yuan_converted(tmp_path):
 
     import sqlite3
 
-    from app import db_core
+    from app import db_schema
 
     conn = sqlite3.connect(str(tmp_path / "old.db"))
-    db_core._ensure_app_meta(conn)
+    db_schema._ensure_app_meta(conn)
     conn.execute("CREATE TABLE advance_posts (id INTEGER PRIMARY KEY AUTOINCREMENT, broadband REAL NOT NULL DEFAULT 0, rebate REAL NOT NULL DEFAULT 0, other REAL NOT NULL DEFAULT 0)")
     conn.executemany(
         "INSERT INTO advance_posts (broadband, rebate, other) VALUES (?, ?, ?)",
         [(200, 35.5, 0), (500, 0, 12.25)],
     )
-    db_core._advance_amounts_to_cents(conn)
+    db_schema._advance_amounts_to_cents(conn)
     rows = conn.execute(
         "SELECT broadband, rebate, other FROM advance_posts ORDER BY id"
     ).fetchall()

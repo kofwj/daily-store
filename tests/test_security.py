@@ -143,8 +143,6 @@ def test_admin_reset_pin_uses_default_without_manual_input(client):
 
 
 def test_legacy_admin_pin_migrates_to_six_digits(tmp_db):
-    from app import db_core
-
     with db.get_db() as conn:
         uid = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
         conn.execute(
@@ -152,7 +150,7 @@ def test_legacy_admin_pin_migrates_to_six_digits(tmp_db):
             (db.hash_pin("1234"), uid),
         )
         conn.execute("DELETE FROM schema_migrations WHERE version=12")
-    db_core.migrate()
+    db.migrate()
     with db.get_db() as conn:
         row = conn.execute(
             "SELECT pin_hash, must_change_pin FROM users WHERE id=?", (uid,)

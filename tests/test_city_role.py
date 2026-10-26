@@ -4,7 +4,7 @@ import sqlite3
 from datetime import date, timedelta
 
 from app import db
-from app.db_core import _expand_user_roles_city
+from app.db_schema import _expand_user_roles_city
 from tests.conftest import login, make_city_user
 
 
