@@ -35,6 +35,10 @@ from .db_advances import (  # noqa: F401
     store_advance_window,
     yuan_to_cents,
 )
+from .db_audit import (  # noqa: F401
+    count_audit_edits,
+    list_audit_edits,
+)
 from .db_aux import (  # noqa: F401
     aux_days,
     aux_range_total,
@@ -53,6 +57,7 @@ from .db_core import (  # noqa: F401
     DEFAULT_FILLER_PIN,
     TZ,
     _now,  # noqa: F401 — 测试直接调用 db._now()
+    active_area_managers,
     active_store_ids,
     burn_pin_time,
     clear_login_failures,
@@ -60,10 +65,12 @@ from .db_core import (  # noqa: F401
     count_auth_events,
     create_store,
     create_user,
+    delete_daily_report,
     delete_store,
     get_report,
     get_setting,
     get_store,
+    get_user,
     get_user_by_username,
     hash_pin,
     hot_settings,
@@ -91,6 +98,7 @@ from .db_core import (  # noqa: F401
     set_user_scope,
     set_user_stores,
     sql_in,
+    system_entity_counts,
     today_local,
     update_store_profile,
     update_user_pin,
@@ -106,6 +114,7 @@ from .db_deals import (  # noqa: F401
     deal_counts,
     deal_daily_counts,
     delete_deal_post,
+    find_latest_deal_by_phone,
     get_deal_post,
     list_all_deal_posts,
     list_deal_posts,

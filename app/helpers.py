@@ -483,13 +483,8 @@ def store_forecast(
     if rules is None:
         rules = incentive_rules(conn)
     if reported is None:
-        start, end = db.month_bounds(as_of)
         reported = (
-            conn.execute(
-                "SELECT 1 FROM daily_reports WHERE store_id=? AND biz_date>=? AND biz_date<=? LIMIT 1",
-                (store["id"], start, end),
-            ).fetchone()
-            is not None
+            db.store_reported_days(conn, [store["id"]], as_of.replace(day=1), as_of).get(store["id"], 0) > 0
         )
     if not reported:
         judged = {

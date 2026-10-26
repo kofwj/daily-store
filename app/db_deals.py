@@ -158,14 +158,7 @@ def record_deal_post(
         existing_id = int(row["id"])
         existing_row = row
     if payload["phone"]:
-        row = conn.execute(
-            """
-            SELECT * FROM deal_posts
-            WHERE store_id=? AND biz_date=? AND phone=?
-            ORDER BY id DESC LIMIT 1
-            """,
-            (store_id, day.isoformat(), payload["phone"]),
-        ).fetchone()
+        row = find_latest_deal_by_phone(conn, store_id, day, payload["phone"])
         if existing_id is None:
             # 新建：同店 + 当日 + 同号码按口径覆盖到已有记录上
             if row:
@@ -416,4 +409,18 @@ def deal_daily_counts(
             row["total"] or 0
         )
     return out
+
+
+def find_latest_deal_by_phone(
+    conn: sqlite3.Connection,
+    store_id: int,
+    biz_date: date,
+    phone: str,
+) -> Optional[sqlite3.Row]:
+    """查询同店同日同手机号最新的一条触客记录。"""
+    return conn.execute(
+        "SELECT * FROM deal_posts WHERE store_id=? AND biz_date=? AND phone=? "
+        "ORDER BY id DESC LIMIT 1",
+        (store_id, biz_date.isoformat(), phone),
+    ).fetchone()
 

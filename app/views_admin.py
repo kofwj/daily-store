@@ -34,7 +34,6 @@ from .helpers import (
     request_scope,
     review_preset_key,
     review_template_setting,
-    sql_in,
     store_forecasts,
     store_label,
     values_for_broadcast,
@@ -337,21 +336,6 @@ def _board_payload(conn, biz_date: date, view: str, city: str = ""):
             scope_label=city,
         ),
     }
-
-
-_AUDIT_SOURCES = (
-    # (kind, 表别名, 审计表, 日期列, 是否有 action 列)
-    ("daily", "rn", "report_edits", "rn.biz_date", False),
-    ("deal", "dn", "deal_edits", "dn.biz_date", True),
-    ("advance", "an", "advance_edits", "an.biz_date", True),
-    ("invoice", "inv", "invoice_edits", "inv.month", True),
-    ("mobile", "bm", "bisuan_mobile_edits", "bm.month", True),
-)
-
-
-def _audit_union_sources(kind: str):
-    """审计 UNION 的数据源：kind=all 全部，否则只取对应表。"""
-    return [row for row in _AUDIT_SOURCES if kind in ("all", row[0])]
 
 
 def _audit_diff(r, before, after, names) -> str:
@@ -1077,50 +1061,28 @@ def register_admin(app) -> None:
         # edited_at 存的是北京时间；用北京时间算窗口边界，避免 SQLite 的 UTC now 差 8 小时
         cutoff = (datetime.now(db.TZ) - timedelta(days=days_int)).strftime("%Y-%m-%d %H:%M:%S")
         sid = int(store_id) if store_id.isdigit() else None
-        parts: List[str] = []
-        params: List[Any] = []
         with db.get_db() as conn:
             all_stores = accessible_stores(conn)
             city_scope = request_scope(all_stores)
             scoped_ids = city_scope["ids"] if (not sid and city_scope["active"]) else []
-        for kind_, alias, table, date_col, has_action in _audit_union_sources(kind):
-            w = f"{alias}.edited_at >= ?"
-            ps: List[Any] = [cutoff]
-            if sid:
-                w += f" AND {alias}.store_id=?"
-                ps.append(sid)
-            elif scoped_ids:
-                clause, ids = sql_in(f"{alias}.store_id", scoped_ids)
-                w += f" AND {clause}"
-                ps.extend(ids)
-            action_col = f"{alias}.action" if has_action else "'' AS action"
-            parts.append(
-                f"SELECT '{kind_}' AS kind, {alias}.id, {date_col} AS biz_date, "
-                f"{alias}.edited_at, {alias}.note, {alias}.before_json, {alias}.after_json, "
-                f"{action_col}, s.name AS store_name, u.username AS user_name "
-                f"FROM {table} {alias} "
-                f"LEFT JOIN stores s ON s.id={alias}.store_id "
-                f"LEFT JOIN users u ON u.id={alias}.user_id "
-                f"WHERE {w}"
+            total = db.count_audit_edits(
+                conn,
+                kind=kind,
+                sid=sid,
+                scoped_ids=scoped_ids,
+                cutoff=cutoff,
             )
-            params += ps
-        # kind 已在白名单内，parts 至少一段，无需空兜底
-        union_sql = " UNION ALL ".join(parts)
-
-        with db.get_db() as conn:
-            total = conn.execute(
-                f"SELECT COUNT(*) FROM ({union_sql})", params
-            ).fetchone()[0]
             page, pages = pagination(request.args.get("page"), total)
             rows = [
                 dict(r)
-                for r in conn.execute(
-                    f"""
-                    SELECT * FROM ({union_sql}) t
-                    ORDER BY t.edited_at DESC, t.id DESC
-                    LIMIT ? OFFSET ?
-                    """,
-                    [*params, 50, (page - 1) * 50],
+                for r in db.list_audit_edits(
+                    conn,
+                    kind=kind,
+                    sid=sid,
+                    scoped_ids=scoped_ids,
+                    cutoff=cutoff,
+                    limit=50,
+                    offset=(page - 1) * 50,
                 )
             ]
             all_stores = db.list_all_stores(conn)

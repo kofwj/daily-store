@@ -1680,8 +1680,27 @@ def get_report(conn: sqlite3.Connection, store_id: int, biz_date: date) -> Optio
         (store_id, biz_date.isoformat()),
     ).fetchone()
 
+
+def delete_daily_report(conn: sqlite3.Connection, store_id: int, biz_date: date) -> None:
+    """删除某门店特定日期的日报和事实记录。调用方需在事务内。"""
+    date_str = biz_date.isoformat()
+    conn.execute(
+        "DELETE FROM daily_facts WHERE store_id=? AND biz_date=?",
+        (store_id, date_str),
+    )
+    conn.execute(
+        "DELETE FROM daily_reports WHERE store_id=? AND biz_date=?",
+        (store_id, date_str),
+    )
+
+
 def list_users(conn: sqlite3.Connection) -> List[sqlite3.Row]:
     return list(conn.execute("SELECT * FROM users ORDER BY id"))
+
+
+def get_user(conn: sqlite3.Connection, user_id: int) -> Optional[sqlite3.Row]:
+    return conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+
 
 def list_all_stores(conn: sqlite3.Connection) -> List[sqlite3.Row]:
     return list(conn.execute("SELECT * FROM stores ORDER BY sort_order, id"))
@@ -1690,6 +1709,22 @@ def list_all_stores(conn: sqlite3.Connection) -> List[sqlite3.Row]:
 def active_store_ids(conn: sqlite3.Connection) -> Set[int]:
     """返回当前所有已启用门店的 ID 集合。"""
     return {int(row["id"]) for row in conn.execute("SELECT id FROM stores WHERE active=1")}
+
+
+def active_area_managers(conn: sqlite3.Connection) -> Set[str]:
+    """返回当前所有已启用门店的有效区域经理姓名集合。"""
+    return {
+        (row["area_manager"] or "").strip()
+        for row in conn.execute("SELECT area_manager FROM stores WHERE active=1")
+        if (row["area_manager"] or "").strip()
+    }
+
+
+def system_entity_counts(conn: sqlite3.Connection) -> Dict[str, int]:
+    """系统设置页运行状态统计：全部门店数与非管理员用户数。"""
+    stores_count = int(conn.execute("SELECT COUNT(*) FROM stores").fetchone()[0])
+    users_count = int(conn.execute("SELECT COUNT(*) FROM users WHERE role!='admin'").fetchone()[0])
+    return {"stores": stores_count, "users": users_count}
 
 
 def user_store_ids(conn: sqlite3.Connection, user_id: int) -> List[int]:

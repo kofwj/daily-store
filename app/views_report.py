@@ -244,14 +244,7 @@ def register_report(app) -> None:
                     after={},
                     note="删除日报",
                 )
-                conn.execute(
-                    "DELETE FROM daily_facts WHERE store_id=? AND biz_date=?",
-                    (sid, biz_date.isoformat()),
-                )
-                conn.execute(
-                    "DELETE FROM daily_reports WHERE store_id=? AND biz_date=?",
-                    (sid, biz_date.isoformat()),
-                )
+                db.delete_daily_report(conn, sid, biz_date)
                 flash("已删除该日日报", "ok")
         return redirect(
             url_for("report", store_id=sid, view="month", start=biz_date.replace(day=1).isoformat())

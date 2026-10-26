@@ -183,10 +183,11 @@ def _server_status_stats() -> dict:
     except OSError:
         pass
     with db.get_db() as conn:
+        counts = db.system_entity_counts(conn)
         stats["db"] = {
             "backups": len(list(backup.backup_dir().glob(f"{backup.BACKUP_PREFIX}*.db"))),
-            "stores": conn.execute("SELECT COUNT(*) FROM stores").fetchone()[0],
-            "users": conn.execute("SELECT COUNT(*) FROM users WHERE role!='admin'").fetchone()[0],
+            "stores": counts["stores"],
+            "users": counts["users"],
             "wal_mb": round(wal_bytes / 1024 / 1024, 2),
         }
     return stats
@@ -490,9 +491,7 @@ def _do_add_user(conn):
 
 def _do_reset_pin(conn):
     uid = int(request.form.get("user_id") or 0)
-    target = conn.execute(
-        "SELECT id, role, display_name FROM users WHERE id=?", (uid,)
-    ).fetchone()
+    target = db.get_user(conn, uid)
     if target is None:
         raise ValueError("查无此人")
     pin = (
@@ -516,7 +515,7 @@ def _do_reset_pin(conn):
 
 def _do_set_stores(conn):
     uid = int(request.form.get("user_id") or 0)
-    target = conn.execute("SELECT role, scope FROM users WHERE id=?", (uid,)).fetchone()
+    target = db.get_user(conn, uid)
     if target is None:
         raise ValueError("查无此人")
     if target["role"] == "admin":
@@ -540,11 +539,7 @@ def _do_set_stores(conn):
         if not scope:
             raise ValueError("区域经理没填区域经理姓名")
         # 姓名必须能对上某家启用店的区域经理，不然账号会静默变成零门店
-        known_managers = {
-            (s["area_manager"] or "").strip()
-            for s in conn.execute("SELECT area_manager FROM stores WHERE active=1")
-            if (s["area_manager"] or "").strip()
-        }
+        known_managers = db.active_area_managers(conn)
         if scope not in known_managers:
             raise ValueError("区域经理姓名要对得上门店档案里的区域经理")
         db.set_user_scope(conn, uid, scope)

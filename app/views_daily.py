@@ -260,11 +260,7 @@ def register_daily(app) -> None:
                         url_for("deal_page", store_id=store["id"], deal_id=deal_id_int)
                     )
                 if deal_id_int is None and values.get("phone"):
-                    dup = conn.execute(
-                        "SELECT user_id FROM deal_posts WHERE store_id=? AND biz_date=? AND phone=? "
-                        "ORDER BY id DESC LIMIT 1",
-                        (store["id"], today_d.isoformat(), values["phone"]),
-                    ).fetchone()
+                    dup = db.find_latest_deal_by_phone(conn, store["id"], today_d, values["phone"])
                     if dup is not None and int(dup["user_id"] or 0) != int(g.user["id"]):
                         flash("同日同号已有一条记录（他人填的），提交后按规则覆盖", "warn")
                 text = deal.render_deal(

@@ -640,3 +640,78 @@ def test_abandon_request_conn_resets_depth(tmp_db):
     assert "probe" not in keys  # abandon 时已回滚
     assert "probe2" in keys
 
+
+def test_system_entity_counts_and_get_user(tmp_db):
+    with db.get_db() as conn:
+        counts = db.system_entity_counts(conn)
+        assert isinstance(counts["stores"], int)
+        assert isinstance(counts["users"], int)
+
+        user = db.get_user(conn, 1)
+        assert user is not None
+        assert user["id"] == 1
+        assert db.get_user(conn, 999999) is None
+
+
+def test_active_area_managers(tmp_db):
+    with db.get_db() as conn:
+        mgrs = db.active_area_managers(conn)
+        assert isinstance(mgrs, set)
+        for m in mgrs:
+            assert m != ""
+
+
+def test_delete_daily_report(tmp_db):
+    from datetime import date
+    d = date(2026, 10, 15)
+    with db.get_db() as conn:
+        stores = db.list_all_stores(conn)
+        sid = stores[0]["id"]
+        db.save_daily(conn, store_id=sid, biz_date=d, values={"ai": 5}, user_id=1)
+        assert db.get_report(conn, sid, d) is not None
+        db.delete_daily_report(conn, sid, d)
+        assert db.get_report(conn, sid, d) is None
+        assert all(v == 0 for v in db.day_values(conn, sid, d).values())
+
+
+def test_find_latest_deal_by_phone(tmp_db):
+    from datetime import date
+    d = date(2026, 10, 15)
+    with db.get_db() as conn:
+        stores = db.list_all_stores(conn)
+        sid = stores[0]["id"]
+        deal_id = db.record_deal_post(
+            conn,
+            store_id=sid,
+            user_id=1,
+            closed=True,
+            phone="13800000000",
+            model="X200",
+            biz_date=d,
+        )
+        found = db.find_latest_deal_by_phone(conn, sid, d, "13800000000")
+        assert found is not None
+        assert found["id"] == deal_id
+        assert db.find_latest_deal_by_phone(conn, sid, d, "13900000000") is None
+
+
+def test_audit_edits_count_and_list(tmp_db):
+    from datetime import date
+    d = date(2026, 10, 15)
+    with db.get_db() as conn:
+        stores = db.list_all_stores(conn)
+        sid = stores[0]["id"]
+        db.record_edit(
+            conn,
+            biz_date=d,
+            store_id=sid,
+            user_id=1,
+            before={"ai": 1},
+            after={"ai": 2},
+            note="单元测试",
+        )
+        total = db.count_audit_edits(conn, kind="daily", cutoff="2026-01-01 00:00:00")
+        assert total >= 1
+        rows = db.list_audit_edits(conn, kind="daily", cutoff="2026-01-01 00:00:00", limit=10)
+        assert len(rows) >= 1
+
