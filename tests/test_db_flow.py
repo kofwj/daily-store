@@ -589,22 +589,22 @@ def test_comma_input_strict(tmp_db):
 
 def test_store_has_data_counts_invoice_edits(tmp_db):
     """开票审计行也算门店数据：否则删过开票月的店会被误判无数据，删店撞外键。"""
-    from app import db_core
+    from app import db_stores
 
     with db.get_db() as conn:
         sid = db.create_store(conn, "数据校验店", "x-data")
-        assert not db_core.store_has_data(conn, sid)
+        assert not db_stores.store_has_data(conn, sid)
         conn.execute(
             "INSERT INTO invoice_edits(store_id, user_id, month, edited_at, action)"
             " VALUES (?, 1, '2026-09', '2026-09-12 10:00:00', 'test')",
             (sid,),
         )
-        assert db_core.store_has_data(conn, sid)
+        assert db_stores.store_has_data(conn, sid)
 
 
 def test_store_has_data_counts_aux_queries(tmp_db):
     """业辅登记引用门店：不能误判为空店并删除。"""
-    from app import db_core
+    from app import db_stores
 
     with db.get_db() as conn:
         sid = db.create_store(conn, "业辅登记店", "x-aux")
@@ -612,7 +612,7 @@ def test_store_has_data_counts_aux_queries(tmp_db):
             "INSERT INTO aux_queries(biz_date, store_id, n) VALUES ('2026-09-12', ?, 3)",
             (sid,),
         )
-        assert db_core.store_has_data(conn, sid)
+        assert db_stores.store_has_data(conn, sid)
         with pytest.raises(ValueError, match="已有填报"):
             db.delete_store(conn, sid)
         assert db.get_store(conn, sid) is not None

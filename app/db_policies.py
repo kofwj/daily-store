@@ -531,7 +531,7 @@ def policy_read_status(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
 
     读 = 该用户的 ack 版本 >= 政策当前版本。目标 = 全部可登录用户。
     """
-    from .db_core import list_users
+    from .db_stores import list_users
 
     policies = list_policies(conn, active_only=True)
     # 键 = (policy_id, user_id)，否则多用户同策会互相覆盖
