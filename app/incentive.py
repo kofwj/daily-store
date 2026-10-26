@@ -163,7 +163,7 @@ def judge(
     has_advisor: bool,
     ai: int,
     new_cut: int,
-    rules: Dict[str, int] = None,
+    rules: Dict[str, int] | None = None,
     *,
     as_of: date | None = None,
 ) -> Dict[str, Any]:

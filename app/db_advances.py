@@ -8,7 +8,7 @@ import sqlite3
 from datetime import date, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from .db_core import _now, begin_immediate, month_bounds, today_local
+from .db_core import _now, begin_immediate, month_bounds, require_lastrowid, today_local
 from .db_core import sql_in as _store_in
 
 MAX_AMOUNT = 10_000_000.0
@@ -181,9 +181,10 @@ def record_advance(
             paid_by,
         ),
     )
-    created = conn.execute("SELECT * FROM advance_posts WHERE id=?", (int(cur.lastrowid or 0),)).fetchone()
+    new_id = require_lastrowid(cur)
+    created = conn.execute("SELECT * FROM advance_posts WHERE id=?", (new_id,)).fetchone()
     _audit(conn, created, user_id=user_id, action="create", before={}, after=_snapshot(created, cents=True))
-    return int(cur.lastrowid or 0)
+    return new_id
 
 
 def get_advance(conn: sqlite3.Connection, advance_id: int, store_id: int):
@@ -216,7 +217,7 @@ def delete_advance(
 
 def set_advance_paid(
     conn: sqlite3.Connection,
-    advance_ids: Sequence[int],
+    advance_ids: Iterable[int | str],
     *,
     paid: bool,
     user_id: int,

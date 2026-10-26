@@ -348,7 +348,7 @@ def close_rate(closed: int, total: int) -> str:
 
 
 def with_close_rate(counts: Dict[str, int]) -> Dict[str, Any]:
-    out = dict(counts or {"total": 0, "closed": 0})
+    out: Dict[str, Any] = dict(counts or {"total": 0, "closed": 0})
     out["rate"] = close_rate(out.get("closed", 0), out.get("total", 0))
     return out
 

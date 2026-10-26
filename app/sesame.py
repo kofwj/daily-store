@@ -260,7 +260,7 @@ def _store_map(stores: Iterable[Any]) -> Dict[str, Any]:
 def classify_sesame_rows(conn, rows: Sequence[Dict[str, Any]], stores: Sequence[Any]) -> Dict[str, List[Dict[str, Any]]]:
     by_code = _store_map(stores)
     ext_ids = [r["ext_id"] for r in rows]
-    existing = set()
+    existing: set[str] = set()
     if ext_ids:
         chunk = 400
         for i in range(0, len(ext_ids), chunk):

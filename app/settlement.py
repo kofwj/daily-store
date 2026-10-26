@@ -235,8 +235,8 @@ def build_settlement_xlsx(conn, stores: Sequence[Any], as_of: date) -> bytes:
         "I": 12, "J": 10, "K": 14, "L": 8, "M": 8, "N": 8, "O": 10, "P": 12,
         "Q": 8, "R": 12, "S": 12,
     }
-    for col, width in widths.items():
-        ws.column_dimensions[col].width = width
+    for col_letter, width in widths.items():
+        ws.column_dimensions[col_letter].width = width
     ws.row_dimensions[2].height = 20
     ws.row_dimensions[3].height = 20
     ws.row_dimensions[4].height = 20
@@ -282,8 +282,8 @@ def _write_store_row(ws, row: int, manager: str, data: Dict[str, Any]) -> None:
     ws[f"F{row}"] = invoice_total or None
     ws[f"G{row}"] = housing or None
     ws[f"P{row}"] = None
-    for col in ("F", "G", "P"):
-        ws[f"{col}{row}"].fill = INPUT_FILL
+    for col_letter in ("F", "G", "P"):
+        ws[f"{col_letter}{row}"].fill = INPUT_FILL
     advance = float(data.get("advance") or 0)
     if advance:
         ws[f"H{row}"] = advance

@@ -715,3 +715,17 @@ def test_audit_edits_count_and_list(tmp_db):
         rows = db.list_audit_edits(conn, kind="daily", cutoff="2026-01-01 00:00:00", limit=10)
         assert len(rows) >= 1
 
+
+def test_require_lastrowid():
+    from unittest.mock import MagicMock
+
+    from app.db_core import require_lastrowid
+
+    cur = MagicMock()
+    cur.lastrowid = 42
+    assert require_lastrowid(cur) == 42
+
+    cur.lastrowid = None
+    with pytest.raises(RuntimeError, match="SQLite INSERT did not return a valid lastrowid"):
+        require_lastrowid(cur)
+

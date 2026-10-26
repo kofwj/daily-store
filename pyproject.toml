@@ -22,6 +22,14 @@ files = [
     "app/db_core.py",
     "app/db_policies.py",
     "app/db_audit.py",
+    "app/settlement.py",
+    "app/bulletin.py",
+    "app/db_query.py",
+    "app/db_deals.py",
+    "app/db_aux.py",
+    "app/incentive.py",
+    "app/sesame.py",
+    "app/helpers.py",
 ]
 # sqlite3.Row 在类型桩里不算 Sequence，业务代码到处 row["x"]，不为此加 cast
 disable_error_code = ["index", "union-attr"]

@@ -5,7 +5,7 @@ import sqlite3
 from datetime import date
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-from .db_core import _now, begin_immediate, today_local
+from .db_core import _now, begin_immediate, require_lastrowid, today_local
 from .db_core import sql_in as _store_in
 
 
@@ -217,7 +217,7 @@ def record_deal_post(
             payload["text"],
         ),
     )
-    new_id = int(cur.lastrowid)
+    new_id = require_lastrowid(cur)
     record_deal_edit(
         conn,
         store_id=store_id,

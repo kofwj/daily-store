@@ -2028,3 +2028,10 @@ def delete_store(conn: sqlite3.Connection, store_id: int) -> None:
     conn.execute("DELETE FROM user_stores WHERE store_id=?", (sid,))
     conn.execute("DELETE FROM stores WHERE id=?", (sid,))
 
+
+def require_lastrowid(cur: sqlite3.Cursor) -> int:
+    """提取 INSERT 产生的主键自增 ID。游标未返回自增 ID 时明确抛出异常。"""
+    if cur.lastrowid is None:
+        raise RuntimeError("SQLite INSERT did not return a valid lastrowid")
+    return int(cur.lastrowid)
+

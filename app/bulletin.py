@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any, Callable, Dict, List, Mapping, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 from .metrics_seed import effective_month_bisuan, format_display, from_stored
 
@@ -659,7 +659,7 @@ def _month_bisuan_for_rank(row: Mapping[str, Any]) -> int:
     return effective_month_bisuan(row.get("_month_bisuan_mobile_stored"), row.get("month_bisuan") or 0)
 
 
-def _join_names(names: Sequence[str]) -> str:
+def _join_names(names: Iterable[str]) -> str:
     return "、".join(names)
 
 
