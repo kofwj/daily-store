@@ -605,7 +605,7 @@ def register_advance(app) -> None:
                         rules = sesame.tier_rules(conn)
                     orders, order_warnings = sesame.parse_orders_xlsx(order_file.read())
                     for o in orders:
-                        o["category"] = sesame.tier_category(o.get("order_title") or "", rules)
+                        o["category"] = sesame.tier_category(o.get("order_title"), rules)
                     if order_warnings:
                         order_error = "；".join(order_warnings)
                 except ValueError as exc:

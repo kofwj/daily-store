@@ -36,7 +36,7 @@ def tier_rules(conn) -> Dict[str, int]:
     return rules
 
 
-def tier_category(title: str, rules: Mapping[str, int]) -> str:
+def tier_category(title: str | None, rules: Mapping[str, int]) -> str:
     """从订单标题提取档位并归类：500=小天才、1000=AI手机、其余=新用户芝麻直降。"""
     m = re.search(r"(\d+)\s*档", str(title or ""))
     if not m:
