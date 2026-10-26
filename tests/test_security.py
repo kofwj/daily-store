@@ -9,7 +9,7 @@ from app import backup, db
 from app.web import create_app
 
 
-def test_production_rejects_missing_or_example_secret(monkeypatch):
+def test_production_rejects_missing_or_example_secret(tmp_db, monkeypatch):
     monkeypatch.delenv("STORE_DAILY_SECRET", raising=False)
     monkeypatch.delenv("STORE_DAILY_TESTING", raising=False)  # 明确生产态：不靠 sys.modules 探测，要测就删开关
     with pytest.raises(RuntimeError):

@@ -153,6 +153,5 @@ def create_app(*, testing: bool = False) -> Flask:
     return app
 
 
-# 模块级 app 永远按生产配置装配。测试请 create_app(testing=True)；
-# gunicorn/wsgi 若带 STORE_DAILY_TESTING=1 会在 wsgi.py 直接拒绝启动。
-app = create_app()
+# 生产 app 装配由 wsgi.py 显式调用 create_app()；测试请使用 create_app(testing=True)。
+# 本模块不保留全局 app 实例，防止模块导入期提前触碰生产数据库与执行备份清理。
