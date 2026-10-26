@@ -2,6 +2,8 @@ import sqlite3
 import time
 from pathlib import Path
 
+import pytest
+
 from app import backup, db
 
 
@@ -213,9 +215,13 @@ def test_restore_safe_while_other_connection_open(tmp_db):
         other.close()
 
 
-def test_restore_corrupt_sqlite_file_is_valueerror(tmp_path):
-    """魔数对但页损坏的备份要报"备份文件损坏"，不能炸成 500。"""
-    import pytest
+def test_restore_corrupt_sqlite_file_is_valueerror(tmp_db, tmp_path):
+    """魔数对但页损坏的备份要报"备份文件损坏"，不能炸成 500。
+
+    restore_bytes 在验证前会先往 backup_dir() 落一个 _incoming_*.db 临时文件，
+    所以必须带 tmp_db 把 db_core.DATA_DIR 指到临时目录；否则本用例会在真实的
+    data/backups 里建了又删（目录 mtime 被改写，且失败时留垃圾）。
+    """
 
     corrupt = tmp_path / "corrupt.db"
     corrupt.write_bytes(b"SQLite format 3\x00" + b"\x00" * 8192)
