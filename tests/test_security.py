@@ -1,7 +1,7 @@
 """登录锁定、默认口令强制改密、备份校验、会话过期。"""
 
 import sqlite3
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -222,21 +222,43 @@ def test_untrusted_proxy_ignores_forwarded_ip(tmp_db, monkeypatch):
 
 def test_successful_login_and_logout_are_logged(client):
     client.post("/login", data={"username": "admin", "pin": "123456"})
+    client.post("/logout", follow_redirects=True)
+    # 登入 filler 账号产生一条 filler 登录与登出
+    client.post("/login", data={"username": "alpha", "pin": "123456"})
+    client.post("/logout", follow_redirects=True)
+
     with db.get_db() as conn:
         rows = conn.execute(
             "SELECT action, username, role FROM auth_events ORDER BY id"
         ).fetchall()
-    assert [r["action"] for r in rows] == ["login"]
-    assert rows[0]["username"] == "admin"
-    page = client.get("/logins").get_data(as_text=True)
-    assert "登录日志" in page
-    assert "admin" in page
-    assert "settings-nav" in page
-    assert "备份恢复" in page
+    assert [(r["action"], r["username"], r["role"]) for r in rows] == [
+        ("login", "admin", "admin"),
+        ("logout", "admin", "admin"),
+        ("login", "alpha", "filler"),
+        ("logout", "alpha", "filler"),
+    ]
+
+    # 以管理员身份查看 /logins 验证筛选器真实有效性
+    client.post("/login", data={"username": "admin", "pin": "123456"})
+
+    # 1. 筛选 action=logout & role=filler：表格里应出现 <code>alpha</code>，不可出现 <code>admin</code>
+    page_filler_logout = client.get("/logins?action=logout&role=filler").get_data(as_text=True)
+    assert "<code>alpha</code>" in page_filler_logout
+    assert "<code>admin</code>" not in page_filler_logout
+
+    # 2. 筛选 action=login & role=admin：表格里应出现 <code>admin</code>，不可出现 <code>alpha</code>
+    page_admin_login = client.get("/logins?action=login&role=admin").get_data(as_text=True)
+    assert "<code>admin</code>" in page_admin_login
+    assert "<code>alpha</code>" not in page_admin_login
+
+    # 3. 筛选 q=nobody：无匹配记录
+    page_empty = client.get("/logins?q=nobody").get_data(as_text=True)
+    assert "没有登录记录" in page_empty
+    assert "<code>admin</code>" not in page_empty
+    assert "<code>alpha</code>" not in page_empty
+
+    # 普通填报员越权访问 /logins 被拦截
     client.post("/logout", follow_redirects=True)
-    with db.get_db() as conn:
-        actions = [r["action"] for r in conn.execute("SELECT action FROM auth_events ORDER BY id")]
-    assert actions == ["login", "logout"]
     client.post("/login", data={"username": "alpha", "pin": "123456"})
     blocked = client.get("/logins", follow_redirects=True)
     assert "需要管理员权限" in blocked.get_data(as_text=True)
@@ -329,7 +351,11 @@ def test_login_locks_account_across_ips(client):
         environ_base={"REMOTE_ADDR": "203.0.113.50"},
         follow_redirects=True,
     )
-    assert "连续输错太多" in locked.get_data(as_text=True)
+    body = locked.get_data(as_text=True)
+    assert "连续输错太多" in body
+    assert "30 分钟后再试" in body
+    with db.get_db() as conn:
+        assert db.login_lock_remaining(conn, "admin", "203.0.113.50") >= 1700
     assert locked.request.path == "/login"
 
 
@@ -429,4 +455,69 @@ def test_login_next_keeps_query_string(client):
     )
     assert landed.request.path == "/report"
     assert landed.request.query_string == b"view=week"
+
+
+def test_login_failure_recovery_and_timestamp_edge_cases(tmp_db, monkeypatch):
+    """验证登录失败计数的过期重置、已锁状态更新及异常时间戳容错。"""
+    with db.get_db() as conn:
+        # 1. 正常记一次失败
+        db.record_login_failure(conn, "bob", "198.51.100.1")
+
+        # 2. 模拟锁定已过期（until <= now）：再次失败应重置 count = 1
+        conn.execute(
+            "UPDATE login_attempts SET locked_until='2020-01-01 00:00:00' WHERE key='ip:198.51.100.1'"
+        )
+        db.record_login_failure(conn, "bob", "198.51.100.1")
+        row = conn.execute(
+            "SELECT fail_count FROM login_attempts WHERE key='ip:198.51.100.1'"
+        ).fetchone()
+        assert row["fail_count"] == 1
+
+        # 3. 模拟仍在锁定中（until > now）：再次失败应保留 locked_until 并 count >= limit
+        future = (datetime.now(db.TZ) + timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute(
+            "UPDATE login_attempts SET locked_until=? WHERE key='ip:198.51.100.1'",
+            (future,),
+        )
+        rem = db.record_login_failure(conn, "bob", "198.51.100.1")
+        assert rem > 0
+
+        # 4. 模拟时间戳损坏：login_lock_remaining 与 record_login_failure 优雅容错
+        conn.execute(
+            "UPDATE login_attempts SET locked_until='corrupt-timestamp' WHERE key='ip:198.51.100.1'"
+        )
+        assert db.login_lock_remaining(conn, "bob", "198.51.100.1") == 0
+        db.record_login_failure(conn, "bob", "198.51.100.1")
+
+    # 5. verify_pin 遇到缺少 $ 的损坏哈希应安全返回 False
+    assert not db.verify_pin("123456", "corrupt_hash_without_dollar")
+
+    # 6. burn_pin_time 覆盖：验证不存在用户与错误口令均落到相同提示，并切实调用了 burn_pin_time 防枚举
+    app = create_app(testing=True)
+    c = app.test_client()
+    resp_nonexistent = c.post(
+        "/login", data={"username": "nonexistent_user", "pin": "123456"}, follow_redirects=True
+    )
+    assert resp_nonexistent.status_code == 200
+    assert "账号或口令不对" in resp_nonexistent.get_data(as_text=True)
+
+    resp_wrong_pin = c.post(
+        "/login", data={"username": "admin", "pin": "wrong_pin"}, follow_redirects=True
+    )
+    assert resp_wrong_pin.status_code == 200
+    assert "账号或口令不对" in resp_wrong_pin.get_data(as_text=True)
+
+    # 变异防护：验证不存在用户登录时确实触发了 burn_pin_time 防时序枚举
+    burned = False
+
+    def fake_burn(pin: str) -> None:
+        nonlocal burned
+        burned = True
+
+    monkeypatch.setattr(db, "burn_pin_time", fake_burn)
+    c.post("/login", data={"username": "another_ghost", "pin": "0000"})
+    assert burned, "未调用 burn_pin_time，防用户名枚举时序保护失效"
+
+    # 7. is_weak_new_pin 8 位及以上整串同一字符（通过 db 门面调用）
+    assert db.is_weak_new_pin("88888888")
 

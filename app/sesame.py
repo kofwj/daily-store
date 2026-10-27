@@ -123,6 +123,8 @@ def parse_orders_xlsx(data: bytes) -> Tuple[List[Dict[str, Any]], List[str]]:
         if terms is None:
             terms = 0
             bad_terms.append(order_no)
+        tier_match = re.search(r"(\d+)\s*档", title)
+        tier = tier_match.group(1) if tier_match else ""
         out.append(
             {
                 "order_no": order_no[:40],
@@ -130,7 +132,7 @@ def parse_orders_xlsx(data: bytes) -> Tuple[List[Dict[str, Any]], List[str]]:
                 "frozen": frozen,
                 "terms": terms,
                 "order_title": title[:120],
-                "tier": (re.search(r"(\d+)\s*档", title).group(1) if re.search(r"(\d+)\s*档", title) else ""),
+                "tier": tier,
             }
         )
     if not out:

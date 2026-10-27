@@ -47,6 +47,7 @@ from .db_auth import (  # noqa: F401
     count_auth_events,
     hash_pin,
     is_locked,
+    is_weak_new_pin,
     list_auth_events,
     login_lock_remaining,
     new_pin_error,
@@ -220,6 +221,8 @@ def get_db():
         raise
     else:
         if depth == 0 and getattr(g, "_db_conn", None) is conn:
+            if conn is None:  # pragma: no cover
+                raise RuntimeError("请求连接已丢失")
             conn.commit()
     finally:
         g._db_depth = depth

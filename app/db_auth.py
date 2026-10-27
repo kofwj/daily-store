@@ -14,8 +14,6 @@ ITERATIONS = 200_000
 
 FILLER_PIN_MIN = 8
 
-ADMIN_PIN_MIN = 8
-
 DEFAULT_FILLER_PIN = "123456"
 
 DEFAULT_ADMIN_PIN = "123456"
@@ -258,13 +256,10 @@ def record_login_failure(conn: sqlite3.Connection, username: str, ip: str) -> in
             (key, count, locked_until, _now()),
         )
         if locked_until:
-            try:
-                until = datetime.strptime(locked_until, "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ)
-                left = int((until - now).total_seconds())
-                if left > remaining:
-                    remaining = left
-            except ValueError:
-                remaining = max(remaining, lock_seconds)
+            until = datetime.strptime(locked_until, "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ)
+            left = int((until - now).total_seconds())
+            if left > remaining:
+                remaining = left
     return remaining
 
 def clear_login_failures(conn: sqlite3.Connection, username: str, ip: str) -> None:

@@ -16,8 +16,6 @@ known-first-party = ["app", "tests"]
 python_version = "3.11"
 # 全量扫描 app 目录，持续保障数据计算与 Web 视图的类型安全性
 files = ["app"]
-# sqlite3.Row 在类型桩里不算 Sequence，业务代码到处 row["x"]，不为此加 cast
-disable_error_code = ["index", "union-attr"]
 # 第三方库（flask/openpyxl 等）没桩不报
 ignore_missing_imports = true
 # 校验无类型注解函数体内部的表达式，消除隐式类型漂移
