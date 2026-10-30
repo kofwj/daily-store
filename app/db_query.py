@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date
-from typing import Any, Dict, Iterable, List, Sequence, Set
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
 from .db_core import (
     _now,
@@ -14,7 +14,7 @@ from .db_core import (
     record_edit,
     sql_in,
 )
-from .metrics_seed import to_stored
+from .metrics_seed import V5_METRIC_CODES, to_stored
 
 
 def prev_month_cum(
@@ -79,10 +79,19 @@ def save_daily(
     user_id: int,
     compact: bool = False,
     note: str = "",
+    codes: Optional[Iterable[str]] = None,
 ) -> None:
+    """保存某天填报。
+
+    `codes` 传本次表单实际展示的科目（V5 门店 2026-11 起是 V5 科目，双轨期等于
+    原 active 指标）；不传则沿用旧行为——按 active 指标写入。写入一律限定在
+    「旧 active 指标 ∪ V5 科目」内，别的 code 直接忽略，不撞外键。
+    """
     # 最高频写路径：先占写锁再写，避免并发保存时 DEFERRED 升级写锁偶发 locked
     begin_immediate(conn)
-    codes = {row["code"] for row in list_metrics(conn)}
+    active = {row["code"] for row in list_metrics(conn)}
+    writable = active | set(V5_METRIC_CODES)
+    targets = active if codes is None else {code for code in codes if code in writable}
     day = biz_date.isoformat()
     conn.execute(
         """
@@ -97,7 +106,7 @@ def save_daily(
         (day, store_id, user_id, _now(), 1 if compact else 0, note or ""),
     )
     for code, raw in values.items():
-        if code not in codes:
+        if code not in writable:
             continue
         value = max(0, to_stored(code, raw) if not isinstance(raw, int) else max(0, raw))
         conn.execute(
@@ -110,7 +119,7 @@ def save_daily(
             (day, store_id, code, value),
         )
     # 未提交的指标写成 0，避免旧值残留
-    for code in codes:
+    for code in targets:
         if code not in values:
             conn.execute(
                 """
@@ -152,7 +161,7 @@ def set_day_value(
 ) -> None:
     """只改某一天某一个指标，不动其它格子。"""
     begin_immediate(conn)
-    codes = {row["code"] for row in list_metrics(conn)}
+    codes = {row["code"] for row in list_metrics(conn)} | set(V5_METRIC_CODES)
     if metric_code not in codes:
         raise ValueError("没有这个指标")
     value = max(0, to_stored(metric_code, value) if not isinstance(value, int) else int(value or 0))

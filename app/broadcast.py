@@ -5,7 +5,15 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
-from .metrics_seed import SECTIONS, format_stored, rollup_codes
+from . import v5_baseline
+from .metrics_seed import (
+    SECTIONS,
+    V5_MOBILE_SECTIONS,
+    V5_TAIZHOU_SECTIONS,
+    V5_TELECOM_SECTIONS,
+    format_stored,
+    rollup_codes,
+)
 
 DayCum = Tuple[int, int]
 
@@ -22,14 +30,58 @@ def _line(name: str, day, cum, *, code: str = "") -> str:
     return f"{name}：日{_fmt(code, day)}，累{_fmt(code, cum)}"
 
 
-def sections_for_store(store: Any, as_of: Optional[date] = None) -> Iterable[Mapping[str, Any]]:
-    """按门店模式取播报/填报表单使用的科目分组。
+NO_FILING_MESSAGE = (
+    "该店为非主控加盟店，暂未开通日报填报；如需开展业务请联系管理员配置挂靠母店"
+)
 
-    双轨期一律回落到全局 SECTIONS：V5 的移动 10 项、电信 8 项、泰州 8 项科目
-    尚未灌进 metrics，此时按模式过滤只会把播报清空。第三阶段把科目落库后，
-    仅需在这里按 store["v5_mode"] 与 as_of 返回对应子集，调用点不必再改。
+
+def _store_field(store: Any, key: str, default: str = "") -> str:
+    """安全取值：dict / sqlite3.Row / None 都能用，取不到返回 default。"""
+    if store is None:
+        return default
+    try:
+        value = store[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+    return str(value or "").strip() or default
+
+
+def store_v5_mode(store: Any) -> str:
+    return _store_field(store, "v5_mode")
+
+
+def sections_for_store(store: Any, as_of: Optional[date] = None) -> Iterable[Mapping[str, Any]]:
+    """按门店模式 + 月份取播报/填报表单使用的科目分组（唯一分流缝）。
+
+    - 2026-10 及以前（以及取不到日期）：一律回落到全局 `SECTIONS`，双轨隔离，
+      历史月份的表单、播报、导出逐字节不变；
+    - 2026-11 起：移动四类模式（顾问 A/B 近档、无顾问主力、挂靠）→ 移动 10 科目；
+      电信独立店 → 电信 8 科目；泰州垫资店 → 泰州 8 科目；
+    - 非主控加盟店 → 空（`NO_FILING_MESSAGE` 提示联系管理员配置挂靠母店）；
+    - 未纳入 V5（`UNSET`）或认不出的模式、示例店 → 仍按原 `SECTIONS`，
+      避免口径未定就把人挡在门外（示例店只存在于测试环境）。
     """
+    if not v5_baseline.v5_month_enabled(as_of):
+        return SECTIONS
+    mode = store_v5_mode(store)
+    if mode in v5_baseline.MOBILE_AI_MODES:
+        return V5_MOBILE_SECTIONS
+    if mode == v5_baseline.MODE_TELECOM_SINGLE:
+        return V5_TELECOM_SECTIONS
+    if mode == v5_baseline.MODE_TAIZHOU_ADVANCE_ONLY:
+        return V5_TAIZHOU_SECTIONS
+    if mode == v5_baseline.MODE_FRANCHISE_DISABLED:
+        return []
     return SECTIONS
+
+
+def filing_blocked(store: Any, as_of: Optional[date] = None) -> str:
+    """该店在该日期是否禁止填报：返回给店员看的提示语，空串表示可填。"""
+    if not v5_baseline.v5_month_enabled(as_of):
+        return ""
+    if store_v5_mode(store) == v5_baseline.MODE_FRANCHISE_DISABLED:
+        return NO_FILING_MESSAGE
+    return ""
 
 
 def render_broadcast(

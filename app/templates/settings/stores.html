@@ -3,6 +3,9 @@
       <h1>门店档案</h1>
       <p class="muted">店档、考核口径和顾问。账号在「人员账号」页。</p>
     </div>
+    {% if v5_summary %}
+    <p class="muted store-v5-banner" id="v5ModeSummary">{{ v5_summary.text }}</p>
+    {% endif %}
     <div class="stores-desk">
       <aside class="store-list card" id="storeList">
         <div class="store-list-sticky">
@@ -203,6 +206,40 @@
               <p class="span-2"><label>租赁地址</label><input name="lease_address" value="{{ current_store.lease_address }}" placeholder="市、区/县、街路村乡镇道巷号"></p>
             </div>
           </section>
+          {% if v5_modes %}
+          {% set cur_mode = (v5.mode if v5 else (current_store.v5_mode or 'UNSET')) %}
+          <section class="store-section" id="v5LinkSection">
+            <div class="store-section-head">
+              <h3>V5 口径与挂靠</h3>
+              <p class="muted">11 月起按模式走不同科目。挂靠店的单必须用母店报备的渠道工号落单：运营商酬金全归母店，加盟店按月领 50% 合办提成；顺差让利只看本店当月申报笔数独立分档（1–10 笔 5 元 / 11 笔起 10 元，不跨店跳点）。</p>
+            </div>
+            <div class="store-editor-grid">
+              <p>
+                <label for="v5Mode">V5 模式</label>
+                <select name="v5_mode" id="v5Mode">
+                  {% set mode_values = v5_modes | map(attribute=0) | list %}
+                  {% if cur_mode not in mode_values %}
+                  <option value="{{ cur_mode }}" selected>{{ v5.mode_label if v5 else cur_mode }}（当前值，不在候选内）</option>
+                  {% endif %}
+                  {% for mode_code, mode_name in v5_modes %}
+                  <option value="{{ mode_code }}" {% if cur_mode == mode_code %}selected{% endif %}>{{ mode_name }}</option>
+                  {% endfor %}
+                </select>
+              </p>
+              <p id="v5ParentRow"{% if cur_mode != 'AFFILIATED' %} hidden{% endif %}>
+                <label for="v5Parent">挂靠母店</label>
+                <select name="affiliated_to" id="v5Parent">
+                  <option value="">— 选一家独立主力店 —</option>
+                  {% for p in affiliate_parents %}
+                  {% if p.id != current_store.id %}
+                  <option value="{{ p.id }}"{% if v5 and v5.parent and v5.parent.id == p.id %} selected{% endif %}>{{ store_label(p) }} · {{ p.city or '未分地市' }}</option>
+                  {% endif %}
+                  {% endfor %}
+                </select>
+              </p>
+            </div>
+          </section>
+          {% endif %}
           <div class="toolbar">
             <button type="submit">保存这家店</button>
           </div>
@@ -348,6 +385,16 @@
         });
       }
       filter();
+    })();
+    </script>
+    <script>
+    (function () {
+      var mode = document.getElementById('v5Mode');
+      var row = document.getElementById('v5ParentRow');
+      if (!mode || !row) return;
+      function sync() { row.hidden = mode.value !== 'AFFILIATED'; }
+      mode.addEventListener('change', sync);
+      sync();
     })();
     </script>
     {% endif %}

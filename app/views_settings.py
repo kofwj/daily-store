@@ -22,7 +22,7 @@ from flask import (
     url_for,
 )
 
-from . import backup, bulletin, db, db_core, incentive, invoice, sesame
+from . import backup, bulletin, db, db_core, incentive, invoice, sesame, v5_baseline
 from .helpers import (
     admin_required,
     ascii_filename,
@@ -263,10 +263,15 @@ def _render_settings(conn, tab: str):
                 people_by_store[sid].append(item)
     policy_id_raw = (request.args.get("policy_id") or "").strip()
     policy_id = int(policy_id_raw) if policy_id_raw.isdigit() else None
-    # V5 只读快照：门店编辑页展示模式/基线/顾问任期（本轮不提供任何写入口）
+    # V5 只读快照：门店编辑页展示模式/基线/顾问任期
     v5_snapshot = (
         db.store_v5_snapshot(conn, current_store["id"]) if current_store is not None else None
     )
+    # V5 挂靠配置（模块 1）：模式下拉、母店候选、C10 模式分布提示条
+    is_admin = g.user["role"] == "admin"
+    v5_modes = v5_baseline.mode_choices() if is_admin else []
+    v5_summary = db.store_mode_summary(conn) if is_admin else None
+    affiliate_parents = db.affiliate_parent_options(conn) if current_store is not None else []
     return render_template(
         "settings.html",
         tab=tab,
@@ -285,6 +290,9 @@ def _render_settings(conn, tab: str):
         user_map=user_map,
         store_label=store_label,
         v5_snapshot=v5_snapshot,
+        v5_modes=v5_modes,
+        v5_summary=v5_summary,
+        affiliate_parents=affiliate_parents,
         filler_edit_month=db.get_setting(conn, "filler_edit_month", "0") == "1",
         policy_require_read=db.policy_require_read(conn),
         policies=db.list_policies(conn) if g.user["role"] == "admin" else [],
@@ -369,6 +377,9 @@ def _do_edit_store(conn):
     sid = int(request.form.get("store_id") or 0)
     if db.get_store(conn, sid) is None:
         raise ValueError("没有这家店")
+    # V5 挂靠配置（模块 1）：只有表单真的带了 v5_mode 才提交，避免批量/旧表单误清模式
+    v5_mode_form = request.form.get("v5_mode") if "v5_mode" in request.form else None
+    parent_raw = (request.form.get("affiliated_to") or "").strip()
     db.update_store_profile(
         conn,
         sid,
@@ -384,6 +395,8 @@ def _do_edit_store(conn):
         lease_area=request.form.get("lease_area") or "",
         lease_address=request.form.get("lease_address") or "",
         lease_period=request.form.get("lease_period") or "",
+        v5_mode=v5_mode_form,
+        affiliated_to=parse_int(parent_raw, 0) or None,
     )
     flash("门店档案已改", "ok")
     return redirect(url_for("settings", tab="stores", store_id=sid))

@@ -6,7 +6,7 @@
 1. 迁移 17 建出表 1–6 + `stores` 四列，且可重复执行（幂等）；
 2. 34 家门店的 V5 模式 / 考核基线 / 顾问任期按 `code` 灌入，数值与门店表一致；
 3. 2026-10 及以前的存量报表「一个字节都不动」，V5 表里不允许出现历史月份行（双轨）；
-4. 设置页门店档案只读展示 V5 口径，POST 保存不会改 V5 字段。
+4. 设置页门店档案只读展示 V5 口径；POST 只在表单显式提交 `v5_mode` 时才改模式与挂靠。
 
 **不测 V5 计算引擎**：本轮不实现，`v5_month_enabled()` 只是按月份隔离的开关。
 """
@@ -261,8 +261,9 @@ def test_migration_17_creates_tables_and_columns(v5_db):
     assert {"v5_mode", "carrier_scope", "mobile_code_active", "affiliated_to"} <= store_columns
 
     applied = [row["version"] for row in conn.execute("SELECT version FROM schema_migrations ORDER BY version")]
-    assert applied == list(range(1, 18)), "迁移 1–17 应各记一次"
+    assert applied == list(range(1, 19)), "迁移 1–18 应各记一次"
     assert applied.count(17) == 1
+    assert applied.count(18) == 1
 
 
 def test_migration_17_is_idempotent(v5_db):
@@ -484,10 +485,13 @@ def test_settings_store_page_shows_v5_block(admin_client):
     assert v5_baseline.mode_label(v5_baseline.MODE_SAMPLE_DISABLED) in body
     assert v5_baseline.V5_START_MONTH in body
     assert v5_baseline.V5_LEGACY_LAST_MONTH in body
-    # 只读：页面上不许出现能提交 v5_mode 的字段
-    assert 'name="v5_mode"' not in body
-    assert 'name="affiliated_to"' not in body
+    # 模块 1 起「模式 + 挂靠母店」在编辑表单里可改；基线金额/档位仍然只读
+    assert 'name="v5_mode"' in body
+    assert 'name="affiliated_to"' in body
     assert 'name="net_baseline_cents"' not in body
+    assert 'name="carry_tier_25"' not in body
+    # C10 模式分布提示条
+    assert "当前主控活跃" in body
 
 
 def test_settings_store_page_renders_baseline_and_tenure(admin_client):

@@ -96,6 +96,111 @@ SECTIONS: List[Dict] = [
     },
 ]
 
+# —— V5 科目（迁移 18 落库）——
+# 这些科目**不进 SECTIONS**：双轨期（2026-10 及以前）的旧表单、旧播报一个字节都不变。
+# 2026-11 起按门店模式由 broadcast.sections_for_store() 分流取用；metrics 表里以
+# active=0 共存，避免被 list_metrics() 带进旧填报表单和指标目标表。
+# 科目中文名以运营商正式口径为准；改名只影响展示，code 稳定不动历史数据。
+_V5_PHONE_SALES = ("phone_sales", "当天手机销量", "台；搭载率的分母，通用底座")
+
+_V5_MOBILE_METRICS: List[Tuple[str, str, str]] = [
+    ("v5_m1", "5G融合新入网（主卡）", "户；核心考核科目"),
+    ("v5_m2", "终端信用购/金币合约", "笔；核心考核科目"),
+    ("v5_m3", "宽带新装/提速", "户"),
+    ("v5_m4", "存量升档/大流量", "笔"),
+    ("v5_m5", "AI终端同开换新", "台；通报表 AI 手机项之一"),
+    ("v5_m6", "AI终端未同开换新", "台；通报表 AI 手机项之二"),
+    ("v5_m7", "顺差让利购机直降", "笔；独立分档核算提成（单店算自己的）"),
+    ("v5_m8", "移动优选会员", "笔；0 元义务项，与购机让利 1:1 绑定，仅作合规留痕"),
+    ("v5_m9", "智家/全屋WiFi/安防", "户"),
+    ("v5_m10", "权益/云盘/其他", "笔"),
+]
+
+# 电信独立店的 8 项主业与智能家居（名称暂按电信口径拟，正式下文后改 name 即可）
+_V5_TELECOM_METRICS: List[Tuple[str, str, str]] = [
+    ("v5_t1", "5G融合新入网（主卡）", "户"),
+    ("v5_t2", "终端合约/信用购", "笔"),
+    ("v5_t3", "宽带新装/提速", "户"),
+    ("v5_t4", "存量升档/大流量", "笔"),
+    ("v5_t5", "天翼看家/安防", "户"),
+    ("v5_t6", "全屋WiFi/组网", "户"),
+    ("v5_t7", "权益/云盘/其他", "笔"),
+    ("v5_t8", "智能家居融合", "户"),
+]
+
+# 泰州 10 家店只做垫资预存：8 个纯垫资科目（不进 V5 提成）
+_V5_TAIZHOU_METRICS: List[Tuple[str, str, str]] = [
+    ("v5_tz1", "预存垫资（100 元档）", "笔；顺差让利垫资"),
+    ("v5_tz2", "预存垫资（其他档）", "笔"),
+    ("v5_tz3", "让利垫资", "笔"),
+    ("v5_tz4", "终端垫资", "笔"),
+    ("v5_tz5", "调测费垫资", "笔"),
+    ("v5_tz6", "宽带垫资", "笔"),
+    ("v5_tz7", "合约保证金", "笔"),
+    ("v5_tz8", "其他垫资", "笔"),
+]
+
+V5_MOBILE_SECTION_CODE = "v5_mobile"
+V5_TELECOM_SECTION_CODE = "v5_telecom"
+V5_TAIZHOU_SECTION_CODE = "v5_taizhou"
+
+
+def _v5_sections(code: str, header: str, rows: List[Tuple[str, str, str]]) -> List[Dict]:
+    """通用底座（手机销量）+ 该运营商的一组 V5 科目。
+
+    每次返回全新对象：分组只被只读遍历，不做原地修改。
+    """
+    return [
+        {"code": "basic", "header": None, "blank_before": False, "metrics": [_V5_PHONE_SALES]},
+        {"code": code, "header": header, "blank_before": True, "metrics": list(rows)},
+    ]
+
+
+V5_MOBILE_SECTIONS: List[Dict] = _v5_sections(
+    V5_MOBILE_SECTION_CODE, "南通移动（V5）", _V5_MOBILE_METRICS
+)
+V5_TELECOM_SECTIONS: List[Dict] = _v5_sections(
+    V5_TELECOM_SECTION_CODE, "电信（V5）", _V5_TELECOM_METRICS
+)
+V5_TAIZHOU_SECTIONS: List[Dict] = _v5_sections(
+    V5_TAIZHOU_SECTION_CODE, "泰州垫资（V5）", _V5_TAIZHOU_METRICS
+)
+V5_SECTION_GROUPS: Tuple[List[Dict], ...] = (
+    V5_MOBILE_SECTIONS,
+    V5_TELECOM_SECTIONS,
+    V5_TAIZHOU_SECTIONS,
+)
+
+
+def v5_all_metrics() -> List[Tuple[str, str, str, int]]:
+    """V5 科目字典 (code, name, section, sort)：给迁移 18 灌 metrics 表用。
+
+    通用底座 `phone_sales` 已在旧字典里，不重复列出（否则 sort/section 会被覆盖）；
+    排序从 1000 起，不与旧科目（10 起）混排。
+    """
+    rows: List[Tuple[str, str, str, int]] = []
+    sort = 1000
+    for group in V5_SECTION_GROUPS:
+        for section in group:
+            if section["code"] == "basic":
+                continue
+            for code, name, _hint in section["metrics"]:
+                rows.append((code, name, section["code"], sort))
+                sort += 10
+    return rows
+
+
+def v5_metric_codes() -> List[str]:
+    return [code for code, _name, _section, _sort in v5_all_metrics()]
+
+
+def v5_metric_names() -> Dict[str, str]:
+    return {code: name for code, name, _section, _sort in v5_all_metrics()}
+
+
+# V5 科目 code 全集（迁移 18 之后它们就在 metrics 表里，只是 active=0）
+V5_METRIC_CODES: Tuple[str, ...] = tuple(v5_metric_codes())
+
 
 def all_metrics() -> List[Tuple[str, str, str, int]]:
     """(code, name, section, sort)."""
@@ -109,7 +214,11 @@ def all_metrics() -> List[Tuple[str, str, str, int]]:
 
 
 def metric_name_map() -> Dict[str, str]:
-    return {code: name for code, name, _section, _sort in all_metrics()}
+    """指标中文名。含 V5 科目：双轨期旧科目优先，V5 科目只在被引用时才有键。"""
+    names = {code: name for code, name, _section, _sort in all_metrics()}
+    for code, name in v5_metric_names().items():
+        names.setdefault(code, name)
+    return names
 
 
 def metric_codes() -> List[str]:

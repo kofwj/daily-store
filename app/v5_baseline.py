@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 # V5 正式执行月（以正式下文为准）。此月及之后才允许触发 V5 计算引擎。
 V5_START_MONTH = "2026-11"
@@ -230,3 +230,74 @@ def v5_month_enabled(month: Any) -> bool:
     if not key:
         return False
     return key >= V5_START_MONTH
+
+
+# —— 设置页「门店档案」用到的模式下拉与分布统计（纯函数，不碰库）——
+# 顺序即下拉展示顺序：把「未纳入 V5」放最后，避免管理员顺手选错把店挡在门外。
+MODE_CHOICES: Tuple[str, ...] = (
+    MODE_ADVISOR_A,
+    MODE_ADVISOR_B_NEAR,
+    MODE_NO_ADVISOR_MAIN,
+    MODE_AFFILIATED,
+    MODE_TELECOM_SINGLE,
+    MODE_TAIZHOU_ADVANCE_ONLY,
+    MODE_FRANCHISE_DISABLED,
+    MODE_UNSET,
+)
+
+
+def mode_choices() -> List[Tuple[str, str]]:
+    """(模式代码, 中文标签) 列表，给设置页下拉用。"""
+    return [(mode, V5_MODE_LABELS.get(mode, mode)) for mode in MODE_CHOICES]
+
+
+def normalize_mode(value: Any, fallback: str = MODE_UNSET) -> str:
+    """把表单/库里的模式归一成已知常量；认不出的回落到 fallback。"""
+    text = str(value or "").strip().upper()
+    return text if text in V5_MODE_LABELS else fallback
+
+
+def carrier_for_mode(mode: str) -> str:
+    """模式对应的运营商范围：电信单店固定 TELECOM，其余 MOBILE。"""
+    return "TELECOM" if mode == MODE_TELECOM_SINGLE else "MOBILE"
+
+
+def can_be_parent(mode: Any) -> bool:
+    """能不能当挂靠母店：必须是在跑的独立主力店（顾问店或主力店）。"""
+    return normalize_mode(mode) in (MODE_ADVISOR_A, MODE_ADVISOR_B_NEAR, MODE_NO_ADVISOR_MAIN)
+
+
+def store_mode_summary(stores: Iterable[Mapping[str, Any]]) -> Dict[str, Any]:
+    """设置页 C10 提示条：按模式统计门店家数。
+
+    只做展示统计，不进任何计算；停用的店（`active=0`）一律算进「加盟/停用」。
+    """
+    mobile = telecom = taizhou = affiliated = disabled = 0
+    for store in stores or ():
+        mode = normalize_mode(store["v5_mode"] if "v5_mode" in store.keys() else None)
+        active = int(store["active"] or 0) if "active" in store.keys() else 1
+        if not active:
+            disabled += 1
+        elif mode == MODE_TELECOM_SINGLE:
+            telecom += 1
+        elif mode == MODE_TAIZHOU_ADVANCE_ONLY:
+            taizhou += 1
+        elif mode == MODE_AFFILIATED:
+            affiliated += 1
+        elif mode in (MODE_ADVISOR_A, MODE_ADVISOR_B_NEAR, MODE_NO_ADVISOR_MAIN):
+            mobile += 1
+        else:
+            disabled += 1
+    main_total = mobile + taizhou + telecom
+    return {
+        "main_total": main_total,
+        "mobile": mobile,
+        "telecom": telecom,
+        "taizhou": taizhou,
+        "affiliated": affiliated,
+        "disabled": disabled,
+        "text": (
+            f"当前主控活跃 {main_total} 家（移动 {mobile} / 泰州 {taizhou} / 电信 {telecom}）"
+            f" ｜ 挂靠 {affiliated} 家 ｜ 加盟/停用 {disabled} 家"
+        ),
+    }

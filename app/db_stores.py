@@ -197,6 +197,130 @@ def create_store(
     return int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
 
 
+def _resolve_v5_link(
+    conn: sqlite3.Connection, store_id: int, mode_raw: Any, parent_raw: Any
+) -> Any:
+    """把表单里的 v5_mode / affiliated_to 归一成 (模式, 运营商范围, 母店 id)。
+
+    挂靠店的铁律：必须挂一家在跑的独立主力店（顾问店或主力店），并跟随母店的
+    运营商范围——因为落单用的是母店的渠道工号；自己挂自己、挂到另一家挂靠店、
+    挂到加盟店都会被挡下来。
+    """
+    from . import v5_baseline
+
+    mode = v5_baseline.normalize_mode(mode_raw)
+    if mode != v5_baseline.MODE_AFFILIATED:
+        # 非挂靠模式：母店指针一律清空，运营商范围按模式定（电信单店→TELECOM）
+        return mode, v5_baseline.carrier_for_mode(mode), None
+    try:
+        parent_id = int(parent_raw or 0)
+    except (TypeError, ValueError):
+        parent_id = 0
+    if not parent_id:
+        raise ValueError("挂靠小店必须选一家母店")
+    if parent_id == int(store_id):
+        raise ValueError("不能把店挂到自己名下")
+    parent = conn.execute(
+        "SELECT id, name, short_name, v5_mode, carrier_scope FROM stores WHERE id=?",
+        (parent_id,),
+    ).fetchone()
+    if parent is None:
+        raise ValueError("母店不存在")
+    if not v5_baseline.can_be_parent(parent["v5_mode"]):
+        raise ValueError("母店必须是独立主力店（顾问店或主力店），加盟店和挂靠店不能当母店")
+    scope = str(parent["carrier_scope"] or "").strip().upper() or "MOBILE"
+    return mode, scope, parent_id
+
+
+def sync_store_v5_baseline(conn: sqlite3.Connection, store_id: int) -> None:
+    """按门店当前 v5_mode 同步 `store_baseline` 里 V5 起始月那一行。
+
+    只动 `from_month = 2026-11` 这一行：更早的月份一行都不写（双轨期不回溯、
+    不重算），非主控/停用模式则把这一行删掉（不进提成与考核）。
+    """
+    from . import v5_baseline
+
+    if not _table_exists(conn, "store_baseline"):
+        return
+    store = conn.execute(
+        "SELECT v5_mode, carrier_scope, affiliated_to FROM stores WHERE id=?",
+        (int(store_id),),
+    ).fetchone()
+    if store is None:
+        return
+    mode = v5_baseline.normalize_mode(store["v5_mode"])
+    if mode in v5_baseline.DISABLED_MODES:
+        conn.execute(
+            "DELETE FROM store_baseline WHERE store_id=? AND from_month=?",
+            (int(store_id), v5_baseline.V5_START_MONTH),
+        )
+        return
+    scope = str(store["carrier_scope"] or "").strip().upper() or "MOBILE"
+    tiers = v5_baseline.CARRIER_CARRY_TIERS.get(scope, v5_baseline.CARRIER_CARRY_TIERS["MOBILE"])
+    tier_25, tier_18, tier_10 = tiers
+    existing = conn.execute(
+        "SELECT net_baseline_cents FROM store_baseline WHERE store_id=? AND from_month=?",
+        (int(store_id), v5_baseline.V5_START_MONTH),
+    ).fetchone()
+    # 已有的基线净额是业务数字，重配模式时不能清零
+    net = int(existing["net_baseline_cents"] or 0) if existing is not None else 0
+    cap_abs = (
+        v5_baseline.ADVISOR_CAP_ABS_CENTS
+        if mode in (v5_baseline.MODE_ADVISOR_A, v5_baseline.MODE_ADVISOR_B_NEAR)
+        else 0
+    )
+    conn.execute(
+        """
+        INSERT INTO store_baseline(
+            store_id, from_month, to_month, v5_mode, affiliated_to,
+            net_baseline_cents, target_carry_rate, carry_tier_25, carry_tier_18,
+            carry_tier_10, cap_ratio, cap_abs_cents, created_at
+        ) VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(store_id, from_month) DO UPDATE SET
+            v5_mode=excluded.v5_mode,
+            affiliated_to=excluded.affiliated_to,
+            target_carry_rate=excluded.target_carry_rate,
+            carry_tier_25=excluded.carry_tier_25,
+            carry_tier_18=excluded.carry_tier_18,
+            carry_tier_10=excluded.carry_tier_10,
+            cap_ratio=excluded.cap_ratio,
+            cap_abs_cents=excluded.cap_abs_cents
+        """,
+        (
+            int(store_id),
+            v5_baseline.V5_START_MONTH,
+            mode,
+            store["affiliated_to"],
+            net,
+            tier_25,
+            tier_25,
+            tier_18,
+            tier_10,
+            v5_baseline.DEFAULT_CAP_RATIO,
+            cap_abs,
+            _now(),
+        ),
+    )
+
+
+def affiliate_parent_options(conn: sqlite3.Connection) -> List[sqlite3.Row]:
+    """可当挂靠母店的门店：在跑的独立主力店（顾问店 / 主力店）。"""
+    from . import v5_baseline
+
+    rows = conn.execute(
+        "SELECT id, code, name, short_name, city, v5_mode FROM stores WHERE active=1"
+    ).fetchall()
+    return [row for row in rows if v5_baseline.can_be_parent(row["v5_mode"])]
+
+
+def store_mode_summary(conn: sqlite3.Connection) -> Dict[str, Any]:
+    """设置页 C10 提示条的数据：按 V5 模式统计门店家数。"""
+    from . import v5_baseline
+
+    rows = conn.execute("SELECT id, v5_mode, active FROM stores ORDER BY id").fetchall()
+    return v5_baseline.store_mode_summary(rows)
+
+
 def update_store_profile(
     conn: sqlite3.Connection,
     store_id: int,
@@ -213,10 +337,17 @@ def update_store_profile(
     lease_area: Optional[str] = None,
     lease_address: Optional[str] = None,
     lease_period: Optional[str] = None,
+    v5_mode: Optional[str] = None,
+    affiliated_to: Optional[int] = None,
 ) -> None:
     name = (advisor_name or "").strip()
     row = conn.execute(
-        "SELECT region_group, city, store_grade, ai_target, invoice_name, lease_area, lease_address, lease_period FROM stores WHERE id=?",
+        """
+        SELECT region_group, city, store_grade, ai_target, invoice_name,
+               lease_area, lease_address, lease_period,
+               v5_mode, carrier_scope, affiliated_to
+          FROM stores WHERE id=?
+        """,
         (store_id,),
     ).fetchone()
     if row is None:
@@ -235,6 +366,14 @@ def update_store_profile(
         next_ai = int(row["ai_target"] or 10)
     else:
         next_ai = max(0, int(ai_target))
+    next_mode = str(row["v5_mode"] or "").strip()
+    next_scope = str(row["carrier_scope"] or "").strip().upper() or "MOBILE"
+    next_parent = row["affiliated_to"]
+    if v5_mode is not None:
+        # 只有显式提交了 v5_mode 才动 V5 配置：批量改档、建店都不受影响
+        next_mode, next_scope, next_parent = _resolve_v5_link(
+            conn, store_id, v5_mode, affiliated_to
+        )
     next_invoice = invoice_name if invoice_name is not None else (row["invoice_name"] or "")
     next_area = lease_area if lease_area is not None else (row["lease_area"] or "")
     next_addr = lease_address if lease_address is not None else (row["lease_address"] or "")
@@ -244,7 +383,8 @@ def update_store_profile(
         UPDATE stores SET
             mobile_code=?, area_manager=?, store_manager=?,
             advisor_name=?, has_advisor=?, region_group=?, city=?,
-            store_grade=?, ai_target=?, invoice_name=?, lease_area=?, lease_address=?, lease_period=?
+            store_grade=?, ai_target=?, invoice_name=?, lease_area=?, lease_address=?, lease_period=?,
+            v5_mode=?, carrier_scope=?, affiliated_to=?
         WHERE id=?
         """,
         (
@@ -261,9 +401,14 @@ def update_store_profile(
             (next_area or "").strip(),
             (next_addr or "").strip(),
             (next_period or "").strip(),
+            next_mode,
+            next_scope,
+            next_parent,
             store_id,
         ),
     )
+    if v5_mode is not None:
+        sync_store_v5_baseline(conn, store_id)
 
 
 def create_user(

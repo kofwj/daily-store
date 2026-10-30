@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import Any, Dict, List
 
 from flask import (
     Response,
@@ -57,8 +58,15 @@ def register_daily(app) -> None:
                 return render_template("empty.html")
             biz_date = parse_date(request.values.get("date"))
             today = db.today_local()
-            metrics = db.list_metrics(conn)
+            # 唯一分流缝：按门店 V5 模式 + 月份取科目分组（2026-10 及以前恒为旧 SECTIONS）
+            sections = broadcast.sections_for_store(store, biz_date)
+            blocked = broadcast.filing_blocked(store, biz_date)
+            form_codes = [code for section in sections for code, _name, _hint in section["metrics"]]
+            legacy_form = sections is broadcast.SECTIONS
             if request.method == "POST":
+                if blocked:
+                    flash(blocked, "error")
+                    return redirect(url_for("report", store_id=store["id"]))
                 role = g.user["role"]
                 filler_month = db.get_setting(conn, "filler_edit_month", "0") == "1"
                 gate = policy.daily_edit_gate(
@@ -78,8 +86,8 @@ def register_daily(app) -> None:
                     flash("该日已有其他人提交，覆盖前与对方确认", "error")
                     return redirect(url_for("today", store_id=store["id"], date=biz_date.isoformat()))
                 values = {}
-                for m in metrics:
-                    values[m["code"]] = max(0, to_stored(m["code"], request.form.get(f"m_{m['code']}", "0")))
+                for code in form_codes:
+                    values[code] = max(0, to_stored(code, request.form.get(f"m_{code}", "0")))
                 compact_sections = broadcast_compact_sections(conn)
                 note = (request.form.get("note") or "").strip()
                 before = db.day_values(conn, store["id"], biz_date)
@@ -91,6 +99,7 @@ def register_daily(app) -> None:
                     user_id=g.user["id"],
                     compact=bool(compact_sections),
                     note=note,
+                    codes=form_codes,
                 )
                 if existing:
                     db.record_edit(
@@ -116,7 +125,7 @@ def register_daily(app) -> None:
                             broadcast_pairs,
                             compact=bool(compact_sections),
                             compact_sections=compact_sections,
-                            sections=broadcast.sections_for_store(store, biz_date),
+                            sections=sections,
                         )
                         wecom.send_text(conn, store, broadcast_text, source="daily")
                     except Exception:  # noqa: BLE001
@@ -143,10 +152,10 @@ def register_daily(app) -> None:
                 pairs,
                 compact=bool(compact_sections),
                 compact_sections=compact_sections,
-                sections=broadcast.sections_for_store(store, biz_date),
+                sections=sections,
             )
             grouped = []
-            for section in broadcast.sections_for_store(store, biz_date):
+            for section in sections:
                 items = []
                 for code, name, hint in section["metrics"]:
                     day, cum = pairs.get(code, (0, 0))
@@ -165,31 +174,35 @@ def register_daily(app) -> None:
                         }
                     )
                 grouped.append({**section, "rows": items})
-            kpi_cards = []
-            for code, name, note in KPI_TARGETS:
-                if code == "ai_contract":
-                    day, cum = pairs.get("ai_contract", (0, 0))
-                else:
-                    day, cum = rollup_pair(pairs, code, biz_date)
-                target = kpi_targets.get(code, 0)
-                scale = "bisuan" if code == "bisuan_total" else code
-                day_disp = from_stored(scale, day)
-                cum_disp = from_stored(scale, cum)
-                kpi_cards.append(
-                    {
-                        "code": code,
-                        "name": name,
-                        "note": note,
-                        "day": day_disp,
-                        "cum": cum_disp,
-                        "day_text": format_display(scale, day_disp),
-                        "cum_text": format_display(scale, cum_disp),
-                        "target": target,
-                        "target_text": format_display(scale, target) if target else "",
-                        "progress": (cum_disp / target * 100) if target else None,
-                    }
-                )
-            forecast = store_forecast(conn, store, biz_date)
+            # 旧口径 KPI / 考核卡片只在双轨期（旧 SECTIONS 表单）展示：V5 门店的
+            # 比算、金币直降已经换口径，硬套旧卡片只会显示 0 和错判。
+            kpi_cards: List[Dict[str, Any]] = []
+            forecast = None
+            if legacy_form:
+                for code, name, note in KPI_TARGETS:
+                    if code == "ai_contract":
+                        day, cum = pairs.get("ai_contract", (0, 0))
+                    else:
+                        day, cum = rollup_pair(pairs, code, biz_date)
+                    target = kpi_targets.get(code, 0)
+                    scale = "bisuan" if code == "bisuan_total" else code
+                    day_disp = from_stored(scale, day)
+                    cum_disp = from_stored(scale, cum)
+                    kpi_cards.append(
+                        {
+                            "code": code,
+                            "name": name,
+                            "note": note,
+                            "day": day_disp,
+                            "cum": cum_disp,
+                            "day_text": format_display(scale, day_disp),
+                            "cum_text": format_display(scale, cum_disp),
+                            "target": target,
+                            "target_text": format_display(scale, target) if target else "",
+                            "progress": (cum_disp / target * 100) if target else None,
+                        }
+                    )
+                forecast = store_forecast(conn, store, biz_date)
             return render_template(
                 "today.html",
                 store=store,
@@ -205,6 +218,7 @@ def register_daily(app) -> None:
                     locked=db.is_locked(biz_date),
                 ).allowed,
                 grouped=grouped,
+                no_filing_message=blocked,
                 report=report,
                 broadcast_text=text,
                 compact=bool(compact_sections),

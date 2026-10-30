@@ -2,7 +2,13 @@ from datetime import date
 
 from app import db
 from app.broadcast import add_day_to_prev, render_broadcast, sections_for_store
-from app.metrics_seed import SECTIONS, metric_codes
+from app.metrics_seed import (
+    SECTIONS,
+    V5_MOBILE_SECTIONS,
+    V5_TAIZHOU_SECTIONS,
+    V5_TELECOM_SECTIONS,
+    metric_codes,
+)
 
 
 def test_render_matches_wechat_log():
@@ -247,8 +253,35 @@ def test_render_broadcast_sections_override_limits_groups():
 
 
 def test_sections_for_store_falls_back_to_global_sections():
-    # V5 科目未落库前，任何模式与月份都回落全局分组，双轨期播报内容一致
-    for mode in ("ADVISOR_A", "TELECOM_SINGLE", "TAIZHOU_ADVANCE_ONLY", "UNSET", ""):
-        assert sections_for_store({"v5_mode": mode}, date(2026, 11, 1)) == SECTIONS
-        assert sections_for_store({}, date(2026, 10, 31)) == SECTIONS
-        assert sections_for_store(None) == SECTIONS
+    # 双轨期（2026-10 及以前、以及日期缺失）：任何模式都回落全局分组，
+    # 历史月份的表单与播报内容与改版前逐字节一致
+    modes = (
+        "ADVISOR_A",
+        "ADVISOR_B_NEAR",
+        "NO_ADVISOR_MAIN",
+        "AFFILIATED",
+        "TELECOM_SINGLE",
+        "TAIZHOU_ADVANCE_ONLY",
+        "FRANCHISE_DISABLED",
+        "UNSET",
+        "SAMPLE_DISABLED",
+        "",
+    )
+    for mode in modes:
+        assert sections_for_store({"v5_mode": mode}, date(2026, 10, 31)) == SECTIONS
+        assert sections_for_store({"v5_mode": mode}, None) == SECTIONS
+    assert sections_for_store(None) == SECTIONS
+    assert sections_for_store({}) == SECTIONS
+
+
+def test_sections_for_store_switches_by_mode_from_november():
+    as_of = date(2026, 11, 1)
+    for mode in ("ADVISOR_A", "ADVISOR_B_NEAR", "NO_ADVISOR_MAIN", "AFFILIATED"):
+        assert sections_for_store({"v5_mode": mode}, as_of) == V5_MOBILE_SECTIONS
+    assert sections_for_store({"v5_mode": "TELECOM_SINGLE"}, as_of) == V5_TELECOM_SECTIONS
+    assert sections_for_store({"v5_mode": "TAIZHOU_ADVANCE_ONLY"}, as_of) == V5_TAIZHOU_SECTIONS
+    # 非主控加盟店：空分组 + 提示语，配置挂靠母店后才会放行
+    assert list(sections_for_store({"v5_mode": "FRANCHISE_DISABLED"}, as_of)) == []
+    # 口径未定 / 认不出的模式不挡人：仍按旧分组
+    assert sections_for_store({"v5_mode": "UNSET"}, as_of) == SECTIONS
+    assert sections_for_store({"v5_mode": "SAMPLE_DISABLED"}, as_of) == SECTIONS

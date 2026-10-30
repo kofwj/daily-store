@@ -153,6 +153,7 @@ from .db_schema import (  # noqa: F401
 from .db_stores import (  # noqa: F401
     active_area_managers,
     active_store_ids,
+    affiliate_parent_options,
     create_store,
     create_user,
     delete_store,
@@ -167,6 +168,7 @@ from .db_stores import (  # noqa: F401
     set_user_scope,
     set_user_stores,
     store_has_data,
+    store_mode_summary,
     store_v5_snapshot,
     system_entity_counts,
     update_store_profile,

@@ -215,6 +215,9 @@ MIGRATIONS: List[Tuple[int, str, str]] = [
     # 迁移 17：V5 落库。只建表 1–6、补 stores 四列、灌基线/顾问任期；
     # 不重算、不回填 2026-10 及以前任何月份的报表与算薪数据。
     (17, "v5_schema_and_baseline", "_v5_schema_and_baseline"),
+    # 迁移 18：V5 科目字典落库（移动 10 / 电信 8 / 泰州 8）。只写 metrics 字典表，
+    # 全部 active=0，双轨期旧表单/播报/指标目标一个字节都不变。
+    (18, "v5_metrics_catalog", "_v5_metrics_catalog"),
 ]
 
 def init_db() -> None:
@@ -291,6 +294,7 @@ def migrate() -> None:
             "_sesame_frozen_to_cents": _sesame_frozen_to_cents,
             "_oct_coin_cut_rework": _oct_coin_cut_rework,
             "_v5_schema_and_baseline": _v5_schema_and_baseline,
+            "_v5_metrics_catalog": _v5_metrics_catalog,
         }
         for version, name, fn_name in sorted(MIGRATIONS):
             if version in applied:
@@ -1324,3 +1328,29 @@ def _seed_v5_baseline(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "UPDATE users SET active=0 WHERE username=? AND role='filler'", (login,)
             )
+
+
+def _v5_metrics_catalog(conn: sqlite3.Connection) -> None:
+    """迁移 18：把 V5 科目灌进 metrics 字典，与旧科目共存。
+
+    统一 `active=0`：填报表单、指标目标表、通报表下拉都按 `active=1` 取数，
+    所以 2026-10 及以前的口径一个字节都不变。V5 门店 2026-11 起由
+    `broadcast.sections_for_store()` 直接取分组，不依赖这里的 active。
+
+    重复执行只刷新 name/section/sort（便于正式下文后改名），不动 active，
+    避免把管理员手工开启的科目又关回去。
+    """
+    from .metrics_seed import v5_all_metrics
+
+    for code, name, section, sort in v5_all_metrics():
+        conn.execute(
+            """
+            INSERT INTO metrics(code, name, section, sort_order, monthly_target, highlight, active)
+            VALUES (?, ?, ?, ?, 0, 0, 0)
+            ON CONFLICT(code) DO UPDATE SET
+                name=excluded.name,
+                section=excluded.section,
+                sort_order=excluded.sort_order
+            """,
+            (code, name, section, sort),
+        )

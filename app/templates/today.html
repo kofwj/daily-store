@@ -56,6 +56,13 @@
 </div>
 {% endif %}
 
+{% if no_filing_message %}
+<div class="card">
+  <h2>暂未开通日报填报</h2>
+  <p>{{ no_filing_message }}</p>
+</div>
+{% endif %}
+{% if not no_filing_message %}
 <form method="post" id="dailyForm">
   <input type="hidden" name="store_id" value="{{ store.id }}">
   <input type="hidden" name="date" value="{{ biz_date.isoformat() }}">
@@ -97,6 +104,7 @@
     <button type="submit" {% if not can_edit %}disabled title="店员只能改当天或本月（需管理员开启）"{% endif %}>保存并生成播报</button>
   </div>
 </form>
+{% endif %}
 
 {% if not report %}
 <div class="card">
