@@ -1319,6 +1319,24 @@ details.extra summary { cursor: pointer; font-weight: 600; }
   font-size: 13px; font-weight: 650; letter-spacing: 0;
 }
 .store-section-head p { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.tenure-table-wrap { overflow-x: auto; margin: 0 0 10px; }
+.tenure-table th, .tenure-table td { white-space: nowrap; }
+.tenure-table td.muted { white-space: normal; max-width: 180px; }
+.tenure-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.tenure-actions form { display: contents; }
+.tenure-actions .btn { padding: 4px 10px; font-size: 12px; min-width: 0; }
+.tenure-toolbar { margin: 0; }
+.tenure-dialog {
+  width: min(560px, calc(100vw - 32px));
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+}
+.tenure-dialog::backdrop { background: rgba(15, 23, 42, 0.35); }
+.tenure-dialog .store-editor-grid { margin-top: 12px; }
+.tenure-dialog-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 .store-list-item.is-off { opacity: .55; }
 .store-danger-zone { margin-top: 14px; }
 .store-danger-zone .settings-card-head {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import secrets
 from io import BytesIO
@@ -272,6 +273,14 @@ def _render_settings(conn, tab: str):
     v5_modes = v5_baseline.mode_choices() if is_admin else []
     v5_summary = db.store_mode_summary(conn) if is_admin else None
     affiliate_parents = db.affiliate_parent_options(conn) if current_store is not None else []
+    # V5 顾问任期维护（任务二）：任期表是唯一来源，stores.advisor_name 由它派生
+    tenure_rows = (
+        [_tenure_view(row) for row in db.list_advisor_tenures(conn, current_store["id"])]
+        if current_store is not None
+        else []
+    )
+    tenure_month = db.advisor_snapshot_month()
+    tenure_tiers = v5_baseline.tier_choices() if is_admin else []
     return render_template(
         "settings.html",
         tab=tab,
@@ -293,6 +302,9 @@ def _render_settings(conn, tab: str):
         v5_modes=v5_modes,
         v5_summary=v5_summary,
         affiliate_parents=affiliate_parents,
+        tenure_rows=tenure_rows,
+        tenure_month=tenure_month,
+        tenure_tiers=tenure_tiers,
         filler_edit_month=db.get_setting(conn, "filler_edit_month", "0") == "1",
         policy_require_read=db.policy_require_read(conn),
         policies=db.list_policies(conn) if g.user["role"] == "admin" else [],
@@ -347,6 +359,74 @@ def _settings_post(conn, tab: str):
     return redirect(url_for("settings", tab=tab))
 
 
+def _form_cents(raw: Any, label: str) -> int:
+    """表单里的金额（元）转分；空串按 0，超范围直接报错。"""
+    text = str(raw or "").strip().replace(",", "").replace("，", "")
+    if not text:
+        return 0
+    try:
+        number = float(text)
+    except ValueError:
+        raise ValueError(f"{label} 不是有效金额") from None
+    if not math.isfinite(number) or abs(number) > 10_000_000:
+        raise ValueError(f"{label} 超出范围（一千万以内）")
+    return int(round(number * 100))
+
+
+def _form_rate(raw: Any, label: str) -> float:
+    """表单里的百分比（40 表示 40%）转 0~1 的比例；空串按 0。"""
+    text = str(raw or "").strip().rstrip("%").strip()
+    if not text:
+        return 0.0
+    try:
+        number = float(text)
+    except ValueError:
+        raise ValueError(f"{label} 不是有效百分比") from None
+    if not math.isfinite(number):
+        raise ValueError(f"{label} 不是有效百分比")
+    return round(number / 100, 6)
+
+
+def _form_coef(raw: Any, label: str) -> float:
+    """考核系数：空串按 1.00；正负由 db 层统一校验。"""
+    text = str(raw or "").strip()
+    if not text:
+        return 1.0
+    try:
+        number = float(text)
+    except ValueError:
+        raise ValueError(f"{label} 不是有效数字") from None
+    if not math.isfinite(number):
+        raise ValueError(f"{label} 不是有效数字")
+    return round(number, 4)
+
+
+def _yuan_text(cents: Any) -> str:
+    """分转元，固定两位小数，给输入框回填用。"""
+    return f"{int(cents or 0) / 100:.2f}"
+
+
+def _tenure_view(row: Any) -> dict:
+    """任期行 → 表格展示 + 弹层回填都能直接用的扁平字典。"""
+    from_month = row["from_month"] or ""
+    to_month = row["to_month"] or ""
+    return {
+        "id": int(row["id"]),
+        "advisor_name": row["advisor_name"] or "",
+        "from_month": from_month,
+        "to_month": to_month,
+        "range_label": db.tenure_range_label(from_month, to_month),
+        "tier_grade": row["tier_grade"] or "A",
+        "tier_label": v5_baseline.tier_label(row["tier_grade"]),
+        "base_pay_yuan": _yuan_text(row["base_pay_cents"]),
+        "base_coef": f"{float(row['base_coef'] or 0):.2f}",
+        "breakeven_yuan": _yuan_text(row["breakeven_cents"]),
+        "excess_rate_pct": f"{float(row['excess_rate'] or 0) * 100:g}",
+        "work_days": int(row["work_days"] or 0),
+        "note": row["note"] or "",
+    }
+
+
 def _do_add_store(conn):
     name = (request.form.get("store_name") or "").strip()
     short_name = (request.form.get("short_name") or "").strip()
@@ -375,18 +455,23 @@ def _do_add_store(conn):
 
 def _do_edit_store(conn):
     sid = int(request.form.get("store_id") or 0)
-    if db.get_store(conn, sid) is None:
+    store = db.get_store(conn, sid)
+    if store is None:
         raise ValueError("没有这家店")
     # V5 挂靠配置（模块 1）：只有表单真的带了 v5_mode 才提交，避免批量/旧表单误清模式
     v5_mode_form = request.form.get("v5_mode") if "v5_mode" in request.form else None
     parent_raw = (request.form.get("affiliated_to") or "").strip()
+    # 有任期行的店：顾问姓名是任期表派生的只读快照，普通保存不许覆盖它（消除双源）
+    advisor_form = request.form.get("advisor_name") or ""
+    if db.list_advisor_tenures(conn, sid):
+        advisor_form = str(store["advisor_name"] or "")
     db.update_store_profile(
         conn,
         sid,
         mobile_code=request.form.get("mobile_code") or "",
         area_manager=request.form.get("area_manager") or "",
         store_manager=request.form.get("store_manager") or "",
-        advisor_name=request.form.get("advisor_name") or "",
+        advisor_name=advisor_form,
         region_group=request.form.get("region_group") or "",
         city=request.form.get("city") or "",
         store_grade=request.form.get("store_grade") or "A",
@@ -418,6 +503,46 @@ def _do_delete_store(conn):
     db.delete_store(conn, sid)
     flash("门店已删除", "ok")
     return redirect(url_for("settings", tab="stores"))
+
+
+def _do_save_tenure(conn):
+    """新增/改写一段顾问任期：校验在 db 层，保存后由任期表反写门店快照。"""
+    sid = parse_int(request.form.get("store_id"), 0)
+    if not sid:
+        raise ValueError("没有这家店，先在上面选一家")
+    db.save_advisor_tenure(
+        conn,
+        sid,
+        tenure_id=parse_int(request.form.get("tenure_id"), 0) or None,
+        advisor_name=request.form.get("advisor_name") or "",
+        from_month=request.form.get("from_month") or "",
+        to_month=request.form.get("to_month") or "",
+        tier_grade=request.form.get("tier_grade") or "A",
+        base_pay_cents=_form_cents(request.form.get("base_pay"), "保底底薪"),
+        base_coef=_form_coef(request.form.get("base_coef"), "考核系数"),
+        breakeven_cents=_form_cents(request.form.get("breakeven"), "平衡点"),
+        excess_rate=_form_rate(request.form.get("excess_rate"), "超额分成比例"),
+        work_days=parse_int(request.form.get("work_days"), 0),
+        note=request.form.get("note") or "",
+    )
+    store = db.get_store(conn, sid)
+    snapshot = ((store["advisor_name"] if store is not None else "") or "").strip()
+    if snapshot:
+        flash(f"顾问任期已保存，「运营商顾问」同步为 {snapshot}", "ok")
+    else:
+        flash("顾问任期已保存；{0} 没有在任顾问，门店快照已置空".format(
+            db.advisor_snapshot_month()
+        ), "ok")
+    return redirect(url_for("settings", tab="stores", store_id=sid))
+
+
+def _do_delete_tenure(conn):
+    sid = parse_int(request.form.get("store_id"), 0)
+    if not sid:
+        raise ValueError("没有这家店，先在上面选一家")
+    db.delete_advisor_tenure(conn, sid, parse_int(request.form.get("tenure_id"), 0))
+    flash("任期已删除，门店顾问快照已跟着重算", "ok")
+    return redirect(url_for("settings", tab="stores", store_id=sid))
 
 
 def _do_save_profiles(conn):
@@ -763,6 +888,8 @@ _SETTINGS_ACTIONS = {
     "edit_store": _do_edit_store,
     "toggle_store": _do_toggle_store,
     "delete_store": _do_delete_store,
+    "save_tenure": _do_save_tenure,
+    "delete_tenure": _do_delete_tenure,
     "save_profiles": _do_save_profiles,
     "add_user": _do_add_user,
     "reset_pin": _do_reset_pin,

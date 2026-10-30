@@ -533,8 +533,10 @@ def test_settings_store_page_renders_baseline_and_tenure(admin_client):
     assert "目标搭载率" in body and "20%" in body
     assert "≥18%" in body  # 搭载率档位
     assert "35%" in body  # 提成封顶比例
-    assert "李海燕 · A 档" in body
-    assert "7,487 元" in body  # 顾问平衡点
+    # 任务二之后顾问块变成任期表：姓名 / 任期 / 档位分列，金额走"元 + 两位小数"回填格式
+    assert "李海燕" in body and "2026-10 起" in body  # 在任顾问 + 任期区间
+    assert "A 档" in body
+    assert "7487.00" in body  # 顾问平衡点（元）
 
 
 def test_settings_store_page_marks_unset_mode(admin_client):

@@ -65,6 +65,12 @@ ADVISOR_CAP_ABS_CENTS = 65000
 DEFAULT_CAP_RATIO = 0.35
 DEFAULT_BASE_PAY_CENTS = 400000
 
+# 专职顾问档位：`advisor_tenure.tier_grade` 的合法取值。
+# A 档 = 高底薪高系数（1.20 / 40% 超额分成）；B 近档 = 低保底（1.00 / 70%）。
+# 迁移 17 播的种子就是这两个值；旧写法 "B" 也当 B 近档收，避免手改库后认不出。
+ADVISOR_TIER_GRADES: Tuple[str, ...] = ("A", "B_NEAR")
+ADVISOR_TIER_LABELS: Dict[str, str] = {"A": "A 档", "B_NEAR": "B 近档"}
+
 SAMPLE_STORES: Tuple[Tuple[str, str], ...] = (
     ("store-alpha", "alpha"),
     ("store-beta", "beta"),
@@ -255,6 +261,30 @@ def normalize_mode(value: Any, fallback: str = MODE_UNSET) -> str:
     """把表单/库里的模式归一成已知常量；认不出的回落到 fallback。"""
     text = str(value or "").strip().upper()
     return text if text in V5_MODE_LABELS else fallback
+
+
+def normalize_tier(value: Any) -> str:
+    """把档位写法归一成 `A` / `B_NEAR`；认不出返回空串（由调用方报错）。
+
+    兼容 "B"、"b_near"、"B 近档" 这类手改库或口头写法。
+    """
+    text = str(value or "").strip().upper().replace("-", "_").replace(" ", "")
+    if text in ("A", "A档"):
+        return "A"
+    if text in ("B", "B_NEAR", "BNEAR", "B近档"):
+        return "B_NEAR"
+    return ""
+
+
+def tier_label(value: Any) -> str:
+    """档位中文标签；认不出的原样返回，方便页面把脏数据显示出来。"""
+    code = normalize_tier(value)
+    return ADVISOR_TIER_LABELS.get(code, str(value or "").strip())
+
+
+def tier_choices() -> List[Tuple[str, str]]:
+    """(档位代码, 中文标签) 列表，给任期维护下拉用。"""
+    return [(code, ADVISOR_TIER_LABELS[code]) for code in ADVISOR_TIER_GRADES]
 
 
 def carrier_for_mode(mode: str) -> str:

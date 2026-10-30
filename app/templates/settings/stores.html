@@ -113,21 +113,120 @@
           {% else %}
           <p class="muted">暂无考核基线行，V5 引擎不会对这家店出月结。</p>
           {% endif %}
-          {% if v5.tenures %}
           <div class="store-section-head">
             <h3>专职顾问任期</h3>
-            <p class="muted">顾问任职以任期表为唯一事实源；下面「运营商顾问」只是当前在任的只读快照。</p>
+            <p class="muted">任期表是顾问任职的唯一来源；保存后按 {{ tenure_month }} 在任的那段反写上面「运营商顾问」。同店同一时段只允许一位顾问。</p>
           </div>
-          <div class="store-editor-grid">
-            {% for tenure in v5.tenures %}
-            <p>
-              <label>{{ tenure.advisor_name }} · {{ tenure.tier_grade }} 档</label>
-              <span>{{ tenure.range_label }}</span>
-              <span class="muted">系数 {{ tenure.base_coef }} ｜ 底薪 {{ tenure.base_pay }} 元 ｜ 平衡点 {{ tenure.breakeven }} 元 ｜ 超额分成 {{ tenure.excess_rate }}{% if tenure.work_days %} ｜ 折算 {{ tenure.work_days }} 天{% endif %}</span>
-            </p>
-            {% endfor %}
+          {% if tenure_rows %}
+          <div class="tenure-table-wrap">
+            <table class="data tenure-table">
+              <thead>
+                <tr>
+                  <th>顾问</th>
+                  <th>任期</th>
+                  <th>档位</th>
+                  <th>保底底薪（元）</th>
+                  <th>系数</th>
+                  <th>平衡点（元）</th>
+                  <th>超额分成</th>
+                  <th>工作日折算</th>
+                  <th>备注</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for t in tenure_rows %}
+                <tr>
+                  <td>{{ t.advisor_name }}</td>
+                  <td>{{ t.range_label }}</td>
+                  <td>{{ t.tier_label }}</td>
+                  <td>{{ t.base_pay_yuan }}</td>
+                  <td>{{ t.base_coef }}</td>
+                  <td>{{ t.breakeven_yuan }}</td>
+                  <td>{{ t.excess_rate_pct }}%</td>
+                  <td>{{ t.work_days ~ ' 天' if t.work_days else '全月' }}</td>
+                  <td class="muted">{{ t.note }}</td>
+                  <td class="tenure-actions">
+                    <button type="button" class="btn ghost tenure-edit" data-id="{{ t.id }}" data-name="{{ t.advisor_name }}" data-from="{{ t.from_month }}" data-to="{{ t.to_month }}" data-tier="{{ t.tier_grade }}" data-pay="{{ t.base_pay_yuan }}" data-coef="{{ t.base_coef }}" data-breakeven="{{ t.breakeven_yuan }}" data-rate="{{ t.excess_rate_pct }}" data-days="{{ t.work_days }}" data-note="{{ t.note }}">改</button>
+                    <form method="post" onsubmit="return confirm('删掉这段任期？删光后门店顾问快照会置空。')">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                      <input type="hidden" name="action" value="delete_tenure">
+                      <input type="hidden" name="tab" value="stores">
+                      <input type="hidden" name="store_id" value="{{ current_store.id }}">
+                      <input type="hidden" name="tenure_id" value="{{ t.id }}">
+                      <button type="submit" class="btn ghost">删</button>
+                    </form>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
           </div>
+          {% else %}
+          <p class="muted">还没有任期记录，「运营商顾问」先按手填算；新增一段任期后改由任期表派生。</p>
           {% endif %}
+          <p class="tenure-toolbar"><button type="button" class="btn" id="tenureAdd">新增一段任期</button></p>
+          <dialog class="tenure-dialog" id="tenureDialog">
+            <form method="post">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="action" value="save_tenure">
+              <input type="hidden" name="tab" value="stores">
+              <input type="hidden" name="store_id" value="{{ current_store.id }}">
+              <input type="hidden" name="tenure_id" id="tnId" value="">
+              <div class="store-section-head">
+                <h3 id="tnTitle">新增一段任期</h3>
+                <p class="muted">2026-10 及以前不回溯；结束月留空表示仍在任；工作日折算填 0 表示按全月算。</p>
+              </div>
+              <div class="store-editor-grid">
+                <p>
+                  <label>顾问姓名</label>
+                  <input id="tnName" name="advisor_name" maxlength="20" autocomplete="off">
+                </p>
+                <p>
+                  <label>档位</label>
+                  <select id="tnTier" name="tier_grade">
+                    {% for code, label in tenure_tiers %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+                  </select>
+                </p>
+                <p>
+                  <label>起始月</label>
+                  <input id="tnFrom" name="from_month" type="month">
+                </p>
+                <p>
+                  <label>结束月（在任留空）</label>
+                  <input id="tnTo" name="to_month" type="month">
+                </p>
+                <p>
+                  <label>保底底薪（元）</label>
+                  <input id="tnPay" name="base_pay" inputmode="decimal" autocomplete="off" placeholder="4000">
+                </p>
+                <p>
+                  <label>考核系数</label>
+                  <input id="tnCoef" name="base_coef" inputmode="decimal" autocomplete="off" placeholder="1.20">
+                </p>
+                <p>
+                  <label>平衡点（元）</label>
+                  <input id="tnBreakeven" name="breakeven" inputmode="decimal" autocomplete="off" placeholder="7000">
+                </p>
+                <p>
+                  <label>超额分成（%）</label>
+                  <input id="tnRate" name="excess_rate" inputmode="decimal" autocomplete="off" placeholder="40">
+                </p>
+                <p>
+                  <label>当月工作日折算（天）</label>
+                  <input id="tnDays" name="work_days" inputmode="numeric" autocomplete="off" placeholder="0">
+                </p>
+                <p>
+                  <label>备注</label>
+                  <input id="tnNote" name="note" maxlength="40" autocomplete="off" placeholder="如 8 月离任">
+                </p>
+              </div>
+              <div class="tenure-dialog-actions">
+                <button type="button" class="btn ghost" id="tnCancel">取消</button>
+                <button type="submit" class="btn">保存任期</button>
+              </div>
+            </form>
+          </dialog>
         </div>
         {% endif %}
         <form method="post" class="store-editor-form">
@@ -170,8 +269,13 @@
                 <input name="store_manager" value="{{ current_store.store_manager }}" autocomplete="off">
               </p>
               <p class="span-2">
-                <label>运营商顾问</label>
+                <label>运营商顾问{% if tenure_rows %}（由任期表派生）{% endif %}</label>
+                {% if tenure_rows %}
+                <input name="advisor_name" value="{{ current_store.advisor_name }}" readonly>
+                <span class="muted">任期表里有 {{ tenure_rows|length }} 段记录，这一列跟着 {{ tenure_month }} 在任的那段走；要换人请改上面的任期表。</span>
+                {% else %}
                 <input name="advisor_name" value="{{ current_store.advisor_name }}" placeholder="无顾问留空" autocomplete="off">
+                {% endif %}
               </p>
             </div>
           </section>
@@ -395,6 +499,49 @@
       function sync() { row.hidden = mode.value !== 'AFFILIATED'; }
       mode.addEventListener('change', sync);
       sync();
+    })();
+    </script>
+    <script>
+    (function () {
+      var dlg = document.getElementById('tenureDialog');
+      if (!dlg || typeof dlg.showModal !== 'function') return;
+      var title = document.getElementById('tnTitle');
+      var keys = ['id', 'name', 'from', 'to', 'tier', 'pay', 'coef', 'breakeven', 'rate', 'days', 'note'];
+      var ids = {
+        id: 'tnId', name: 'tnName', from: 'tnFrom', to: 'tnTo', tier: 'tnTier',
+        pay: 'tnPay', coef: 'tnCoef', breakeven: 'tnBreakeven', rate: 'tnRate',
+        days: 'tnDays', note: 'tnNote'
+      };
+      function node(key) { return document.getElementById(ids[key]); }
+      function setValue(key, value) {
+        var el = node(key);
+        if (el) el.value = value === null || value === undefined ? '' : String(value);
+      }
+      var defaults = {};
+      keys.forEach(function (key) { defaults[key] = node(key) ? node(key).value : ''; });
+      function open(fill) {
+        keys.forEach(function (key) { setValue(key, defaults[key]); });
+        title.textContent = '新增一段任期';
+        if (fill) {
+          title.textContent = '改 ' + (fill.name || '') + ' 的任期';
+          keys.forEach(function (key) { setValue(key, fill[key]); });
+        }
+        dlg.showModal();
+      }
+      var add = document.getElementById('tenureAdd');
+      if (add) add.addEventListener('click', function () { open(null); });
+      document.querySelectorAll('.tenure-edit').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var d = btn.dataset;
+          open({
+            id: d.id, name: d.name, from: d.from, to: d.to, tier: d.tier,
+            pay: d.pay, coef: d.coef, breakeven: d.breakeven, rate: d.rate,
+            days: d.days, note: d.note
+          });
+        });
+      });
+      var cancel = document.getElementById('tnCancel');
+      if (cancel) cancel.addEventListener('click', function () { dlg.close(); });
     })();
     </script>
     {% endif %}

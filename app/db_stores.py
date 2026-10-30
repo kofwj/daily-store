@@ -6,7 +6,7 @@ import sqlite3
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 from .db_auth import hash_pin, is_weak_new_pin
-from .db_core import _now
+from .db_core import _now, today_local
 
 
 def get_user_by_username(conn: sqlite3.Connection, username: str) -> Optional[sqlite3.Row]:
@@ -643,3 +643,255 @@ def store_v5_snapshot(conn: sqlite3.Connection, store_id: int) -> Dict[str, Any]
                 }
             )
     return snapshot
+
+
+# ---------------------------------------------------------------------------
+# V5 表 2：专职顾问任期维护（A4 收口）
+# ---------------------------------------------------------------------------
+
+
+def advisor_snapshot_month(today: Optional[Any] = None) -> str:
+    """派生 `stores.advisor_name` 时拿哪个月当「当前在任」的参照月。
+
+    用业务时区的今天，但不早于 V5 生效月：2026-10 及以前是双轨期，旧口径仍靠
+    `stores.advisor_name`，不能因为「任期从 11 月起」就把它清空。
+    """
+    from . import v5_baseline
+
+    key = (today or today_local()).strftime("%Y-%m")
+    return max(key, v5_baseline.V5_START_MONTH)
+
+
+def list_advisor_tenures(conn: sqlite3.Connection, store_id: int) -> List[sqlite3.Row]:
+    """一家店的全部任期段，按起始月升序（页面按时间线展示）。"""
+    if not _table_exists(conn, "advisor_tenure"):
+        return []
+    return list(
+        conn.execute(
+            "SELECT * FROM advisor_tenure WHERE store_id=? ORDER BY from_month, id",
+            (int(store_id),),
+        )
+    )
+
+
+def tenure_range_label(from_month: str, to_month: str) -> str:
+    """任期区间文案：`2026-10 至 2027-02` / `2026-11 起`。"""
+    return f"{from_month}" + (f" 至 {to_month}" if to_month else " 起")
+
+
+def sync_store_advisor_snapshot(
+    conn: sqlite3.Connection, store_id: int, month: Any = None
+) -> str:
+    """以任期表为唯一事实源，反写 `stores.advisor_name` / `has_advisor`。
+
+    返回同步后的顾问姓名（空串 = 该月无人在任）。**一条任期都没有时不动**
+    `stores` 的两列：老库或还没配任期的店仍靠手工填写的顾问姓名跑旧口径，
+    不能被一次保存误清。
+    """
+    from . import v5_baseline
+
+    rows = list_advisor_tenures(conn, store_id)
+    if not rows:
+        return ""
+    key = v5_baseline.month_key(month) or advisor_snapshot_month()
+    active: Optional[sqlite3.Row] = None
+    for row in rows:  # 升序遍历，后命中的起始月更大，即「最近一段」
+        start = row["from_month"]
+        end = row["to_month"] or ""
+        if start <= key and (not end or end >= key):
+            active = row
+    name = (active["advisor_name"] or "").strip() if active is not None else ""
+    conn.execute(
+        "UPDATE stores SET advisor_name=?, has_advisor=? WHERE id=?",
+        (name, 1 if name else 0, int(store_id)),
+    )
+    return name
+
+
+def _normalize_tenure_input(
+    *,
+    advisor_name: str,
+    from_month: str,
+    to_month: str,
+    tier_grade: str,
+    base_pay_cents: int,
+    base_coef: float,
+    breakeven_cents: int,
+    excess_rate: float,
+    work_days: int,
+) -> Dict[str, Any]:
+    """任期表单的校验与归一；任一项不合口径就抛 ValueError（文案直接给用户看）。"""
+    from . import v5_baseline
+
+    name = (advisor_name or "").strip()
+    if not name:
+        raise ValueError("顾问姓名要填")
+    start = v5_baseline.month_key(from_month)
+    if not start:
+        raise ValueError("任期起始月要填成 2026-11 这种格式")
+    end_raw = (to_month or "").strip()
+    end = v5_baseline.month_key(end_raw) if end_raw else ""
+    if end_raw and not end:
+        raise ValueError("任期结束月要填成 2026-11 这种格式，留空表示至今在任")
+    if end and end < start:
+        raise ValueError(f"任期结束月 {end} 早于起始月 {start}，先改日期")
+    tier = v5_baseline.normalize_tier(tier_grade)
+    if not tier:
+        raise ValueError("档位只能选 A 档或 B 近档")
+    pay = int(base_pay_cents or 0)
+    if pay < 0:
+        raise ValueError("保底底薪不能为负")
+    coef = float(base_coef or 0)
+    if coef <= 0:
+        raise ValueError("考核系数要大于 0")
+    breakeven = int(breakeven_cents or 0)
+    if breakeven < 0:
+        raise ValueError("平衡点不能为负")
+    rate = float(excess_rate or 0)
+    if not 0 <= rate <= 1:
+        raise ValueError("超额分成比例要在 0% 到 100% 之间")
+    days = int(work_days or 0)
+    if not 0 <= days <= 31:
+        raise ValueError("当月工作日折算只能填 0 到 31 天（0 = 按全月算）")
+    return {
+        "advisor_name": name,
+        "from_month": start,
+        "to_month": end,
+        "tier_grade": tier,
+        "base_pay_cents": pay,
+        "base_coef": coef,
+        "breakeven_cents": breakeven,
+        "excess_rate": rate,
+        "work_days": days,
+    }
+
+
+def _tenure_conflict(
+    conn: sqlite3.Connection, store_id: int, start: str, end: str, keep_id: int
+) -> Optional[sqlite3.Row]:
+    """找与 [start, end] 重叠的其它任期段；同店同期只允许一位专职顾问。"""
+    span_end = end or "9999-12"
+    for row in list_advisor_tenures(conn, store_id):
+        if keep_id and int(row["id"]) == keep_id:
+            continue
+        other_start = row["from_month"]
+        other_end = row["to_month"] or "9999-12"
+        if other_start <= span_end and start <= other_end:
+            return row
+    return None
+
+
+def save_advisor_tenure(
+    conn: sqlite3.Connection,
+    store_id: int,
+    *,
+    advisor_name: str,
+    from_month: str,
+    to_month: str = "",
+    tier_grade: str = "A",
+    base_pay_cents: int = 0,
+    base_coef: float = 1.0,
+    breakeven_cents: int = 0,
+    excess_rate: float = 0.0,
+    work_days: int = 0,
+    note: str = "",
+    tenure_id: Optional[int] = None,
+) -> int:
+    """新增或改写一段顾问任期，并把 `stores` 的顾问快照重新派生一次。
+
+    `tenure_id` 给 0/None 是新增，给了就是改那一段。返回任期行 id。
+    """
+    sid = int(store_id)
+    if get_store(conn, sid) is None:
+        raise ValueError("没有这家店")
+    if not _table_exists(conn, "advisor_tenure"):
+        raise ValueError("这个库还没跑 Migration 17，先升级再维护顾问任期")
+    clean = _normalize_tenure_input(
+        advisor_name=advisor_name,
+        from_month=from_month,
+        to_month=to_month,
+        tier_grade=tier_grade,
+        base_pay_cents=base_pay_cents,
+        base_coef=base_coef,
+        breakeven_cents=breakeven_cents,
+        excess_rate=excess_rate,
+        work_days=work_days,
+    )
+    tid = int(tenure_id or 0)
+    clash = _tenure_conflict(conn, sid, clean["from_month"], clean["to_month"], tid)
+    if clash is not None:
+        label = tenure_range_label(clash["from_month"], clash["to_month"] or "")
+        raise ValueError(
+            f"{label} 已经是 {clash['advisor_name']} 的任期，同一家店同一时间只能有一位专职顾问"
+        )
+    dup = conn.execute(
+        "SELECT 1 FROM advisor_tenure WHERE store_id=? AND advisor_name=?"
+        " AND from_month=? AND id<>?",
+        (sid, clean["advisor_name"], clean["from_month"], tid),
+    ).fetchone()
+    if dup is not None:
+        raise ValueError(f"{clean['advisor_name']} 在 {clean['from_month']} 已经有一段任期了")
+    values = (
+        clean["advisor_name"],
+        clean["from_month"],
+        clean["to_month"],
+        clean["tier_grade"],
+        clean["base_pay_cents"],
+        clean["base_coef"],
+        clean["breakeven_cents"],
+        clean["excess_rate"],
+        clean["work_days"],
+        (note or "").strip(),
+    )
+    if tid:
+        exists = conn.execute(
+            "SELECT 1 FROM advisor_tenure WHERE id=? AND store_id=?", (tid, sid)
+        ).fetchone()
+        if exists is None:
+            raise ValueError("这段任期已经不在了，刷新页面再看")
+        conn.execute(
+            """
+            UPDATE advisor_tenure SET
+                advisor_name=?, from_month=?, to_month=?, tier_grade=?,
+                base_pay_cents=?, base_coef=?, breakeven_cents=?, excess_rate=?,
+                work_days=?, note=?
+            WHERE id=? AND store_id=?
+            """,
+            (*values, tid, sid),
+        )
+        new_id = tid
+    else:
+        cur = conn.execute(
+            """
+            INSERT INTO advisor_tenure(
+                advisor_name, from_month, to_month, tier_grade,
+                base_pay_cents, base_coef, breakeven_cents, excess_rate,
+                work_days, note, store_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (*values, sid),
+        )
+        new_id = int(cur.lastrowid or 0)
+    sync_store_advisor_snapshot(conn, sid)
+    return new_id
+
+
+def delete_advisor_tenure(conn: sqlite3.Connection, store_id: int, tenure_id: int) -> None:
+    """删掉一段任期并重新派生顾问快照；删光最后一段时快照退回「无顾问」。"""
+    sid = int(store_id)
+    tid = int(tenure_id or 0)
+    if not _table_exists(conn, "advisor_tenure"):
+        raise ValueError("这个库还没跑 Migration 17，没有任期表")
+    if not tid or conn.execute(
+        "SELECT 1 FROM advisor_tenure WHERE id=? AND store_id=?", (tid, sid)
+    ).fetchone() is None:
+        raise ValueError("这段任期已经删过了，刷新页面再看")
+    conn.execute("DELETE FROM advisor_tenure WHERE id=? AND store_id=?", (tid, sid))
+    if list_advisor_tenures(conn, sid):
+        sync_store_advisor_snapshot(conn, sid)
+    else:
+        # 任期表里已无事实：快照跟着退回无顾问，不留幽灵姓名
+        conn.execute(
+            "UPDATE stores SET advisor_name='', has_advisor=0 WHERE id=?", (sid,)
+        )
+
