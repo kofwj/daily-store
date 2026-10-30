@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 from .db_auth import hash_pin, is_weak_new_pin
 from .db_core import _now
@@ -354,6 +354,14 @@ def store_has_data(conn: sqlite3.Connection, store_id: int) -> bool:
         "deal_edits",
         "advance_edits",
         "invoice_edits",
+        # 迁移 17 的 V5 表同样引用 stores(id) 且无级联：有 V5 基线/月结行时不能删，
+        # 否则 DELETE 直接撞外键，用户看到 500 而不是「只能停用」。
+        "store_baseline",
+        "advisor_tenure",
+        "store_month_biz",
+        "store_month_settlement",
+        "store_month_split",
+        "settlement_audit_log",
     )
     for table in tables:
         exists = conn.execute(
@@ -372,3 +380,121 @@ def delete_store(conn: sqlite3.Connection, store_id: int) -> None:
         raise ValueError("这家店已有填报/触客/垫资，不能删，只能停用")
     conn.execute("DELETE FROM user_stores WHERE store_id=?", (sid,))
     conn.execute("DELETE FROM stores WHERE id=?", (sid,))
+
+
+def _row_get(row: sqlite3.Row, key: str, default: Any = None) -> Any:
+    """按列名取值；老库还没补列时返回默认值（不让页面 500）。"""
+    try:
+        value = row[key]
+    except IndexError:
+        return default
+    return default if value is None else value
+
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    return (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+        ).fetchone()
+        is not None
+    )
+
+
+def _yuan(cents: Any) -> str:
+    """分转元展示，整数不带小数尾巴。"""
+    try:
+        value = int(cents or 0) / 100
+    except (TypeError, ValueError):
+        value = 0.0
+    return f"{value:,.0f}" if abs(value - round(value)) < 0.005 else f"{value:,.2f}"
+
+
+def _pct(rate: Any) -> str:
+    try:
+        value = float(rate or 0) * 100
+    except (TypeError, ValueError):
+        value = 0.0
+    return f"{value:g}%"
+
+
+def store_v5_snapshot(conn: sqlite3.Connection, store_id: int) -> Dict[str, Any]:
+    """门店的 V5 只读快照：模式、运营商范围、挂靠母店、考核基线、顾问任期。
+
+    **只读**：本函数只 SELECT，不写任何表；V5 口径的真实事实源是
+    `store_baseline` / `advisor_tenure`，`stores` 上四列只是给筛选用的快照。
+    2026-10 及以前的报表与算薪不走这里，双轨并行。
+    """
+    from . import v5_baseline
+
+    store = get_store(conn, store_id)
+    if store is None:
+        return {}
+    mode = str(_row_get(store, "v5_mode", "") or "").strip() or v5_baseline.MODE_UNSET
+    carrier = str(_row_get(store, "carrier_scope", "") or "").strip().upper() or "MOBILE"
+    snapshot: Dict[str, Any] = {
+        "store_id": int(store["id"]),
+        "mode": mode,
+        "mode_label": v5_baseline.mode_label(mode),
+        "in_v5": mode != v5_baseline.MODE_UNSET and mode not in v5_baseline.DISABLED_MODES,
+        "disabled": mode in v5_baseline.DISABLED_MODES,
+        "carrier": carrier,
+        "carrier_label": v5_baseline.carrier_label(carrier),
+        "mobile_code_active": bool(int(_row_get(store, "mobile_code_active", 1) or 0)),
+        "parent": None,
+        "baseline": None,
+        "tenures": [],
+        "start_month": v5_baseline.V5_START_MONTH,
+        "legacy_last_month": v5_baseline.V5_LEGACY_LAST_MONTH,
+        "advisor_name": str(_row_get(store, "advisor_name", "") or "").strip(),
+    }
+    parent_id = _row_get(store, "affiliated_to", None)
+    if parent_id:
+        parent = conn.execute(
+            "SELECT id, code, name, short_name FROM stores WHERE id=?", (int(parent_id),)
+        ).fetchone()
+        if parent is not None:
+            snapshot["parent"] = {
+                "id": int(parent["id"]),
+                "code": parent["code"] or "",
+                "label": (parent["short_name"] or "").strip() or parent["name"] or "",
+            }
+    if _table_exists(conn, "store_baseline"):
+        row = conn.execute(
+            "SELECT * FROM store_baseline WHERE store_id=? ORDER BY from_month DESC, id DESC LIMIT 1",
+            (int(store_id),),
+        ).fetchone()
+        if row is not None:
+            snapshot["baseline"] = {
+                "from_month": row["from_month"],
+                "to_month": row["to_month"] or "",
+                "range_label": row["from_month"]
+                + (f" 至 {row['to_month']}" if row["to_month"] else " 起"),
+                "net_baseline": _yuan(row["net_baseline_cents"]),
+                "target_carry_rate": _pct(row["target_carry_rate"]),
+                "tiers": [
+                    ("≥25%", _pct(row["carry_tier_25"])),
+                    ("≥18%", _pct(row["carry_tier_18"])),
+                    ("≥10%", _pct(row["carry_tier_10"])),
+                ],
+                "cap_ratio": _pct(row["cap_ratio"]),
+                "cap_abs": _yuan(row["cap_abs_cents"]) if row["cap_abs_cents"] else "",
+            }
+    if _table_exists(conn, "advisor_tenure"):
+        for row in conn.execute(
+            "SELECT * FROM advisor_tenure WHERE store_id=? ORDER BY from_month DESC, id DESC",
+            (int(store_id),),
+        ):
+            snapshot["tenures"].append(
+                {
+                    "advisor_name": row["advisor_name"],
+                    "tier_grade": row["tier_grade"] or "",
+                    "range_label": row["from_month"]
+                    + (f" 至 {row['to_month']}" if row["to_month"] else " 起"),
+                    "base_coef": f"{float(row['base_coef'] or 0):.2f}",
+                    "base_pay": _yuan(row["base_pay_cents"]),
+                    "breakeven": _yuan(row["breakeven_cents"]),
+                    "excess_rate": _pct(row["excess_rate"]),
+                    "work_days": int(row["work_days"] or 0),
+                }
+            )
+    return snapshot

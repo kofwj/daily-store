@@ -166,6 +166,8 @@ from .db_stores import (  # noqa: F401
     set_user_active,
     set_user_scope,
     set_user_stores,
+    store_has_data,
+    store_v5_snapshot,
     system_entity_counts,
     update_store_profile,
     update_user_pin,

@@ -59,6 +59,74 @@
           <span>{{ current_store.store_grade or 'A' }}类</span>
           <span>{{ current_store.mobile_code or '无移动编码' }}</span>
         </div>
+        {% set v5 = v5_snapshot %}
+        {% if v5 %}
+        <div class="card settings-card store-v5-card">
+          <div class="settings-card-head">
+            <h2>V5 口径（只读）</h2>
+            <p class="muted">{{ v5.start_month }} 起按 V5 口径核算；{{ v5.legacy_last_month }} 及以前继续按原口径展示与归档（双轨并行，不回溯、不重算）。此处仅供核对，修改走基线配置。</p>
+          </div>
+          <div class="store-editor-grid">
+            <p>
+              <label>V5 模式</label>
+              <span>{{ v5.mode_label }}</span>
+              <span class="muted">{{ v5.mode }}</span>
+            </p>
+            <p>
+              <label>运营商</label>
+              <span>{{ v5.carrier_label }}</span>
+            </p>
+            <p>
+              <label>移动编码</label>
+              <span>{{ '参与考核与通报' if v5.mobile_code_active else '不参与（无有效编码）' }}</span>
+            </p>
+            <p>
+              <label>挂靠母店</label>
+              {% if v5.parent %}
+              <span>{{ v5.parent.label }}</span>
+              <span class="muted">{{ v5.parent.code }}</span>
+              {% else %}
+              <span class="muted">独立店，无母店</span>
+              {% endif %}
+            </p>
+          </div>
+          {% if v5.mode == 'UNSET' %}
+          <p class="muted">这家店尚未纳入 V5（`v5_mode` 未配置），照旧按原口径考核。</p>
+          {% elif v5.disabled %}
+          <p class="muted">该模式不参与 V5 提成与考核，也不配考核基线。</p>
+          {% elif v5.baseline %}
+          <div class="store-editor-grid">
+            <p><label>考核基线</label><span>{{ v5.baseline.net_baseline }} 元</span><span class="muted">{{ v5.baseline.range_label }}</span></p>
+            <p><label>目标搭载率</label><span>{{ v5.baseline.target_carry_rate }}</span></p>
+            <p>
+              <label>搭载率档位</label>
+              <span>{% for label, rate in v5.baseline.tiers %}{{ label }} → {{ rate }}{% if not loop.last %} ｜ {% endif %}{% endfor %}</span>
+            </p>
+            <p>
+              <label>提成封顶</label>
+              <span>{{ v5.baseline.cap_ratio }}{% if v5.baseline.cap_abs %}（绝对封顶 {{ v5.baseline.cap_abs }} 元）{% endif %}</span>
+            </p>
+          </div>
+          {% else %}
+          <p class="muted">暂无考核基线行，V5 引擎不会对这家店出月结。</p>
+          {% endif %}
+          {% if v5.tenures %}
+          <div class="store-section-head">
+            <h3>专职顾问任期</h3>
+            <p class="muted">顾问任职以任期表为唯一事实源；下面「运营商顾问」只是当前在任的只读快照。</p>
+          </div>
+          <div class="store-editor-grid">
+            {% for tenure in v5.tenures %}
+            <p>
+              <label>{{ tenure.advisor_name }} · {{ tenure.tier_grade }} 档</label>
+              <span>{{ tenure.range_label }}</span>
+              <span class="muted">系数 {{ tenure.base_coef }} ｜ 底薪 {{ tenure.base_pay }} 元 ｜ 平衡点 {{ tenure.breakeven }} 元 ｜ 超额分成 {{ tenure.excess_rate }}{% if tenure.work_days %} ｜ 折算 {{ tenure.work_days }} 天{% endif %}</span>
+            </p>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+        {% endif %}
         <form method="post" class="store-editor-form">
           <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="action" value="edit_store">

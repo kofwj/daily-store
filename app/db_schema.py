@@ -63,6 +63,11 @@ CREATE TABLE IF NOT EXISTS stores (
     store_grade TEXT NOT NULL DEFAULT '',
     ai_target INTEGER NOT NULL DEFAULT 0,
     active INTEGER NOT NULL DEFAULT 1,
+    -- V5 口径（迁移 17 补齐）：模式快照、运营商范围、移动编码是否参与、挂靠母店
+    v5_mode TEXT NOT NULL DEFAULT 'UNSET',
+    carrier_scope TEXT NOT NULL DEFAULT 'MOBILE',
+    mobile_code_active INTEGER NOT NULL DEFAULT 1,
+    affiliated_to INTEGER REFERENCES stores(id),
     created_at TEXT NOT NULL
 );
 
@@ -207,6 +212,9 @@ MIGRATIONS: List[Tuple[int, str, str]] = [
     (14, "expand_user_roles_city", "_expand_user_roles_city"),
     (15, "sesame_frozen_to_cents", "_sesame_frozen_to_cents"),
     (16, "oct_coin_cut_rework", "_oct_coin_cut_rework"),
+    # 迁移 17：V5 落库。只建表 1–6、补 stores 四列、灌基线/顾问任期；
+    # 不重算、不回填 2026-10 及以前任何月份的报表与算薪数据。
+    (17, "v5_schema_and_baseline", "_v5_schema_and_baseline"),
 ]
 
 def init_db() -> None:
@@ -228,6 +236,8 @@ def init_db() -> None:
 
         _ensure_invoice_tables(conn)
         _ensure_policy_tables(conn)
+        # V5 表 1–6 建表（结构与迁移 17 一致，页面读取不依赖迁移是否已跑）
+        _ensure_v5_tables(conn)
         # 种子（建表/加列/回填默认）每次幂等执行即可；真正“动数据”的迁移走 migrate() 一次
         # seed 是"先 SELECT 再 INSERT"，多 worker 同时启动会撞 UNIQUE；和 migrate() 一样先抢写锁
         conn.commit()
@@ -280,6 +290,7 @@ def migrate() -> None:
             "_migrate_bisuan_mobile_from_settings": _bisuan_mobile_migration,
             "_sesame_frozen_to_cents": _sesame_frozen_to_cents,
             "_oct_coin_cut_rework": _oct_coin_cut_rework,
+            "_v5_schema_and_baseline": _v5_schema_and_baseline,
         }
         for version, name, fn_name in sorted(MIGRATIONS):
             if version in applied:
@@ -321,6 +332,11 @@ _STORE_EXTRA_COLUMNS = {
     "lease_area": "ALTER TABLE stores ADD COLUMN lease_area TEXT NOT NULL DEFAULT ''",
     "lease_address": "ALTER TABLE stores ADD COLUMN lease_address TEXT NOT NULL DEFAULT ''",
     "lease_period": "ALTER TABLE stores ADD COLUMN lease_period TEXT NOT NULL DEFAULT ''",
+    # 迁移 17：V5 门店口径（只加列，不动历史月份任何数据）
+    "v5_mode": "ALTER TABLE stores ADD COLUMN v5_mode TEXT NOT NULL DEFAULT 'UNSET'",
+    "carrier_scope": "ALTER TABLE stores ADD COLUMN carrier_scope TEXT NOT NULL DEFAULT 'MOBILE'",
+    "mobile_code_active": "ALTER TABLE stores ADD COLUMN mobile_code_active INTEGER NOT NULL DEFAULT 1",
+    "affiliated_to": "ALTER TABLE stores ADD COLUMN affiliated_to INTEGER REFERENCES stores(id)",
 }
 
 _USER_EXTRA_COLUMNS = {
@@ -1025,4 +1041,286 @@ def _seed_store_fillers(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "INSERT OR IGNORE INTO user_stores(user_id, store_id) VALUES (?, ?)",
                 (user_id, store_id),
+            )
+
+
+# ---------------------------------------------------------------------------
+# 迁移 17：V5 落库（表 1–6 + stores 四列 + 基线/顾问任期灌入）
+#
+# 边界（对齐 docs/V5落库与store-daily改造对接清单.md）：
+# * 只做结构新增与配置灌入，**不重算、不回填** 2026-10 及以前任何月份的报表/算薪；
+# * 表 3–6 本次只建空表，V5 引擎按 month 触发后才写数据，历史月份双轨并行；
+# * 门店一律按 code 定位（测试库示例店是 id 1..6，禁止按 id 区间硬编码）；
+# * 6 家示例店的停用与账号下线只在非示例环境（STORE_DAILY_SAMPLE_SEED!=1）执行，
+#   否则 alpha 默认登录的数十个既有单测会全部失联。
+# ---------------------------------------------------------------------------
+
+V5_TABLES: Tuple[str, ...] = (
+    "store_baseline",
+    "advisor_tenure",
+    "store_month_biz",
+    "store_month_settlement",
+    "store_month_split",
+    "settlement_audit_log",
+)
+
+V5_TABLE_DDL: Tuple[str, ...] = (
+    # 表 1：门店考核基线与搭载率配置表
+    """
+    CREATE TABLE IF NOT EXISTS store_baseline (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        store_id INTEGER NOT NULL REFERENCES stores(id),
+        from_month TEXT NOT NULL,
+        to_month TEXT NOT NULL DEFAULT '',
+        v5_mode TEXT NOT NULL,
+        affiliated_to INTEGER REFERENCES stores(id),
+        net_baseline_cents INTEGER NOT NULL DEFAULT 0,
+        target_carry_rate REAL NOT NULL DEFAULT 0.20,
+        carry_tier_25 REAL NOT NULL DEFAULT 0.20,
+        carry_tier_18 REAL NOT NULL DEFAULT 0.15,
+        carry_tier_10 REAL NOT NULL DEFAULT 0.10,
+        cap_ratio REAL NOT NULL DEFAULT 0.35,
+        cap_abs_cents INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        UNIQUE(store_id, from_month)
+    )
+    """,
+    # 表 2：专职顾问任期与成本平衡点表（支持换人分段与折算）
+    """
+    CREATE TABLE IF NOT EXISTS advisor_tenure (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        store_id INTEGER NOT NULL REFERENCES stores(id),
+        advisor_name TEXT NOT NULL,
+        from_month TEXT NOT NULL,
+        to_month TEXT NOT NULL DEFAULT '',
+        tier_grade TEXT NOT NULL DEFAULT 'A',
+        base_pay_cents INTEGER NOT NULL DEFAULT 400000,
+        base_coef REAL NOT NULL DEFAULT 1.20,
+        breakeven_cents INTEGER NOT NULL DEFAULT 700000,
+        excess_rate REAL NOT NULL DEFAULT 0.40,
+        work_days INTEGER NOT NULL DEFAULT 0,
+        note TEXT NOT NULL DEFAULT '',
+        UNIQUE(store_id, advisor_name, from_month)
+    )
+    """,
+    # 表 3：门店月度单笔提成档位核算表（带变更审计列）
+    """
+    CREATE TABLE IF NOT EXISTS store_month_biz (
+        month TEXT NOT NULL,
+        store_id INTEGER NOT NULL REFERENCES stores(id),
+        source_store_id INTEGER NOT NULL REFERENCES stores(id),
+        role_share TEXT NOT NULL DEFAULT 'SHOP_FULL_100',
+        biz_code TEXT NOT NULL,
+        daily_sum_count INTEGER NOT NULL DEFAULT 0,
+        settled_count INTEGER NOT NULL DEFAULT 0,
+        unit_price_cents INTEGER NOT NULL DEFAULT 0,
+        raw_amount_cents INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL DEFAULT '',
+        updated_by INTEGER REFERENCES users(id),
+        PRIMARY KEY (month, store_id, source_store_id, role_share, biz_code)
+    )
+    """,
+    # 表 4：门店月度结算、店长 100 分考核、专职顾问薪酬总表（追回款独立列）
+    """
+    CREATE TABLE IF NOT EXISTS store_month_settlement (
+        month TEXT NOT NULL,
+        store_id INTEGER NOT NULL REFERENCES stores(id),
+        gross_commission_cents INTEGER NOT NULL DEFAULT 0,
+        commissioning_fee_cents INTEGER NOT NULL DEFAULT 0,
+        total_deduction_cents INTEGER NOT NULL DEFAULT 0,
+        deduct_3b_quality_cents INTEGER NOT NULL DEFAULT 0,
+        deduct_3b_dispute_cents INTEGER NOT NULL DEFAULT 0,
+        deduct_3b_workorder_cents INTEGER NOT NULL DEFAULT 0,
+        deduct_3b_luckynum_cents INTEGER NOT NULL DEFAULT 0,
+        broadband_star_penalty INTEGER NOT NULL DEFAULT 0,
+        net_commission_cents INTEGER NOT NULL DEFAULT 0,
+        settled_cat1_fusion INTEGER NOT NULL DEFAULT 0,
+        settled_cat2_contract INTEGER NOT NULL DEFAULT 0,
+        settled_cat3_ai INTEGER NOT NULL DEFAULT 0,
+        settled_cat4_rebate INTEGER NOT NULL DEFAULT 0,
+        settled_cat4_rebate_member INTEGER NOT NULL DEFAULT 0,
+        core_biz_count INTEGER NOT NULL DEFAULT 0,
+        phone_sales_snap INTEGER NOT NULL DEFAULT 0,
+        actual_carry_rate REAL NOT NULL DEFAULT 0.0,
+        rebate_advance_cents INTEGER NOT NULL DEFAULT 0,
+        rebate_recovered_cents INTEGER NOT NULL DEFAULT 0,
+        rebate_recovery_ratio_3m REAL NOT NULL DEFAULT 1.0,
+        rebate_recovery_exempt INTEGER NOT NULL DEFAULT 0,
+        rebate_clawback_cents INTEGER NOT NULL DEFAULT 0,
+        exempt_cross_month INTEGER NOT NULL DEFAULT 0,
+        audit_flag TEXT NOT NULL DEFAULT 'OK',
+        override_remark TEXT NOT NULL DEFAULT '',
+        v5_mode_snap TEXT NOT NULL DEFAULT '',
+        net_baseline_snap_cents INTEGER NOT NULL DEFAULT 0,
+        target_carry_rate_snap REAL NOT NULL DEFAULT 0.20,
+        advisor_name_snap TEXT NOT NULL DEFAULT '',
+        base_coef_snap REAL NOT NULL DEFAULT 0,
+        breakeven_snap_cents INTEGER NOT NULL DEFAULT 0,
+        excess_rate_snap REAL NOT NULL DEFAULT 0,
+        shop_raw_pool_cents INTEGER NOT NULL DEFAULT 0,
+        shop_payout_ratio REAL NOT NULL DEFAULT 1.0,
+        shop_final_pool_cents INTEGER NOT NULL DEFAULT 0,
+        co_pool_deducted_cents INTEGER NOT NULL DEFAULT 0,
+        advisor_retained_net_cents INTEGER NOT NULL DEFAULT 0,
+        score_1_net REAL NOT NULL DEFAULT 0,
+        score_2_biz REAL NOT NULL DEFAULT 0,
+        score_3a_deduct REAL NOT NULL DEFAULT 0,
+        score_3b_redline REAL NOT NULL DEFAULT 0,
+        total_score_100 REAL NOT NULL DEFAULT 0,
+        mgr_score_20 REAL NOT NULL DEFAULT 0,
+        mgr_score_15 REAL NOT NULL DEFAULT 0,
+        advisor_sys_coef REAL NOT NULL DEFAULT 0,
+        advisor_base_pay_cents INTEGER NOT NULL DEFAULT 0,
+        advisor_excess_bonus_cents INTEGER NOT NULL DEFAULT 0,
+        advisor_3b_penalty_cents INTEGER NOT NULL DEFAULT 0,
+        advisor_final_pay_cents INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'DRAFT',
+        locked_by INTEGER REFERENCES users(id),
+        locked_at TEXT NOT NULL DEFAULT '',
+        updated_by INTEGER REFERENCES users(id),
+        updated_at TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (month, store_id)
+    )
+    """,
+    # 表 5：店长二次分配备案留痕表（自增主键，重名不撞库）
+    """
+    CREATE TABLE IF NOT EXISTS store_month_split (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        month TEXT NOT NULL,
+        store_id INTEGER NOT NULL REFERENCES stores(id),
+        emp_code TEXT NOT NULL DEFAULT '',
+        emp_name TEXT NOT NULL,
+        role_tag TEXT NOT NULL DEFAULT '导购',
+        amount_cents INTEGER NOT NULL DEFAULT 0,
+        remark TEXT NOT NULL DEFAULT '',
+        confirmed_by INTEGER REFERENCES users(id),
+        confirmed_at TEXT NOT NULL DEFAULT ''
+    )
+    """,
+    # 表 6：月结锁月与配置审计日志表
+    """
+    CREATE TABLE IF NOT EXISTS settlement_audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        month TEXT NOT NULL,
+        store_id INTEGER NOT NULL REFERENCES stores(id),
+        action TEXT NOT NULL,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        created_at TEXT NOT NULL,
+        before_json TEXT NOT NULL DEFAULT '',
+        after_json TEXT NOT NULL DEFAULT '',
+        reason TEXT NOT NULL DEFAULT ''
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_store_baseline_store ON store_baseline(store_id, from_month)",
+    "CREATE INDEX IF NOT EXISTS idx_advisor_tenure_store ON advisor_tenure(store_id, from_month)",
+    "CREATE INDEX IF NOT EXISTS idx_store_month_biz_month ON store_month_biz(month, store_id)",
+    "CREATE INDEX IF NOT EXISTS idx_store_month_split_month ON store_month_split(month, store_id)",
+    "CREATE INDEX IF NOT EXISTS idx_settlement_audit_month ON settlement_audit_log(month, store_id)",
+)
+
+
+def _ensure_v5_tables(conn: sqlite3.Connection) -> None:
+    """幂等建 V5 表 1–6；逐条执行（migrate 里已开事务，不能用 executescript 抢提交）。"""
+    for sql in V5_TABLE_DDL:
+        conn.execute(sql)
+
+
+def _v5_schema_and_baseline(conn: sqlite3.Connection) -> None:
+    """迁移 17：补 stores 四列 → 建表 1–6 → 按 code 灌基线/顾问任期。"""
+    _ensure_store_columns(conn)
+    _ensure_v5_tables(conn)
+    _seed_v5_baseline(conn)
+
+
+def _seed_v5_baseline(conn: sqlite3.Connection) -> None:
+    """把 V5 静态基线灌进库：门店模式、表 1 基线、表 2 顾问任期。
+
+    全部 UPDATE/INSERT OR IGNORE，可重复执行；只碰 V5 口径字段，
+    不写 `daily_*`、不改 2026-10 及以前任何月份的既有数据。
+    """
+    from . import v5_baseline
+
+    ids = {row["code"]: int(row["id"]) for row in conn.execute("SELECT id, code FROM stores")}
+    if not ids:
+        return
+    created = _now()
+    for cfg in v5_baseline.STORE_V5_CONFIG:
+        sid = ids.get(cfg["code"])
+        if sid is None:
+            continue
+        parent_id = ids.get((cfg.get("affiliated_to") or "").strip())
+        conn.execute(
+            """
+            UPDATE stores
+               SET v5_mode=?, carrier_scope=?, mobile_code_active=?, affiliated_to=?
+             WHERE code=?
+            """,
+            (
+                cfg["v5_mode"],
+                cfg["carrier_scope"],
+                int(cfg.get("mobile_code_active") or 0),
+                parent_id,
+                cfg["code"],
+            ),
+        )
+        if cfg["v5_mode"] in v5_baseline.DISABLED_MODES:
+            # 非主控/示例店不配考核基线，也不进提成与考核
+            continue
+        tier_25, tier_18, tier_10 = v5_baseline.CARRIER_CARRY_TIERS[cfg["carrier_scope"]]
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO store_baseline(
+                store_id, from_month, to_month, v5_mode, affiliated_to,
+                net_baseline_cents, target_carry_rate,
+                carry_tier_25, carry_tier_18, carry_tier_10,
+                cap_ratio, cap_abs_cents, created_at
+            ) VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                sid,
+                v5_baseline.V5_START_MONTH,
+                cfg["v5_mode"],
+                parent_id,
+                int(cfg.get("net_baseline_cents") or 0),
+                tier_25,
+                tier_25,
+                tier_18,
+                tier_10,
+                v5_baseline.DEFAULT_CAP_RATIO,
+                int(cfg.get("cap_abs_cents") or 0),
+                created,
+            ),
+        )
+        advisor = cfg.get("advisor")
+        if not advisor:
+            continue
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO advisor_tenure(
+                store_id, advisor_name, from_month, to_month, tier_grade,
+                base_pay_cents, base_coef, breakeven_cents, excess_rate, work_days, note
+            ) VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, 0, '')
+            """,
+            (
+                sid,
+                advisor["name"],
+                advisor["from_month"],
+                advisor["tier_grade"],
+                int(advisor["base_pay_cents"]),
+                float(advisor["base_coef"]),
+                int(advisor["breakeven_cents"]),
+                float(advisor["excess_rate"]),
+            ),
+        )
+        # 顾问任期表是唯一事实源，stores 上两列只是当前在任的只读快照
+        conn.execute(
+            "UPDATE stores SET advisor_name=?, has_advisor=1 WHERE code=?",
+            (advisor["name"], cfg["code"]),
+        )
+    if os.environ.get("STORE_DAILY_SAMPLE_SEED") != "1":
+        # 非示例环境：6 家示例店停用、账号下线（示例测试环境保留，既有单测照旧能登录）
+        for code, login in v5_baseline.SAMPLE_STORES:
+            conn.execute("UPDATE stores SET active=0 WHERE code=?", (code,))
+            conn.execute(
+                "UPDATE users SET active=0 WHERE username=? AND role='filler'", (login,)
             )

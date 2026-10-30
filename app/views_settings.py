@@ -263,6 +263,10 @@ def _render_settings(conn, tab: str):
                 people_by_store[sid].append(item)
     policy_id_raw = (request.args.get("policy_id") or "").strip()
     policy_id = int(policy_id_raw) if policy_id_raw.isdigit() else None
+    # V5 只读快照：门店编辑页展示模式/基线/顾问任期（本轮不提供任何写入口）
+    v5_snapshot = (
+        db.store_v5_snapshot(conn, current_store["id"]) if current_store is not None else None
+    )
     return render_template(
         "settings.html",
         tab=tab,
@@ -280,6 +284,7 @@ def _render_settings(conn, tab: str):
         kpis=kpis,
         user_map=user_map,
         store_label=store_label,
+        v5_snapshot=v5_snapshot,
         filler_edit_month=db.get_setting(conn, "filler_edit_month", "0") == "1",
         policy_require_read=db.policy_require_read(conn),
         policies=db.list_policies(conn) if g.user["role"] == "admin" else [],
