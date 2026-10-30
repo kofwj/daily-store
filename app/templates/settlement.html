@@ -15,7 +15,7 @@
       <span>月份</span>
       <input type="month" name="month" value="{{ month }}" onchange="this.form.submit()">
     </label>
-    <a class="btn ghost" href="{{ url_for('settlement_xlsx', month=month) }}">导出 Excel</a>
+    <a class="btn ghost" href="{{ url_for('settlement_export', month=month) }}">导出 Excel</a>
   </form>
 </div>
 

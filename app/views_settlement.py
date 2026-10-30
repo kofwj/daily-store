@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Mapping, Sequence, Tuple
 from flask import Response, flash, g, redirect, render_template, request, url_for
 
 from . import db, db_v5
-from .helpers import admin_required, xlsx_bytes, xlsx_response
+from .helpers import admin_required, xlsx_response, xlsx_sheets
 from .v5_baseline import V5_START_MONTH, mode_label, month_key, v5_month_enabled
 
 # 运营商月结录入：金额一律按「元」输入，落库换算成分（库里全是分，int）。
@@ -63,6 +63,7 @@ ACTION_LABELS: Dict[str, str] = {
     db_v5.ACTION_LOCK: "锁月",
     db_v5.ACTION_UNLOCK: "解锁",
     db_v5.ACTION_INPUT: "录入实结",
+    db_v5.ACTION_SPLIT: "二次分配",
 }
 
 
@@ -230,6 +231,192 @@ def _audit_view(rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def _money_value(cents: Any) -> float:
+    """xlsx 数值列：分 → 元，两位小数（Excel 里能直接求和）。"""
+    return round(_int(cents) / 100, 2)
+
+
+def _split_view(rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    """表 5 → 页面行：金额给元字符串与可编辑的纯数字两种形态。"""
+    return [
+        {
+            "emp_code": str(row.get("emp_code") or ""),
+            "emp_name": str(row.get("emp_name") or ""),
+            "role_tag": str(row.get("role_tag") or ""),
+            "amount": _money(row.get("amount_cents"), zero_dash=True),
+            "amount_cents": _int(row.get("amount_cents")),
+            "amount_input": f"{_int(row.get('amount_cents')) / 100:.2f}",
+            "remark": str(row.get("remark") or ""),
+        }
+        for row in rows
+    ]
+
+
+def _export_workbook(conn: Any, month: str) -> bytes:
+    """财务月结四张标准表：大盘、店长卡、顾问工资单、导购二次分配明细。"""
+    rows = db_v5.list_month_settlements(conn, month)
+    splits = db_v5.month_split_rows(conn, month)
+    sheet1 = [
+        [
+            month,
+            str(row.get("store_code") or ""),
+            str(row.get("store_name") or ""),
+            str(row.get("store_manager") or ""),
+            str(row.get("region_group") or ""),
+            mode_label(str(row.get("v5_mode_snap") or "")),
+            STATUS_LABELS.get(str(row.get("status") or ""), ("未落库", ""))[0],
+            _money_value(row.get("gross_commission_cents")),
+            _money_value(row.get("commissioning_fee_cents")),
+            _money_value(row.get("total_deduction_cents")),
+            _money_value(row.get("net_commission_cents")),
+            _int(row.get("settled_cat1_fusion")),
+            _int(row.get("settled_cat2_contract")),
+            _int(row.get("settled_cat3_ai")),
+            _int(row.get("settled_cat4_rebate")),
+            _int(row.get("core_biz_count")),
+            _int(row.get("phone_sales_snap")),
+            _rate(row.get("actual_carry_rate")),
+            _money_value(row.get("shop_raw_pool_cents")),
+            _rate(row.get("shop_payout_ratio")),
+            _money_value(row.get("shop_final_pool_cents")),
+            _money_value(row.get("co_pool_deducted_cents")),
+            _money_value(row.get("rebate_clawback_cents")),
+            _money_value(row.get("advisor_final_pay_cents")),
+            _score(row.get("total_score_100")),
+            FLAG_LABELS.get(str(row.get("audit_flag") or ""), ("—", ""))[0],
+        ]
+        for row in rows
+    ]
+    sheet2 = [
+        [
+            month,
+            str(row.get("store_code") or ""),
+            str(row.get("store_name") or ""),
+            _score(row.get("score_1_net")),
+            _score(row.get("score_2_biz")),
+            _score(row.get("score_3a_deduct")),
+            _score(row.get("score_3b_redline")),
+            _score(row.get("total_score_100")),
+            _score(row.get("mgr_score_20")),
+            _score(row.get("mgr_score_15")),
+            FLAG_LABELS.get(str(row.get("audit_flag") or ""), ("—", ""))[0],
+        ]
+        for row in rows
+    ]
+    sheet3 = [
+        [
+            month,
+            str(row.get("store_code") or ""),
+            str(row.get("store_name") or ""),
+            str(row.get("advisor_name_snap") or ""),
+            "在任" if str(row.get("advisor_name_snap") or "") else "缺任期",
+            _money_value(row.get("advisor_base_pay_cents")),
+            f"{float(row.get('advisor_sys_coef') or 0):.4f}",
+            _money_value(row.get("breakeven_snap_cents")),
+            _money_value(row.get("advisor_excess_bonus_cents")),
+            _money_value(row.get("advisor_3b_penalty_cents")),
+            _money_value(row.get("advisor_final_pay_cents")),
+        ]
+        for row in rows
+        if db_v5.is_advisor_mode(str(row.get("v5_mode_snap") or ""))
+    ]
+    sheet4 = [
+        [
+            month,
+            str(row.get("store_code") or ""),
+            str(row.get("store_name") or ""),
+            str(row.get("emp_code") or ""),
+            str(row.get("emp_name") or ""),
+            str(row.get("role_tag") or ""),
+            _money_value(row.get("amount_cents")),
+            str(row.get("remark") or ""),
+        ]
+        for row in splits
+    ]
+    return xlsx_sheets(
+        [
+            {
+                "title": "1-门店月度结算大盘",
+                "header": [
+                    "月份",
+                    "门店编码",
+                    "门店",
+                    "店长",
+                    "区域",
+                    "模式",
+                    "状态",
+                    "毛酬金(元)",
+                    "调测费(元)",
+                    "负向扣款(元)",
+                    "净酬金(元)",
+                    "融合主件",
+                    "合约金币",
+                    "AI终端",
+                    "顺差让利",
+                    "核心随销量",
+                    "手机销量",
+                    "实际搭载率",
+                    "折前总包(元)",
+                    "全店熔断系数",
+                    "折后总包(元)",
+                    "合办扣减(元)",
+                    "垫资追回(元)",
+                    "顾问实发(元)",
+                    "店长分",
+                    "告警",
+                ],
+                "rows": sheet1,
+            },
+            {
+                "title": "2-店长百分考核卡",
+                "header": [
+                    "月份",
+                    "门店编码",
+                    "门店",
+                    "指标1净酬金(60)",
+                    "指标2搭载率(25)",
+                    "指标3A扣款率(10)",
+                    "指标3B红线(5)",
+                    "合计(100)",
+                    "20分制",
+                    "15分制",
+                    "告警",
+                ],
+                "rows": sheet2,
+            },
+            {
+                "title": "3-专职顾问工资单",
+                "header": [
+                    "月份",
+                    "门店编码",
+                    "门店",
+                    "顾问",
+                    "任期状态",
+                    "考核底薪(元)",
+                    "考核系数",
+                    "平衡点(元)",
+                    "净超额分成(元)",
+                    "3B连带扣罚(元)",
+                    "实发合计(元)",
+                ],
+                "rows": sheet3,
+            },
+            {
+                "title": "4-导购二次分配",
+                "header": [
+                    "月份",
+                    "门店编码",
+                    "门店",
+                    "工号",
+                    "姓名",
+                    "角色",
+                    "分配金额(元)",
+                    "备注",
+                ],
+                "rows": sheet4,
+            },
+        ]
+    )
 def register_settlement(app) -> None:
     """V5 月结路由：全部只给管理员，出账口径不能开着给填报员改。"""
 
@@ -321,72 +508,28 @@ def register_settlement(app) -> None:
             flash(f"{month} 已解锁 {count} 家门店，原因已留痕", "ok")
         return redirect(url_for("settlement_page", month=month))
 
-    @app.route("/settlement.xlsx")
+    @app.route("/settlement/export.xlsx")
     @admin_required
-    def settlement_xlsx():
-        """导出当月表 4 大盘：金额按元给数值，Excel 里能直接求和。"""
+    def settlement_export():
+        """财务交付物：Sheet 1 大盘 / Sheet 2 店长卡 / Sheet 3 顾问单 / Sheet 4 二次分配。"""
         month = _month()
         if not v5_month_enabled(month):
             return Response(f"{month} 未启用 V5 月结", status=400, mimetype="text/plain")
         with db.get_db() as conn:
-            rows = db_v5.list_month_settlements(conn, month)
-        header = [
-            "月份",
-            "门店编码",
-            "门店",
-            "店长",
-            "模式",
-            "状态",
-            "净酬金(元)",
-            "毛酬金(元)",
-            "考核基线(元)",
-            "实际搭载率",
-            "核心随销量",
-            "手机销量",
-            "店长分",
-            "折前总包(元)",
-            "折后比例",
-            "折后总包(元)",
-            "合办扣减(元)",
-            "垫资追回(元)",
-            "顾问实发(元)",
-            "告警",
-        ]
-        data = [
-            [
-                month,
-                str(row.get("store_code") or ""),
-                str(row.get("store_name") or ""),
-                str(row.get("store_manager") or ""),
-                mode_label(str(row.get("v5_mode_snap") or "")),
-                STATUS_LABELS.get(str(row.get("status") or ""), ("未落库", ""))[0],
-                _int(row.get("net_commission_cents")) / 100,
-                _int(row.get("gross_commission_cents")) / 100,
-                _int(row.get("net_baseline_snap_cents")) / 100,
-                _rate(row.get("actual_carry_rate")),
-                _int(row.get("core_biz_count")),
-                _int(row.get("phone_sales_snap")),
-                _score(row.get("total_score_100")),
-                _int(row.get("shop_raw_pool_cents")) / 100,
-                _rate(row.get("shop_payout_ratio")),
-                _int(row.get("shop_final_pool_cents")) / 100,
-                _int(row.get("co_pool_deducted_cents")) / 100,
-                _int(row.get("rebate_clawback_cents")) / 100,
-                _int(row.get("advisor_final_pay_cents")) / 100,
-                FLAG_LABELS.get(str(row.get("audit_flag") or ""), ("—", ""))[0],
-            ]
-            for row in rows
-        ]
-        return xlsx_response(
-            xlsx_bytes(header, data, sheet=f"V5月结{month}"),
-            f"v5_settlement_{month.replace('-', '_')}.xlsx",
-        )
+            data = _export_workbook(conn, month)
+        return xlsx_response(data, f"v5_settlement_{month.replace('-', '_')}.xlsx")
+
+    @app.route("/settlement.xlsx")
+    @admin_required
+    def settlement_xlsx():
+        """旧导出名保留：一律转到标准四表 workbook，别留两套口径。"""
+        return redirect(url_for("settlement_export", month=_month()))
 
     @app.route("/settlement.csv")
     @admin_required
     def settlement_csv():
         """旧 CSV 别名：直接转到 .xlsx，别留两条导出实现。"""
-        return redirect(url_for("settlement_xlsx", month=_month()))
+        return redirect(url_for("settlement_export", month=_month()))
 
     @app.route("/settlement/<int:store_id>")
     @admin_required
@@ -413,9 +556,13 @@ def register_settlement(app) -> None:
             oper = db_v5.operator_input(conn, month, store_id)
             biz = _biz_view(db_v5.store_biz_rows(conn, month, store_id))
             audits = db_v5.audit_log(conn, month, store_id, limit=20)
+            splits = db_v5.list_store_splits(conn, month, store_id)
         form = {name: ("" if _int(oper.get(name)) == 0 else _money(oper.get(name), zero_dash=False))
                 for name, _label in AMOUNT_FIELDS}
         counts = {name: _int(oper.get(name)) for name, _label in COUNT_FIELDS}
+        split_rows = _split_view(splits)
+        split_total_cents = sum(item["amount_cents"] for item in split_rows)
+        split_pool_cents = _int(row.get("shop_final_pool_cents"))
         flags = {name: _int(oper.get(name)) > 0 for name, _label in FLAG_FIELDS}
         return render_template(
             "settlement_store.html",
@@ -432,6 +579,11 @@ def register_settlement(app) -> None:
             remark=str(oper.get("override_remark") or ""),
             biz=biz,
             audits=_audit_view(audits),
+            split_rows=split_rows,
+            split_roles=db_v5.SPLIT_ROLE_TAGS,
+            split_total=split_total_cents,
+            split_pool=split_pool_cents,
+            split_diff=split_pool_cents - split_total_cents,
         )
 
     @app.route("/settlement/<int:store_id>/input", methods=["POST"])
@@ -454,4 +606,37 @@ def register_settlement(app) -> None:
             flash(str(exc), "error")
         else:
             flash("录入已保存并退回草稿：请重新试算后再确认", "ok")
+        return redirect(url_for("settlement_store", store_id=store_id, month=month))
+
+    @app.route("/settlement/<int:store_id>/split", methods=["POST"])
+    @admin_required
+    def settlement_split(store_id: int):
+        """表 5 备案：店长二次分配给导购，合计必须一分不差等于门店最终池。"""
+        month = _post_month()
+        codes = request.form.getlist("emp_code")
+        names = request.form.getlist("emp_name")
+        roles = request.form.getlist("role_tag")
+        amounts = request.form.getlist("amount_cents")
+        remarks = request.form.getlist("remark")
+        rows: List[Dict[str, Any]] = []
+        try:
+            for index in range(len(names)):
+                rows.append(
+                    {
+                        "emp_code": codes[index] if index < len(codes) else "",
+                        "emp_name": names[index],
+                        "role_tag": roles[index] if index < len(roles) else "",
+                        "amount_cents": _form_cents(
+                            amounts[index] if index < len(amounts) else "",
+                            f"第 {index + 1} 行分配金额",
+                        ),
+                        "remark": remarks[index] if index < len(remarks) else "",
+                    }
+                )
+            with db.get_db() as conn:
+                count = db_v5.save_store_splits(conn, month, store_id, rows, user_id=_uid())
+        except ValueError as exc:
+            flash(str(exc), "error")
+        else:
+            flash(f"二次分配已备案 {count} 人，合计与门店最终池一致", "ok")
         return redirect(url_for("settlement_store", store_id=store_id, month=month))

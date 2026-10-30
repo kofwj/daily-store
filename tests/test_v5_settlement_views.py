@@ -6,9 +6,12 @@
 
 from __future__ import annotations
 
-import pytest
+from io import BytesIO
 
-from app import db, db_v5
+import pytest
+from openpyxl import load_workbook
+
+from app import db, db_v5, v5_engine
 from app.v5_baseline import (
     MODE_ADVISOR_A,
     MODE_AFFILIATED,
@@ -63,6 +66,18 @@ def _lock_month(client) -> None:
     client.post("/settlement/compute", data={"month": MONTH})
     client.post("/settlement/confirm", data={"month": MONTH})
     client.post("/settlement/lock", data={"month": MONTH})
+
+
+def _pool_cents(store_id: int) -> int:
+    """表 4 落库后的门店最终池：二次分配必须一分不差贴住这个数。"""
+    with db.get_db() as conn:
+        row = db_v5.settlement_row(conn, MONTH, store_id)
+    assert row is not None
+    return int(row["shop_final_pool_cents"])
+
+
+def _yuan(cents: int) -> str:
+    return f"{cents / 100:.2f}"
 
 # ---------------------------------------------------------------------------
 # 一、页面与权限
@@ -223,18 +238,165 @@ def test_input_refused_after_lock(admin_client, scene):
 # ---------------------------------------------------------------------------
 
 
-def test_export_xlsx_and_csv_alias(admin_client, scene):
+def _seed_rebate(store_id: int) -> None:
+    """造一笔顺差让利：日报 12 笔 + 实结 12 笔，好让「门店最终池」不是 0。"""
+    with db.get_db() as conn:
+        conn.execute(
+            "INSERT INTO daily_facts (biz_date, store_id, metric_code, day_value) VALUES (?,?,?,?)"
+            " ON CONFLICT(biz_date, store_id, metric_code) DO UPDATE SET day_value=excluded.day_value",
+            ("2026-11-15", store_id, v5_engine.REBATE_METRIC_CODE, 12),
+        )
+        db_v5.save_operator_input(
+            conn,
+            MONTH,
+            store_id,
+            {
+                "net_commission_cents": 1_000_000,
+                "gross_commission_cents": 1_100_000,
+                "settled_cat4_rebate": 12,
+            },
+        )
+
+
+def test_export_workbook_has_four_sheets(admin_client, scene):
+    """财务交付物：大盘 / 店长卡 / 顾问单 / 二次分配，四张表一个 workbook。"""
     admin_client.post("/settlement/compute", data={"month": MONTH})
-    resp = admin_client.get(f"/settlement.xlsx?month={MONTH}")
+    resp = admin_client.get(f"/settlement/export.xlsx?month={MONTH}")
     assert resp.status_code == 200
     assert "spreadsheet" in resp.headers["Content-Type"]
     assert resp.data[:2] == b"PK"
 
-    resp = admin_client.get(f"/settlement.csv?month={MONTH}")
-    assert resp.status_code == 302
-    assert "/settlement.xlsx" in resp.headers["Location"]
+    book = load_workbook(BytesIO(resp.data))
+    assert book.sheetnames == [
+        "1-门店月度结算大盘",
+        "2-店长百分考核卡",
+        "3-专职顾问工资单",
+        "4-导购二次分配",
+    ]
+    sheet1 = book["1-门店月度结算大盘"]
+    assert sheet1.cell(row=1, column=1).value == "月份"
+    assert sheet1.cell(row=1, column=7).value == "状态"
+    assert sheet1.max_row == 4  # 表头 + 母店 / 挂靠小店 / 顾问店
+    sheet3 = book["3-专职顾问工资单"]
+    assert sheet3.max_row == 2  # 只有顾问店进工资单
+
+
+def test_export_legacy_alias_redirects(admin_client, scene):
+    """/settlement.xlsx、/settlement.csv 只做 302 别名，不留第二套导出实现。"""
+    admin_client.post("/settlement/compute", data={"month": MONTH})
+    for path in ("/settlement.xlsx", "/settlement.csv"):
+        resp = admin_client.get(f"{path}?month={MONTH}")
+        assert resp.status_code == 302
+        assert "/settlement/export.xlsx" in resp.headers["Location"]
 
 
 def test_export_rejects_legacy_month(admin_client, scene):
-    resp = admin_client.get("/settlement.xlsx?month=2026-10")
+    resp = admin_client.get("/settlement/export.xlsx?month=2026-10")
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# 五、表 5 店长二次分配备案
+# ---------------------------------------------------------------------------
+
+
+def test_split_equal_to_pool_saved(admin_client, scene):
+    """合计一分不差等于门店最终池：落库、页面看得见、审计留痕。"""
+    _seed_rebate(scene["adv"])
+    admin_client.post("/settlement/compute", data={"month": MONTH})
+    pool = _pool_cents(scene["adv"])
+    assert pool > 0
+    first = pool // 2
+    resp = admin_client.post(
+        f"/settlement/{scene['adv']}/split",
+        data={
+            "month": MONTH,
+            "emp_code": ["A001", "A002"],
+            "emp_name": ["张店长", "李导购"],
+            "role_tag": ["店长", "导购"],
+            "amount_cents": [_yuan(first), _yuan(pool - first)],
+            "remark": ["", "协办落单"],
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert "二次分配已备案 2 人" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        rows = db_v5.list_store_splits(conn, MONTH, scene["adv"])
+        audits = db_v5.audit_log(conn, MONTH, scene["adv"], limit=20)
+    assert [row["emp_name"] for row in rows] == ["张店长", "李导购"]
+    assert sum(int(row["amount_cents"]) for row in rows) == pool
+    assert audits[0]["action"] == db_v5.ACTION_SPLIT
+
+
+def test_split_wrong_total_refused(admin_client, scene):
+    """多发一分也不许：差额原样报出来，库里不落半截数据。"""
+    _seed_rebate(scene["adv"])
+    admin_client.post("/settlement/compute", data={"month": MONTH})
+    pool = _pool_cents(scene["adv"])
+    resp = admin_client.post(
+        f"/settlement/{scene['adv']}/split",
+        data={
+            "month": MONTH,
+            "emp_code": ["A001", "A002"],
+            "emp_name": ["张店长", "李导购"],
+            "role_tag": ["店长", "导购"],
+            "amount_cents": [_yuan(pool), "1.00"],
+            "remark": ["", ""],
+        },
+        follow_redirects=True,
+    )
+    assert "不一致" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        assert db_v5.list_store_splits(conn, MONTH, scene["adv"]) == []
+
+
+def test_split_refused_after_lock(admin_client, scene):
+    """锁月后二次分配只读：改不动，也不可能悄悄多发钱。"""
+    _seed_rebate(scene["adv"])
+    _lock_month(admin_client)
+    pool = _pool_cents(scene["adv"])
+    resp = admin_client.post(
+        f"/settlement/{scene['adv']}/split",
+        data={
+            "month": MONTH,
+            "emp_code": ["A001"],
+            "emp_name": ["张店长"],
+            "role_tag": ["店长"],
+            "amount_cents": [_yuan(pool)],
+            "remark": [""],
+        },
+        follow_redirects=True,
+    )
+    assert "已锁月" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        assert db_v5.list_store_splits(conn, MONTH, scene["adv"]) == []
+
+
+def test_split_refused_before_compute(admin_client, scene):
+    """没试算就没有门店最终池，拿什么分配都对不上号。"""
+    resp = admin_client.post(
+        f"/settlement/{scene['adv']}/split",
+        data={
+            "month": MONTH,
+            "emp_code": [""],
+            "emp_name": ["张店长"],
+            "role_tag": ["店长"],
+            "amount_cents": ["1.00"],
+            "remark": [""],
+        },
+        follow_redirects=True,
+    )
+    assert "还没试算" in resp.get_data(as_text=True)
+
+
+def test_store_page_shows_split_card(admin_client, scene):
+    """单店页有表 5 卡片，且差额按库里现状算给店长看。"""
+    _seed_rebate(scene["adv"])
+    admin_client.post("/settlement/compute", data={"month": MONTH})
+    pool = _pool_cents(scene["adv"])
+    resp = admin_client.get(f"/settlement/{scene['adv']}?month={MONTH}")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert "表 5 · 导购二次分配备案" in html
+    assert _yuan(pool) in html

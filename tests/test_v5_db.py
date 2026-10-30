@@ -507,3 +507,99 @@ def test_sample_stores_never_produce_rows(tmp_db):
         for store_id in sample_ids:
             _facts(conn, store_id, {"v5_m7": 5})
         assert db_v5.compute_month(conn, MONTH) == []
+
+
+# ---------------------------------------------------------------------------
+# 八、表 5 店长二次分配备案
+# ---------------------------------------------------------------------------
+
+
+def _apply_with_pool(conn, store_id: int) -> int:
+    """给店里造 12 笔顺差让利再落库，返回这家店的门店最终池（分）。"""
+    _facts(conn, store_id, {"v5_m7": 12})
+    db_v5.save_operator_input(
+        conn,
+        MONTH,
+        store_id,
+        {"net_commission_cents": 1_000_000, "settled_cat4_rebate": 12},
+    )
+    db_v5.apply_month(conn, MONTH)
+    row = db_v5.settlement_row(conn, MONTH, store_id)
+    return int(row["shop_final_pool_cents"])
+
+
+def test_save_splits_requires_exact_pool(scene):
+    """分配总额必须一分不差等于门店最终池：多了少了都不许落库。"""
+    with db.get_db() as conn:
+        pool = _apply_with_pool(conn, scene["adv"])
+        assert pool > 0
+        half = pool // 2
+        rows = [
+            {"emp_code": "A001", "emp_name": "张店长", "role_tag": "店长", "amount_cents": half},
+            {
+                "emp_code": "A002",
+                "emp_name": "李导购",
+                "role_tag": "导购",
+                "amount_cents": pool - half,
+            },
+            {"emp_code": "", "emp_name": "", "role_tag": "", "amount_cents": 0, "remark": ""},
+        ]
+        assert db_v5.save_store_splits(conn, MONTH, scene["adv"], rows) == 2
+        saved = db_v5.list_store_splits(conn, MONTH, scene["adv"])
+        assert [row["role_tag"] for row in saved] == ["店长", "导购"]
+        assert sum(int(row["amount_cents"]) for row in saved) == pool
+
+        short = [{"emp_code": "A001", "emp_name": "张店长", "amount_cents": pool - 1}]
+        with pytest.raises(ValueError, match="不一致"):
+            db_v5.save_store_splits(conn, MONTH, scene["adv"], short)
+        # 失败不落半截数据：原样两条还在
+        assert len(db_v5.list_store_splits(conn, MONTH, scene["adv"])) == 2
+
+
+def test_save_splits_rejects_bad_rows(scene):
+    """角色、负金额、缺姓名、工号重复、同名无工号：逐条拦在入口。"""
+    with db.get_db() as conn:
+        pool = _apply_with_pool(conn, scene["adv"])
+        bad_rows = [
+            ([{"emp_name": "张店长", "role_tag": "老板", "amount_cents": pool}], "角色只能填"),
+            ([{"emp_name": "张店长", "amount_cents": -100}], "不能为负"),
+            ([{"emp_code": "A001", "amount_cents": pool}], "缺员工姓名"),
+            (
+                [
+                    {"emp_code": "A001", "emp_name": "王芳", "amount_cents": pool},
+                    {"emp_code": "A001", "emp_name": "王芳", "amount_cents": 0},
+                ],
+                "重复",
+            ),
+            (
+                [
+                    {"emp_name": "王芳", "amount_cents": pool},
+                    {"emp_name": "王芳", "amount_cents": 0},
+                ],
+                "重名",
+            ),
+        ]
+        for rows, message in bad_rows:
+            with pytest.raises(ValueError, match=message):
+                db_v5.save_store_splits(conn, MONTH, scene["adv"], rows)
+        assert db_v5.list_store_splits(conn, MONTH, scene["adv"]) == []
+
+
+def test_save_splits_gates(scene):
+    """没试算不许备案；锁月后一律拒改。"""
+    with db.get_db() as conn:
+        with pytest.raises(ValueError, match="还没试算"):
+            db_v5.save_store_splits(
+                conn, MONTH, scene["main"], [{"emp_name": "张店长", "amount_cents": 0}]
+            )
+
+
+    with db.get_db() as conn:
+        pool = _apply_with_pool(conn, scene["adv"])
+        db_v5.confirm_month(conn, MONTH)
+        db_v5.lock_month(conn, MONTH)
+        with pytest.raises(ValueError, match="已锁月"):
+            db_v5.save_store_splits(
+                conn, MONTH, scene["adv"], [{"emp_name": "张店长", "amount_cents": pool}]
+            )
+        assert db_v5.list_store_splits(conn, MONTH, scene["adv"]) == []

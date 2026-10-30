@@ -12,7 +12,7 @@ import time
 from datetime import date, timedelta
 from functools import wraps
 from io import BytesIO
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import openpyxl
 from flask import Response, current_app, flash, g, redirect, request, session, url_for
@@ -804,20 +804,17 @@ def _xlsx_safe(value: Any) -> Any:
     return value
 
 
-def xlsx_bytes(
-    header: Sequence[str],
+def _fill_sheet(
+    ws: Any,
+    header: Sequence[Any],
     rows: Sequence[Sequence[Any]],
     *,
-    sheet: str = "Sheet1",
     autofilter: bool = True,
-) -> bytes:
-    """把表头+数据行导出为真实 .xlsx 字节流。表头加粗+底色+冻结，列宽自适应。"""
+) -> None:
+    """给 worksheet 铺表头+数据：加粗底色、冻结首行、列宽自适应（中文按宽字符算）。"""
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = (sheet or "Sheet1")[:31]  # Excel sheet 名最长 31 字符
     ws.append([_xlsx_safe(value) for value in header])
     fill = PatternFill("solid", fgColor="D9E2F3")
     for col in range(1, len(header) + 1):
@@ -825,13 +822,11 @@ def xlsx_bytes(
         cell.font = Font(bold=True, color="1F2937")
         cell.fill = fill
         cell.alignment = Alignment(vertical="center")
-    if rows:
-        for r in rows:
-            ws.append([_xlsx_safe(value) for value in r])
+    for r in rows or ():
+        ws.append([_xlsx_safe(value) for value in r])
     ws.freeze_panes = "A2"
     if autofilter:
         ws.auto_filter.ref = ws.dimensions
-    # 列宽自适应（中文按宽字符估算，封顶 60）
     for col in range(1, max(1, ws.max_column) + 1):
         width = 0.0
         for row in ws.iter_rows(min_col=col, max_col=col):
@@ -840,6 +835,43 @@ def xlsx_bytes(
                 w = 0 if v is None else sum(2 if ord(ch) > 127 else 1 for ch in str(v))
                 width = max(width, w)
         ws.column_dimensions[get_column_letter(col)].width = min(max(width + 2, 10), 60)
+
+
+def xlsx_bytes(
+    header: Sequence[str],
+    rows: Sequence[Sequence[Any]],
+    *,
+    sheet: str = "Sheet1",
+    autofilter: bool = True,
+) -> bytes:
+    """把表头+数据行导出为真实 .xlsx 字节流。表头加粗+底色+冻结，列宽自适应。"""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = (sheet or "Sheet1")[:31]  # Excel sheet 名最长 31 字符
+    _fill_sheet(ws, header, rows, autofilter=autofilter)
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def xlsx_sheets(
+    sheets: Sequence[Mapping[str, Any]],
+    *,
+    autofilter: bool = True,
+) -> bytes:
+    """多 Sheet 导出：每项 {"title": 表名, "header": [...], "rows": [[...]]}，按序落表。"""
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    for item in sheets:
+        ws = wb.create_sheet(str(item.get("title") or "Sheet")[:31])
+        _fill_sheet(
+            ws,
+            list(item.get("header") or []),
+            list(item.get("rows") or []),
+            autofilter=autofilter,
+        )
+    if not wb.sheetnames:
+        wb.create_sheet("Sheet1")
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()

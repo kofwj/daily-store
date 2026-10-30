@@ -198,6 +198,58 @@
 </div>
 
 <div class="card" style="overflow:auto">
+  <div class="section-title">表 5 · 导购二次分配备案</div>
+  <p class="muted" style="margin-top:0">
+    门店最终池 <strong>{{ '%.2f' | format(split_pool / 100) }}</strong> 元，二次分配必须一分不差对上：合计
+    <strong id="split-total">{{ '%.2f' | format(split_total / 100) }}</strong> 元，未分配差额
+    <strong id="split-diff">{{ '%.2f' | format(split_diff / 100) }}</strong> 元。
+    {% if locked %}已锁月，只能查看，不能再改。{% endif %}
+  </p>
+  <form method="post" action="{{ url_for('settlement_split', store_id=row.store_id) }}" id="split-form">
+    <input type="hidden" name="month" value="{{ month }}">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>工号</th>
+          <th>姓名</th>
+          <th>角色</th>
+          <th>分配金额（元）</th>
+          <th>备注</th>
+          {% if not locked %}<th></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody id="split-rows">
+        {% for item in split_rows %}
+        <tr>
+          <td><input type="text" name="emp_code" maxlength="20" value="{{ item.emp_code }}"{% if locked %} disabled{% endif %}></td>
+          <td><input type="text" name="emp_name" maxlength="20" value="{{ item.emp_name }}"{% if locked %} disabled{% endif %}></td>
+          <td>
+            <select name="role_tag"{% if locked %} disabled{% endif %}>
+              {% for role in split_roles %}
+              <option value="{{ role }}"{% if item.role_tag == role %} selected{% endif %}>{{ role }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td><input type="text" inputmode="decimal" class="split-amount" name="amount_cents" value="{{ item.amount_input }}"{% if locked %} disabled{% endif %}></td>
+          <td><input type="text" name="remark" maxlength="80" value="{{ item.remark }}"{% if locked %} disabled{% endif %}></td>
+          {% if not locked %}<td><button type="button" class="btn ghost split-remove">删</button></td>{% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="toolbar">
+      {% if not locked %}
+      <button type="button" class="btn ghost" id="split-add">＋ 添加一行</button>
+      <button type="submit">保存备案</button>
+      <span class="muted" id="split-hint">合计必须等于门店最终池，差一分都存不进去。</span>
+      {% else %}
+      <span class="muted">锁月后二次分配只做展示，留痕在最近操作里。</span>
+      {% endif %}
+    </div>
+  </form>
+</div>
+
+<div class="card" style="overflow:auto">
   <div class="section-title">最近操作</div>
   {% if audits %}
   <table class="data">
@@ -224,4 +276,110 @@
   <p class="muted" style="margin:0">这家店本月还没有操作记录。</p>
   {% endif %}
 </div>
+<script>
+(function () {
+  var form = document.getElementById('split-form');
+  if (!form) return;
+  var tbody = document.getElementById('split-rows');
+  var addBtn = document.getElementById('split-add');
+  var totalOut = document.getElementById('split-total');
+  var diffOut = document.getElementById('split-diff');
+  var hint = document.getElementById('split-hint');
+  var locked = {{ 'true' if locked else 'false' }};
+  var pool = {{ split_pool }};
+  var roles = {{ split_roles | tojson }};
+
+  function cents(input) {
+    var value = parseFloat((input.value || '').replace(/[,\s]/g, ''));
+    return isNaN(value) ? 0 : Math.round(value * 100);
+  }
+
+  function total() {
+    var sum = 0;
+    tbody.querySelectorAll('.split-amount').forEach(function (input) {
+      sum += cents(input);
+    });
+    return sum;
+  }
+
+  function setHint(diff) {
+    if (!hint) return;
+    if (diff === 0) {
+      hint.textContent = '合计与门店最终池一致，可以保存备案。';
+    } else if (diff > 0) {
+      hint.textContent = '还差 ' + (diff / 100).toFixed(2) + ' 元没分配出去。';
+    } else {
+      hint.textContent = '多分了 ' + (-diff / 100).toFixed(2) + ' 元，对不上最终池。';
+    }
+  }
+
+  function recalc() {
+    var sum = total();
+    totalOut.textContent = (sum / 100).toFixed(2);
+    diffOut.textContent = ((pool - sum) / 100).toFixed(2);
+    setHint(pool - sum);
+  }
+
+  function cell(inner) {
+    var td = document.createElement('td');
+    td.appendChild(inner);
+    return td;
+  }
+
+  function field(name, cls) {
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.name = name;
+    if (cls) input.className = cls;
+    return input;
+  }
+
+  function addRow() {
+    var tr = document.createElement('tr');
+    tr.appendChild(cell(field('emp_code')));
+    tr.appendChild(cell(field('emp_name')));
+    var select = document.createElement('select');
+    select.name = 'role_tag';
+    roles.forEach(function (role, index) {
+      var option = document.createElement('option');
+      option.value = role;
+      option.textContent = role;
+      if (index === 1) option.selected = true;
+      select.appendChild(option);
+    });
+    tr.appendChild(cell(select));
+    tr.appendChild(cell(field('amount_cents', 'split-amount')));
+    tr.appendChild(cell(field('remark')));
+    var remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn ghost split-remove';
+    remove.textContent = '删';
+    tr.appendChild(cell(remove));
+    tbody.appendChild(tr);
+    var first = tr.querySelector('input');
+    if (first) first.focus();
+    recalc();
+  }
+
+  if (!locked) {
+    if (addBtn) addBtn.addEventListener('click', addRow);
+    tbody.addEventListener('input', recalc);
+    tbody.addEventListener('click', function (event) {
+      var target = event.target;
+      if (target && target.classList && target.classList.contains('split-remove')) {
+        var row = target.closest('tr');
+        if (row) row.remove();
+        recalc();
+      }
+    });
+    form.addEventListener('submit', function (event) {
+      if (total() !== pool) {
+        event.preventDefault();
+        recalc();
+      }
+    });
+  }
+  recalc();
+})();
+</script>
 {% endblock %}

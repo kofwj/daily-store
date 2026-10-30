@@ -76,6 +76,10 @@ ACTION_CONFIRM = "CONFIRM"
 ACTION_LOCK = "LOCK"
 ACTION_UNLOCK = "UNLOCK"
 ACTION_INPUT = "INPUT"
+ACTION_SPLIT = "SPLIT"
+
+# 表 5 二次分配的角色标签（页面下拉与落库校验同一份）
+SPLIT_ROLE_TAGS: Tuple[str, ...] = ("店长", "导购", "协办落单")
 
 
 def fact_codes() -> Tuple[str, ...]:
@@ -1009,3 +1013,153 @@ def audit_log(
         (key, int(store_id), max(1, int(limit))),
     )
     return [_row_dict(row) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# 表 5：店长二次分配备案（分配总额必须精确等于表 4 的门店最终池）
+# ---------------------------------------------------------------------------
+
+
+def _fmt_cents(cents: Any) -> str:
+    """分 → 「1,234.56」：只给错误提示看，库里一律存分。"""
+    value = _to_int(cents)
+    sign = "-" if value < 0 else ""
+    return f"{sign}{abs(value) / 100:,.2f}"
+
+
+def list_store_splits(
+    conn: sqlite3.Connection, month: Any, store_id: int
+) -> List[Dict[str, Any]]:
+    """表 5：该店该月的二次分配备案，按录入顺序返回。"""
+    key = _require_month(month)
+    rows = conn.execute(
+        "SELECT * FROM store_month_split WHERE month=? AND store_id=? ORDER BY id",
+        (key, int(store_id)),
+    )
+    return [_row_dict(row) for row in rows]
+
+
+def month_split_rows(conn: sqlite3.Connection, month: Any) -> List[Dict[str, Any]]:
+    """表 5：整月二次分配明细（财务导出 Sheet 4 用），带门店名与编码。"""
+    key = _require_month(month)
+    rows = conn.execute(
+        """
+        SELECT p.*, st.name AS store_name, st.code AS store_code
+        FROM store_month_split p
+        JOIN stores st ON st.id = p.store_id
+        WHERE p.month=?
+        ORDER BY st.sort_order, st.id, p.id
+        """,
+        (key,),
+    )
+    return [_row_dict(row) for row in rows]
+
+
+def _split_pool(conn: sqlite3.Connection, month: str, store_id: int) -> Tuple[int, str]:
+    """取表 4 的门店最终池与状态；没落库返回 (0, '')。"""
+    row = conn.execute(
+        "SELECT shop_final_pool_cents, status FROM store_month_settlement "
+        "WHERE month=? AND store_id=?",
+        (month, int(store_id)),
+    ).fetchone()
+    if row is None:
+        return 0, ""
+    return _to_int(row["shop_final_pool_cents"]), str(row["status"] or "")
+
+
+def save_store_splits(
+    conn: sqlite3.Connection,
+    month: Any,
+    store_id: int,
+    rows: Sequence[Mapping[str, Any]],
+    user_id: int = 0,
+) -> int:
+    """表 5：整体覆盖该店该月的二次分配备案，返回落库行数。
+
+    刚性口径：
+    - 分配总额必须精确等于表 4 的 `shop_final_pool_cents`，不多发也不少发；
+    - 必须先试算落库才能备案，锁月后一律拒改；
+    - 同名靠工号区分（D13：同名且工号相同才拦，两个「王芳」补工号即可）。
+    """
+    key = _require_enabled_month(month)
+    pool, status = _split_pool(conn, key, store_id)
+    if not status:
+        raise ValueError(f"{key} 这家店还没试算，先试算落库再备二次分配")
+    if status == STATUS_LOCKED:
+        raise ValueError(f"{key} 已锁月，二次分配备案不能再改")
+    cleaned: List[Dict[str, Any]] = []
+    codes: Dict[str, int] = {}
+    names: Dict[str, str] = {}
+    total = 0
+    for index, raw in enumerate(rows, start=1):
+        name = _to_text(raw.get("emp_name"))
+        code = _to_text(raw.get("emp_code"))
+        role = _to_text(raw.get("role_tag")) or SPLIT_ROLE_TAGS[1]
+        remark = _to_text(raw.get("remark"))
+        amount = _to_int(raw.get("amount_cents"))
+        if not name and not code and amount == 0 and not remark:
+            continue
+        if not name:
+            raise ValueError(f"第 {index} 行缺员工姓名")
+        if role not in SPLIT_ROLE_TAGS:
+            raise ValueError(f"第 {index} 行角色只能填 {'/'.join(SPLIT_ROLE_TAGS)}")
+        if amount < 0:
+            raise ValueError(f"第 {index} 行分配金额不能为负")
+        if code:
+            if code in codes:
+                raise ValueError(f"工号 {code} 重复，同一个人只能占一行")
+            codes[code] = index
+        elif name in names:
+            raise ValueError(f"「{name}」重名，请补填工号区分")
+        names[name] = code
+        total += amount
+        cleaned.append(
+            {
+                "emp_code": code,
+                "emp_name": name,
+                "role_tag": role,
+                "amount_cents": amount,
+                "remark": remark,
+            }
+        )
+    if total != pool:
+        raise ValueError(
+            f"分配合计 {_fmt_cents(total)} 元与门店最终池 {_fmt_cents(pool)} 元不一致，"
+            f"差 {_fmt_cents(abs(pool - total))} 元"
+        )
+    before = json.dumps(list_store_splits(conn, key, store_id), ensure_ascii=False, default=str)
+    conn.execute(
+        "DELETE FROM store_month_split WHERE month=? AND store_id=?", (key, int(store_id))
+    )
+    stamp = _now()
+    for item in cleaned:
+        conn.execute(
+            """
+            INSERT INTO store_month_split
+                (month, store_id, emp_code, emp_name, role_tag, amount_cents, remark,
+                 confirmed_by, confirmed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                key,
+                int(store_id),
+                item["emp_code"],
+                item["emp_name"],
+                item["role_tag"],
+                item["amount_cents"],
+                item["remark"],
+                _uid(user_id),
+                stamp,
+            ),
+        )
+    _audit(
+        conn,
+        key,
+        int(store_id),
+        ACTION_SPLIT,
+        user_id,
+        before=before,
+        after=json.dumps(cleaned, ensure_ascii=False),
+        reason=f"二次分配 {len(cleaned)} 人，合计 {_fmt_cents(total)} 元",
+    )
+    return len(cleaned)
