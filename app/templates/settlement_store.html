@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block title %}{{ row.store_name }} V5 月结{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div class="page-title">
+    <h1>{{ row.store_name }}</h1>
+    <p class="muted">
+      {{ month }} · {{ row.mode }} · 店长 {{ row.store_manager or '—' }}
+      {% if preview_only %}· 试算预览，尚未落库{% endif %}
+    </p>
+  </div>
+  <form method="get" class="page-filters">
+    <label class="filter">
+      <span>月份</span>
+      <input type="month" name="month" value="{{ month }}" onchange="this.form.submit()">
+    </label>
+    <a class="btn ghost" href="{{ url_for('settlement_page', month=month) }}">返回月结</a>
+  </form>
+</div>
+
+{% if preview_only %}
+<div class="card">
+  <p class="muted" style="margin:0">
+    这家店本月还没落库，下面是按当前日报和基线试算的结果。先在月结总览点「试算并落库」，再回来录运营商实结。
+  </p>
+</div>
+{% endif %}
+
+{% if locked %}
+<div class="card">
+  <p class="muted" style="margin:0">
+    本月已锁月（{{ row.locked_at[:16] }}），金额不能再改。如果确实要改数，回到月结总览「解锁本月」填写原因，解锁后重新试算。
+  </p>
+</div>
+{% endif %}
+
+<div class="kpi-row">
+  <div class="kpi">
+    <div class="muted">实结净酬金</div>
+    <div class="kpi-num">{{ row.net }}</div>
+    <div class="muted">毛酬金 {{ row.gross }}</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">考核基线</div>
+    <div class="kpi-num">{{ row.baseline }}</div>
+    <div class="muted">实际搭载率 {{ row.carry }}</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">店长分</div>
+    <div class="kpi-num">{{ row.score }}</div>
+    <div class="muted">核心随销量 {{ row.core_biz }} · 手机 {{ row.phone_sales }}</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">折前总包</div>
+    <div class="kpi-num">{{ row.raw_pool }}</div>
+    <div class="muted">折后比例 {{ row.payout }}</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">门店最终池</div>
+    <div class="kpi-num">{{ row.final_pool }}</div>
+    <div class="muted">合办扣减 {{ row.co_pool }} · 追回 {{ row.clawback }}</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">顾问实发</div>
+    <div class="kpi-num">{{ row.advisor_pay }}</div>
+    <div class="muted">{% if row.advisor_name %}顾问 {{ row.advisor_name }}{% else %}本月无顾问{% endif %}</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="section-title">运营商实结录入</div>
+  <p class="muted" style="margin-top:0">
+    金额按「元」填，留空等于 0；实结量填 0 等于确认当月没出量。保存后退回草稿，必须重新试算再确认。
+    本月告警：<span class="status {{ row.flag_class }}">{{ row.flag_label }}</span>
+  </p>
+  <form method="post" action="{{ url_for('settlement_input', store_id=row.store_id) }}">
+    <input type="hidden" name="month" value="{{ month }}">
+    <div class="row">
+      {% for name, label in amount_fields %}
+      <label class="field">
+        <span class="muted">{{ label }}</span>
+        <input type="text" inputmode="decimal" name="{{ name }}" value="{{ form[name] }}"
+               placeholder="0.00"{% if locked %} disabled{% endif %}>
+      </label>
+      {% endfor %}
+    </div>
+    <div class="row" style="margin-top:10px">
+      {% for name, label in count_fields %}
+      <label class="field">
+        <span class="muted">{{ label }}（实结量）</span>
+        <input type="number" min="0" step="1" name="{{ name }}" value="{{ counts[name] }}"
+               {% if locked %}disabled{% endif %}>
+      </label>
+      {% endfor %}
+    </div>
+    <div class="row" style="margin-top:10px">
+      {% for name, label in flag_fields %}
+      <label class="check">
+        <input type="checkbox" name="{{ name }}" value="1"
+               {% if flags[name] %}checked{% endif %}{% if locked %} disabled{% endif %}>
+        <span>{{ label }}</span>
+      </label>
+      {% endfor %}
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label class="field">
+        <span class="muted">备注（改数原因、运营商口径说明）</span>
+        <input type="text" name="override_remark" maxlength="200" value="{{ remark }}"
+               {% if locked %}disabled{% endif %}>
+      </label>
+    </div>
+    <div class="toolbar">
+      <button type="submit"{% if locked %} disabled{% endif %}>保存录入</button>
+      <span class="muted">当前状态：<span class="status {{ row.status_class }}">{{ row.status_label }}</span></span>
+    </div>
+  </form>
+</div>
+
+<div class="card" style="overflow:auto">
+  <div class="section-title">店长 100 分考核明细</div>
+  <table class="data">
+    <thead>
+      <tr>
+        <th>指标</th>
+        <th>满分</th>
+        <th>得分</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>指标 1 · 净酬金达成 <div class="muted">{{ row.net }} / 基线 {{ row.baseline }}</div></td>
+        <td>60</td>
+        <td>{{ row.score_1 }}</td>
+      </tr>
+      <tr>
+        <td>指标 2 · 核心随销搭载率 <div class="muted">核心 {{ row.core_biz }} / 手机 {{ row.phone_sales }}</div></td>
+        <td>25</td>
+        <td>{{ row.score_2 }}</td>
+      </tr>
+      <tr>
+        <td>指标 3A · 酬金扣款率 <div class="muted">含宽带星级扣罚</div></td>
+        <td>10</td>
+        <td>{{ row.score_3a }}</td>
+      </tr>
+      <tr>
+        <td>指标 3B · 违规红线 <div class="muted">3B 质量/争议/工单/靓号任一扣款即一票否决</div></td>
+        <td>5</td>
+        <td>{{ row.score_3b }}</td>
+      </tr>
+      <tr>
+        <td><strong>合计</strong></td>
+        <td><strong>100</strong></td>
+        <td><strong>{{ row.score_total }}</strong></td>
+      </tr>
+      <tr>
+        <td>换算 20 分制 / 15 分制</td>
+        <td>—</td>
+        <td>{{ row.mgr20 }} / {{ row.mgr15 }}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card" style="overflow:auto">
+  <div class="section-title">表 3 · 单笔提成明细</div>
+  {% if biz %}
+  <table class="data">
+    <thead>
+      <tr>
+        <th>业务</th>
+        <th>角色</th>
+        <th>工号归属</th>
+        <th>日报量</th>
+        <th>实结量</th>
+        <th>单价</th>
+        <th>金额</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in biz %}
+      <tr>
+        <td>{{ item.biz_code }}</td>
+        <td>{{ item.role }}</td>
+        <td>{{ item.source or '—' }}</td>
+        <td>{{ item.daily }}</td>
+        <td>{{ item.settled }}</td>
+        <td>{{ item.unit }}</td>
+        <td>{{ item.amount }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin:0">
+    本月没有单笔提成行。只有录了运营商实结（或日报有量）的顺差让利科目才会落表 3。
+  </p>
+  {% endif %}
+</div>
+
+<div class="card" style="overflow:auto">
+  <div class="section-title">最近操作</div>
+  {% if audits %}
+  <table class="data">
+    <thead>
+      <tr>
+        <th>时间</th>
+        <th>动作</th>
+        <th>操作人</th>
+        <th>原因</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in audits %}
+      <tr>
+        <td>{{ item.created_at }}</td>
+        <td>{{ item.action }}</td>
+        <td>{{ item.user }}</td>
+        <td>{{ item.reason or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin:0">这家店本月还没有操作记录。</p>
+  {% endif %}
+</div>
+{% endblock %}

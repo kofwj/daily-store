@@ -990,3 +990,22 @@ def summarize(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
 def month_totals(conn: sqlite3.Connection, month: Any) -> Dict[str, Any]:
     """该月大盘汇总（列表页顶部卡片用）。"""
     return summarize(list_month_settlements(conn, month))
+
+
+def audit_log(
+    conn: sqlite3.Connection, month: Any, store_id: int, limit: int = 20
+) -> List[Dict[str, Any]]:
+    """表 6：该店该月的操作流水，最新在前（页面「最近操作」用）。"""
+    key = _require_month(month)
+    rows = conn.execute(
+        """
+        SELECT a.*, u.display_name AS user_name
+        FROM settlement_audit_log a
+        LEFT JOIN users u ON u.id = a.user_id
+        WHERE a.month=? AND a.store_id=?
+        ORDER BY a.id DESC
+        LIMIT ?
+        """,
+        (key, int(store_id), max(1, int(limit))),
+    )
+    return [_row_dict(row) for row in rows]

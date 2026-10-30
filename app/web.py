@@ -8,6 +8,7 @@
 - views_compare compare / compare/cell / compare.xlsx（手机销量 vs 触客对比）
 - views_admin board / bulletin / bulletin.csv / incentive / edits
 - views_settings settings
+- views_settlement settlement / settlement.xlsx / settlement/<store_id>（V5 月结）
 
 用 register_*(app) 而非 Blueprint：路由名保持原样（today/deal/report…），
 模板里的 url_for('today')、request.endpoint=='today' 都不用改。
@@ -41,6 +42,7 @@ from .views_daily import register_daily
 from .views_policies import register_policies
 from .views_report import register_report
 from .views_settings import register_settings
+from .views_settlement import register_settlement
 
 INSECURE_SECRETS = frozenset({"", "store-daily-dev-change-me", "replace-with-random-secret"})
 
@@ -148,6 +150,7 @@ def create_app(*, testing: bool = False) -> Flask:
     register_compare(app)
     register_admin(app)
     register_settings(app)
+    register_settlement(app)
     register_policies(app)
     register_errors(app)
     return app

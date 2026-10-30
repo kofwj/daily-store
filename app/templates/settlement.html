@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}V5 月结{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div class="page-title">
+    <h1>V5 月结</h1>
+    <p class="muted">
+      {{ month }} 按运营商实结逐店出账：毛酬金 → 核减 → 搭载率 → 提成总包 → 顾问薪酬。
+      V5 从 {{ start_month }} 起算，此前月份走原口径，不回溯、不重算。
+      {% if preview_only %}当前显示的是试算预览（尚未落库），核对无误再点「试算并落库」。{% endif %}
+    </p>
+  </div>
+  <form method="get" class="page-filters">
+    <label class="filter">
+      <span>月份</span>
+      <input type="month" name="month" value="{{ month }}" onchange="this.form.submit()">
+    </label>
+    <a class="btn ghost" href="{{ url_for('settlement_xlsx', month=month) }}">导出 Excel</a>
+  </form>
+</div>
+
+{% if not enabled %}
+<div class="card">
+  <p class="muted" style="margin:0">
+    {{ month }} 未启用 V5 月结（生效月 {{ start_month }}）。该月及以前按原口径出账，不需要在这里试算。
+    想看去 {{ start_month }} 及以后的月份。
+  </p>
+</div>
+{% else %}
+
+<div class="kpi-row">
+  <div class="kpi">
+    <div class="muted">经营主体</div>
+    <div class="kpi-num">{{ summary.store_count }}</div>
+    <div class="muted">草稿 {{ summary.draft_count }} / 已确认 {{ summary.confirmed_count }} / 已锁 {{ summary.locked_count }}</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">实结净酬金</div>
+    <div class="kpi-num">{{ summary.net }}</div>
+    <div class="muted">毛酬金 {{ summary.gross }}</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">折前总包</div>
+    <div class="kpi-num">{{ summary.raw_pool }}</div>
+    <div class="muted">折后 {{ summary.final_pool }}</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">合办扣减</div>
+    <div class="kpi-num">{{ summary.co_pool }}</div>
+    <div class="muted">顾问实发 {{ summary.advisor_pay }}（{{ summary.advisor_count }} 家有顾问）</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">垫资追回</div>
+    <div class="kpi-num">{{ summary.clawback }}</div>
+    <div class="muted">{{ summary.clawback_count }} 家有待追回</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">核心随销 / 平均店长分</div>
+    <div class="kpi-num">{{ summary.core_biz }}</div>
+    <div class="muted">均分 {{ summary.avg_score }} / 100</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="toolbar" style="margin-top:0">
+    <form method="post" action="{{ url_for('settlement_compute') }}">
+      <input type="hidden" name="month" value="{{ month }}">
+      <button type="submit" class="ghost">试算并落库</button>
+    </form>
+    <form method="post" action="{{ url_for('settlement_confirm') }}">
+      <input type="hidden" name="month" value="{{ month }}">
+      <button type="submit" class="ghost">全月确认</button>
+    </form>
+    <form method="post" action="{{ url_for('settlement_lock') }}">
+      <input type="hidden" name="month" value="{{ month }}">
+      <button type="submit" class="ghost">锁月</button>
+    </form>
+    <span class="muted">试算重写表 3/表 4，状态回到草稿；录入新数据也会退回草稿，必须重新试算再确认。</span>
+  </div>
+  <form method="post" action="{{ url_for('settlement_unlock') }}" class="row" style="margin-top:10px">
+    <input type="hidden" name="month" value="{{ month }}">
+    <label class="field">
+      <span class="muted">解锁原因（必填，留在操作记录里）</span>
+      <input type="text" name="reason" maxlength="120" placeholder="例如：运营商补发 3B 争议扣款，重算">
+    </label>
+    <button type="submit" class="ghost">解锁本月</button>
+  </form>
+</div>
+
+<div class="card" style="overflow:auto">
+  {% if rows %}
+  <table class="data">
+    <thead>
+      <tr>
+        <th>门店</th>
+        <th>模式</th>
+        <th>状态</th>
+        <th>净酬金</th>
+        <th>基线</th>
+        <th>搭载率</th>
+        <th>核心</th>
+        <th>店长分</th>
+        <th>折前总包</th>
+        <th>折后总包</th>
+        <th>合办</th>
+        <th>顾问实发</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>
+          <a href="{{ url_for('settlement_store', store_id=row.store_id, month=month) }}">{{ row.store_name }}</a>
+          <div class="muted">店长 {{ row.store_manager or '—' }}{% if row.region_group %} · {{ row.region_group }}{% endif %}</div>
+        </td>
+        <td>{{ row.mode }}</td>
+        <td>
+          <span class="status {{ row.status_class }}">{{ row.status_label }}</span>
+          <div class="muted">{{ row.flag_label }}</div>
+        </td>
+        <td>{{ row.net }}</td>
+        <td>{{ row.baseline }}</td>
+        <td>{{ row.carry }}</td>
+        <td>{{ row.core_biz }}</td>
+        <td>{{ row.score }}</td>
+        <td>{{ row.raw_pool }}</td>
+        <td>{{ row.final_pool }}</td>
+        <td>{{ row.co_pool }}</td>
+        <td>{{ row.advisor_pay }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin:0">
+    本月没有生成任何门店：要么还没试算，要么这月没有可出账的经营主体（停用模式、泰州垫资店不进表 3/表 4）。
+  </p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
