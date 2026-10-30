@@ -218,6 +218,8 @@ MIGRATIONS: List[Tuple[int, str, str]] = [
     # 迁移 18：V5 科目字典落库（移动 10 / 电信 8 / 泰州 8）。只写 metrics 字典表，
     # 全部 active=0，双轨期旧表单/播报/指标目标一个字节都不变。
     (18, "v5_metrics_catalog", "_v5_metrics_catalog"),
+    # 迁移 19：审计表 user_id 放开 NOT NULL（批量试算/锁月没有操作人）。
+    (19, "v5_audit_user_nullable", "_v5_audit_user_nullable"),
 ]
 
 def init_db() -> None:
@@ -295,6 +297,7 @@ def migrate() -> None:
             "_oct_coin_cut_rework": _oct_coin_cut_rework,
             "_v5_schema_and_baseline": _v5_schema_and_baseline,
             "_v5_metrics_catalog": _v5_metrics_catalog,
+            "_v5_audit_user_nullable": _v5_audit_user_nullable,
         }
         for version, name, fn_name in sorted(MIGRATIONS):
             if version in applied:
@@ -1208,7 +1211,7 @@ V5_TABLE_DDL: Tuple[str, ...] = (
         month TEXT NOT NULL,
         store_id INTEGER NOT NULL REFERENCES stores(id),
         action TEXT NOT NULL,
-        user_id INTEGER NOT NULL REFERENCES users(id),
+        user_id INTEGER REFERENCES users(id),
         created_at TEXT NOT NULL,
         before_json TEXT NOT NULL DEFAULT '',
         after_json TEXT NOT NULL DEFAULT '',
@@ -1354,3 +1357,50 @@ def _v5_metrics_catalog(conn: sqlite3.Connection) -> None:
             """,
             (code, name, section, sort),
         )
+
+
+def _v5_audit_user_nullable(conn: sqlite3.Connection) -> None:
+    """迁移 19：`settlement_audit_log.user_id` 放开 NOT NULL。
+
+    批量试算、锁月、解锁这类动作可能是系统跑的，没有操作人；审计行必须允许空责任人，
+    与 `advance_edits`/`auth_events` 等既有审计表（可空外键）保持一致。
+    只在现存列仍为 NOT NULL 时重建一次，行数与 id 原样保留，`user_id=0` 的老行归一成 NULL。
+    """
+    columns = {
+        str(row["name"]): row
+        for row in conn.execute("PRAGMA table_info(settlement_audit_log)")
+    }
+    info = columns.get("user_id")
+    if info is None or not int(info["notnull"]):
+        return
+    conn.execute("DROP TABLE IF EXISTS settlement_audit_log_nullable")
+    conn.execute(
+        """
+        CREATE TABLE settlement_audit_log_nullable (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month TEXT NOT NULL,
+            store_id INTEGER NOT NULL REFERENCES stores(id),
+            action TEXT NOT NULL,
+            user_id INTEGER REFERENCES users(id),
+            created_at TEXT NOT NULL,
+            before_json TEXT NOT NULL DEFAULT '',
+            after_json TEXT NOT NULL DEFAULT '',
+            reason TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO settlement_audit_log_nullable
+            (id, month, store_id, action, user_id, created_at, before_json, after_json, reason)
+        SELECT id, month, store_id, action, NULLIF(user_id, 0), created_at,
+               before_json, after_json, reason
+        FROM settlement_audit_log
+        """
+    )
+    conn.execute("DROP TABLE settlement_audit_log")
+    conn.execute("ALTER TABLE settlement_audit_log_nullable RENAME TO settlement_audit_log")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_settlement_audit_month "
+        "ON settlement_audit_log(month, store_id)"
+    )

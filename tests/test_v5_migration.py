@@ -261,9 +261,13 @@ def test_migration_17_creates_tables_and_columns(v5_db):
     assert {"v5_mode", "carrier_scope", "mobile_code_active", "affiliated_to"} <= store_columns
 
     applied = [row["version"] for row in conn.execute("SELECT version FROM schema_migrations ORDER BY version")]
-    assert applied == list(range(1, 19)), "迁移 1–18 应各记一次"
+    assert applied == list(range(1, 20)), "迁移 1–19 应各记一次"
     assert applied.count(17) == 1
     assert applied.count(18) == 1
+    assert applied.count(19) == 1
+    # 迁移 19：审计表 user_id 允许空（批量试算/锁月没有操作人）
+    audit_user = {r["name"]: r for r in conn.execute("PRAGMA table_info(settlement_audit_log)")}["user_id"]
+    assert int(audit_user["notnull"]) == 0
 
 
 def test_migration_17_is_idempotent(v5_db):

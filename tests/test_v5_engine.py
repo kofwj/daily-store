@@ -325,3 +325,130 @@ def test_advisor_retained_net_deducts_co_pool():
     # 顾问店先扣掉 50% 合办提成包再比平衡点
     assert engine.advisor_retained_net(1_000_000, 200_000) == 800_000
     assert engine.advisor_retained_net(1_000_000, 0) == 1_000_000
+
+
+# ---------------------------------------------------------------------------
+# 第六段：接线口径（第四阶段四项裁决）
+# ---------------------------------------------------------------------------
+
+
+def test_core_biz_breakdown_mobile_counts_four_categories():
+    counts = {
+        "v5_m1": 3,
+        "v5_m2": 2,
+        "v5_m5": 4,
+        "v5_m6": 1,
+        "v5_m7": 5,
+        # 以下全部不进分子
+        "v5_m3": 9,
+        "v5_m4": 9,
+        "v5_m8": 9,
+        "v5_m9": 9,
+        "v5_m10": 9,
+        "phone_sales": 100,
+    }
+    got = engine.core_biz_breakdown(counts, "MOBILE")
+    assert got == {"cat1_fusion": 3, "cat2_contract": 2, "cat3_ai": 5, "cat4_rebate": 5}
+    assert engine.core_biz_count(counts, "MOBILE") == 15
+
+
+def test_core_biz_breakdown_telecom_uses_three_smart_home_items():
+    counts = {
+        "v5_t1": 1,
+        "v5_t2": 2,
+        "v5_t5": 3,
+        "v5_t6": 4,
+        "v5_t8": 5,
+        "v5_t3": 9,
+        "v5_t4": 9,
+        "v5_t7": 9,
+        "v5_m1": 9,  # 移动科目不串到电信
+    }
+    got = engine.core_biz_breakdown(counts, "TELECOM")
+    assert got["cat1_fusion"] == 1
+    assert got["cat2_contract"] == 2
+    assert got["cat3_ai"] == 12
+    assert got["cat4_rebate"] == 0  # 电信无顺差让利科目
+    assert engine.core_biz_count(counts, "TELECOM") == 15
+
+
+@pytest.mark.parametrize("scope", ["", "  ", "UNKNOWN", "mobile5"])
+def test_core_biz_breakdown_unknown_carrier_is_zero(scope):
+    assert engine.core_biz_count({"v5_m1": 9, "v5_t1": 9}, scope) == 0
+
+
+def test_core_biz_breakdown_negative_counts_floor_at_zero():
+    counts = {"v5_m1": -3, "v5_m2": 2, "v5_m5": None}
+    assert engine.core_biz_breakdown(counts, "MOBILE")["cat1_fusion"] == 0
+    assert engine.core_biz_count(counts, "MOBILE") == 2
+
+
+def _core_codes():
+    return {
+        code
+        for cats in engine.CORE_BIZ_CATEGORIES.values()
+        for codes in cats.values()
+        for code in codes
+    }
+
+
+def test_core_biz_excluded_never_overlaps_categories():
+    assert _core_codes().isdisjoint(engine.CORE_BIZ_EXCLUDED)
+
+
+def test_core_biz_codes_all_exist_in_metrics_catalog():
+    assert _core_codes() <= set(v5_metric_codes())
+
+
+def test_rebate_metric_code_is_in_core_biz():
+    # 顺差让利既算单笔提成、又算搭载主件 cat4，两处必须同源
+    assert engine.REBATE_METRIC_CODE in _core_codes()
+
+
+@pytest.mark.parametrize("month", ["2026-10", "2026-11", "2026-12", "2026-12-31", "2026-01", ""])
+def test_clawback_exempt_through_2026_12(month):
+    assert engine.rebate_recovery_exempt(month) is True
+    assert engine.rebate_clawback_due(month, 100_000) == 0
+
+
+@pytest.mark.parametrize("month", ["2027-01", "2027-01-15", "2028-06"])
+def test_clawback_starts_2027_01(month):
+    assert engine.rebate_recovery_exempt(month) is False
+    assert engine.rebate_clawback_due(month, 100_000) == 100_000
+
+
+def test_clawback_negative_outstanding_floors_at_zero():
+    assert engine.rebate_clawback_due("2027-01", -50_000) == 0
+
+
+@pytest.mark.parametrize(
+    "mode", ["ADVISOR_A", "ADVISOR_B_NEAR", "NO_ADVISOR_MAIN", "AFFILIATED", "TELECOM_SINGLE"]
+)
+def test_settlement_applies_for_fourteen_business_units(mode):
+    assert engine.settlement_applies(mode, "2026-11") is True
+
+
+@pytest.mark.parametrize(
+    "mode", ["TAIZHOU_ADVANCE_ONLY", "FRANCHISE_DISABLED", "SAMPLE_DISABLED", "UNSET", ""]
+)
+def test_settlement_skips_taizhou_and_disabled_modes(mode):
+    assert engine.settlement_applies(mode, "2026-11") is False
+
+
+@pytest.mark.parametrize("month", ["2026-10", "2026-09", "", "garbage"])
+def test_settlement_never_runs_before_v5_start_month(month):
+    assert engine.settlement_applies("NO_ADVISOR_MAIN", month) is False
+
+
+def test_rebate_prices_match_commission_tiers():
+    base, bulk = engine.rebate_prices(engine.ROLE_SHOP_FULL_100)
+    assert (base, bulk) == (1000, 2000)
+    half_base, half_bulk = engine.rebate_prices(engine.ROLE_ADVISOR_SHOP_50)
+    assert (half_base, half_bulk) == (500, 1000)
+    # 10 笔基础价 + 1 笔达量价，与 calc_rebate_commission 对得上
+    assert engine.calc_rebate_commission(11, engine.ROLE_SHOP_FULL_100) == 10 * base + bulk
+
+
+def test_rebate_prices_unknown_role_raises():
+    with pytest.raises(ValueError):
+        engine.rebate_prices("PARENT_ASSIST_50")

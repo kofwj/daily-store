@@ -25,6 +25,12 @@ from .v5_baseline import (
     ADVISOR_CAP_ABS_CENTS,
     CARRIER_CARRY_TIERS,
     DEFAULT_CAP_RATIO,
+    DISABLED_MODES,
+    MODE_TAIZHOU_ADVANCE_ONLY,
+    V5_START_MONTH,
+    month_key,
+    normalize_mode,
+    v5_month_enabled,
 )
 
 # —— 表 3 role_share 枚举（与迁移 17 DDL 注释逐字一致）——
@@ -98,22 +104,27 @@ def _round_score(value: float) -> float:
 # ---------------------------------------------------------------------------
 
 
+def rebate_prices(role_share: str) -> Tuple[int, int]:
+    """顺差让利单价 (基础价, 达量价)，单位分；未知角色抛 ValueError。
+
+    分档与单价同源：表 3 的 `unit_price_cents` 记基础价，达量差额已体现在金额里。
+    """
+    if role_share not in ROLE_SHARES:
+        raise ValueError(f"未知分成角色：{role_share}")
+    if role_share in HALF_SHARES:
+        return REBATE_HALF_BASE_CENTS, REBATE_HALF_BULK_CENTS
+    return REBATE_BASE_CENTS, REBATE_BULK_CENTS
+
+
 def calc_rebate_commission(count: int, role_share: str) -> int:
     """顺差让利单店分档提成（分）。
 
     严格按本店当月核定笔数分档：前 10 笔基础价、第 11 笔起达量价，
     不跟随母店工号总量跳点。`count` 为核减后的有效笔数 N。
     """
-    if role_share not in ROLE_SHARES:
-        raise ValueError(f"未知分成角色：{role_share}")
+    base, bulk = rebate_prices(role_share)
     n = max(int(count), 0)
-    if role_share in HALF_SHARES:
-        base, bulk = REBATE_HALF_BASE_CENTS, REBATE_HALF_BULK_CENTS
-    else:
-        base, bulk = REBATE_BASE_CENTS, REBATE_BULK_CENTS
     return min(n, REBATE_BULK_THRESHOLD) * base + max(0, n - REBATE_BULK_THRESHOLD) * bulk
-
-
 def reconcile_carrier_counts(
     parent_store_id: int,
     carrier_settled_count: int,
@@ -414,3 +425,97 @@ def calc_advisor_salary(
 def advisor_retained_net(net_commission_cents: int, co_pool_deducted_cents: int) -> int:
     """顾问店留存净酬金（分）：先扣掉 50% 合办提成包再进顾问考核。"""
     return int(net_commission_cents) - max(int(co_pool_deducted_cents), 0)
+
+
+# ---------------------------------------------------------------------------
+# 第六段：接线口径（第四阶段四项裁决的显式固化）
+# ---------------------------------------------------------------------------
+
+# 裁决 1：指标 2 分子 = 运营商结算单「四大核心随销主件」4 类 5 项。
+# 移动：cat1 融合 v5_m1 / cat2 合约 v5_m2 / cat3 AI 手机 v5_m5+v5_m6 / cat4 让利 v5_m7。
+# 电信：cat1 v5_t1 / cat2 v5_t2 / cat3 全屋智能主件 v5_t5+v5_t6+v5_t8；cat4 无对应科目
+#      （电信不跑顺差让利垫资，表 4 该列留 0）。
+# 坚决不计入：v5_m8 优选会员（0 元义务项）、v5_m3 宽带、v5_m4 升档、v5_m9 智家、v5_m10 权益；
+#              电信 v5_t3 宽带、v5_t4 升档、v5_t7 权益。
+CORE_CATEGORY_KEYS: Tuple[str, ...] = ("cat1_fusion", "cat2_contract", "cat3_ai", "cat4_rebate")
+CORE_BIZ_CATEGORIES: Dict[str, Dict[str, Tuple[str, ...]]] = {
+    "MOBILE": {
+        "cat1_fusion": ("v5_m1",),
+        "cat2_contract": ("v5_m2",),
+        "cat3_ai": ("v5_m5", "v5_m6"),
+        "cat4_rebate": ("v5_m7",),
+    },
+    "TELECOM": {
+        "cat1_fusion": ("v5_t1",),
+        "cat2_contract": ("v5_t2",),
+        "cat3_ai": ("v5_t5", "v5_t6", "v5_t8"),
+        "cat4_rebate": (),
+    },
+}
+# 只做留痕/存量维系、不算搭载主件的科目：写库时这些列不进 core_biz_count。
+CORE_BIZ_EXCLUDED: Tuple[str, ...] = (
+    "v5_m3",
+    "v5_m4",
+    "v5_m8",
+    "v5_m9",
+    "v5_m10",
+    "v5_t3",
+    "v5_t4",
+    "v5_t7",
+)
+
+# 裁决 2/3：追回款独立冲减提成总包，绝不进负向扣款、绝不污染 3A；
+# 2026-10 ~ 2026-12 历史豁免，2027-01 起按 advance_posts 超期未回款滚动追缴。
+# 顺差让利垫资账龄 T+3：2026-10 起产生的新垫资到 2027-01 才满 3 个月超期点。
+CLAWBACK_EXEMPT_LAST_MONTH = "2026-12"
+CLAWBACK_START_MONTH = "2027-01"
+
+# 裁决 4：只有 14 个经营主体（南通移动 13 + 电信 1）进表 3/表 4；
+# 泰州垫资店只做预存、不配考核基线，不进 V5 提成与店长分。
+SETTLEMENT_EXCLUDED_MODES: Tuple[str, ...] = (MODE_TAIZHOU_ADVANCE_ONLY,) + DISABLED_MODES
+
+
+def core_biz_breakdown(
+    counts: Mapping[str, int], carrier_scope: str = "MOBILE"
+) -> Dict[str, int]:
+    """按 cat1–cat4 汇总核心随销主件（笔/户/台），负数按 0 计。
+
+    认不出的运营商返回全 0：宁可指标 2 计 0 分，也不猜口径。
+    """
+    scope = (carrier_scope or "").strip().upper()
+    cats = CORE_BIZ_CATEGORIES.get(scope, {})
+    return {
+        key: sum(max(int(counts.get(code) or 0), 0) for code in cats.get(key, ()))
+        for key in CORE_CATEGORY_KEYS
+    }
+
+
+def core_biz_count(counts: Mapping[str, int], carrier_scope: str = "MOBILE") -> int:
+    """指标 2 分子：4 类核心随销主件之和（与表 4 `core_biz_count` 列同义）。"""
+    return sum(core_biz_breakdown(counts, carrier_scope).values())
+
+
+def rebate_recovery_exempt(month: Any) -> bool:
+    """追回款是否处于历史豁免期：2026-12 及以前一律豁免（含全部双轨历史月）。"""
+    key = month_key(month)
+    if not key:
+        return True  # 认不出的月份按豁免处理：绝不误扣真金白银
+    return key <= CLAWBACK_EXEMPT_LAST_MONTH
+
+
+def rebate_clawback_due(month: Any, outstanding_cents: int) -> int:
+    """当期应追缴的垫资本金（分）：豁免期恒 0；2027-01 起按超期未回款全额滚入。"""
+    if rebate_recovery_exempt(month):
+        return 0
+    return max(int(outstanding_cents), 0)
+
+
+def settlement_applies(v5_mode: str, month: Any = V5_START_MONTH) -> bool:
+    """该店该月是否生成表 3 / 表 4 与店长分：V5 生效月 + 非泰州垫资/非停用模式。
+
+    模式先过 `normalize_mode`：空串、拼写错误的模式一律当「未纳入 V5」挡在门外，
+    宁可少算一家等管理员补配置，也绝不给错模式的门店出账。
+    """
+    if not v5_month_enabled(month):
+        return False
+    return normalize_mode(v5_mode) not in SETTLEMENT_EXCLUDED_MODES
