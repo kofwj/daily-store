@@ -3,6 +3,7 @@ from datetime import date
 from app import db
 from app.bulletin import (
     REVIEW_PRESETS,
+    ai_phone_pair,
     apply_scales,
     bisuan_total,
     build_row,
@@ -800,3 +801,40 @@ def test_summary_combo_tie_lists_both():
     assert "综合标杆：启东人民路、通州金沙（AI 2，笔算 1.0，直降 0）" in text
     assert "单项第一：AI 启东人民路、通州金沙 · 笔算 启东人民路、通州金沙" in text
     assert "直降 " not in text.split("单项第一：")[1].split("\n")[0]
+
+
+def test_ai_phone_pair_prefers_v5_split_metrics():
+    pairs = {"ai_contract": (9, 99), "v5_m5": (2, 20), "v5_m6": (1, 5)}
+    assert ai_phone_pair(pairs, {"v5_mode": "ADVISOR_A"}) == (3, 25)
+
+
+def test_ai_phone_pair_accepts_single_split_metric():
+    pairs = {"ai_contract": (9, 99), "v5_m6": (4, 8)}
+    assert ai_phone_pair(pairs, {"v5_mode": "NO_ADVISOR_MAIN"}) == (4, 8)
+
+
+def test_ai_phone_pair_falls_back_to_ai_contract_when_split_missing():
+    # 切月初期 v5_m5/v5_m6 还没填报时不能变 0，否则移动通报表断档
+    pairs = {"ai_contract": (2, 17)}
+    for mode in ("ADVISOR_A", "ADVISOR_B_NEAR", "NO_ADVISOR_MAIN", "AFFILIATED"):
+        assert ai_phone_pair(pairs, {"v5_mode": mode}) == (2, 17)
+
+
+def test_ai_phone_pair_ignores_split_for_non_mobile_modes():
+    pairs = {"ai_contract": (2, 17), "v5_m5": (2, 20), "v5_m6": (1, 5)}
+    for mode in (
+        "TELECOM_SINGLE",
+        "TAIZHOU_ADVANCE_ONLY",
+        "FRANCHISE_DISABLED",
+        "SAMPLE_DISABLED",
+        "UNSET",
+        "",
+    ):
+        assert ai_phone_pair(pairs, {"v5_mode": mode}) == (2, 17)
+
+
+def test_ai_phone_pair_tolerates_store_without_v5_mode():
+    pairs = {"ai_contract": (3, 30), "v5_m5": (1, 1)}
+    assert ai_phone_pair(pairs, {}) == (3, 30)
+    assert ai_phone_pair(pairs, None) == (3, 30)
+    assert ai_phone_pair({}, {"v5_mode": "UNSET"}) == (0, 0)

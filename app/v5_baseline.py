@@ -32,6 +32,11 @@ MODE_FRANCHISE_DISABLED = "FRANCHISE_DISABLED"  # 加盟/非主控店，不进�
 MODE_SAMPLE_DISABLED = "SAMPLE_DISABLED"  # 示例店，不进任何业务
 MODE_UNSET = "UNSET"                    # 未纳入 V5（历史店或新录入店）
 
+# 进移动通报表 AI 手机列的 V5 门店模式（电信 / 泰州垫资 / 加盟 / 示例店都不进）
+MOBILE_AI_MODES = (MODE_ADVISOR_A, MODE_ADVISOR_B_NEAR, MODE_NO_ADVISOR_MAIN, MODE_AFFILIATED)
+# V5 AI 手机拆项：同开换新 + 未同开换新；科目落库后二者之和即 AI 手机数
+V5_AI_METRICS = ("v5_m5", "v5_m6")
+
 V5_MODE_LABELS: Dict[str, str] = {
     MODE_ADVISOR_A: "专职顾问（A 档）",
     MODE_ADVISOR_B_NEAR: "专职顾问（B 近档）",

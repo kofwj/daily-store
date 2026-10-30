@@ -8,6 +8,7 @@ from typing import Any, Dict
 from flask import Response, flash, g, redirect, render_template, request, url_for
 
 from . import db
+from .broadcast import sections_for_store
 from .helpers import (
     admin_required,
     login_required,
@@ -20,7 +21,6 @@ from .helpers import (
 )
 from .metrics_seed import (
     KPI_TARGETS,
-    SECTIONS,
     format_display,
     format_stored,
     from_stored,
@@ -147,9 +147,9 @@ def register_report(app) -> None:
                     }
                 )
 
-            # 分组视图：SECTIONS 顺序 + 每组的 KPI/普通行
+            # 分组视图：科目分组顺序 + 每组的 KPI/普通行
             grouped = []
-            for section in SECTIONS:
+            for section in sections_for_store(store, end):
                 sec_rows = [r for r in rows if r["section"] == section["code"]]
                 if not sec_rows:
                     continue

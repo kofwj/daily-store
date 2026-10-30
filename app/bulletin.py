@@ -6,6 +6,7 @@ from datetime import date
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 from .metrics_seed import effective_month_bisuan, format_display, from_stored
+from .v5_baseline import MOBILE_AI_MODES, V5_AI_METRICS
 
 # 设置页一键套用。key 稳定；正文用占位符，空段渲染时压掉。
 REVIEW_PRESETS: List[Dict[str, str]] = [
@@ -135,6 +136,26 @@ def fmt_metric(code: str, stored: Any) -> str:
 
 def bisuan_total(values: Mapping[str, int]) -> int:
     return int(values.get("bisuan", 0) or 0) + int(values.get("bisuan_high", 0) or 0)
+
+
+def ai_phone_pair(pairs: Mapping[str, Any], store: Any) -> Tuple[int, int]:
+    """通报表 AI 手机数（日, 累）。
+
+    V5 移动店在 v5_m5（同开换新）+ v5_m6（未同开换新）落库后取二者之和；
+    两个科目都还没数据时回落 ai_contract —— 切月过渡期通报表不会出现 0 值断档。
+    """
+    try:
+        mode = str(store["v5_mode"] or "").strip()
+    except (KeyError, IndexError, TypeError):
+        mode = ""
+    if mode in MOBILE_AI_MODES:
+        present = [pairs[code] for code in V5_AI_METRICS if code in pairs]
+        if present:
+            day = sum(int((p or (0, 0))[0] or 0) for p in present)
+            cum = sum(int((p or (0, 0))[1] or 0) for p in present)
+            return day, cum
+    day, cum = pairs.get("ai_contract", (0, 0))
+    return int(day or 0), int(cum or 0)
 
 
 def _store_short(store: Mapping[str, Any]) -> str:

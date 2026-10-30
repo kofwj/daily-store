@@ -1,8 +1,8 @@
 from datetime import date
 
 from app import db
-from app.broadcast import add_day_to_prev, render_broadcast
-from app.metrics_seed import metric_codes
+from app.broadcast import add_day_to_prev, render_broadcast, sections_for_store
+from app.metrics_seed import SECTIONS, metric_codes
 
 
 def test_render_matches_wechat_log():
@@ -227,3 +227,28 @@ def test_broadcast_compact_is_admin_setting(admin_client):
         follow_redirects=True,
     ).get_data(as_text=True)
     assert "云盘：日0，累0" in again
+
+
+def test_render_broadcast_default_matches_explicit_sections():
+    biz = date(2026, 8, 13)
+    values = {"phone_sales": (1, 13), "bisuan": (0, 5)}
+    assert render_broadcast("示例戊店", biz, values) == render_broadcast(
+        "示例戊店", biz, values, sections=SECTIONS
+    )
+
+
+def test_render_broadcast_sections_override_limits_groups():
+    biz = date(2026, 8, 13)
+    values = {"phone_sales": (1, 13), "bisuan": (0, 5)}
+    only_basic = [s for s in SECTIONS if s["code"] == "basic"]
+    text = render_broadcast("示例戊店", biz, values, sections=only_basic)
+    assert "当天手机销量：日1，累13" in text
+    assert "比算新增" not in text
+
+
+def test_sections_for_store_falls_back_to_global_sections():
+    # V5 科目未落库前，任何模式与月份都回落全局分组，双轨期播报内容一致
+    for mode in ("ADVISOR_A", "TELECOM_SINGLE", "TAIZHOU_ADVANCE_ONLY", "UNSET", ""):
+        assert sections_for_store({"v5_mode": mode}, date(2026, 11, 1)) == SECTIONS
+        assert sections_for_store({}, date(2026, 10, 31)) == SECTIONS
+        assert sections_for_store(None) == SECTIONS

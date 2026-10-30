@@ -92,7 +92,7 @@ def _bulletin_rows(conn, stores, biz_date: date):
             # 没配移动编码的店不进通报表
             continue
         pairs = values_for_broadcast(conn, store["id"], biz_date)
-        day_ai, month_ai = pairs.get("ai_contract", (0, 0))
+        day_ai, month_ai = bulletin.ai_phone_pair(pairs, store)
         day_welcome, month_welcome = pairs.get("welcome_back", (0, 0))
         day_bisuan = bulletin.bisuan_total(
             {"bisuan": pairs.get("bisuan", (0, 0))[0], "bisuan_high": pairs.get("bisuan_high", (0, 0))[0]}

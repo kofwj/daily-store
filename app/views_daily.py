@@ -35,7 +35,6 @@ from .helpers import (
 )
 from .metrics_seed import (
     KPI_TARGETS,
-    SECTIONS,
     format_display,
     format_stored,
     from_stored,
@@ -117,6 +116,7 @@ def register_daily(app) -> None:
                             broadcast_pairs,
                             compact=bool(compact_sections),
                             compact_sections=compact_sections,
+                            sections=broadcast.sections_for_store(store, biz_date),
                         )
                         wecom.send_text(conn, store, broadcast_text, source="daily")
                     except Exception:  # noqa: BLE001
@@ -143,9 +143,10 @@ def register_daily(app) -> None:
                 pairs,
                 compact=bool(compact_sections),
                 compact_sections=compact_sections,
+                sections=broadcast.sections_for_store(store, biz_date),
             )
             grouped = []
-            for section in SECTIONS:
+            for section in broadcast.sections_for_store(store, biz_date):
                 items = []
                 for code, name, hint in section["metrics"]:
                     day, cum = pairs.get(code, (0, 0))
