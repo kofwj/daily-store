@@ -439,6 +439,20 @@ def test_shot_scope_label_for_single_city(city_client, tmp_db):
     assert f"{day.month}月{day.day}日 · 示例市" in body
 
 
+def test_shot_date_not_zero_padded(admin_client, tmp_db):
+    """图片抬头日期不补零：页面上「11月4日」要和微信文案一字不差，不写「11月04日」。
+
+    这条专门钉住个位数日子——以前模板用 %m月%d日 零填充，每月 1—9 号必挂。
+    """
+    day = work_day()
+    while day.day > 9:  # 往回退到个位数日子（永远是过去，单日视图照常认）
+        day -= timedelta(days=1)
+    seed_report("store-alpha", day, 8)
+    seed_touch("store-alpha", day, 8)
+    body = admin_client.get(f"/compare?date={day.isoformat()}").get_data(as_text=True)
+    assert f"{day.month}月{day.day}日" in body
+    assert f"{day.month}月{day.day:02d}日" not in body
+
 def test_shot_hidden_on_empty_day(admin_client, day_scene):
     """空日没有图可截（按钮和脚本都不出）。"""
     empty = (work_day() - timedelta(days=40)).isoformat()
