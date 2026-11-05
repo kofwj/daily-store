@@ -160,25 +160,25 @@
       <tr>
         <th class="g-profile"></th>
         <th colspan="4" class="g-month">本月累计（{{ month.label }}）</th>
+        <th colspan="4" class="g-month qc-col">品管支撑服务</th>
         <th colspan="4" class="g-day">当日</th>
-        <th colspan="4" class="qc-col" style="border-left: 2px solid #cbd5e1">品管·本月累计（{{ month.label }}）</th>
-        <th colspan="4" class="qc-col" style="border-left: 2px solid #cbd5e1">品管·当日</th>
+        <th colspan="4" class="g-day qc-col">品管支撑服务</th>
       </tr>
       <tr>
         <th class="store g-profile">门店</th>
-        <th class="g-month" style="width: 110px">触客条数</th>
+        <th class="g-month" style="width: 110px; border-left: 2px solid #cbd5e1">触客条数</th>
         <th class="g-month" style="width: 110px">手机销量</th>
         <th class="g-month" style="width: 150px" title="本月累计触客 ÷ 本月累计手机销量（理论要 > 100.00%）：某店这月没交过日报写「—」，月销量 0 写「-」">触客/销量</th>
         <th class="g-month" style="width: 120px" title="本月累计业辅查询登记：这店这个月一共填了几条">业辅查询登记</th>
-        <th class="g-day" style="width: 120px">触客条数</th>
+        {% for code, name in quality_cols %}
+        <th class="g-month qc-col" style="width: 92px{% if loop.first %}; border-left: 2px solid #cbd5e1{% endif %}" title="品管支撑服务·本月累计（{{ month.label }}）：{{ name }}">{{ name }}</th>
+        {% endfor %}
+        <th class="g-day" style="width: 120px; border-left: 2px solid #cbd5e1">触客条数</th>
         <th class="g-day" style="width: 120px">手机销量</th>
         <th class="g-day" style="width: 150px" title="触客 ÷ 手机销量（理论要 > 100.00%）：低于 100.00% 都不好，销量 0 写「-」">触客/销量</th>
         <th class="g-day" style="width: 140px" title="业辅查询登记：当天这店查了几条，就地填、只改这一格">业辅查询登记</th>
         {% for code, name in quality_cols %}
-        <th class="qc-col" style="width: 92px{% if loop.first %}; border-left: 2px solid #cbd5e1{% endif %}" title="品管支撑服务·本月累计（{{ month.label }}）：{{ name }}">{{ name }}</th>
-        {% endfor %}
-        {% for code, name in quality_cols %}
-        <th class="qc-col" style="width: 92px{% if loop.first %}; border-left: 2px solid #cbd5e1{% endif %}" title="品管支撑服务·当日：{{ name }}">{{ name }}</th>
+        <th class="g-day qc-col" style="width: 92px{% if loop.first %}; border-left: 2px solid #cbd5e1{% endif %}" title="品管支撑服务·当日：{{ name }}">{{ name }}</th>
         {% endfor %}
       </tr>
     </thead>
@@ -191,6 +191,9 @@
           <strong>{{ r.name }}</strong>
         </td>
         {{ month_row_cells(r) }}
+        {% for code, name in quality_cols %}
+        <td class="num qc-col"{% if loop.first %} style="border-left: 2px solid #cbd5e1"{% endif %}>{{ r.qc_month[code] }}</td>
+        {% endfor %}
         <td class="num" style="border-left: 2px solid #cbd5e1"><span style="font-weight: 650">{{ r.touch }}</span></td>
         <td class="num">
           {% if can_edit and r.submitted %}
@@ -232,9 +235,6 @@
           {% endif %}
         </td>
         {% for code, name in quality_cols %}
-        <td class="num qc-col"{% if loop.first %} style="border-left: 2px solid #cbd5e1"{% endif %}>{{ r.qc_month[code] }}</td>
-        {% endfor %}
-        {% for code, name in quality_cols %}
         <td class="num qc-col"{% if loop.first %} style="border-left: 2px solid #cbd5e1"{% endif %}>{% if r.submitted %}{{ r.qc_day[code] }}{% else %}<span class="muted">—</span>{% endif %}</td>
         {% endfor %}
       </tr>
@@ -245,13 +245,13 @@
       <tr class="city-sub">
         <td class="store">{{ g.city }} · {{ g.n }} 家{% if g.missing %}（未交 {{ g.missing }}）{% endif %}</td>
         {{ month_total_cells(g.m_touch, g.m_sold, g.m_n, g.m_ratio_text, g.m_aux) }}
+        {% for code, name in quality_cols %}
+        <td class="num qc-col"{% if loop.first %} style="border-left: 2px solid #cbd5e1"{% endif %}>{{ g.qc_month[code] }}</td>
+        {% endfor %}
         <td class="num" style="border-left: 2px solid #cbd5e1">{{ g.touch }}</td>
         <td class="num">{{ g.sold }}</td>
         <td class="num">{% if g.n %}{{ g.ratio_text }}{% else %}<span class="muted">—</span>{% endif %}</td>
         <td class="num">{{ g.aux }}</td>
-        {% for code, name in quality_cols %}
-        <td class="num qc-col"{% if loop.first %} style="border-left: 2px solid #cbd5e1"{% endif %}>{{ g.qc_month[code] }}</td>
-        {% endfor %}
         {% for code, name in quality_cols %}
         <td class="num qc-col"{% if loop.first %} style="border-left: 2px solid #cbd5e1"{% endif %}>{{ g.qc_day[code] }}</td>
         {% endfor %}
@@ -260,13 +260,13 @@
       <tr class="city-sub">
         <td class="store" style="border-top: 2px solid #94a3b8">合计</td>
         {{ month_total_cells(month.total.touch, month.total.sold, month.total.n, month.total.ratio_text, month.total.aux, 'border-top: 2px solid #94a3b8') }}
+        {% for code, name in quality_cols %}
+        <td class="num qc-col" style="border-top: 2px solid #94a3b8{% if loop.first %}; border-left: 2px solid #cbd5e1{% endif %}">{{ totals.qc_month[code] }}</td>
+        {% endfor %}
         <td class="num" style="border-top: 2px solid #94a3b8; border-left: 2px solid #cbd5e1">{{ totals.touch }}</td>
         <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.sold }}</td>
         {{ total_cell(totals.n, totals.ratio_text, 'border-top: 2px solid #94a3b8') }}
         <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.aux }}</td>
-        {% for code, name in quality_cols %}
-        <td class="num qc-col" style="border-top: 2px solid #94a3b8{% if loop.first %}; border-left: 2px solid #cbd5e1{% endif %}">{{ totals.qc_month[code] }}</td>
-        {% endfor %}
         {% for code, name in quality_cols %}
         <td class="num qc-col" style="border-top: 2px solid #94a3b8{% if loop.first %}; border-left: 2px solid #cbd5e1{% endif %}">{{ totals.qc_day[code] }}</td>
         {% endfor %}

@@ -1010,9 +1010,9 @@ def test_aux_feeds_subtotal_total_and_copy_text(admin_client, day_scene):
     assert '<td class="num">8</td>' in foot_of(body, "示例市 · 2 家")
     assert '<td class="num">3</td>' in foot_of(body, "邻市 · 2 家（未交 1）")
     total = re.findall(r"<td[^>]*>(.*?)</td>", foot_of(body, "合计"), re.S)
-    assert len(total) == 17  # 门店 + 4 列本月累计 + 4 列当日 + 品管 8 列
-    assert total[8].strip() == "11"  # 当日业辅
+    assert len(total) == 17  # 门店 + 本月 4 + 品管本月 4 + 当日 4 + 品管当日 4
     assert total[4].strip() == "11"  # 本月累计业辅（就这一天，跟当日同数）
+    assert total[12].strip() == "11"  # 当日业辅
 
 
 
@@ -1275,7 +1275,29 @@ def test_day_view_shows_quality_columns_page_only(admin_client, day_scene):
     head = shot[: shot.index("</thead>")]
     for name in QUALITY_NAMES:
         assert name in head
-    assert "品管·本月累计（" in head and "品管·当日" in head
+    # 两组品管列头：本月那 4 列跟在「本月累计」后面，当日那 4 列跟在「当日」后面
+    assert 'class="g-month qc-col">品管支撑服务<' in head
+    assert 'class="g-day qc-col">品管支撑服务<' in head
+    rows = re.findall(r"<tr>(.*?)</tr>", head, re.S)
+
+
+    def th_names(row):
+        # 开标签里带 title（含「>」），所以按最后一个「>」切正文，别用 <th[^>]*>
+        return [
+            re.sub(r"<[^>]+>", "", chunk[chunk.rfind(">") + 1 :]).strip()
+            for chunk in row.split("</th>")[:-1]
+        ]
+
+    groups = th_names(rows[0])
+    assert groups[0] == "" and groups[1].startswith("本月累计（")
+    assert groups[2:] == ["品管支撑服务", "当日", "品管支撑服务"]
+    # 列序：本月（业务 4 + 品管 4）→ 当日（业务 4 + 品管 4）
+    assert th_names(rows[1]) == [
+        "门店", "触客条数", "手机销量", "触客/销量", "业辅查询登记",
+        *QUALITY_NAMES,
+        "触客条数", "手机销量", "触客/销量", "业辅查询登记",
+        *QUALITY_NAMES,
+    ]
 
     cells = [
         c.strip()
