@@ -133,8 +133,8 @@
     });
   }
 
-  // 「只页面看、不进图」的列（品管的 8 列就是）：截图前 display:none，拍完按原值还原。
-  // 页面用 hideSelectors: ['.qc-col'] 开启；不配置就什么都不做。
+  // 「只页面看、不进图」的列：截图前 display:none，拍完按原值还原。
+  // 页面用 hideSelectors: ['.xxx'] 开启；不配置就什么都不做（服务通报现在出整张表，没在用）。
   function hideEls(on) {
     var sels = cfg().hideSelectors || [];
     if (!sels.length) return;

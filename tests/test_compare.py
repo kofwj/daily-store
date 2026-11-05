@@ -225,7 +225,6 @@ def test_touch_zero_keeps_row_and_zero_percent(admin_client):
 def test_ratio_rule_in_tooltip_not_page_copy(admin_client, day_scene):
     """口径留在表头悬浮提示，页面头部不再摆大段说教（B 类瘦身，别被下次改回去）。"""
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
-    assert 'title="触客 ÷ 手机销量（理论要 > 100.00%）' in body
     assert 'title="本月累计触客 ÷ 本月累计手机销量（理论要 > 100.00%）' in body
     head = body[: body.index('<div class="card bulletin-wrap">')]
     for gone in ("没有补交一说", "触客/销量 = 触客条数", "只在本页显示"):
@@ -338,22 +337,22 @@ def test_shot_content_matches_table(admin_client, day_scene):
     assert "服务通报" in shot
     assert f"{day_scene.month}月{day_scene.day}日" in shot
     assert TOTAL_HEAD in shot  # 图里合计行也只写「合计」
-    assert "176.92%" in shot  # 合计行的触客/销量
+    assert "180.00%" in shot  # 本月累计那一列（当日不再给比价）
     assert "示例市丁路vivo体验店" in shot  # 未交日报的店还在表里
     assert "未交日报 1 家" not in shot  # 名单那段不再上屏
     assert "示例乙店" in shot
 
 
 def test_day_shot_table_header_groups(admin_client, day_scene):
-    """通报图两行表头：本月累计 4 列 + 当日 4 列；列名统一「触客/销量」，没有「差率」小字。"""
+    """通报图两行表头：本月累计 8 列（业务 4 + 品管 4）+ 当日 7 列；当日没有「触客/销量」。"""
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
     shot = shot_of(body)
     head = shot[: shot.index("</thead>")]
-    assert len(re.findall(r"<th[ >]", head)) == 22  # 5 个分组格 + 17 个列名（品管 8 列只页面看）
-    assert '<th colspan="4" class="g-day">当日</th>' in head
+    assert len(re.findall(r"<th[ >]", head)) == 19  # 3 个分组格 + 16 个列名
+    assert '<th colspan="7" class="g-day">当日</th>' in head
     assert 'class="g-month"' in head and "本月累计（" in head
+    assert head.count("触客/销量") == 1  # 只剩本月累计那一列
     assert "业辅查询登记" in head
-    assert head.count("触客/销量") == 2  # 月 + 当日都用这个列名
     assert "差率" not in shot and "少报" not in shot and "多报" not in shot
     assert "dev-bar" not in shot
     assert "<th>日报</th>" not in shot
@@ -373,31 +372,16 @@ def test_ratio_column_shows_percent(admin_client, day_scene):
 def test_city_subtotal_uses_same_ratio(admin_client, day_scene):
     """城市小计跟店铺行同一套算法：合计触客 ÷ 合计销量；合计销量 0 写「-」。"""
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
-    # 示例市：触客 8+9=17 ÷ 销量 8+5=13 = 130.77%
-    assert "130.77%" in foot_of(body, "示例市 · 2 家")
-    # 邻市：触客 2+4=6 ÷ 销量 0 台 → 「-」
-    assert '<td class="num">-</td>' in foot_of(body, "邻市 · 2 家（未交 1）")
+    def cols(label):
+        row = foot_of(body, label)
+        tds = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
+        return [re.sub(r"<[^>]+>", "", t).strip() for t in tds]
 
+    # 示例市本月：触客 8+9=17 ÷ 销量 8+5=13 = 130.77%
+    assert cols("示例市 · 2 家")[1:4] == ["17", "13", "130.77%"]
+    # 邻市本月：触客 2+4+6（未交的丁店也记触客）=12 ÷ 销量 0 台 → 「-」
+    assert cols("邻市 · 2 家（未交 1）")[1:4] == ["12", "0", "-"]
 
-def test_worst_three_get_red_flag(admin_client, tmp_db):
-    """排名最差 3 家：只给当日「触客/销量」那一格加红底，小计 / 合计行不参与。"""
-    day = work_day()
-    for code, sold, touch in (
-        ("store-alpha", 10, 2),  # 20.00% ← 最差
-        ("store-beta", 10, 5),  # 50.00%
-        ("store-gamma", 10, 9),  # 90.00%
-        ("store-zeta", 10, 20),  # 200.00% ← 最好，不标
-    ):
-        seed_report(code, day, sold)
-        seed_touch(code, day, touch)
-    body = admin_client.get(f"/compare?date={day.isoformat()}").get_data(as_text=True)
-    assert body.count("color: #b91c1c") == 3  # 全表一个池子，只标最差 3 家
-    for name in ("示例甲店", "示例乙店", "示例丙店"):
-        assert "color: #b91c1c" in row_of(body, name)
-    assert "color: #b91c1c" not in row_of(body, "示例巳店")
-    assert "color: #b91c1c" not in foot_of(body, "合计")
-    assert "20.00%" in row_of(body, "示例甲店")
-    assert "color: #b91c1c" in shot_of(body)  # 贴群的图里也是同一套标色
 
 
 def test_row_drops_city_subtitle(admin_client, day_scene):
@@ -1010,9 +994,9 @@ def test_aux_feeds_subtotal_total_and_copy_text(admin_client, day_scene):
     assert '<td class="num">8</td>' in foot_of(body, "示例市 · 2 家")
     assert '<td class="num">3</td>' in foot_of(body, "邻市 · 2 家（未交 1）")
     total = re.findall(r"<td[^>]*>(.*?)</td>", foot_of(body, "合计"), re.S)
-    assert len(total) == 17  # 门店 + 本月 4 + 品管本月 4 + 当日 4 + 品管当日 4
+    assert len(total) == 16  # 门店 + 本月 8（业务 4 + 品管 4）+ 当日 7（业务 3 + 品管 4）
     assert total[4].strip() == "11"  # 本月累计业辅（就这一天，跟当日同数）
-    assert total[12].strip() == "11"  # 当日业辅
+    assert total[11].strip() == "11"  # 当日业辅
 
 
 
@@ -1039,7 +1023,7 @@ def test_month_columns_follow_filter(admin_client, day_scene):
     """本月累计是表里的 4 列（页头不再挂卡）：每家店一行，跟着地市筛选一起缩。"""
     day = day_scene.isoformat()
     body = admin_client.get(f"/compare?date={day}").get_data(as_text=True)
-    span = r'<th colspan="4" class="g-month">本月累计（\d+月1日(–\d+月\d+日)?）</th>'
+    span = r'<th colspan="8" class="g-month">本月累计（\d+月1日(–\d+月\d+日)?）</th>'
     assert re.search(span, shot_of(body))
     assert month_of(body, "示例乙店") == ["9", "5", "180.00%", "—"]
     assert "180.00%" in shot_of(body)  # 月累计同一口径（本月触客 ÷ 本月销量）
@@ -1060,7 +1044,7 @@ def test_shot_has_month_group_header(admin_client, tmp_db):
     shot = shot_of(
         admin_client.get(f"/compare?date={day.isoformat()}").get_data(as_text=True)
     )
-    assert re.search(r'<th colspan="4" class="g-month">本月累计（[^）]+）</th>', shot)
+    assert re.search(r'<th colspan="8" class="g-month">本月累计（[^）]+）</th>', shot)
     assert month_of(shot, "示例甲店") == ["8", "8", "100.00%", "6"]
     assert "管理员" not in shot and "报表" not in shot
 
@@ -1275,9 +1259,10 @@ def test_day_view_shows_quality_columns_page_only(admin_client, day_scene):
     head = shot[: shot.index("</thead>")]
     for name in QUALITY_NAMES:
         assert name in head
-    # 两组品管列头：本月那 4 列跟在「本月累计」后面，当日那 4 列跟在「当日」后面
-    assert 'class="g-month qc-col">品管支撑服务<' in head
-    assert 'class="g-day qc-col">品管支撑服务<' in head
+    # 表头两层：「本月累计」一整块 8 格、「当日」7 格（当日没有「触客/销量」）；
+    # 品管那 4 项直接排在各自期间里，不再挂「品管支撑服务」这层分组标签
+    assert 'colspan="8" class="g-month">本月累计（' in head
+    assert 'colspan="7" class="g-day">当日<' in head
     rows = re.findall(r"<tr>(.*?)</tr>", head, re.S)
 
 
@@ -1290,12 +1275,12 @@ def test_day_view_shows_quality_columns_page_only(admin_client, day_scene):
 
     groups = th_names(rows[0])
     assert groups[0] == "" and groups[1].startswith("本月累计（")
-    assert groups[2:] == ["品管支撑服务", "当日", "品管支撑服务"]
-    # 列序：本月（业务 4 + 品管 4）→ 当日（业务 4 + 品管 4）
+    assert groups[2:] == ["当日"]
+    # 列序：本月（业务 4 + 品管 4）→ 当日（业务 3 + 品管 4，当日没有「触客/销量」）
     assert th_names(rows[1]) == [
         "门店", "触客条数", "手机销量", "触客/销量", "业辅查询登记",
         *QUALITY_NAMES,
-        "触客条数", "手机销量", "触客/销量", "业辅查询登记",
+        "触客条数", "手机销量", "业辅查询登记",
         *QUALITY_NAMES,
     ]
 
@@ -1312,8 +1297,8 @@ def test_day_view_shows_quality_columns_page_only(admin_client, day_scene):
     total = [c.strip() for c in re.findall(r'<td class="num qc-col"[^>]*>(.*?)</td>', foot_of(body, "合计"), re.S)]
     assert len(total) == 8 and total[4] == "3"
 
-    # 只页面看：截图前藏掉这 8 列，贴群文案里也没有
-    assert "hideSelectors: ['.qc-col']" in body
+    # 整张表进图：品管两组列不再靠 hideSelectors 藏掉；贴群文案里仍然没有
+    assert "hideSelectors" not in body
     m = re.search(r'<textarea id="copyText"[^>]*>(.*?)</textarea>', body, re.S)
     assert m is not None and "苏心集结" not in m.group(1)
 

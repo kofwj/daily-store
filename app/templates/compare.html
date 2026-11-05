@@ -3,17 +3,15 @@
 {% block title %}服务通报{% endblock %}
 {% block body %}
 {# 触客/销量：未交日报给徽标、销量 0 给「-」、其余两位小数百分比；两个视图共用一套，免得改一处漏一处。 #}
-{% macro ratio_badge(r, worst=False) -%}
+{% macro ratio_badge(r) -%}
 {%- if not r.submitted -%}
 <span class="dev-badge" style="min-width: 0; background: #f1f5f9; color: #64748b">未交日报</span>
-{%- elif worst -%}
-<span style="font-weight: 800; color: #b91c1c; background: #fee2e2; padding: 1px 7px; border-radius: 4px">{{ r.ratio_text }}</span>
 {%- else -%}
 {{ r.ratio_text }}
 {%- endif -%}
 {%- endmacro %}
-{% macro ratio_cell(r, worst=False) %}
-        <td class="num">{{ ratio_badge(r, worst) }}</td>
+{% macro ratio_cell(r) %}
+        <td class="num">{{ ratio_badge(r) }}</td>
 {% endmacro %}
 {% macro month_row_cells(r) %}
         <td class="num" style="border-left: 2px solid #cbd5e1"><span style="font-weight: 650">{{ r.m_touch }}</span></td>
@@ -159,10 +157,8 @@
     <thead>
       <tr>
         <th class="g-profile"></th>
-        <th colspan="4" class="g-month">本月累计（{{ month.label }}）</th>
-        <th colspan="4" class="g-month qc-col">品管支撑服务</th>
-        <th colspan="4" class="g-day">当日</th>
-        <th colspan="4" class="g-day qc-col">品管支撑服务</th>
+        <th colspan="8" class="g-month">本月累计（{{ month.label }}）</th>
+        <th colspan="7" class="g-day">当日</th>
       </tr>
       <tr>
         <th class="store g-profile">门店</th>
@@ -175,7 +171,6 @@
         {% endfor %}
         <th class="g-day" style="width: 120px; border-left: 2px solid #cbd5e1">触客条数</th>
         <th class="g-day" style="width: 120px">手机销量</th>
-        <th class="g-day" style="width: 150px" title="触客 ÷ 手机销量（理论要 > 100.00%）：低于 100.00% 都不好，销量 0 写「-」">触客/销量</th>
         <th class="g-day" style="width: 140px" title="业辅查询登记：当天这店查了几条，就地填、只改这一格">业辅查询登记</th>
         {% for code, name in quality_cols %}
         <th class="g-day qc-col" style="width: 92px{% if loop.first %}; border-left: 2px solid #cbd5e1{% endif %}" title="品管支撑服务·当日：{{ name }}">{{ name }}</th>
@@ -211,10 +206,9 @@
           {% elif r.submitted %}
           <span style="font-weight: 650"{% if r.fix_title %} title="{{ r.fix_title }}"{% endif %}>{{ r.sold }}</span>
           {% else %}
-          <span class="muted">—</span>
+          {{ ratio_badge(r) }}
           {% endif %}
         </td>
-        {{ ratio_cell(r, r.worst) }}
         <td class="num">
           {% if can_edit and r.submitted %}
           <form method="post" action="{{ url_for('compare_aux') }}" class="cell-edit" onsubmit="return confirm('把 {{ r.name }} {{ date.isoformat() }} 的业辅查询登记改成这个数？只改这一格。')">
@@ -250,7 +244,6 @@
         {% endfor %}
         <td class="num" style="border-left: 2px solid #cbd5e1">{{ g.touch }}</td>
         <td class="num">{{ g.sold }}</td>
-        <td class="num">{% if g.n %}{{ g.ratio_text }}{% else %}<span class="muted">—</span>{% endif %}</td>
         <td class="num">{{ g.aux }}</td>
         {% for code, name in quality_cols %}
         <td class="num qc-col"{% if loop.first %} style="border-left: 2px solid #cbd5e1"{% endif %}>{{ g.qc_day[code] }}</td>
@@ -265,7 +258,6 @@
         {% endfor %}
         <td class="num" style="border-top: 2px solid #94a3b8; border-left: 2px solid #cbd5e1">{{ totals.touch }}</td>
         <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.sold }}</td>
-        {{ total_cell(totals.n, totals.ratio_text, 'border-top: 2px solid #94a3b8') }}
         <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.aux }}</td>
         {% for code, name in quality_cols %}
         <td class="num qc-col" style="border-top: 2px solid #94a3b8{% if loop.first %}; border-left: 2px solid #cbd5e1{% endif %}">{{ totals.qc_day[code] }}</td>
@@ -302,8 +294,7 @@
     fitContent: true,
     // 截图前把可编辑格子换成纯数字（拍完自动还原）
     plainCells: { form: '#compareShot .cell-edit', text: '#compareShot .cell-plain' },
-    // 品管支撑服务只在本页看：拍图前把这 8 列藏掉，图跟老版一模一样（拍完自动还原）
-    hideSelectors: ['.qc-col']
+    // 拍图就是整张表（品管两组列也在图里），不再藏列
   };
 </script>
 {% endif %}
