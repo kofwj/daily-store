@@ -47,6 +47,8 @@ from .metrics_seed import QUALITY_CODES, format_stored, section_metrics, to_stor
 
 PHONE_CODE = "phone_sales"
 COMPARE_TITLE = "服务通报"
+# 抬头跟通报表一个模子：<地市>vivo零售运营中心<表名>
+COMPARE_BRAND = "vivo零售运营中心"
 _WEEKDAYS = ("一", "二", "三", "四", "五", "六", "日")
 # 只有这两个角色能进这页（地市负责人要用它改本市手机销量）
 _EDIT_ROLES = ("admin", "city")
@@ -207,6 +209,16 @@ def _month_total(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
 
 def _city_of(store) -> str:
     return (store["city"] or "").strip() or "未分地市"
+
+
+def bulletin_title(city: str) -> str:
+    """通报抬头：跟通报表一个模子——「南通vivo零售运营中心服务通报」。
+
+    筛了地市就带地市（南通市 → 南通），一次看几个地市时没有单一主体，
+    只写「vivo零售运营中心服务通报」，不硬凑一个城市名。
+    """
+    short = (city or "").strip().replace("市", "")
+    return f"{short}{COMPARE_BRAND}{COMPARE_TITLE}" if short else f"{COMPARE_BRAND}{COMPARE_TITLE}"
 
 
 def _day_scope(stores) -> Dict[str, Any]:
@@ -617,11 +629,13 @@ def register_compare(app) -> None:
                 month = parse_date(
                     request.args.get("month"), today.replace(day=1)
                 ).replace(day=1)
+                title = bulletin_title(store["city"] or "")
                 payload = _store_month_payload(conn, store, month, role=role, today=today)
                 return render_template(
                     "compare.html",
                     view="store",
                     stores=stores,
+                    bulletin_title=title,
                     **payload,
                 )
             biz_date = parse_date(request.args.get("date"), today - timedelta(days=1))
@@ -633,6 +647,9 @@ def register_compare(app) -> None:
                 role=role,
                 today=today,
                 scope_label=scope["label"],
+            )
+            title = bulletin_title(
+                scope["city"] or (scope["cities"][0] if len(scope["cities"]) == 1 else "")
             )
         return render_template(
             "compare.html",
@@ -646,6 +663,7 @@ def register_compare(app) -> None:
             area=scope["area"],
             areas=scope["areas"],
             advisor=scope["advisor"],
+            bulletin_title=title,
             **payload,
         )
 

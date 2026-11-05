@@ -1168,6 +1168,42 @@ def test_compare_title_constant():
     assert COMPARE_TITLE == "服务通报"
 
 
+def test_bulletin_title_helper():
+    """抬头：<地市>vivo零售运营中心服务通报；没有单一地市就不硬凑城市名。"""
+    from app.views_compare import bulletin_title
+
+    assert bulletin_title("南通市") == "南通vivo零售运营中心服务通报"
+    assert bulletin_title("泰州市") == "泰州vivo零售运营中心服务通报"
+    assert bulletin_title("") == "vivo零售运营中心服务通报"
+
+
+def test_bulletin_title_on_page_and_shot(admin_client, day_scene):
+    """页面 h1 和截图抬头一起带公司名：看全部地市不写城市，筛了地市就写地市。"""
+    day = day_scene.isoformat()
+    all_title = "vivo零售运营中心服务通报"
+    city_title = "示例vivo零售运营中心服务通报"
+
+    body = admin_client.get(f"/compare?date={day}").get_data(as_text=True)
+    assert f"<h1>\n      {all_title} ·" in body
+    assert f'"margin: 0 0 3px">{all_title}</div>' in shot_of(body)
+
+    scoped = admin_client.get(f"/compare?date={day}&city=示例市").get_data(as_text=True)
+    assert f"<h1>\n      {city_title} ·" in scoped
+    assert f'"margin: 0 0 3px">{city_title}</div>' in shot_of(scoped)
+
+
+def test_store_view_bulletin_title_uses_store_city(admin_client, tmp_db):
+    """单店逐日抬头用这家店的地市。"""
+    day = work_day()
+    sid = store_id("store-alpha")
+    body = admin_client.get(
+        f"/compare?view=store&store_id={sid}&month={day.replace(day=1).isoformat()}"
+    ).get_data(as_text=True)
+    title = "示例vivo零售运营中心服务通报"
+    assert f"<h1>\n      {title} ·" in body
+    assert f'"margin: 0 0 3px">{title}</div>' in shot_of(body)
+
+
 # ---------------------------------------------------------------- 品管支撑服务 / 今日业辅查询
 
 QUALITY_NAMES = ("苏心集结", "心级服务", "好评回复", "客户感知录入")
