@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from flask import Response, flash, g, redirect, render_template, request, url_for
 
-from . import db, insights, policy
+from . import city_order, db, policy
 from .helpers import (
     accessible_stores,
     default_home,
@@ -212,11 +212,11 @@ def _city_of(store) -> str:
 
 
 def _day_scope(stores) -> Dict[str, Any]:
-    """单日视图的地市 / 区域经理 / 顾问筛选：跟通报表、洞察页同一套控件，只有默认值不同。
+    """单日视图的地市 / 区域经理 / 顾问筛选：跟通报表同一套控件，只有默认值不同。
 
     通报表默认落在南通市，这页默认「全部」——打开是单日全店视野，想看某个
     地市 / 哪位区域经理 / 哪类顾问再选。传了不认识的值当没传，别把表滤成空的。
-    顾问筛选照洞察页（`?advisor=yes|no`），只作用于单日视图，单店逐日不涉及。
+    顾问筛选是 `?advisor=yes|no`，只作用于单日视图，单店逐日不涉及。
     """
     cities, managers = scope_options(stores)
     city = (request.args.get("city") or "").strip()
@@ -248,7 +248,7 @@ def _day_scope(stores) -> Dict[str, Any]:
 
 
 def _order_rows(
-    rows: List[Dict[str, Any]], city_order: Sequence[str], stores
+    rows: List[Dict[str, Any]], order: Sequence[str], stores
 ) -> List[Dict[str, Any]]:
     """地市按目录顺序分组；组内按区县固定顺序（启东 → … → 海安），没命中的接在最后。
 
@@ -263,7 +263,7 @@ def _order_rows(
             catalog.get(r["id"], 0),
         ),
     )
-    return insights.group_rows_by_city_order(ordered, city_order, lambda r: r["city"])
+    return city_order.group_rows_by_city_order(ordered, order, lambda r: r["city"])
 
 
 def day_copy_text(
@@ -400,8 +400,8 @@ def _day_payload(
         )
     month["total"] = _month_total(rows)
 
-    city_order = insights.catalog_city_order(stores)
-    ordered = _order_rows(rows, city_order, stores)
+    order = city_order.catalog_city_order(stores)
+    ordered = _order_rows(rows, order, stores)
     # 最差 3 家标红：只数「已交日报 + 当天卖了」的店，合计 / 小计行不参与
     ranked = [r for r in ordered if r["submitted"] and int(r["sold"]) > 0]
     worst_ids = {r["id"] for r in sorted(ranked, key=lambda r: r["ratio"])[:_WORST_N]}

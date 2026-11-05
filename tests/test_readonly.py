@@ -92,7 +92,6 @@ def test_readonly_cannot_write(client):
 def test_readonly_cannot_admin(client):
     _mk_readonly(client, username="rd_admin_block", store_code="store-alpha")
     for path in (
-        "/board",
         "/incentive",
         "/edits",
         "/logins",

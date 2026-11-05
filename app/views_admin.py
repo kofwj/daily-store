@@ -1,15 +1,14 @@
-"""管理员专属：看板、通报表、CSV、月度考核、修改审计。"""
+"""管理员专属：通报表、CSV、月度考核、修改审计。"""
 
 from __future__ import annotations
 
 import json
-import re
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List
+from typing import Dict
 
 from flask import Response, flash, g, redirect, render_template, request, url_for
 
-from . import bulletin, db, insights, invoice, settlement
+from . import bulletin, db, invoice, settlement
 from .helpers import (
     accessible_stores,
     admin_required,
@@ -21,7 +20,6 @@ from .helpers import (
     advisor_score_month,
     advisor_score_open,
     build_diff,
-    close_rate,
     deal_diff,
     incentive_rules,
     login_required,
@@ -35,9 +33,7 @@ from .helpers import (
     review_preset_key,
     review_template_setting,
     store_forecasts,
-    store_label,
     values_for_broadcast,
-    with_close_rate,
     xlsx_bytes,
     xlsx_response,
 )
@@ -45,10 +41,7 @@ from .helpers import (
     month_end as _month_end,
 )
 from .metrics_seed import (
-    KPI_TARGETS,
-    format_display,
     format_stored,
-    from_stored,
     rollup_pair,
     to_stored,
 )
@@ -148,196 +141,6 @@ def _bulletin_rows(conn, stores, biz_date: date):
     return rows
 
 
-def _board_bisuan(row: Dict[str, Any], view: str) -> float:
-    """看板排序键：比算新增（今日用日值，本月用累计）。"""
-    key = "day" if view == "today" else "month"
-    for item in row.get("kpis") or []:
-        if item.get("code") == "bisuan_total":
-            return float(item.get(key) or 0)
-    return 0.0
-
-
-def _board_city_groups(ranked: List[Dict[str, Any]], view: str) -> List[Dict[str, Any]]:
-    """排行按地市汇总：家数 + 三项 KPI + 触客。"""
-    groups: List[Dict[str, Any]] = []
-    index: Dict[str, Dict[str, Any]] = {}
-    for r in ranked:
-        city = r["city"]
-        g = index.get(city)
-        if g is None:
-            g = {
-                "city": city,
-                "n": 0,
-                "kpis": [
-                    {"code": k["code"], "name": k["name"], "value": 0.0} for k in r["kpis"]
-                ],
-                "deal_total": 0,
-                "deal_closed": 0,
-            }
-            index[city] = g
-            groups.append(g)
-        g["n"] += 1
-        deal = r["deal_today"] if view == "today" else r["deal_month"]
-        g["deal_total"] += int(deal["total"] or 0)
-        g["deal_closed"] += int(deal["closed"] or 0)
-        key = "day" if view == "today" else "month"
-        for i, k in enumerate(r["kpis"]):
-            g["kpis"][i]["value"] += float(k.get(key) or 0)
-    for g in groups:
-        g["deal_rate"] = close_rate(g["deal_closed"], g["deal_total"])
-        for k in g["kpis"]:
-            scale = "bisuan" if k["code"] == "bisuan_total" else k["code"]
-            k["value_text"] = format_display(scale, k["value"])
-    return groups
-
-
-def _board_payload(conn, biz_date: date, view: str, city: str = ""):
-    """看板页面和导出共用的取数。"""
-    stores = accessible_stores(conn)
-    cities = []
-    for s in stores:
-        city_name = (s["city"] or "").strip() or "未分地市"
-        if city_name not in cities:
-            cities.append(city_name)
-    if city and city not in cities:
-        city = ""
-    if city:
-        stores = [s for s in stores if ((s["city"] or "").strip() or "未分地市") == city]
-    kpi_targets = db.list_kpi_targets(conn)
-    rules = incentive_rules(conn)
-    store_ids = [s["id"] for s in stores]
-    month_begin = biz_date.replace(day=1)
-    deal_today_map = db.deal_counts(conn, store_ids, biz_date, biz_date)
-    deal_month_map = db.deal_counts(conn, store_ids, month_begin, biz_date)
-    judged_map = store_forecasts(conn, stores, biz_date, rules)
-    rows = []
-    for store in stores:
-        sid = store["id"]
-        pairs = values_for_broadcast(conn, sid, biz_date)
-        kpis = []
-        for code, name, _note in KPI_TARGETS:
-            if code == "ai_contract":
-                day, cum = pairs.get("ai_contract", (0, 0))
-            else:
-                day, cum = rollup_pair(pairs, code, biz_date)
-            target = kpi_targets.get(code, 0)
-            scale = "bisuan" if code == "bisuan_total" else code
-            day_disp = from_stored(scale, day)
-            month_disp = from_stored(scale, cum)
-            kpis.append(
-                {
-                    "code": code,
-                    "name": name,
-                    "day": day_disp,
-                    "day_text": format_stored(scale, day),
-                    "month": month_disp,
-                    "month_text": format_stored(scale, cum),
-                    "target": target,
-                    "progress": (month_disp / target * 100) if target else None,
-                }
-            )
-        rep = db.get_report(conn, sid, biz_date)
-        deal_today = with_close_rate(deal_today_map.get(sid, {"total": 0, "closed": 0}))
-        deal_month = with_close_rate(deal_month_map.get(sid, {"total": 0, "closed": 0}))
-        rows.append(
-            {
-                "store": store,
-                "city": (store["city"] or "").strip() or "未分地市",
-                "submitted_today": rep is not None,
-                "submitter_name": rep["submitter_name"] if rep else None,
-                "submitted_at": rep["submitted_at"] if rep else None,
-                "reported_this_month": bool(judged_map[sid].get("reported")),
-                "forecast": judged_map[sid],
-                "kpis": kpis,
-                "deal_today": deal_today,
-                "deal_month": deal_month,
-            }
-        )
-    max_day = {k: 0 for k, _n, _x in KPI_TARGETS}
-    max_month = {k: 0 for k, _n, _x in KPI_TARGETS}
-    for r in rows:
-        for k in r["kpis"]:
-            max_day[k["code"]] = max(max_day[k["code"]], k["day"])
-            max_month[k["code"]] = max(max_month[k["code"]], k["month"])
-    if view == "today":
-        ranked = [r for r in rows if r["submitted_today"]]
-        missing = [r for r in rows if not r["submitted_today"]]
-    else:
-        ranked = [r for r in rows if r["reported_this_month"]]
-        missing = [r for r in rows if not r["reported_this_month"]]
-    ranked.sort(key=lambda r: (-_board_bisuan(r, view), store_label(r["store"])))
-    for rank, r in enumerate(ranked, 1):
-        r["rank"] = rank
-        for k in r["kpis"]:
-            k["top_day"] = k["day"] > 0 and k["day"] == max_day[k["code"]]
-            k["top_month"] = k["month"] > 0 and k["month"] == max_month[k["code"]]
-    ranked = insights.group_rows_by_city_order(
-        ranked, insights.catalog_city_order(stores), lambda r: r["city"]
-    )
-    city_groups = _board_city_groups(ranked, view)
-    if len(city_groups) <= 1:
-        city_groups = []
-    n = len(rows)
-    sum_day = {k: 0 for k, _n, _x in KPI_TARGETS}
-    sum_month = {k: 0 for k, _n, _x in KPI_TARGETS}
-    done_today = sum(1 for r in rows if r["submitted_today"])
-    done_month = sum(1 for r in rows if r["reported_this_month"])
-    for r in rows:
-        for k in r["kpis"]:
-            sum_day[k["code"]] += k["day"]
-            sum_month[k["code"]] += k["month"]
-    grand = []
-    for code, name, note in KPI_TARGETS:
-        scale = "bisuan" if code == "bisuan_total" else code
-        day_v = sum_day[code]
-        month_v = sum_month[code]
-        target_v = kpi_targets.get(code, 0) * n
-        grand.append(
-            {
-                "code": code,
-                "name": name,
-                "note": note,
-                "day": day_v,
-                "month": month_v,
-                "day_text": format_display(scale, day_v),
-                "month_text": format_display(scale, month_v),
-                "target": target_v,
-                "progress": (month_v / target_v * 100) if target_v and n else None,
-            }
-        )
-    deal_grand: Dict[str, Any] = {
-        "day_total": sum(int(r["deal_today"]["total"]) for r in rows),
-        "day_closed": sum(int(r["deal_today"]["closed"]) for r in rows),
-        "month_total": sum(int(r["deal_month"]["total"]) for r in rows),
-        "month_closed": sum(int(r["deal_month"]["closed"]) for r in rows),
-    }
-    deal_grand["day_rate"] = close_rate(deal_grand["day_closed"], deal_grand["day_total"])
-    deal_grand["month_rate"] = close_rate(deal_grand["month_closed"], deal_grand["month_total"])
-    return {
-        "biz_date": biz_date,
-        "view": view,
-        "rows": rows,
-        "ranked": ranked,
-        "missing": missing,
-        "grand": grand,
-        "deal_grand": deal_grand,
-        "coverage_today": round(done_today / n * 100) if n else 0,
-        "coverage_month": round(done_month / n * 100) if n else 0,
-        "done_today": done_today,
-        "done_month": done_month,
-        "n": n,
-        "cities": cities,
-        "city": city,
-        "city_groups": city_groups,
-        "chase_text": insights.chase_copy_text(
-            as_of=biz_date,
-            names=[store_label(r["store"]) for r in missing],
-            kind="today" if view == "today" else "month",
-            scope_label=city,
-        ),
-    }
-
-
 def _audit_diff(r, before, after, names) -> str:
     """把审计行的 before/after 翻译成一句话 diff（按 kind 分派）。"""
     kind = r["kind"]
@@ -372,219 +175,6 @@ def _audit_diff(r, before, after, names) -> str:
 
 
 def register_admin(app) -> None:
-    @app.route("/board")
-    @admin_required
-    def board():
-        biz_date = parse_date(request.args.get("date"))
-        view = request.args.get("view") or "today"
-        if view not in ("today", "month"):
-            view = "today"
-        city = (request.args.get("city") or "").strip()
-        with db.get_db() as conn:
-            payload = _board_payload(conn, biz_date, view, city)
-            payload["is_admin"] = g.user["role"] == "admin"
-            return render_template("board.html", **payload)
-
-    @app.route("/insights")
-    @admin_required
-    def insights_page():
-        as_of = parse_date(request.args.get("date"))
-        with db.get_db() as conn:
-            all_stores = accessible_stores(conn)
-            scope = request_scope(all_stores)
-            stores = scope["stores"]
-            advisor = (request.args.get("advisor") or "").strip()
-            if advisor not in ("yes", "no"):
-                advisor = ""
-            if advisor == "yes":
-                stores = [s for s in stores if (s["advisor_name"] or "").strip()]
-            elif advisor == "no":
-                stores = [s for s in stores if not (s["advisor_name"] or "").strip()]
-            store_ids = [int(s["id"]) for s in stores]
-            month_start = as_of.replace(day=1)
-            this_start, this_end = insights.week_span(as_of)
-            prev_start, prev_end = insights.prev_week_span(as_of)
-            month_facts = db.range_metric_totals(conn, store_ids, month_start, as_of, insights.FACT_CODES)
-            week_facts = db.range_metric_totals(conn, store_ids, this_start, this_end, insights.FACT_CODES)
-            prev_facts = db.range_metric_totals(conn, store_ids, prev_start, prev_end, insights.FACT_CODES)
-            reported_month = db.stores_reported_in_month(conn, store_ids, as_of)
-            reported_today = db.stores_reported_in_range(conn, store_ids, as_of, as_of)
-            month_key = as_of.strftime("%Y-%m")
-            mobile_bisuan = db.bisuan_mobile_map(conn, month_key)
-            payload = insights.build_insights(
-                stores=stores,
-                as_of=as_of,
-                kpi_targets=db.list_kpi_targets(conn),
-                month_facts=month_facts,
-                week_facts=week_facts,
-                prev_week_facts=prev_facts,
-                reported_today=reported_today,
-                reported_month=reported_month,
-                mobile_bisuan=mobile_bisuan,
-            )
-            if advisor == "yes":
-                scope["label"] = scope["label"] + " · 有顾问"
-            elif advisor == "no":
-                scope["label"] = scope["label"] + " · 无顾问"
-            scope_label = scope["label"] if (scope["active"] or advisor) else ""
-            payload["chase_text"] = insights.chase_lag_copy_text(
-                as_of=payload["as_of"],
-                pace=payload["pace"],
-                missing_today=payload["missing_today"],
-                laggards=payload["laggards"],
-                scope_label=scope_label,
-            )
-            payload.update({
-                "scope": scope,
-                "advisor": advisor,
-                "show_idle": (request.args.get("idle") or "").strip() == "1",
-            })
-            return render_template("insights.html", **payload)
-
-    @app.route("/deviation")
-    @admin_required
-    def deviation():
-        """填报偏差榜：截止日同期填报比算 vs 移动校准比算。
-
-        温差=移动−asof 同期填报。正=少报，负=多报。只列有移动数的店。
-        """
-        today_d = db.today_local()
-        month = parse_date(request.args.get("month"), today_d.replace(day=1)).replace(day=1)
-        month_end = _month_end(month)
-        month_key = month.strftime("%Y-%m")
-        prev_month = (month - timedelta(days=1)).replace(day=1)
-        next_month = _month_end(month) + timedelta(days=1)
-        # 对照截止日：当月到今天，往月到月末，未来月锁在月初（别让 asof 落到 ref 之后）
-        ref = insights.deviation_ref(month, month_end, today_d)
-        with db.get_db() as conn:
-            stores = accessible_stores(conn)
-            mobile = db.bisuan_mobile_map(conn, month_key)
-            asof_raw = db.bisuan_mobile_asof_map(conn, month_key)
-            asof_by_store = {
-                int(sid): insights.clamp_mobile_asof(
-                    asof_raw.get(int(sid), ""), month_start=month, ref=ref
-                )
-                for sid in mobile
-            }
-            if mobile:
-                daily = db.range_metric_days(
-                    conn, list(mobile), month, ref, ("bisuan", "bisuan_high")
-                )
-                reported = insights.fold_bisuan_reported(
-                    daily, store_ids=list(mobile), asof_by_store=asof_by_store
-                )
-            else:
-                reported = {}
-            rows = insights.build_deviation_board(
-                stores=stores,
-                reported=reported,
-                mobile_bisuan=mobile,
-                asof_by_store=asof_by_store,
-                asof_raw=asof_raw,
-                month_end=month_end,
-            )
-            bulletin_cities = [
-                ((s["city"] or "").strip() or "南通市")
-                for s in stores
-                if (s["mobile_code"] or "").strip()
-            ]
-            by_id = {int(s["id"]): s for s in stores}
-            city_order = insights.catalog_city_order(stores)
-            visible_ids = {int(s["id"]) for s in stores}
-            hidden_mobile_n = sum(1 for sid in mobile if int(sid) not in visible_ids)
-            uncompared_n = len(stores) - len(rows)
-            for i, r in enumerate(rows, 1):
-                r["rank"] = i
-                r["bulletin_city"] = insights.store_bulletin_city(by_id.get(int(r["id"])), bulletin_cities)
-        has_mobile = bool(rows)
-        under_n = sum(1 for r in rows if r["under"])
-        over_n = sum(1 for r in rows if r["over"])
-        net_diff = sum(int(r["diff"]) for r in rows)
-        show_all = (request.args.get("all") or "").strip() == "1"
-        side = (request.args.get("side") or "").strip()
-        if side not in ("under", "over"):
-            side = ""
-        hidden_small_n = sum(1 for r in rows if int(r["abs_diff"]) < insights.DEV_MIN_ABS)
-        shown = list(rows) if show_all else [r for r in rows if int(r["abs_diff"]) >= insights.DEV_MIN_ABS]
-        if side == "under":
-            shown = [r for r in shown if r["under"]]
-        elif side == "over":
-            shown = [r for r in shown if r["over"]]
-        shown = insights.group_rows_by_city_order(shown, city_order, lambda r: r["city"])
-        city_groups: List[Dict[str, Any]] = []
-        index: Dict[str, Dict[str, Any]] = {}
-        for r in shown:
-            g = index.get(r["city"])
-            if g is None:
-                g = {"city": r["city"], "n": 0, "net_diff": 0, "under_n": 0, "over_n": 0}
-                index[r["city"]] = g
-                city_groups.append(g)
-            g["n"] += 1
-            g["net_diff"] += int(r["diff"])
-            if r["under"]:
-                g["under_n"] += 1
-            if r["over"]:
-                g["over_n"] += 1
-        if len(city_groups) <= 1:
-            city_groups = []
-        max_abs = max((int(r["abs_diff"]) for r in shown), default=0)
-        return render_template(
-            "deviation.html",
-            rows=rows,
-            shown=shown,
-            month=month,
-            month_key=month_key,
-            month_end=month_end,
-            prev_month=prev_month,
-            next_month=next_month,
-            has_mobile=has_mobile,
-            under_n=under_n,
-            over_n=over_n,
-            max_abs=max_abs,
-            net_diff=net_diff,
-            show_all=show_all,
-            side=side,
-            hidden_small_n=hidden_small_n,
-            uncompared_n=uncompared_n,
-            hidden_mobile_n=hidden_mobile_n,
-            city_groups=city_groups,
-        )
-
-    @app.route("/board.xlsx")
-    @admin_required
-    def board_xlsx():
-        """导出当前看板视图(今日/本月 + 地市)为 Excel。"""
-        biz_date = parse_date(request.args.get("date"))
-        view = request.args.get("view") or "today"
-        if view not in ("today", "month"):
-            view = "today"
-        city = (request.args.get("city") or "").strip()
-        with db.get_db() as conn:
-            payload = _board_payload(conn, biz_date, view, city)
-        header = ["排名", "门店", "地市"]
-        header += [g["name"] for g in payload["grand"]]
-        header += ["触客", "成交", "成功率", "考核", "奖罚"]
-        data_rows = []
-        for r in payload["ranked"]:
-            deal = r["deal_today"] if view == "today" else r["deal_month"]
-            data_rows.append(
-                [
-                    r["rank"],
-                    r["store"]["short_name"] or r["store"]["name"],
-                    r["store"]["city"] or "",
-                    *[k["day"] if view == "today" else k["month"] for k in r["kpis"]],
-                    deal["total"],
-                    deal["closed"],
-                    deal["rate"],
-                    r["forecast"]["label"],
-                    r["forecast"]["money_text"],
-                ]
-            )
-        tag = "today" if view == "today" else "month"
-        city_tag = re.sub(r"[^A-Za-z0-9]+", "", city) or "all"
-        filename = f"board_{tag}_{biz_date.isoformat()}_{city_tag}.xlsx"
-        return xlsx_response(xlsx_bytes(header, data_rows, sheet="多店看板"), filename)
-
     @app.route("/bulletin")
     @readonly_required
     def bulletin_page():
