@@ -282,7 +282,6 @@ def test_broadcast_from_saved_facts(tmp_db):
             biz_date=date(2026, 8, 13),
             values={
                 "phone_sales": 1,
-                "id_check": 1,
                 "lead": 0,
                 "reserve": 0,
                 "bisuan": 0,
@@ -301,7 +300,6 @@ def test_broadcast_from_saved_facts(tmp_db):
             biz_date=date(2026, 8, 1),
             values={
                 "phone_sales": 12,
-                "id_check": 3,
                 "lead": 9,
                 "reserve": 2,
                 "bisuan": 5,
@@ -326,7 +324,6 @@ def test_broadcast_from_saved_facts(tmp_db):
             biz_date=date(2026, 8, 13),
             values={
                 "phone_sales": 1,
-                "id_check": 1,
                 "bisuan_high": 3,
                 "broadband": 3,
                 "tv": 3,
@@ -727,3 +724,54 @@ def test_require_lastrowid():
     with pytest.raises(RuntimeError, match="SQLite INSERT did not return a valid lastrowid"):
         require_lastrowid(cur)
 
+
+
+def test_retire_id_check_keeps_history_and_stops_being_written(tmp_db):
+    """「查询身份证数」下线：老库历史值照留，保存日报也不再把它写回 0。"""
+    from datetime import date as _date
+
+    from app import db
+
+    with db.get_db() as conn:
+        # 老库的样子：metrics 里「查询身份证数」还启用着，日报里存过值，迁移 21 还没记上
+        conn.execute(
+            "INSERT OR REPLACE INTO metrics(code, name, section, sort_order, active) "
+            "VALUES('id_check','查询身份证数','basic',20,1)"
+        )
+        cur = conn.execute(
+            "INSERT INTO stores(name, code, sort_order, created_at) VALUES('示例品管店','store-qc',99,'2026-01-01')"
+        )
+        sid = cur.lastrowid
+        conn.execute(
+            "INSERT INTO daily_facts(biz_date, store_id, metric_code, day_value) VALUES (?, ?, 'id_check', 6)",
+            (_date(2026, 10, 1).isoformat(), sid),
+        )
+        conn.execute("DELETE FROM schema_migrations WHERE version=21")
+        conn.commit()
+
+    db.migrate()  # 升级：只停用指标，历史值一个字不动
+
+    with db.get_db() as conn:
+        applied = conn.execute("SELECT name FROM schema_migrations WHERE version=21").fetchone()
+        codes = [row[0] for row in db.list_metrics(conn)]
+        assert applied["name"] == "retire_id_check_metric"
+        assert "id_check" not in codes  # 停用后 list_metrics 不再给
+        assert "aux_query" not in codes  # 业辅查询走 aux_queries，不占日报指标
+        # 现在存一份日报，历史 id_check 不该被 save_daily 写成 0
+        db.save_daily(
+            conn,
+            store_id=sid,
+            biz_date=_date(2026, 10, 1),
+            user_id=1,
+            values={"phone_sales": 3},
+        )
+        row = conn.execute(
+            "SELECT day_value FROM daily_facts WHERE store_id=? AND biz_date=? AND metric_code='id_check'",
+            (sid, _date(2026, 10, 1).isoformat()),
+        ).fetchone()
+        saved = conn.execute(
+            "SELECT day_value FROM daily_facts WHERE store_id=? AND biz_date=? AND metric_code='phone_sales'",
+            (sid, _date(2026, 10, 1).isoformat()),
+        ).fetchone()
+    assert int(row["day_value"]) == 6
+    assert int(saved["day_value"]) == 3

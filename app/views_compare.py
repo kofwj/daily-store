@@ -1,4 +1,4 @@
-"""触客通报：手机销量 vs 触客条数的单日全店主表 + 单店逐日下钻，可事后修正手机销量。
+"""服务通报（原「触客通报」）：手机销量 vs 触客条数的单日全店主表 + 单店逐日下钻，可事后修正手机销量。
 口径（与 README「口径」一致）：
 - 触客条数 = 该店当日 deal_posts 的全部记录数（COUNT(*)，不看是否成交）
 - 手机销量 = 该店当日日报的 phone_sales
@@ -15,6 +15,9 @@
   每个店一行；触客含未交日报那几天，销量只可能出自已交日报，某店这月没交过日报那格写「—」
 - 触客按定义就是当天的：deal_posts.biz_date 恒等于录入当天，没有补交一说，
   所以「昨天触客 0 条」就是当天真没录，本表不做任何回填
+- 品管支撑服务 4 项（苏心集结 / 心级服务 / 好评回复 / 客户感知录入）挂在单日表最右边两组列：
+  「本月累计」4 列 + 「当日」4 列，口径跟别的列一样（当日只算已交日报的店，月累计算表里所有行）；
+  只页面和导出的 Excel 里看，不进贴群文案、也不进截图（`.qc-col` 由 shot.js 拍照前隐藏）
 """
 
 from __future__ import annotations
@@ -40,10 +43,10 @@ from .helpers import (
     xlsx_bytes,
     xlsx_response,
 )
-from .metrics_seed import format_stored, to_stored
+from .metrics_seed import QUALITY_CODES, format_stored, section_metrics, to_stored
 
 PHONE_CODE = "phone_sales"
-COMPARE_TITLE = "触客通报"
+COMPARE_TITLE = "服务通报"
 _WEEKDAYS = ("一", "二", "三", "四", "五", "六", "日")
 # 只有这两个角色能进这页（地市负责人要用它改本市手机销量）
 _EDIT_ROLES = ("admin", "city")
@@ -121,6 +124,21 @@ def _aux_title(meta: Optional[Mapping[str, Any]]) -> str:
     return f"业辅查询登记：{' · '.join(bits)}" if bits else ""
 
 
+def _code_values(raw: Optional[Mapping[str, int]], codes: Sequence[str]) -> Dict[str, int]:
+    """某店某几个指标的合计：缺的补 0，脏值当 0。"""
+    out: Dict[str, int] = {}
+    for code in codes:
+        try:
+            out[code] = int((raw or {}).get(code, 0) or 0)
+        except (TypeError, ValueError):
+            out[code] = 0
+    return out
+
+
+# 品管支撑服务 4 项（code, name）：单日表最右边两组列、导出的 Excel 都照这个顺序
+QUALITY_COLS = section_metrics("quality")
+
+
 def _fix_title(fix: Optional[Mapping[str, Any]]) -> str:
     """手机销量改过的留痕：只说「改了什么、什么时候」，不写谁改的（图里要干净）。"""
     if not fix:
@@ -181,6 +199,10 @@ def _month_total(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     total["ratio_text"] = (
         _ratio_text(total["touch"], total["sold"]) if total["n"] else "—"
     )
+    # 品管支撑服务·本月累计：跟表里看得见那几行对齐（Excel 表尾要用）
+    total["qc_month"] = {
+        code: sum(int(r["qc_month"].get(code, 0)) for r in rows) for code in QUALITY_CODES
+    }
     return total
 
 
@@ -263,7 +285,7 @@ def day_copy_text(
     if not rows:
         return ""  # 没有店进表（全静默）：没有可通报的内容
     label = (scope_label or "").strip()
-    head = f"【触客通报】{biz_date.month}月{biz_date.day}日"
+    head = f"【服务通报】{biz_date.month}月{biz_date.day}日"
     if label:
         head += f"（{label}）"
     parts: List[str] = [head]
@@ -319,6 +341,10 @@ def _day_payload(
     reports = db.daily_reports_on_date(conn, ids, biz_date)
     marks = phone_fix_marks(conn, ids, biz_date, biz_date, metric_code=PHONE_CODE)
     aux = db.aux_days(conn, ids, biz_date, biz_date)
+    # 品管支撑服务 4 项：当日 + 本月累计（1 日 → 所选日），一次取齐，别逐店查
+    month_start = biz_date.replace(day=1)
+    quality_day = db.range_metric_totals(conn, ids, biz_date, biz_date, QUALITY_CODES)
+    quality_month = db.range_metric_totals(conn, ids, month_start, biz_date, QUALITY_CODES)
 
     rows: List[Dict[str, Any]] = []
     silent_n = 0
@@ -354,6 +380,8 @@ def _day_payload(
                 "fix_title": _fix_title((marks.get(sid) or {}).get(day_key)),
                 "aux": aux_n,
                 "aux_title": _aux_title(aux_meta),
+                "qc_day": _code_values(quality_day.get(sid), QUALITY_CODES),
+                "qc_month": _code_values(quality_month.get(sid), QUALITY_CODES),
             }
         )
 
@@ -393,6 +421,13 @@ def _day_payload(
         _ratio_text(totals["touch"], totals["sold"]) if totals["n"] else "—"
     )
     totals["below"] = totals["n"] > 0 and totals["touch"] < totals["sold"]
+    # 品管支撑服务：当日跟其它当日列一个规矩（只算已交日报的店），本月累计算表里所有行
+    totals["qc_day"] = {
+        code: sum(int(r["qc_day"].get(code, 0)) for r in reported_rows) for code in QUALITY_CODES
+    }
+    totals["qc_month"] = {
+        code: sum(int(r["qc_month"].get(code, 0)) for r in ordered) for code in QUALITY_CODES
+    }
 
     city_groups: List[Dict[str, Any]] = []
     index: Dict[str, Dict[str, Any]] = {}
@@ -412,6 +447,8 @@ def _day_payload(
                 "m_diff": 0,
                 "m_aux": 0,
                 "m_n": 0,
+                "qc_day": {code: 0 for code in QUALITY_CODES},
+                "qc_month": {code: 0 for code in QUALITY_CODES},
             }
             index[row["city"]] = g
             city_groups.append(g)
@@ -421,12 +458,16 @@ def _day_payload(
             g["sold"] += int(row["sold"])
             g["diff"] += int(row["diff"])
             g["aux"] += int(row["aux"])
+            for code in QUALITY_CODES:
+                g["qc_day"][code] += int(row["qc_day"].get(code, 0))
         else:
             g["missing"] += 1
         # 本月累计不受「已交」限制：这一组所有店的月数（触客含未交日报那几天）
         g["m_touch"] += int(row["m_touch"])
         g["m_sold"] += int(row["m_sold"])
         g["m_aux"] += int(row["m_aux"])
+        for code in QUALITY_CODES:
+            g["qc_month"][code] += int(row["qc_month"].get(code, 0))
         if row["m_diff"] is not None:
             g["m_n"] += 1
             g["m_diff"] += int(row["m_diff"])
@@ -448,6 +489,7 @@ def _day_payload(
     return {
         "rows": ordered,
         "city_groups": city_groups,
+        "quality_cols": QUALITY_COLS,
         "totals": totals,
         "missing_n": len(ordered) - totals["n"],
         "missing_names": missing_names,
@@ -656,7 +698,7 @@ def register_compare(app) -> None:
                     metric_code=PHONE_CODE,
                     value=value,
                     user_id=g.user["id"],
-                    note="触客通报校准手机销量",
+                    note="服务通报校准手机销量",
                 )
             except ValueError as exc:
                 flash(str(exc), "error")
@@ -808,6 +850,8 @@ def register_compare(app) -> None:
                     "日报提交人",
                     "提交时间",
                     "手机销量修正",
+                    *[f"品管·本月累计 {name}（{month['label']}）" for _code, name in QUALITY_COLS],
+                    *[f"品管·当日 {name}" for _code, name in QUALITY_COLS],
                 ]
                 data_rows = [
                     [
@@ -826,6 +870,8 @@ def register_compare(app) -> None:
                         r["submitter"],
                         r["submitted_at"],
                         (r["fix"] or {}).get("text", ""),
+                        *[r["qc_month"].get(code, 0) for code in QUALITY_CODES],
+                        *[r["qc_day"].get(code, 0) for code in QUALITY_CODES],
                     ]
                     for r in payload["rows"]
                 ]
@@ -850,6 +896,8 @@ def register_compare(app) -> None:
                         "",
                         "",
                         "",
+                        *[month_total["qc_month"].get(code, 0) for code in QUALITY_CODES],
+                        *[day_totals["qc_day"].get(code, 0) for code in QUALITY_CODES],
                     ]
                 )
                 filename = f"compare_{biz_date.isoformat()}.xlsx"

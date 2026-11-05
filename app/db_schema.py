@@ -207,6 +207,11 @@ MIGRATIONS: List[Tuple[int, str, str]] = [
     (14, "expand_user_roles_city", "_expand_user_roles_city"),
     (15, "sesame_frozen_to_cents", "_sesame_frozen_to_cents"),
     (16, "oct_coin_cut_rework", "_oct_coin_cut_rework"),
+    # 21 而不是 17：V5 分支（feat/v5-metrics-catalog）已占用 17–20（v5_schema_and_baseline /
+    # v5_metrics_catalog / v5_audit_user_nullable / v5_metrics_catalog_full）。两分支合并时
+    # 同号不同名不会同时生效（schema_migrations 按版本号判重，先跑的那个会把后一个顶掉），
+    # 迁到 21 两边都安全。migrate() 只按版本号判重，不要求连号。
+    (21, "retire_id_check_metric", "_retire_id_check_metric"),
 ]
 
 def init_db() -> None:
@@ -280,6 +285,7 @@ def migrate() -> None:
             "_migrate_bisuan_mobile_from_settings": _bisuan_mobile_migration,
             "_sesame_frozen_to_cents": _sesame_frozen_to_cents,
             "_oct_coin_cut_rework": _oct_coin_cut_rework,
+            "_retire_id_check_metric": _retire_id_check_metric,
         }
         for version, name, fn_name in sorted(MIGRATIONS):
             if version in applied:
@@ -798,6 +804,16 @@ def _seed_metrics(conn: sqlite3.Connection) -> None:
                 """,
                 (code, name, section, sort, 1 if code in highlight else 0),
             )
+
+def _retire_id_check_metric(conn: sqlite3.Connection) -> None:
+    """「查询身份证数」下线（表单里换成「今日业辅查询」）：只停用，历史值照留。
+
+    历史 daily_facts 里那些 id_check 不搬进 aux_queries——身份证数不是业辅查询，
+    搬过去等于凭空多算一批业辅。停用后 list_metrics 只给 active=1，save_daily /
+    day_values 都不再碰它，跟芝麻免充下线是同一个做法。
+    """
+    conn.execute("UPDATE metrics SET active=0 WHERE code='id_check'")
+
 
 def _retire_legacy_coin_cut(conn: sqlite3.Connection) -> None:
     """旧的合计项拆到老用户直降，避免历史数丢、新表单重复。"""

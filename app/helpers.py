@@ -18,7 +18,7 @@ import openpyxl
 from flask import Response, current_app, flash, g, redirect, request, session, url_for
 
 from . import broadcast, db, incentive
-from .metrics_seed import rollup_amount
+from .metrics_seed import AUX_QUERY_CODE, rollup_amount
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -448,6 +448,13 @@ def pick_store(conn, raw_id: Optional[str]):
 def values_for_broadcast(conn, store_id: int, biz_date: date) -> Dict[str, broadcast.DayCum]:
     today = db.day_values(conn, store_id, biz_date)
     prev = db.prev_month_cum(conn, store_id, biz_date)
+    # 业辅查询不在 daily_facts：当日取 aux_queries 那一格，prev 放「本月 1 日 → 昨日」，
+    # add_day_to_prev 再把当日加进去，累计就是本月 1 日 → 所选日。
+    month_start = biz_date.replace(day=1)
+    today[AUX_QUERY_CODE] = db.aux_range_total(conn, [store_id], biz_date, biz_date)
+    prev[AUX_QUERY_CODE] = db.aux_range_total(
+        conn, [store_id], month_start, biz_date - timedelta(days=1)
+    )
     return broadcast.add_day_to_prev(prev, today)
 
 

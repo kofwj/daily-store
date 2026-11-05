@@ -34,6 +34,7 @@ from .helpers import (
     xlsx_response,
 )
 from .metrics_seed import (
+    AUX_QUERY_CODE,
     KPI_TARGETS,
     SECTIONS,
     format_display,
@@ -93,6 +94,15 @@ def register_daily(app) -> None:
                     compact=bool(compact_sections),
                     note=note,
                 )
+                # 今日业辅查询跟服务通报的「业辅查询登记」是同一处：写 aux_queries，不进 daily_facts
+                if f"m_{AUX_QUERY_CODE}" in request.form:
+                    db.set_aux(
+                        conn,
+                        store_id=store["id"],
+                        biz_date=biz_date,
+                        n=max(0, parse_int(request.form.get(f"m_{AUX_QUERY_CODE}"), 0)),
+                        user_id=g.user["id"],
+                    )
                 if existing:
                     db.record_edit(
                         conn,
@@ -133,6 +143,8 @@ def register_daily(app) -> None:
 
             day_vals = db.day_values(conn, store["id"], biz_date)
             pairs = values_for_broadcast(conn, store["id"], biz_date)
+            # 业辅查询不是日报指标，当日格子的值从 aux_queries 来（pairs 里已经带着它）
+            day_vals[AUX_QUERY_CODE] = int(pairs.get(AUX_QUERY_CODE, (0, 0))[0] or 0)
             kpi_targets = db.list_kpi_targets(conn)
             filler_month = db.get_setting(conn, "filler_edit_month", "0") == "1"
             report = db.get_report(conn, store["id"], biz_date)

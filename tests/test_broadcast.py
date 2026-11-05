@@ -9,7 +9,7 @@ def test_render_matches_wechat_log():
     biz = date(2026, 8, 13)
     values = {
         "phone_sales": (1, 13),
-        "id_check": (1, 4),
+        "aux_query": (1, 4),
         "lead": (0, 9),
         "reserve": (0, 2),
         "bisuan": (0, 5),
@@ -46,7 +46,9 @@ def test_render_matches_wechat_log():
     text = render_broadcast("示例戊店", biz, values, compact=False)
     assert text.startswith("8月13日\n示例戊店\n")
     assert "当天手机销量：日1，累13" in text
-    assert "查询身份证数：日1，累4" in text
+    assert "今日业辅查询：日1，累4" in text
+    # 品管支撑服务只在页面显示：不复制粘贴到微信群，播报里一行都不该有
+    assert "品管支撑服务" not in text and "苏心集结" not in text
     assert "\n重点业务\n比算新增：日0.0，累0.5\n比算新增[高]：日0.3，累0.3\nAi手机合约：日0，累0\n低销迎回：日0，累0\n" in text
     assert "\n数字化\n" in text
     assert text.endswith("灵犀·晓伴：日0，累0\n")
@@ -127,7 +129,12 @@ def test_metric_codes_cover_all_seed_items():
     # 10 月期下线的两项不再进表单（历史数据留在库里）
     assert "coin_cut_old" not in metric_codes()
     assert "coin_cut_new_sesame" not in metric_codes()
-    assert len(metric_codes()) == 41
+    assert len(metric_codes()) == 44  # 41 − 停用的 id_check + 品管 4 项（业辅查询不占 metrics）
+    # 品管支撑服务进字典、进表单，但不进微信群播报
+    assert "suxin_gather" in metric_codes() and "customer_perception_entry" in metric_codes()
+    # 业辅查询是 aux_queries 里的数，不是日报指标
+    assert "aux_query" not in metric_codes()
+    assert "id_check" not in metric_codes()  # 2026-11 起下线
 
 
 def test_broadcast_rolls_legacy_coin_cut_parts_into_one_line():

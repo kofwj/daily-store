@@ -1,4 +1,4 @@
-/* 把页面上一块 DOM 截成 PNG，供「复制图片 / 下载图片」用（通报页、触客通报页共用）。
+/* 把页面上一块 DOM 截成 PNG，供「复制图片 / 下载图片」用（通报页、服务通报页共用）。
  *
  * 与 app/templates/bulletin.html 里那套逻辑同源：微信/手机内置浏览器几乎不支持
  * 写图片进剪贴板，download 也常被拦，所以那两个环境一律只生成预览，让人长按保存。
@@ -14,6 +14,7 @@
  *              （把可编辑的 <input> 换成纯数字，拍完自动还原）
  *   fitContent 可选 true：容器比内容窄时（手机上贴宽表），截图前按内容撑宽容器、拍完还原，
  *              免得 html2canvas 只画容器那么大、把表右边裁掉
+ *   hideSelectors 可选 [选择器]：截图前把这些元素藏起来（display:none），拍完还原原样
  * 然后调用 shotCopyImage() / shotDownloadImage()。
  */
 (function () {
@@ -132,10 +133,27 @@
     });
   }
 
+  // 「只页面看、不进图」的列（品管的 8 列就是）：截图前 display:none，拍完按原值还原。
+  // 页面用 hideSelectors: ['.qc-col'] 开启；不配置就什么都不做。
+  function hideEls(on) {
+    var sels = cfg().hideSelectors || [];
+    if (!sels.length) return;
+    document.querySelectorAll(sels.join(',')).forEach(function (el) {
+      if (on) {
+        if (el.__shotPrevDisplay === undefined) el.__shotPrevDisplay = el.style.display || '';
+        el.style.display = 'none';
+      } else if (el.__shotPrevDisplay !== undefined) {
+        el.style.display = el.__shotPrevDisplay;
+        delete el.__shotPrevDisplay;
+      }
+    });
+  }
+
   function makeShot() {
     hint('正在生成图片…');
     swapPlainCells(true);
-    function putBack() { swapPlainCells(false); }
+    hideEls(true);
+    function putBack() { swapPlainCells(false); hideEls(false); }
     return renderShot().then(function (canvas) {
       return canvasToBlob(canvas).then(function (blob) {
         // 预览用 data URL：部分环境里 blob: 地址会失效导致预览 0×0 不显示

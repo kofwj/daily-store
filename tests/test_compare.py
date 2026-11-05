@@ -1,4 +1,4 @@
-"""触客通报（手机销量 vs 触客）：口径、权限、改格、导出（`/compare`）。
+"""服务通报（原「触客通报」；手机销量 vs 触客 + 品管支撑服务）：口径、权限、改格、导出（`/compare`）。
 
 口径（与 app/views_compare.py 顶部说明一致）：
 - 触客条数 = 当天 deal_posts 条数（不分成交）；手机销量 = 当天日报 phone_sales
@@ -164,7 +164,7 @@ def day_scene(admin_client):
 
 def test_day_table_numbers_and_unsubmitted(admin_client, day_scene):
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
-    assert "触客通报" in body
+    assert "服务通报" in body
     # 已交 4 家：触客 9+8+2+4=23，销量 5+8+0+0=13 → 23 ÷ 13 = 176.92%
     assert TOTAL_HEAD in body  # 合计行只写「合计」，不再带「（已交 N 家）」
     assert ">23<" in body and ">13<" in body and "176.92%" in body
@@ -247,7 +247,7 @@ def test_day_copy_text_lines():
         scope_label="示例市",
     )
     assert text.splitlines() == [
-        "【触客通报】10月11日（示例市）",
+        "【服务通报】10月11日（示例市）",
         "合计：触客 21 条 · 手机销量 13 台 · 触客/销量 161.54%",
         "不足 100.00% 1 家：示例戊店 40.00%",
         "另有 1 家没交日报也没触客记录",
@@ -331,7 +331,7 @@ def test_shot_content_matches_table(admin_client, day_scene):
     """截图容器里就是这张表：抬头、两行表头、未交日报的店都在图里。"""
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
     shot = shot_of(body)
-    assert "触客通报" in shot
+    assert "服务通报" in shot
     assert f"{day_scene.month}月{day_scene.day}日" in shot
     assert TOTAL_HEAD in shot  # 图里合计行也只写「合计」
     assert "176.92%" in shot  # 合计行的触客/销量
@@ -345,7 +345,7 @@ def test_day_shot_table_header_groups(admin_client, day_scene):
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
     shot = shot_of(body)
     head = shot[: shot.index("</thead>")]
-    assert len(re.findall(r"<th[ >]", head)) == 12  # 3 个分组格 + 9 个列名
+    assert len(re.findall(r"<th[ >]", head)) == 22  # 5 个分组格 + 17 个列名（品管 8 列只页面看）
     assert '<th colspan="4" class="g-day">当日</th>' in head
     assert 'class="g-month"' in head and "本月累计（" in head
     assert "业辅查询登记" in head
@@ -481,9 +481,9 @@ def test_store_view_shot_and_no_missing_note(admin_client, tmp_db):
     assert "sourceId: 'compareShot'" in setup
     assert "fitContent: true" in setup
     assert "text: '#compareShot .cell-plain'" in setup
-    assert f"触客通报_示例甲店_{day.strftime('%Y-%m')}.png" in setup
+    assert f"服务通报_示例甲店_{day.strftime('%Y-%m')}.png" in setup
     shot = shot_of(body)
-    assert "触客通报" in shot
+    assert "服务通报" in shot
     assert _full("示例甲店") in shot and f"{day.month}月" in shot  # 抬头：店名 + 月份
     assert TOTAL_HEAD in shot  # 图里合计行也只写「合计」
     assert "管理员" not in shot and "报表" not in shot  # 页面说明不进图
@@ -630,7 +630,7 @@ def test_admin_fix_cell_writes_edit_mark(admin_client, tmp_db):
         ).fetchone()
     assert int(fact["day_value"]) == 9
     assert '"phone_sales": 5' in edit["before_json"] and '"phone_sales": 9' in edit["after_json"]
-    assert "触客通报校准手机销量" in edit["note"]
+    assert "服务通报校准手机销量" in edit["note"]
 
 
 def test_admin_fix_back_to_zero_clears_mark(admin_client, tmp_db):
@@ -829,7 +829,7 @@ def test_day_export_respects_filter(admin_client, day_scene):
     assert f"compare_{day_scene.isoformat()}.xlsx" in resp.headers["Content-Disposition"]
     ws = load_workbook(io.BytesIO(resp.data)).active
     header = [cell.value for cell in ws[1]]
-    assert len(header) == 15
+    assert len(header) == 23  # 15 列 + 品管 8 列
     assert any(str(h).startswith("本月累计触客条数（") for h in header)
     labels = [str(row[1] or "") for row in ws.iter_rows(min_row=2, values_only=True)]
     names = [x for x in labels if x and x != "合计"]
@@ -1006,7 +1006,7 @@ def test_aux_feeds_subtotal_total_and_copy_text(admin_client, day_scene):
     assert '<td class="num">8</td>' in foot_of(body, "示例市 · 2 家")
     assert '<td class="num">3</td>' in foot_of(body, "邻市 · 2 家（未交 1）")
     total = re.findall(r"<td[^>]*>(.*?)</td>", foot_of(body, "合计"), re.S)
-    assert len(total) == 9  # 门店 + 4 列本月累计 + 4 列当日
+    assert len(total) == 17  # 门店 + 4 列本月累计 + 4 列当日 + 品管 8 列
     assert total[8].strip() == "11"  # 当日业辅
     assert total[4].strip() == "11"  # 本月累计业辅（就这一天，跟当日同数）
 
@@ -1067,7 +1067,7 @@ def test_day_export_includes_aux(admin_client, day_scene):
     resp = admin_client.get(f"/compare.xlsx?view=day&date={day_scene.isoformat()}")
     ws = load_workbook(io.BytesIO(resp.data)).active
     header = [cell.value for cell in ws[1]]
-    assert len(header) == 15  # 去掉了「日报」列
+    assert len(header) == 23  # 去掉了「日报」列；品管 8 列追加在最后
     assert str(header[3]).startswith("本月累计触客条数（")
     assert str(header[4]).startswith("本月累计手机销量（")
     assert str(header[5]).startswith("本月累计差（")
@@ -1162,18 +1162,139 @@ def test_advisor_control_is_bulletin_style_and_out_of_shot(admin_client, day_sce
     assert '<select name="advisor"' not in shot and "顾问" not in shot
 
 
-def test_page_renamed_to_touch_bulletin(admin_client, day_scene):
-    """改名：抬头 / 导航 / 通报文案统一叫「触客通报」，旧名不再出现。"""
+def test_page_named_service_bulletin(admin_client, day_scene):
+    """改名：抬头 / 导航 / 通报文案统一叫「服务通报」，旧名不再出现。"""
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
     assert "手机销量对比触客" not in body and "销量对比" not in body
-    assert "<title>触客通报</title>" in body
-    assert '<span class="full">触客通报</span>' in body  # 导航
-    assert "【触客通报】" in body  # 通报文案抬头
-    assert "触客通报" in shot_of(body)  # 图里抬头
+    assert "<title>服务通报</title>" in body
+    assert '<span class="full">服务通报</span>' in body  # 导航
+    assert "【服务通报】" in body  # 通报文案抬头
+    assert "服务通报" in shot_of(body)  # 图里抬头
+    assert "触客通报" not in body  # 旧名彻底退场
 
 
 def test_compare_title_constant():
     """改名落在常量上（模板 / 文案共用同一个名字）。"""
     from app.views_compare import COMPARE_TITLE
 
-    assert COMPARE_TITLE == "触客通报"
+    assert COMPARE_TITLE == "服务通报"
+
+
+# ---------------------------------------------------------------- 品管支撑服务 / 今日业辅查询
+
+QUALITY_NAMES = ("苏心集结", "心级服务", "好评回复", "客户感知录入")
+
+
+def seed_quality(code: str, day: date, metric_code: str, n: int) -> None:
+    """直接写 daily_facts 里的一项品管数（不重写整份日报）。"""
+    sid = store_id(code)
+    with db.get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO daily_facts(biz_date, store_id, metric_code, day_value) VALUES (?, ?, ?, ?)
+            ON CONFLICT(biz_date, store_id, metric_code) DO UPDATE SET day_value=excluded.day_value
+            """,
+            (day.isoformat(), sid, metric_code, n),
+        )
+
+
+def test_today_page_has_quality_section_and_aux_query(admin_client):
+    """填报表单：手机销量下面是「今日业辅查询」，品管支撑服务 4 项排在「重点业务」之上。"""
+    body = admin_client.get("/today").get_data(as_text=True)
+    assert "查询身份证数" not in body
+    # 位置：当天手机销量 → 今日业辅查询 → 商机录入
+    assert re.search(r"当天手机销量(?:(?!商机录入).)*今日业辅查询", body, re.S)
+    assert re.search(r"今日业辅查询(?:(?!商机录入).)*商机录入", body, re.S)
+    # 品管支撑服务整组在重点业务之上
+    assert body.index("品管支撑服务") < body.index("重点业务")
+    for name in QUALITY_NAMES:
+        assert name in body
+        assert body.index(name) < body.index("重点业务")
+
+
+def test_quality_items_stay_out_of_wechat_broadcast(admin_client, day_scene):
+    """品管支撑服务不复制粘贴到微信群：播报框里一行都不该有。"""
+    sid = store_id("store-alpha")
+    body = admin_client.post(
+        "/today",
+        data={
+            "store_id": str(sid),
+            "date": day_scene.isoformat(),
+            "m_phone_sales": "8",
+            "m_suxin_gather": "2",
+        },
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    m = re.search(r'<textarea id="broadcastText"[^>]*>(.*?)</textarea>', body, re.S)
+    assert m is not None
+    text = m.group(1)
+    assert "品管支撑服务" not in text
+    for name in QUALITY_NAMES:
+        assert name not in text
+
+
+def test_today_aux_field_shares_data_with_compare(admin_client, day_scene):
+    """「今日业辅查询」就是通报页的「业辅查询登记」：填一处两处都变。"""
+    sid = store_id("store-alpha")
+    resp = admin_client.post(
+        "/today",
+        data={
+            "store_id": str(sid),
+            "date": day_scene.isoformat(),
+            "m_phone_sales": "8",
+            "m_aux_query": "4",
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    with db.get_db() as conn:
+        assert db.aux_range_total(conn, [sid], day_scene, day_scene) == 4
+        row = conn.execute(
+            "SELECT 1 FROM daily_facts WHERE store_id=? AND biz_date=? AND metric_code='aux_query'",
+            (sid, day_scene.isoformat()),
+        ).fetchone()
+    assert row is None  # 不落 daily_facts
+    body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
+    assert re.search(r'value="4"[^>]*title="[^"]*业辅查询登记', row_of(body, "示例甲店"))
+
+
+def test_day_view_shows_quality_columns_page_only(admin_client, day_scene):
+    """服务通报主表最右加品管 8 列（本月累计 4 + 当日 4），截图时藏掉、文案里不出现。"""
+    month_start = day_scene.replace(day=1)
+    earlier = month_start if month_start < day_scene else None
+    seed_quality("store-alpha", day_scene, "suxin_gather", 3)
+    if earlier is not None:
+        seed_quality("store-alpha", earlier, "suxin_gather", 4)
+
+    body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
+    shot = shot_of(body)
+    head = shot[: shot.index("</thead>")]
+    for name in QUALITY_NAMES:
+        assert name in head
+    assert "品管·本月累计（" in head and "品管·当日" in head
+
+    cells = [
+        c.strip()
+        for c in re.findall(r'<td class="num qc-col"[^>]*>(.*?)</td>', row_of(body, "示例甲店"), re.S)
+    ]
+    assert len(cells) == 8  # 本月累计 4 + 当日 4
+    assert cells[0] == "7" if earlier is not None else cells[0] == "3"
+    assert cells[4] == "3"  # 当日：苏心集结
+    assert cells[1:4] == ["0", "0", "0"] and cells[5:] == ["0", "0", "0"]
+
+    # 合计行也带品管；当日只算已交日报的店（甲店交了，所以算得进）
+    total = [c.strip() for c in re.findall(r'<td class="num qc-col"[^>]*>(.*?)</td>', foot_of(body, "合计"), re.S)]
+    assert len(total) == 8 and total[4] == "3"
+
+    # 只页面看：截图前藏掉这 8 列，贴群文案里也没有
+    assert "hideSelectors: ['.qc-col']" in body
+    m = re.search(r'<textarea id="copyText"[^>]*>(.*?)</textarea>', body, re.S)
+    assert m is not None and "苏心集结" not in m.group(1)
+
+    # 单店逐日视图不动：没有品管列，也不需要藏
+    month = month_start.isoformat()
+    store_body = admin_client.get(
+        f"/compare?view=store&store_id={store_id('store-alpha')}&month={month}"
+    ).get_data(as_text=True)
+    assert "苏心集结" not in store_body
+    assert "hideSelectors" not in store_body

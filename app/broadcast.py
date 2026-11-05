@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Dict, Iterable, Mapping, Tuple
 
-from .metrics_seed import SECTIONS, format_stored, rollup_codes
+from .metrics_seed import SECTIONS, format_stored, rollup_codes, section_broadcast
 
 DayCum = Tuple[int, int]
 
@@ -42,6 +42,9 @@ def render_broadcast(
     coin_dates_codes = set(rollup_codes("coin_cut_all", biz_date))
 
     for section in SECTIONS:
+        # 品管支撑服务只页面 / 报表里看，不进微信群播报
+        if not section_broadcast(section):
+            continue
         visible = []
         if section["code"] == "contract":
             day, cum = _sum_codes(values, coin_dates_codes)

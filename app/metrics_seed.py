@@ -6,8 +6,14 @@ import re
 from datetime import date
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
+# 业辅查询（填报表单的「今日业辅查询」/ 服务通报的「业辅查询登记」）不是日报指标：数存在
+# aux_queries 表里，挂在字典里只是为了占表单和播报里那一行。all_metrics() 会跳过它——
+# 不建 metrics 行、不进 list_metrics，save_daily 也就不会把它的历史值写成 0。
+AUX_QUERY_CODE = "aux_query"
+
 # 播报分组：与现有微信群格式对齐
 # header 为 None 表示基础项，直接跟在店名后面
+# broadcast=False 的分组只页面 / 报表里看，不进微信群播报（品管支撑服务就是这种）
 SECTIONS: List[Dict] = [
     {
         "code": "basic",
@@ -15,9 +21,22 @@ SECTIONS: List[Dict] = [
         "blank_before": False,
         "metrics": [
             ("phone_sales", "当天手机销量", ""),
-            ("id_check", "查询身份证数", ""),
+            (AUX_QUERY_CODE, "今日业辅查询", "跟服务通报的「业辅查询登记」是同一个数，填一处两处都变"),
             ("lead", "商机录入", ""),
             ("reserve", "储备", ""),
+        ],
+    },
+    {
+        "code": "quality",
+        "header": "品管支撑服务",
+        "blank_before": True,
+        # 只页面 / 报表里看：不进微信群播报，也不进服务通报的贴群文案和截图
+        "broadcast": False,
+        "metrics": [
+            ("suxin_gather", "苏心集结", ""),
+            ("xinji_service", "心级服务", ""),
+            ("good_review_reply", "好评回复", ""),
+            ("customer_perception_entry", "客户感知录入", ""),
         ],
     },
     {
@@ -103,9 +122,33 @@ def all_metrics() -> List[Tuple[str, str, str, int]]:
     sort = 10
     for section in SECTIONS:
         for code, name, _hint in section["metrics"]:
+            if is_aux_metric(code):
+                continue  # 业辅查询走 aux_queries，不占 metrics / daily_facts
             rows.append((code, name, section["code"], sort))
             sort += 10
     return rows
+
+
+def is_aux_metric(code: str) -> bool:
+    """业辅查询是「准指标」：表单 / 播报要有这一行，daily_facts 里没有它。"""
+    return code == AUX_QUERY_CODE
+
+
+def section_broadcast(section: Mapping[str, Any]) -> bool:
+    """这一组要不要进微信群播报；品管支撑服务只页面显示，不进群。"""
+    return bool(section.get("broadcast", True))
+
+
+def section_metrics(section_code: str) -> Tuple[Tuple[str, str], ...]:
+    """某个分组的 (code, name) 列表，顺序照字典（服务通报的品管列就照这个序）。"""
+    for section in SECTIONS:
+        if section["code"] == section_code:
+            return tuple((code, name) for code, name, _hint in section["metrics"])
+    raise KeyError(section_code)
+
+
+# 品管支撑服务 4 项：服务通报按这个顺序出「本月累计 + 当日」两组列
+QUALITY_CODES: Tuple[str, ...] = tuple(code for code, _name in section_metrics("quality"))
 
 
 def metric_name_map() -> Dict[str, str]:

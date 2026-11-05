@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_store_picker.html" import store_picker %}
-{% block title %}触客通报{% endblock %}
+{% block title %}服务通报{% endblock %}
 {% block body %}
 {# 触客/销量：未交日报给徽标、销量 0 给「-」、其余两位小数百分比；两个视图共用一套，免得改一处漏一处。 #}
 {% macro ratio_badge(r, worst=False) -%}
@@ -33,11 +33,14 @@
 <div class="page-head">
   <div class="page-title">
     <h1>
-      触客通报
+      服务通报
       {%- if view == 'day' %} · {{ date.year }}年{{ date.month }}月{{ date.day }}日
       {%- else %} · {{ store.name or store.short_name }} · {{ month.strftime('%Y年%m月') }}{% endif %}
     </h1>
     <p class="muted">触客/销量 = 触客条数 ÷ 手机销量（理论要 > 100.00%，低于 100.00% 都不好）：触客取当天全部记录，手机销量取当天日报；触客只有当天，没有补交一说。</p>
+    {% if view == 'day' %}
+    <p class="muted">品管支撑服务（苏心集结 / 心级服务 / 好评回复 / 客户感知录入）只在本页显示：不进群播报、不进通报文案、截图里也不出现。</p>
+    {% endif %}
   </div>
   {# 筛选 + 动作同一个 flex 行（跟通报表一个模子）；控件放不下时折行，故把动作组整条压到第二行。 #}
   <form method="get" class="page-filters">
@@ -152,7 +155,7 @@
 <div class="card bulletin-wrap">
   <div id="compareShot" class="bulletin-shot" style="display: block; min-width: 0; width: fit-content; max-width: min(1180px, 100%); margin: 0 auto">
     <div style="border-bottom: 2px solid #111827; padding-bottom: 10px; margin-bottom: 12px">
-      <div class="bulletin-shot-title" style="margin: 0 0 3px">触客通报</div>
+      <div class="bulletin-shot-title" style="margin: 0 0 3px">服务通报</div>
       <div class="bulletin-shot-date" style="margin: 0">{{ date.year }}年{{ date.month }}月{{ date.day }}日{% if scope_label %} · {{ scope_label }}{% endif %}</div>
     </div>
   {% if rows %}
@@ -162,6 +165,8 @@
         <th class="g-profile"></th>
         <th colspan="4" class="g-month">本月累计（{{ month.label }}）</th>
         <th colspan="4" class="g-day">当日</th>
+        <th colspan="4" class="qc-col" style="border-left: 2px solid #cbd5e1">品管·本月累计（{{ month.label }}）</th>
+        <th colspan="4" class="qc-col" style="border-left: 2px solid #cbd5e1">品管·当日</th>
       </tr>
       <tr>
         <th class="store g-profile">门店</th>
@@ -173,6 +178,12 @@
         <th class="g-day" style="width: 120px">手机销量</th>
         <th class="g-day" style="width: 150px" title="触客 ÷ 手机销量（理论要 > 100.00%）：低于 100.00% 都不好，销量 0 写「-」">触客/销量</th>
         <th class="g-day" style="width: 140px" title="业辅查询登记：当天这店查了几条，就地填、只改这一格">业辅查询登记</th>
+        {% for code, name in quality_cols %}
+        <th class="qc-col" style="width: 92px{% if loop.first %}; border-left: 2px solid #cbd5e1{% endif %}" title="品管支撑服务·本月累计（{{ month.label }}）：{{ name }}">{{ name }}</th>
+        {% endfor %}
+        {% for code, name in quality_cols %}
+        <th class="qc-col" style="width: 92px{% if loop.first %}; border-left: 2px solid #cbd5e1{% endif %}" title="品管支撑服务·当日：{{ name }}">{{ name }}</th>
+        {% endfor %}
       </tr>
     </thead>
     <tbody>
@@ -224,6 +235,12 @@
           <span class="muted">—</span>
           {% endif %}
         </td>
+        {% for code, name in quality_cols %}
+        <td class="num qc-col"{% if loop.first %} style="border-left: 2px solid #cbd5e1"{% endif %}>{{ r.qc_month[code] }}</td>
+        {% endfor %}
+        {% for code, name in quality_cols %}
+        <td class="num qc-col"{% if loop.first %} style="border-left: 2px solid #cbd5e1"{% endif %}>{% if r.submitted %}{{ r.qc_day[code] }}{% else %}<span class="muted">—</span>{% endif %}</td>
+        {% endfor %}
       </tr>
       {% endfor %}
     </tbody>
@@ -236,6 +253,12 @@
         <td class="num">{{ g.sold }}</td>
         <td class="num">{% if g.n %}{{ g.ratio_text }}{% else %}<span class="muted">—</span>{% endif %}</td>
         <td class="num">{{ g.aux }}</td>
+        {% for code, name in quality_cols %}
+        <td class="num qc-col"{% if loop.first %} style="border-left: 2px solid #cbd5e1"{% endif %}>{{ g.qc_month[code] }}</td>
+        {% endfor %}
+        {% for code, name in quality_cols %}
+        <td class="num qc-col"{% if loop.first %} style="border-left: 2px solid #cbd5e1"{% endif %}>{{ g.qc_day[code] }}</td>
+        {% endfor %}
       </tr>
       {% endfor %}
       <tr class="city-sub">
@@ -245,6 +268,12 @@
         <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.sold }}</td>
         {{ total_cell(totals.n, totals.ratio_text, 'border-top: 2px solid #94a3b8') }}
         <td class="num" style="border-top: 2px solid #94a3b8">{{ totals.aux }}</td>
+        {% for code, name in quality_cols %}
+        <td class="num qc-col" style="border-top: 2px solid #94a3b8{% if loop.first %}; border-left: 2px solid #cbd5e1{% endif %}">{{ totals.qc_month[code] }}</td>
+        {% endfor %}
+        {% for code, name in quality_cols %}
+        <td class="num qc-col" style="border-top: 2px solid #94a3b8{% if loop.first %}; border-left: 2px solid #cbd5e1{% endif %}">{{ totals.qc_day[code] }}</td>
+        {% endfor %}
       </tr>
     </tfoot>
   </table>
@@ -260,7 +289,7 @@
 {% if rows %}
 <div class="card" id="shotPreviewCard" hidden>
   <h2>图片预览</h2>
-  <img id="shotPreview" class="shot-preview" alt="触客通报图">
+  <img id="shotPreview" class="shot-preview" alt="服务通报图">
 </div>
 <script src="{{ url_for('static', filename='html2canvas.min.js') }}"></script>
 <script src="{{ url_for('static', filename='shot.js') }}?v={{ app_version }}"></script>
@@ -268,7 +297,7 @@
   // 「复制图片 / 下载图片」只在单日视图出现：把这页的表截成图贴微信群。
   window.__shotSetup = {
     sourceId: 'compareShot',
-    fileName: '触客通报_{{ date.isoformat() }}.png',
+    fileName: '服务通报_{{ date.isoformat() }}.png',
     hintId: 'shotHint',
     buttonIds: ['btnCopyShot', 'btnDownShot'],
     previewId: 'shotPreview',
@@ -276,7 +305,9 @@
     // 手机上表比屏幕宽：拍之前先把容器按内容撑宽，省得右边被裁
     fitContent: true,
     // 截图前把可编辑格子换成纯数字（拍完自动还原）
-    plainCells: { form: '#compareShot .cell-edit', text: '#compareShot .cell-plain' }
+    plainCells: { form: '#compareShot .cell-edit', text: '#compareShot .cell-plain' },
+    // 品管支撑服务只在本页看：拍图前把这 8 列藏掉，图跟老版一模一样（拍完自动还原）
+    hideSelectors: ['.qc-col']
   };
 </script>
 {% endif %}
@@ -309,7 +340,7 @@
 <div class="card bulletin-wrap">
   <div id="compareShot" class="bulletin-shot" style="display: block; min-width: 0; width: fit-content; max-width: min(1180px, 100%); margin: 0 auto">
     <div style="border-bottom: 2px solid #111827; padding-bottom: 10px; margin-bottom: 12px">
-      <div class="bulletin-shot-title" style="margin: 0 0 3px">触客通报</div>
+      <div class="bulletin-shot-title" style="margin: 0 0 3px">服务通报</div>
       <div class="bulletin-shot-date" style="margin: 0">{{ store.name or store.short_name }} · {{ month.strftime('%Y年%m月') }}</div>
     </div>
   <table class="data dev-table bulletin" style="min-width: 0; width: auto; max-width: 760px; margin: 0 auto; font-size: 14px">
@@ -383,7 +414,7 @@
 {% if days %}
 <div class="card" id="shotPreviewCard" hidden>
   <h2>图片预览</h2>
-  <img id="shotPreview" class="shot-preview" alt="触客通报图">
+  <img id="shotPreview" class="shot-preview" alt="服务通报图">
 </div>
 <script src="{{ url_for('static', filename='html2canvas.min.js') }}"></script>
 <script src="{{ url_for('static', filename='shot.js') }}?v={{ app_version }}"></script>
@@ -392,7 +423,7 @@
   window.__shotSetup = {
     sourceId: 'compareShot',
     {# 店名里万一有引号 / 反斜杠，先剔掉再拼进 JS 字符串，免得整个脚本语法错 #}
-    fileName: '触客通报_{{ (store.short_name or store.name) | replace("'", "") | replace('"', "") | replace("\\", "") | replace("/", "") }}_{{ month.strftime('%Y-%m') }}.png',
+    fileName: '服务通报_{{ (store.short_name or store.name) | replace("'", "") | replace('"', "") | replace("\\", "") | replace("/", "") }}_{{ month.strftime('%Y-%m') }}.png',
     hintId: 'shotHint',
     buttonIds: ['btnCopyShot', 'btnDownShot'],
     previewId: 'shotPreview',
