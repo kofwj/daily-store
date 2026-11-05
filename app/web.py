@@ -31,14 +31,12 @@ from .helpers import (
     limit_unauth_body,
     load_user,
     pin_change_required,
-    policy_read_required,
 )
 from .views_admin import register_admin
 from .views_advance import register_advance
 from .views_auth import register_auth
 from .views_compare import register_compare
 from .views_daily import register_daily
-from .views_policies import register_policies
 from .views_report import register_report
 from .views_settings import register_settings
 
@@ -111,7 +109,6 @@ def create_app(*, testing: bool = False) -> Flask:
     app.before_request(limit_unauth_body)
     app.before_request(csrf_protect)
     app.before_request(pin_change_required)
-    app.before_request(policy_read_required)
 
     @app.after_request
     def _security_headers(resp):
@@ -148,7 +145,6 @@ def create_app(*, testing: bool = False) -> Flask:
     register_compare(app)
     register_admin(app)
     register_settings(app)
-    register_policies(app)
     register_errors(app)
     return app
 

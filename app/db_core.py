@@ -159,7 +159,7 @@ def get_setting(conn: sqlite3.Connection, key: str, default: str = "") -> str:
     return row["value"] if row else default
 
 # 页头每次都读的几个 setting。单行主键点查微秒级，直接现读，不缓存。
-_HOT_SETTING_KEYS = ("brand_mark", "brand_kicker", "brand_title", "policy_require_read")
+_HOT_SETTING_KEYS = ("brand_mark", "brand_kicker", "brand_title")
 
 def hot_settings(conn: sqlite3.Connection) -> Dict[str, str]:
     placeholders = ",".join("?" * len(_HOT_SETTING_KEYS))

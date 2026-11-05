@@ -42,8 +42,7 @@
     <a href="{{ url_for('settings', tab='review') }}" class="{{ 'active' if tab=='review' else '' }}">{{ ns.doc }}复盘模板</a>
   </div>
   <div class="settings-nav-group">
-    <span class="settings-nav-label">政策与开票</span>
-    <a href="{{ url_for('settings', tab='policies') }}" class="{{ 'active' if tab=='policies' else '' }}">{{ ns.doccheck }}政策</a>
+    <span class="settings-nav-label">开票</span>
     <a href="{{ url_for('settings', tab='invoice') }}" class="{{ 'active' if tab=='invoice' else '' }}">{{ ns.receipt }}开票主体</a>
   </div>
   <div class="settings-nav-group">

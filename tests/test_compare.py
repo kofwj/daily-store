@@ -222,10 +222,14 @@ def test_touch_zero_keeps_row_and_zero_percent(admin_client):
     assert "差率" not in row and "少报" not in row  # 旧口径的字样一个都不留
 
 
-def test_touch_cross_day_note_visible(admin_client, day_scene):
-    """触客只算当天：页面写明没有补交一说。"""
+def test_ratio_rule_in_tooltip_not_page_copy(admin_client, day_scene):
+    """口径留在表头悬浮提示，页面头部不再摆大段说教（B 类瘦身，别被下次改回去）。"""
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
-    assert "没有补交一说" in body
+    assert 'title="触客 ÷ 手机销量（理论要 > 100.00%）' in body
+    assert 'title="本月累计触客 ÷ 本月累计手机销量（理论要 > 100.00%）' in body
+    head = body[: body.index('<div class="card bulletin-wrap">')]
+    for gone in ("没有补交一说", "触客/销量 = 触客条数", "只在本页显示"):
+        assert gone not in head
 
 
 # ---------------------------------------------------------------- 通报文案
@@ -416,7 +420,7 @@ def test_edit_hint_on_page_but_not_in_image(admin_client, day_scene):
     """「格子能改 / 未交的去哪儿补录」得写在页面上（图外），别进贴群的图。"""
     body = admin_client.get(f"/compare?date={day_scene.isoformat()}").get_data(as_text=True)
     head = body[: body.index('<div id="compareShot"')]
-    assert "点销量格子就能改" in head
+    assert "点格子改销量" in head
     assert "报表" in head
 
 

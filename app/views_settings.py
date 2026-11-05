@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import secrets
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -17,12 +15,11 @@ from flask import (
     redirect,
     render_template,
     request,
-    send_from_directory,
     session,
     url_for,
 )
 
-from . import backup, bulletin, db, db_core, incentive, invoice, sesame
+from . import backup, bulletin, db, incentive, invoice, sesame
 from .helpers import (
     admin_required,
     ascii_filename,
@@ -39,51 +36,6 @@ from .helpers import (
 from .metrics_seed import KPI_TARGETS
 
 
-def _looks_like_image(data: bytes) -> bool:
-    """按文件头魔数判断是否图片，防把任意文件当图片存。"""
-    if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return True
-    if data.startswith(b"\xff\xd8\xff"):  # JPEG
-        return True
-    if data[:6] in (b"GIF87a", b"GIF89a"):
-        return True
-    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return True
-    return False
-
-
-# 政策插图服务端缩放上限：长边超过就压缩，控制存储体积（手机原图常是几 MB）。
-_POLICY_IMG_MAX_EDGE = 1600
-_POLICY_IMG_JPEG_QUALITY = 85
-
-
-def _resize_policy_image(data: bytes, ext: str) -> bytes:
-    """把上传图片压到长边 <= _POLICY_IMG_MAX_EDGE，重编码去元数据。GIF 动画保持原样。"""
-    try:
-        from PIL import Image
-
-        Image.MAX_IMAGE_PIXELS = 20_000_000
-        im: Image.Image = Image.open(BytesIO(data))
-        im.load()  # 真正解码，解码失败说明不是有效图片
-    except Exception:
-        raise ValueError("图片无法解码") from None
-    if ext == ".gif":
-        return data
-    if im.width > _POLICY_IMG_MAX_EDGE or im.height > _POLICY_IMG_MAX_EDGE:
-        im.thumbnail((_POLICY_IMG_MAX_EDGE, _POLICY_IMG_MAX_EDGE), Image.Resampling.LANCZOS)
-    fmt = {".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG", ".webp": "WEBP"}.get(ext)
-    if fmt == "PNG" and im.mode in ("RGBA", "LA", "P"):
-        im = im.convert("RGBA")
-    elif fmt in ("JPEG", "WEBP") and im.mode not in ("RGB", "L"):
-        im = im.convert("RGB")
-    out = BytesIO()
-    if fmt in ("JPEG", "WEBP"):
-        im.save(out, format=fmt, optimize=True, quality=_POLICY_IMG_JPEG_QUALITY)
-    else:
-        im.save(out, format=fmt, optimize=True)
-    return out.getvalue()
-
-
 def _settings_tab() -> str:
     tab = request.values.get("tab") or "account"
     allowed = {
@@ -98,7 +50,6 @@ def _settings_tab() -> str:
         "invoice",
         "brand",
         "backup",
-        "policies",
     }
     if tab not in allowed:
         return "account"
@@ -261,8 +212,6 @@ def _render_settings(conn, tab: str):
         for sid in sids:
             if sid in people_by_store:
                 people_by_store[sid].append(item)
-    policy_id_raw = (request.args.get("policy_id") or "").strip()
-    policy_id = int(policy_id_raw) if policy_id_raw.isdigit() else None
     return render_template(
         "settings.html",
         tab=tab,
@@ -281,10 +230,6 @@ def _render_settings(conn, tab: str):
         user_map=user_map,
         store_label=store_label,
         filler_edit_month=db.get_setting(conn, "filler_edit_month", "0") == "1",
-        policy_require_read=db.policy_require_read(conn),
-        policies=db.list_policies(conn) if g.user["role"] == "admin" else [],
-        policy_edit=(db.get_policy(conn, policy_id) if policy_id is not None else None),
-        policy_revisions=(db.list_revisions(conn, policy_id) if policy_id is not None else []),
         broadcast_compact=db.get_setting(conn, "broadcast_compact", "1") == "1",
         broadcast_compact_family=db.get_setting(conn, "broadcast_compact_family", "0") == "1",
         wecom_global=db.get_setting(conn, "wecom_global", ""),
@@ -590,46 +535,7 @@ def _do_set_targets(conn):
 def _do_save_permissions(conn):
     filler_month = "1" if request.form.get("filler_edit_month") == "1" else "0"
     db.set_setting(conn, "filler_edit_month", filler_month)
-    db.set_policy_require_read(conn, request.form.get("policy_require_read") == "1")
     flash("权限设置已保存", "ok")
-
-
-def _do_save_policy(conn):
-    raw_id = (request.form.get("policy_id") or "").strip()
-    pid = int(raw_id) if raw_id.isdigit() else None
-    db.save_policy(
-        conn,
-        title=request.form.get("title") or "",
-        body=request.form.get("body") or "",
-        sort_order=int(request.form.get("sort_order") or 0),
-        active=request.form.get("active") == "1",
-        user_id=g.user["id"],
-        policy_id=pid,
-    )
-    flash("政策已保存", "ok")
-    return redirect(url_for("settings", tab="policies"))
-
-
-def _do_toggle_policy(conn):
-    pid = int(request.form.get("policy_id") or 0)
-    db.set_policy_active(conn, pid, request.form.get("active") == "1")
-    flash("政策状态已改", "ok")
-    return redirect(url_for("settings", tab="policies"))
-
-
-def _do_delete_policy(conn):
-    pid = int(request.form.get("policy_id") or 0)
-    db.delete_policy(conn, pid)
-    flash("政策已删除", "ok")
-    return redirect(url_for("settings", tab="policies"))
-
-
-def _do_restore_policy(conn):
-    pid = int(request.form.get("policy_id") or 0)
-    ver = int(request.form.get("version") or 0)
-    db.restore_policy_revision(conn, pid, ver, user_id=g.user["id"])
-    flash(f"已恢复为第 {ver} 版，现内容会再记一版", "ok")
-    return redirect(url_for("settings", tab="policies", policy_id=pid))
 
 
 def _do_save_brand(conn):
@@ -752,10 +658,6 @@ _SETTINGS_ACTIONS = {
     "toggle_user": _do_toggle_user,
     "set_targets": _do_set_targets,
     "save_permissions": _do_save_permissions,
-    "save_policy": _do_save_policy,
-    "toggle_policy": _do_toggle_policy,
-    "delete_policy": _do_delete_policy,
-    "restore_policy": _do_restore_policy,
     "save_brand": _do_save_brand,
     "save_review": _do_save_review,
     "save_invoice": _do_save_invoice,
@@ -770,40 +672,6 @@ _SETTINGS_ACTIONS = {
 
 
 def register_settings(app) -> None:
-    @app.route("/settings/policy-image", methods=["POST"])
-    @admin_required
-    def settings_policy_image():
-        """政策正文插图上传。SunEditor 用 file-0 字段，期望 JSON。"""
-        f = request.files.get("file-0")
-        if f is None or not f.filename:
-            return {"errorMessage": "没有文件"}, 400
-        ext = Path(f.filename).suffix.lower()
-        if ext not in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
-            return {"errorMessage": "只支持 png/jpg/gif/webp"}, 400
-        data = f.read()
-        if not data or len(data) > 5 * 1024 * 1024:
-            return {"errorMessage": "图片为空或超过 5MB"}, 400
-        # 简单魔数校验，防把非图片当图片存
-        if not _looks_like_image(data):
-            return {"errorMessage": "不是有效图片"}, 400
-        # 服务端缩放压缩原图（长边 > 1600 才缩），控制存储体积
-        try:
-            resized = _resize_policy_image(data, ext)
-        except ValueError as exc:
-            return {"errorMessage": str(exc)}, 400
-        upload_dir = db_core.DATA_DIR / "uploads" / "policy"
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        name = f"{secrets.token_hex(12)}{ext}"
-        (upload_dir / name).write_bytes(resized)
-        url = f"/uploads/policy/{name}"
-        return {"result": [{"url": url, "name": f.filename, "size": len(resized)}]}
-
-    @app.route("/uploads/policy/<path:filename>")
-    @login_required
-    def policy_image(filename):
-        upload_dir = db_core.DATA_DIR / "uploads" / "policy"
-        return send_from_directory(upload_dir, filename)
-
     @app.route("/settings/backup/<name>")
     @admin_required
     def settings_backup_download(name):

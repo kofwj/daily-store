@@ -275,7 +275,7 @@ def test_session_lasts_24_hours(tmp_db):
         assert sess.get("user_id")
 
 
-def test_policy_form_csrf_enforced_and_baked_token_works(tmp_db):
+def test_settings_form_csrf_enforced_and_baked_token_works(tmp_db):
     # csrf_protect 在 TESTING 模式下关闭，用非测试 app 真实验证：
     # 缺 token 的保存会被拒，而服务端烘焙进表单的 _csrf_token 能保存成功。
     app = create_app()
@@ -287,23 +287,25 @@ def test_policy_form_csrf_enforced_and_baked_token_works(tmp_db):
         token = sess["_csrf_token"]
     client.post("/login", data={"username": "admin", "pin": "123456",
                                 "_csrf_token": token})
-    # 抓取 settings 页面里服务端烘焙进政策表单的 csrf token
-    html = client.get("/settings?tab=policies").get_data(as_text=True)
+    # 抓取 settings 页面里服务端烘焙进门店表单的 csrf token
+    html = client.get("/settings?tab=stores").get_data(as_text=True)
     import re
     m = re.search(r'name="_csrf_token"\s+value="([0-9a-f]+)"', html)
-    assert m, "政策表单必须烘焙 _csrf_token 隐藏字段"
+    assert m, "设置表单必须烘焙 _csrf_token 隐藏字段"
     baked = m.group(1)
     # 不带 token → CSRF 拒绝
-    r = client.post("/settings", data={"action": "save_policy", "tab": "policies",
-                                        "title": "x", "body": "b"}, follow_redirects=True)
+    r = client.post("/settings", data={"action": "add_store", "tab": "stores",
+                                        "store_name": "csrf_bad_store", "short_name": "bad",
+                                        "city": "示例市", "region_group": "示例"}, follow_redirects=True)
     assert "页面停留太久" in r.get_data(as_text=True)
     # 带服务端烘焙的 token → 成功（且不需 base.html 的 JS 注入）
-    r = client.post("/settings", data={"action": "save_policy", "tab": "policies",
-                                        "title": "csrf", "body": "ok",
-                                        "_csrf_token": baked})
+    r = client.post("/settings", data={"action": "add_store", "tab": "stores",
+                                        "store_name": "csrf_good_store", "short_name": "good",
+                                        "city": "示例市", "region_group": "示例",
+                                        "_csrf_token": baked}, follow_redirects=True)
     assert "页面停留太久" not in r.get_data(as_text=True)
     with db.get_db() as conn:
-        assert "csrf" in [x["title"] for x in conn.execute("SELECT title FROM policies")]
+        assert conn.execute("SELECT id FROM stores WHERE name='csrf_good_store'").fetchone()
 
 
 def test_security_headers_and_no_store(client):

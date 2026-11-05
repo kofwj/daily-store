@@ -110,24 +110,6 @@ from .db_invoice import (  # noqa: F401
     save_invoice_from_form,
     save_invoice_month,
 )
-from .db_policies import (  # noqa: F401
-    ack_map,
-    delete_policy,
-    get_policy,
-    list_policies,
-    list_revisions,
-    mark_policy_read,
-    policy_read_status,
-    policy_require_read,
-    previous_revision_body,
-    render_policy_diff,
-    restore_policy_revision,
-    sanitize_policy_html,
-    save_policy,
-    set_policy_active,
-    set_policy_require_read,
-    unread_policies,
-)
 from .db_query import (  # noqa: F401
     daily_reports_on_date,
     dashboard_today,
@@ -196,7 +178,7 @@ from .wecom import (  # noqa: F401
 def get_db():
     """请求内复用一条连接（挂在 flask.g 上），替代「一开一关」的原始 get_db。
 
-    一个请求里 load_user / 政策检查 / 品牌设置 / 路由各自开连接是纯浪费，
+    一个请求里 load_user / 品牌设置 / 路由各自开连接是纯浪费，
     现在整条请求共用一条。语义与原版一致：
     - 最外层 with 块退出才 commit（异常则 rollback）；嵌套块（如渲染模板时的
       context processor）只复用连接、不动事务，避免里层把外层未提交的写提前提交

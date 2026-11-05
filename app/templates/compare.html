@@ -37,10 +37,6 @@
       {%- if view == 'day' %} · {{ date.year }}年{{ date.month }}月{{ date.day }}日
       {%- else %} · {{ store.name or store.short_name }} · {{ month.strftime('%Y年%m月') }}{% endif %}
     </h1>
-    <p class="muted">触客/销量 = 触客条数 ÷ 手机销量（理论要 > 100.00%，低于 100.00% 都不好）：触客取当天全部记录，手机销量取当天日报；触客只有当天，没有补交一说。</p>
-    {% if view == 'day' %}
-    <p class="muted">品管支撑服务（苏心集结 / 心级服务 / 好评回复 / 客户感知录入）只在本页显示：不进群播报、不进通报文案、截图里也不出现。</p>
-    {% endif %}
   </div>
   {# 筛选 + 动作同一个 flex 行（跟通报表一个模子）；控件放不下时折行，故把动作组整条压到第二行。 #}
   <form method="get" class="page-filters">
@@ -151,7 +147,7 @@
 </div>
 {% endif %}
 
-<p class="muted" style="font-size: 12px">点销量格子就能改，业辅查询登记格子也一样（管理员 / 地市负责人，地市限本市、本月）；改完留痕、不重发群播报。未交日报的店请到「报表」页补录当天日报。</p>
+<p class="muted" style="font-size: 12px">点格子改销量 / 业辅查询（管理员 / 地市负责人限本市本月），改完留痕、不重发群播报；未交日报去「报表」补录。</p>
 <div class="card bulletin-wrap">
   <div id="compareShot" class="bulletin-shot" style="display: block; min-width: 0; width: fit-content; max-width: min(1180px, 100%); margin: 0 auto">
     <div style="border-bottom: 2px solid #111827; padding-bottom: 10px; margin-bottom: 12px">
@@ -336,7 +332,7 @@
   </div>
 </div>
 
-<p class="muted" style="font-size: 12px">点销量格子就能改，业辅查询登记格子也一样（管理员 / 地市负责人，地市限本市、本月）；改完留痕、不重发群播报。未交日报的店请到「报表」页补录当天日报。</p>
+<p class="muted" style="font-size: 12px">点格子改销量 / 业辅查询（管理员 / 地市负责人限本市本月），改完留痕、不重发群播报；未交日报去「报表」补录。</p>
 <div class="card bulletin-wrap">
   <div id="compareShot" class="bulletin-shot" style="display: block; min-width: 0; width: fit-content; max-width: min(1180px, 100%); margin: 0 auto">
     <div style="border-bottom: 2px solid #111827; padding-bottom: 10px; margin-bottom: 12px">

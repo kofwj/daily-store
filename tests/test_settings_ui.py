@@ -74,10 +74,11 @@ def test_review_template_placeholder_groups(admin_client):
 
 
 def test_nav_groups_and_store_page_title(admin_client):
-    """导航按 考核/通报/政策与开票 分组；门店页标题与导航一致。"""
+    """导航按 个人/组织/考核/通报/开票/系统 分组；门店页标题与导航一致。"""
     nav = admin_client.get("/settings?tab=account").get_data(as_text=True)
-    for label in ("个人", "组织", "考核", "通报", "政策与开票", "系统"):
+    for label in ("个人", "组织", "考核", "通报", "开票", "系统"):
         assert f">{label}</span>" in nav
+    assert "政策" not in nav
     stores_page = admin_client.get("/settings?tab=stores").get_data(as_text=True)
     assert "<h1>门店档案</h1>" in stores_page
     assert "<h1>门店</h1>" not in stores_page

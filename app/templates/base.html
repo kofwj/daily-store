@@ -19,7 +19,6 @@
       <a href="{{ url_for('deal_page') }}" class="{{ 'active' if request.endpoint in ('deal_page', 'deal_records') else '' }}"><span class="full">触客</span><span class="short">触客</span></a>
       {% endif %}
       <a href="{{ url_for('advance_page') }}" class="{{ 'active' if request.endpoint in ('advance_page', 'advance_pay', 'advance_sesame_page') else '' }}"><span class="full">垫资</span><span class="short">垫资</span></a>
-      <a href="{{ url_for('policies_page') }}" class="{{ 'active' if request.endpoint in ('policies_page', 'policy_ack') else '' }}"><span class="full">政策</span><span class="short">政策</span></a>
       <a href="{{ url_for('report') }}" class="{{ 'active' if request.endpoint == 'report' else '' }}">报表</a>
       <a href="{{ url_for('advisors_page') }}" class="{{ 'active' if request.endpoint == 'advisors_page' else '' }}"><span class="full">顾问打分</span><span class="short">顾问</span></a>
       {% if g.user['role'] in ('admin', 'readonly', 'city') %}
