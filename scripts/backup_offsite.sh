@@ -82,7 +82,7 @@ REMOTE_BACKUP_USER="${REMOTE_BACKUP_USER:-root}"
 REMOTE_BACKUP_DIR="${REMOTE_BACKUP_DIR:-store-daily-backups}"
 REMOTE_BACKUP_SSH_PORT="${REMOTE_BACKUP_SSH_PORT:-22}"
 
-KEEP_DAYS="${KEEP_DAYS:-30}"
+KEEP_DAYS="${KEEP_DAYS:-14}"
 if [[ -z "${PRIMARY_HOST}" && ! -f "${PRIMARY_DIR}/data/store_daily.db" ]]; then
   echo "请在 scripts/backup.env 或环境变量里设置 PRIMARY_HOST" >&2
   exit 1
