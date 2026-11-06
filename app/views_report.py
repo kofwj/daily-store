@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from flask import Response, flash, g, redirect, render_template, request, url_for
 
@@ -19,6 +19,7 @@ from .helpers import (
     xlsx_response,
 )
 from .metrics_seed import (
+    AUX_QUERY_CODE,
     KPI_TARGETS,
     SECTIONS,
     format_display,
@@ -71,9 +72,29 @@ def register_report(app) -> None:
 
             facts = db.facts_in_range(conn, store["id"], start, end)
             metrics = db.list_metrics(conn)
-            dates = sorted({row["biz_date"] for row in facts})
+            # 业辅查询不是日报指标（数在 aux_queries，不进 metrics / daily_facts）：
+            # 这里补一行，跟服务通报的「业辅查询登记」是同一个数，排在手机销量后面。
+            aux_by_day = {
+                d: int(v["n"] or 0)
+                for d, v in db.aux_days(conn, [store["id"]], start, end)
+                .get(int(store["id"]), {})
+                .items()
+                if int(v["n"] or 0)
+            }
+            aux_metric = {
+                "code": AUX_QUERY_CODE,
+                "name": "业辅查询登记",
+                "section": "basic",
+                "sort_order": 15,  # 紧跟在「当天手机销量」(10) 后面
+            }
+            report_metrics: List[Any] = sorted(
+                [*metrics, aux_metric], key=lambda m: m["sort_order"]
+            )
+            dates = sorted({row["biz_date"] for row in facts} | set(aux_by_day))
             grid: Dict[str, Dict[str, int]] = {m["code"]: {} for m in metrics}
             totals: Dict[str, int] = {m["code"]: 0 for m in metrics}
+            grid[AUX_QUERY_CODE] = dict(aux_by_day)
+            totals[AUX_QUERY_CODE] = sum(aux_by_day.values())
             for row in facts:
                 stored = int(row["day_value"] or 0)
                 # 合计兜住停用指标的历史值：芝麻免充 10 月下线，但 9 月的数还得进金币直降合计；
@@ -126,7 +147,7 @@ def register_report(app) -> None:
             # 指标行：按 SECTIONS 分组；考核 KPI 目标走 kpi_targets，普通指标走 metrics
             metric_targets = db.metric_target_map(conn)
             rows = []
-            for m in metrics:
+            for m in report_metrics:
                 total = totals[m["code"]]
                 month_target = int(metric_targets.get(m["code"], 0) or 0)
                 days_stored = [grid[m["code"]].get(d, 0) for d in dates]
@@ -144,6 +165,9 @@ def register_report(app) -> None:
                         "step": metric_step(m["code"]),
                         "decimal": is_decimal_metric(m["code"]),
                         "avg": round(from_stored(m["code"], total) / max(1, len(submitted_dates)), 1) if submitted_dates else 0,
+                        # 业辅查询在 aux_queries 里，不走 daily_facts：这页只读，
+                        # 改去服务通报 / 填报页那两处（同一个数）
+                        "editable": m["code"] != AUX_QUERY_CODE,
                     }
                 )
 
@@ -195,6 +219,14 @@ def register_report(app) -> None:
                 [row["biz_date"], store["name"], row["section"], row["name"], row["day_value"]]
                 for row in facts
             ]
+            # 业辅查询不是日报指标（数在 aux_queries）：导出也补上，同一天里排在最后
+            aux_by_day = db.aux_days(conn, [store["id"]], start, end).get(int(store["id"]), {})
+            data_rows += [
+                [d, store["name"], "basic", "业辅查询登记", int(v["n"] or 0)]
+                for d, v in sorted(aux_by_day.items())
+                if int(v["n"] or 0)
+            ]
+            data_rows.sort(key=lambda r: r[0])
             filename = f"{store['code']}_{start.isoformat()}_{end.isoformat()}.xlsx"
             return xlsx_response(
                 xlsx_bytes(header, data_rows, sheet="报表"),
@@ -271,6 +303,10 @@ def register_report(app) -> None:
         if not code:
             flash("没有指定指标", "error")
             return redirect(url_for("report", store_id=sid))
+        if code == AUX_QUERY_CODE:
+            # 业辅查询不写 daily_facts：在服务通报 / 填报页改同一个数
+            flash("业辅查询登记请去服务通报或填报页改", "error")
+            return redirect(url_for("report", store_id=sid, view=view))
         with db.get_db() as conn:
             if not db.user_can_access_store(conn, g.user, sid):
                 return Response("forbidden", status=403)

@@ -775,3 +775,62 @@ def test_retire_id_check_keeps_history_and_stops_being_written(tmp_db):
         ).fetchone()
     assert int(row["day_value"]) == 6
     assert int(saved["day_value"]) == 3
+
+
+def test_report_shows_aux_queries_as_readonly_row(admin_client):
+    """报表页补一行业辅查询登记：数从 aux_queries 读，只读，导出也带。"""
+    day = date(2026, 8, 13)
+    with db.get_db() as conn:
+        store = conn.execute("SELECT * FROM stores WHERE code=?", (NINGHAI_CODE,)).fetchone()
+        user_id = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        db.save_daily(
+            conn,
+            store_id=store["id"],
+            biz_date=day,
+            values={"phone_sales": 4, "broadband": 3},
+            user_id=user_id,
+        )
+        db.set_aux(conn, store_id=store["id"], biz_date=day, n=7, user_id=user_id)
+
+    day_query = f"store_id={store['id']}&view=day&start={day.isoformat()}"
+    page = admin_client.get(f"/report?{day_query}")
+    assert page.status_code == 200
+    body = page.data.decode("utf-8")
+    assert "业辅查询登记" in body
+    # 只读：业辅查询这一行不给格子编辑表单，普通指标照旧有
+    assert 'value="aux_query"' not in body
+    assert 'value="phone_sales"' in body
+
+    # 导出：同一天里业辅查询排在日报指标之后，分类归 basic
+    xlsx_resp = admin_client.get(f"/report.xlsx?{day_query}")
+    assert xlsx_resp.status_code == 200
+    rows = [list(r) for r in openpyxl.load_workbook(BytesIO(xlsx_resp.data)).active.iter_rows(values_only=True)]
+    aux_rows = [r for r in rows if r[3] == "业辅查询登记"]
+    assert len(aux_rows) == 1
+    assert aux_rows[0][2] == "basic"
+    assert aux_rows[0][4] == 7
+
+    # 改数护栏：报表页格子接口拒收 aux_query，daily_facts 不留痕
+    resp = admin_client.post(
+        "/report/cell",
+        data={
+            "store_id": str(store["id"]),
+            "date": day.isoformat(),
+            "metric_code": "aux_query",
+            "value": "9",
+            "view": "day",
+            "start": day.isoformat(),
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert "业辅查询登记请去服务通报或填报页改".encode("utf-8") in resp.data
+    with db.get_db() as conn:
+        leaked = conn.execute(
+            "SELECT COUNT(*) AS n FROM daily_facts WHERE metric_code='aux_query'"
+        ).fetchone()["n"]
+        kept = conn.execute(
+            "SELECT COALESCE(SUM(n), 0) AS n FROM aux_queries WHERE store_id=?", (store["id"],)
+        ).fetchone()["n"]
+    assert leaked == 0
+    assert int(kept) == 7
