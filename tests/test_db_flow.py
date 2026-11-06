@@ -777,8 +777,8 @@ def test_retire_id_check_keeps_history_and_stops_being_written(tmp_db):
     assert int(saved["day_value"]) == 3
 
 
-def test_report_shows_aux_queries_as_readonly_row(admin_client):
-    """报表页补一行业辅查询登记：数从 aux_queries 读，只读，导出也带。"""
+def test_report_aux_queries_row_edits_like_other_metrics(admin_client):
+    """报表页那行业辅查询登记：跟别的指标一样能看能改，数落 aux_queries。"""
     day = date(2026, 8, 13)
     with db.get_db() as conn:
         store = conn.execute("SELECT * FROM stores WHERE code=?", (NINGHAI_CODE,)).fetchone()
@@ -797,8 +797,8 @@ def test_report_shows_aux_queries_as_readonly_row(admin_client):
     assert page.status_code == 200
     body = page.data.decode("utf-8")
     assert "业辅查询登记" in body
-    # 只读：业辅查询这一行不给格子编辑表单，普通指标照旧有
-    assert 'value="aux_query"' not in body
+    # 管理员看到的是可编辑格子（跟手机销量那一行同款表单）
+    assert 'value="aux_query"' in body
     assert 'value="phone_sales"' in body
 
     # 导出：同一天里业辅查询排在日报指标之后，分类归 basic
@@ -810,7 +810,7 @@ def test_report_shows_aux_queries_as_readonly_row(admin_client):
     assert aux_rows[0][2] == "basic"
     assert aux_rows[0][4] == 7
 
-    # 改数护栏：报表页格子接口拒收 aux_query，daily_facts 不留痕
+    # 就地改：写进 aux_queries，不往 daily_facts 塞 aux_query
     resp = admin_client.post(
         "/report/cell",
         data={
@@ -824,13 +824,34 @@ def test_report_shows_aux_queries_as_readonly_row(admin_client):
         follow_redirects=True,
     )
     assert resp.status_code == 200
-    assert "业辅查询登记请去服务通报或填报页改".encode("utf-8") in resp.data
+    assert "业辅查询登记为 9 条".encode("utf-8") in resp.data
     with db.get_db() as conn:
         leaked = conn.execute(
             "SELECT COUNT(*) AS n FROM daily_facts WHERE metric_code='aux_query'"
         ).fetchone()["n"]
         kept = conn.execute(
-            "SELECT COALESCE(SUM(n), 0) AS n FROM aux_queries WHERE store_id=?", (store["id"],)
+            "SELECT n FROM aux_queries WHERE store_id=? AND biz_date=?",
+            (store["id"], day.isoformat()),
         ).fetchone()["n"]
     assert leaked == 0
-    assert int(kept) == 7
+    assert int(kept) == 9
+
+    # 改 0 等于撤掉这一格（跟服务通报那格一个规矩）
+    admin_client.post(
+        "/report/cell",
+        data={
+            "store_id": str(store["id"]),
+            "date": day.isoformat(),
+            "metric_code": "aux_query",
+            "value": "0",
+            "view": "day",
+            "start": day.isoformat(),
+        },
+        follow_redirects=True,
+    )
+    with db.get_db() as conn:
+        gone = conn.execute(
+            "SELECT COUNT(*) AS n FROM aux_queries WHERE store_id=? AND biz_date=?",
+            (store["id"], day.isoformat()),
+        ).fetchone()["n"]
+    assert gone == 0

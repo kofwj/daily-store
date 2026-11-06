@@ -165,9 +165,6 @@ def register_report(app) -> None:
                         "step": metric_step(m["code"]),
                         "decimal": is_decimal_metric(m["code"]),
                         "avg": round(from_stored(m["code"], total) / max(1, len(submitted_dates)), 1) if submitted_dates else 0,
-                        # 业辅查询在 aux_queries 里，不走 daily_facts：这页只读，
-                        # 改去服务通报 / 填报页那两处（同一个数）
-                        "editable": m["code"] != AUX_QUERY_CODE,
                     }
                 )
 
@@ -303,26 +300,28 @@ def register_report(app) -> None:
         if not code:
             flash("没有指定指标", "error")
             return redirect(url_for("report", store_id=sid))
-        if code == AUX_QUERY_CODE:
-            # 业辅查询不写 daily_facts：在服务通报 / 填报页改同一个数
-            flash("业辅查询登记请去服务通报或填报页改", "error")
-            return redirect(url_for("report", store_id=sid, view=view))
         with db.get_db() as conn:
             if not db.user_can_access_store(conn, g.user, sid):
                 return Response("forbidden", status=403)
-            try:
-                db.set_day_value(
-                    conn,
-                    store_id=sid,
-                    biz_date=biz_date,
-                    metric_code=code,
-                    value=value,
-                    user_id=g.user["id"],
-                )
-            except ValueError as exc:
-                flash(str(exc), "error")
+            if code == AUX_QUERY_CODE:
+                # 业辅查询不在 daily_facts 里：改的是 aux_queries 那一格
+                # （跟服务通报 / 填报页同一个数）。不写修改审计——那边记的是日报指标前后值。
+                db.set_aux(conn, store_id=sid, biz_date=biz_date, n=value, user_id=g.user["id"])
+                flash(f"已校准 {biz_date.isoformat()} 的业辅查询登记为 {value} 条", "ok")
             else:
-                flash(f"已校准 {biz_date.isoformat()} 的该指标为 {format_stored(code, value)}", "ok")
+                try:
+                    db.set_day_value(
+                        conn,
+                        store_id=sid,
+                        biz_date=biz_date,
+                        metric_code=code,
+                        value=value,
+                        user_id=g.user["id"],
+                    )
+                except ValueError as exc:
+                    flash(str(exc), "error")
+                else:
+                    flash(f"已校准 {biz_date.isoformat()} 的该指标为 {format_stored(code, value)}", "ok")
         kwargs: dict[str, Any] = {"store_id": sid, "view": view}
         if start:
             kwargs["start"] = start
