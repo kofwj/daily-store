@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}串码池 · 顺差合约{% endblock %}
+{% block body_class %}imei-page{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div class="page-title">
+    <h1>串码池</h1>
+    <p class="muted">
+      南通共享池里还没卖掉的顺差机器 · 共 {{ total }} 台 / {{ stores|length }} 家店
+      {% if cards.asof %} · 清单截至 {{ cards.asof }}{% endif %}
+    </p>
+  </div>
+  <form method="get" class="page-filters">
+    <a class="btn ghost" href="{{ url_for('imei_page') }}">回串码待办</a>
+  </form>
+</div>
+
+<p class="flash-inline warn">
+  池子是共享的：机器登记在 A 店，B 店也能卖（串码会跨店调拨）。
+  这一页只回答「池子里还有什么」，调拨仍走线下审批，系统不代替门店做决定。
+</p>
+
+{% if not one %}
+{% if not stores %}
+<p class="muted">池子是空的。导入一份库存明细（含「串码标签」列）就会填上。</p>
+{% endif %}
+<div class="report-table-scroll">
+  <table class="data report-grid">
+    <thead>
+      <tr><th>库存登记门店</th><th>在库待售</th><th>主要机型</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for s in stores %}
+      <tr>
+        <td>{{ s.own_store or '未登记' }}</td>
+        <td class="num">{{ s.n }} 台</td>
+        <td class="muted">
+          {% for m in s.models %}{{ m.model }} ×{{ m.n }}{% if not loop.last %} · {% endif %}{% endfor %}
+        </td>
+        <td><a href="{{ url_for('imei_pool', store=s.own_store, by=by) }}">看看这 {{ s.n }} 台</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="page-head">
+  <div class="page-title">
+    <h2>{{ one }}</h2>
+    <p class="muted">{{ shown }} 台在库待售</p>
+  </div>
+  <form method="get" class="page-filters">
+    <a class="btn ghost" href="{{ url_for('imei_pool') }}">回全池</a>
+  </form>
+</div>
+
+{% if not groups %}
+<p class="muted">这家店没有在库的顺差机器。</p>
+{% endif %}
+
+{% for group in groups %}
+<div class="card">
+  {% if group.key %}<h2>{{ group.key }} <span class="muted">{{ group.rows|length }} 台</span></h2>{% endif %}
+  <div class="report-table-scroll">
+    <table class="data report-grid">
+      <thead>
+        <tr><th>机型</th><th>串码</th><th>库存登记门店</th><th>状态</th></tr>
+      </thead>
+      <tbody>
+        {% for row in group.rows %}
+        <tr>
+          <td>{{ row.model or '—' }}</td>
+          <td class="num">{{ row.imei }}</td>
+          <td>{{ row.own_store or '—' }}</td>
+          <td><span class="chip">在库待售</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

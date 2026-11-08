@@ -231,6 +231,10 @@ def init_db() -> None:
         from .db_invoice import _ensure_invoice_tables
 
         _ensure_invoice_tables(conn)
+        # 串码待办两张薄表：建表幂等、没有历史数据要搬，不由 migrate() 管
+        from .db_imei import ensure as _ensure_imei
+
+        _ensure_imei(conn)
         # 种子（建表/加列/回填默认）每次幂等执行即可；真正“动数据”的迁移走 migrate() 一次
         # seed 是"先 SELECT 再 INSERT"，多 worker 同时启动会撞 UNIQUE；和 migrate() 一样先抢写锁
         conn.commit()

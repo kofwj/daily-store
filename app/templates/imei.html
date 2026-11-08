@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}串码待办 · 顺差合约{% endblock %}
+{% block body_class %}imei-page{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div class="page-title">
+    <h1>串码待办</h1>
+    <p class="muted">
+      顺差机器办没办移动合约{% if cards.asof %} · 清单截至 {{ cards.asof }}{% endif %}
+      {% if scope.active %} · {{ scope.label }}{% endif %}
+    </p>
+  </div>
+  <form method="get" class="page-filters">
+    <label class="filter">
+      <span>范围</span>
+      <select name="show" onchange="this.form.submit()">
+        <option value="open" {{ 'selected' if show == 'open' }}>只看要办的</option>
+        <option value="all" {{ 'selected' if show == 'all' }}>全部（含已办）</option>
+      </select>
+    </label>
+    <a class="btn ghost" href="{{ url_for('imei_pool') }}">串码池 {{ cards.pool }} 台</a>
+  </form>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi">
+    <div class="muted">待办</div>
+    <div class="kpi-num">{{ cards.open }}</div>
+    <div class="muted">{{ cards.stores }} 家店在跟</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">过了 7 天</div>
+    <div class="kpi-num">{{ cards.overdue }}</div>
+    <div class="muted">已退省库风险</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">7 天内到期</div>
+    <div class="kpi-num">{{ cards.soon }}</div>
+    <div class="muted">这几天要催</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">门店已自报</div>
+    <div class="kpi-num">{{ cards.reported }}</div>
+    <div class="muted">含截图</div>
+  </div>
+</div>
+
+{% if is_admin and cards.unmapped %}
+<p class="flash-inline warn">
+  <strong>{{ cards.unmapped }} 台</strong> 的销售门店在门店档案里没有（在营但没建账号），
+  只在管理员这里显示。补门店档案或确认改名后重新导入即可自动归位。
+</p>
+{% endif %}
+
+{% if is_admin %}
+<details class="card">
+  <summary>导入清单（管理员）</summary>
+  <form method="post" action="{{ url_for('imei_import') }}" enctype="multipart/form-data" class="rules-form">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+    <label class="field">
+      <span>清单 CSV（台账全量或当日待办都行）</span>
+      <input type="file" name="csv_file" accept=".csv" required>
+    </label>
+    <label class="field">
+      <span>数据截至</span>
+      <input type="date" name="asof" value="{{ today_iso }}">
+    </label>
+    <p class="muted">按 IMEI 覆盖；清单里没有的行不删，只是不再推给门店。店名对不上的行不入库，导入后会列出来。</p>
+    <button type="submit">导入</button>
+  </form>
+  <p class="muted">门店报完的结论在这里导出，回灌台账用：<a href="{{ url_for('imei_export') }}">导出门店自报 CSV</a></p>
+</details>
+{% endif %}
+
+{% if not groups %}
+<p class="muted">没有要处理的串码。清单每天导入一次，导入前这里是空的。</p>
+{% endif %}
+
+{% for group in groups %}
+<div class="card" id="store-{{ group.id }}">
+  <h2>{{ group.short }} <span class="muted">{{ group.rows|length }} 台</span>
+    {% if group.unmapped %}<span class="chip">待建店</span>{% endif %}</h2>
+  {% if group.short != group.name %}<p class="muted">{{ group.name }}</p>{% endif %}
+  <div class="report-table-scroll">
+    <table class="data report-grid">
+      <thead>
+        <tr>
+          <th>机型</th>
+          <th>串码</th>
+          <th>已售</th>
+          <th>剩余</th>
+          <th>清单状态</th>
+          <th>门店自报</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in group.rows %}
+        <tr>
+          <td>{{ row.model or '—' }}{% if row.sp %}<div class="muted">{{ row.sp }}</div>{% endif %}</td>
+          <td class="num">{{ row.imei }}</td>
+          <td class="num">{{ row.age_days }} 天</td>
+          <td class="num {{ 'neg' if row.remain_days < 0 else '' }}">
+            {% if row.remain_days < 0 %}逾期 {{ -row.remain_days }} 天{% else %}剩 {{ row.remain_days }} 天{% endif %}
+          </td>
+          <td>{{ row.state }}{% if row.strength and row.strength != '无' %}<div class="muted">{{ row.strength }}</div>{% endif %}</td>
+          <td>
+            {% if row.report_action %}
+              <span class="chip">{{ row.report_action }}</span>
+              <div class="muted">{{ row.reporter }} · {{ row.report_at }}</div>
+              {% if row.report_note %}<div class="muted">{{ row.report_note }}</div>{% endif %}
+              {% if row.report_photo %}
+                <a href="{{ url_for('imei_photo', filename=row.report_photo) }}" target="_blank" rel="noopener">看截图</a>
+              {% endif %}
+            {% else %}
+              <span class="muted">未报</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if can_write and not group.unmapped %}
+            <details>
+              <summary>自报</summary>
+              <form method="post" action="{{ url_for('imei_report') }}" enctype="multipart/form-data" class="imei-report-form">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="imei" value="{{ row.imei }}">
+                <input type="hidden" name="back" value="{{ request.full_path }}">
+                <select name="action">
+                  {% for a in actions %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+                </select>
+                <input type="text" name="note" maxlength="200" placeholder="说明（可选，如受理单号）">
+                <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" capture="environment">
+                <button type="submit">提交</button>
+              </form>
+            </details>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}

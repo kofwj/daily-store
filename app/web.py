@@ -37,6 +37,7 @@ from .views_advance import register_advance
 from .views_auth import register_auth
 from .views_compare import register_compare
 from .views_daily import register_daily
+from .views_imei import register_imei
 from .views_report import register_report
 from .views_settings import register_settings
 
@@ -140,6 +141,7 @@ def create_app(*, testing: bool = False) -> Flask:
 
     register_auth(app)
     register_daily(app)
+    register_imei(app)
     register_advance(app)
     register_report(app)
     register_compare(app)
