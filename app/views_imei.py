@@ -130,6 +130,10 @@ def register_imei(app) -> None:
             show=show,
             can_write=_can_write(g.user["role"]),
             actions=db_imei.ACTIONS,
+            biz_choices=db_imei.BIZ_CHOICES,
+            biz_other=db_imei.BIZ_OTHER,
+            needs_evidence=list(db_imei.NO_SYSTEM_EVIDENCE),
+            evidence_label=db_imei.evidence_label,
             is_admin=is_admin,
         )
 
@@ -138,6 +142,7 @@ def register_imei(app) -> None:
     def imei_report():
         imei = (request.form.get("imei") or "").strip()
         action = (request.form.get("action") or "").strip()
+        biz_type = (request.form.get("biz_type") or "").strip()
         note = (request.form.get("note") or "").strip()
         back = request.form.get("back") or url_for("imei_page")
         if not back.startswith("/") or back.startswith("//"):
@@ -159,9 +164,22 @@ def register_imei(app) -> None:
             if not db.user_can_access_store(conn, g.user, store_id):
                 # 写路径不静默落到别家店：宁可拒绝，也不能把结论记到别的店
                 return Response("forbidden", status=403)
-            photo = ""
             upload = request.files.get("photo")
-            if upload is not None and upload.filename:
+            has_photo = upload is not None and bool(upload.filename)
+            # 送2G流量 / 顺差让利 系统没有记录：先拦一道，别白存图片再报错
+            if (
+                db_imei.norm_biz_type(biz_type) in db_imei.NO_SYSTEM_EVIDENCE
+                and not note
+                and not has_photo
+            ):
+                flash(
+                    "「送2G流量」「顺差让利」这类业务系统记录不全，查到就能对上，查不到也算正常，"
+                    "请务必上传受理单或截图（二者填一项）",
+                    "error",
+                )
+                return redirect(back)
+            photo = ""
+            if has_photo:
                 try:
                     photo = _save_photo(upload, store_id)
                 except ValueError as exc:
@@ -173,6 +191,7 @@ def register_imei(app) -> None:
                     imei=imei,
                     store_id=store_id,
                     action=action,
+                    biz_type=biz_type,
                     note=note,
                     photo=photo,
                     user_id=g.user["id"],
@@ -180,7 +199,7 @@ def register_imei(app) -> None:
             except ValueError as exc:
                 flash(str(exc), "error")
                 return redirect(back)
-        flash(f"已记下：{imei[-6:]} → {action}", "ok")
+        flash(f"已记下：{imei[-6:]} → {action} · {db_imei.norm_biz_type(biz_type)}", "ok")
         return redirect(back)
 
     @app.route("/imei/export")
@@ -191,13 +210,31 @@ def register_imei(app) -> None:
             rows = db_imei.export_reports(conn, [s['id'] for s in accessible_stores(conn)])
         out = io.StringIO()
         writer = csv.writer(out)
-        writer.writerow(["imei", "门店", "结论", "备注", "截图", "报人", "时间"])
+        writer.writerow(
+            [
+                "imei",
+                "门店",
+                "结论",
+                "业务类型",
+                "POS证据类型",
+                "类型一致性",
+                "核销结论",
+                "备注",
+                "截图",
+                "报人",
+                "时间",
+            ]
+        )
         for row in rows:
             writer.writerow(
                 [
                     row["imei"],
                     row["store_name"],
                     row["action"],
+                    row["biz_type"],
+                    row["pos_type"],
+                    db_imei.type_flag(row["biz_type"], row["pos_type"]),
+                    db_imei.redeem_state(row["action"], row["biz_type"]),
                     row["note"],
                     row["photo"],
                     row["reporter"],

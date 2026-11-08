@@ -35,6 +35,84 @@ from .db_core import sql_in as _store_in
 # 门店能自报的四种结论。前三种是「有答案」，待核是「我还得问」。
 ACTIONS = ("已办", "已退货", "非本店", "待核")
 
+# 「已兑现」认这四类业务（2026-11-08 用户拍板）：AI 手机合约、直降合约、顺差让利、送 2G 流量。
+# 「其他」允许选，但必须写清是什么业务，核销时人工看说明，不自动算已兑现。
+BIZ_TYPES = ("AI手机合约", "直降合约", "顺差让利", "送2G流量")
+BIZ_OTHER = "其他"
+BIZ_CHOICES = (*BIZ_TYPES, BIZ_OTHER)
+
+# 这两类的系统记录不全：送2G流量（= 购机送12GB流量，2GB/月×6期）POS 一般不带类型，
+# 顺差让利 POS 只能对上约 9%。查到就能对上，查不到也算正常 → 不能拿它判「不一致」，
+# 而且门店自报时必须留下人工证据（受理单号或截图）。
+SYSTEM_CHECKABLE = ("AI手机合约", "直降合约")
+NO_SYSTEM_EVIDENCE = ("送2G流量", "顺差让利")
+
+# POS / 台账那边的写法不一定跟下拉框一模一样，比对前先归一。
+_BIZ_ALIAS = {
+    "AI手机合约": "AI手机合约",
+    "AI手机": "AI手机合约",
+    "AI合约": "AI手机合约",
+    "直降合约": "直降合约",
+    "直降": "直降合约",
+    "直降让利": "直降合约",
+    "顺差让利": "顺差让利",
+    "顺差": "顺差让利",
+    "送2G流量": "送2G流量",
+    "送2G": "送2G流量",
+    "2G流量": "送2G流量",
+    "其他": "其他",
+}
+
+
+def norm_biz_type(value: str) -> str:
+    """业务类型归一：去空格、全角括号转半角、别名归到标准写法，再比对。"""
+    text = (value or "").strip().replace("（", "(").replace("）", ")")
+    text = re.sub(r"[\s　]", "", text)
+    return _BIZ_ALIAS.get(text, text)
+
+
+def evidence_label(biz_type: str) -> str:
+    """页面上给门店/管理员看的可信度：这两类只有门店自述，POS 记录不全。"""
+    biz = norm_biz_type(biz_type)
+    if not biz:
+        return ""
+    if biz in NO_SYSTEM_EVIDENCE:
+        return "仅门店自报·POS记录不全"
+    if biz == BIZ_OTHER:
+        return "其他·人工核"
+    return "系统可核"
+
+
+def type_flag(biz_type: str, pos_type: str) -> str:
+    """门店报的类型 vs POS 证据类型：只标注，不改变判定。
+
+    送2G流量 / 顺差让利 的系统记录不全（POS 一般不带类型 / 只对得上约 9%），
+    所以这两个只给两种结果：「一致」或「系统无记录（待核）」，绝不判「不一致」。
+    注：一台机可能同时有别的合约，POS 里是另一种类型时，本类型仍算「系统无记录（待核）」。
+    """
+    pos = norm_biz_type(pos_type)
+    biz = norm_biz_type(biz_type)
+    if biz in NO_SYSTEM_EVIDENCE:
+        return "一致" if pos and biz == pos else "系统无记录（待核）"
+    if not pos:
+        return "无POS类型（未比对）"
+    if not biz:
+        return "门店未报类型"
+    if biz == BIZ_OTHER:
+        return "其他·人工核"
+    return "一致" if biz == pos else "不一致"
+
+
+def redeem_state(action: str, biz_type: str) -> str:
+    """核销结论：四类业务 + 已办 = 已兑现；其他/没填类型留给人工。"""
+    if action != "已办":
+        return action or "未报"
+    if norm_biz_type(biz_type) in {norm_biz_type(t) for t in BIZ_TYPES}:
+        return "已兑现"
+    if norm_biz_type(biz_type) == BIZ_OTHER:
+        return "待人工核（其他）"
+    return "待人工核（未填类型）"
+
 # 清单里这些状态不需要门店再动手：已经查到合约 / 已经退货。
 CLOSED_STATES = ("已办", "已退货")
 
@@ -79,6 +157,7 @@ CREATE TABLE IF NOT EXISTS imei_todo (
     state TEXT NOT NULL DEFAULT '',
     strength TEXT NOT NULL DEFAULT '',
     evidence TEXT NOT NULL DEFAULT '',
+    pos_biz_type TEXT NOT NULL DEFAULT '',
     asof TEXT NOT NULL DEFAULT '',
     seen INTEGER NOT NULL DEFAULT 1,
     updated_at TEXT NOT NULL
@@ -90,6 +169,7 @@ CREATE TABLE IF NOT EXISTS imei_reports (
     imei TEXT NOT NULL,
     store_id INTEGER NOT NULL REFERENCES stores(id),
     action TEXT NOT NULL,
+    biz_type TEXT NOT NULL DEFAULT '',
     note TEXT NOT NULL DEFAULT '',
     photo TEXT NOT NULL DEFAULT '',
     user_id INTEGER,
@@ -105,6 +185,12 @@ _ADDED_COLUMNS = {
     "sold_store": "TEXT NOT NULL DEFAULT ''",
     "own_store": "TEXT NOT NULL DEFAULT ''",
     "dispatch_store": "TEXT NOT NULL DEFAULT ''",
+    "pos_biz_type": "TEXT NOT NULL DEFAULT ''",
+}
+
+# 自报表也要能给老库补列（生产上表已经建了，新版加了 biz_type）
+_REPORTS_ADDED_COLUMNS = {
+    "biz_type": "TEXT NOT NULL DEFAULT ''",
 }
 
 _COLUMNS = {
@@ -120,6 +206,7 @@ _COLUMNS = {
     "state": ("state", "状态"),
     "strength": ("strength", "证据强度"),
     "evidence": ("evidence", "证据"),
+    "pos_type": ("pos_biz_type", "POS业务类型", "业务类型", "合约类型", "合约名称"),
     "tag": ("串码标签", "标签"),
     "city": ("市", "城市"),
 }
@@ -127,10 +214,14 @@ _COLUMNS = {
 
 def ensure(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
-    have = {str(r[1]) for r in conn.execute("PRAGMA table_info(imei_todo)")}
-    for name, decl in _ADDED_COLUMNS.items():
-        if name not in have:
-            conn.execute(f"ALTER TABLE imei_todo ADD COLUMN {name} {decl}")
+    for table, added in (
+        ("imei_todo", _ADDED_COLUMNS),
+        ("imei_reports", _REPORTS_ADDED_COLUMNS),
+    ):
+        have = {str(r[1]) for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, decl in added.items():
+            if name not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
 
 def _ensure(conn: sqlite3.Connection) -> None:
@@ -285,8 +376,8 @@ def import_rows(
             INSERT INTO imei_todo(
                 imei, status, store_id, sold_store, own_store, dispatch_store,
                 model, sp, sold_day, age_days, remain_days,
-                stage, state, strength, evidence, asof, seen, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                stage, state, strength, evidence, pos_biz_type, asof, seen, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
             ON CONFLICT(imei) DO UPDATE SET
                 status=excluded.status, store_id=excluded.store_id,
                 sold_store=excluded.sold_store, own_store=excluded.own_store,
@@ -295,7 +386,8 @@ def import_rows(
                 sold_day=excluded.sold_day, age_days=excluded.age_days,
                 remain_days=excluded.remain_days, stage=excluded.stage,
                 state=excluded.state, strength=excluded.strength,
-                evidence=excluded.evidence, asof=excluded.asof,
+                evidence=excluded.evidence, pos_biz_type=excluded.pos_biz_type,
+                asof=excluded.asof,
                 seen=1, updated_at=excluded.updated_at
             """,
             (
@@ -314,6 +406,7 @@ def import_rows(
                 _text(row.get(cols["state"]), 20) if cols["state"] else "",
                 _text(row.get(cols["strength"]), 20) if cols["strength"] else "",
                 _text(row.get(cols["evidence"]), 200) if cols["evidence"] else "",
+                _text(row.get(cols["pos_type"]), 40) if cols["pos_type"] else "",
                 stamp,
                 now,
             ),
@@ -350,6 +443,7 @@ def latest_reports(
     return {
         str(row["imei"]): {
             "action": row["action"],
+            "biz_type": row["biz_type"],
             "note": row["note"],
             "photo": row["photo"],
             "reporter": row["reporter"] or "",
@@ -393,7 +487,8 @@ def todo_rows(
     rows = conn.execute(
         f"""
         SELECT t.*, s.name AS store_name, s.short_name AS store_short,
-               r.action AS report_action, r.note AS report_note, r.photo AS report_photo,
+               r.action AS report_action, r.biz_type AS report_biz_type,
+               r.note AS report_note, r.photo AS report_photo,
                r.created_at AS report_at, u.display_name AS reporter
         FROM imei_todo t
         LEFT JOIN stores s ON s.id = t.store_id
@@ -531,21 +626,37 @@ def add_report(
     imei: str,
     store_id: int,
     action: str,
+    biz_type: str = "",
     note: str = "",
     photo: str = "",
     user_id: Optional[int] = None,
 ) -> int:
-    """门店自报一条（只增不改）。返回新记录 id。"""
+    """门店自报一条（只增不改）。返回新记录 id。
+
+    业务类型必填，只能是四类之一或「其他」；选「其他」必须写说明。
+    """
     ensure(conn)
     if action not in ACTIONS:
         raise ValueError("结论只能是「已办 / 已退货 / 非本店 / 待核」")
+    biz = norm_biz_type(biz_type)
+    if not biz:
+        raise ValueError("业务类型要选一个（AI手机合约 / 直降合约 / 顺差让利 / 送2G流量 / 其他）")
+    if biz not in BIZ_CHOICES:
+        raise ValueError("业务类型只能选 AI手机合约 / 直降合约 / 顺差让利 / 送2G流量 / 其他")
+    if biz == BIZ_OTHER and not (note or "").strip():
+        raise ValueError("选「其他」要在说明里写清是什么业务")
+    if biz in NO_SYSTEM_EVIDENCE and not (note or "").strip() and not photo:
+        raise ValueError(
+            f"「{biz}」这类业务系统记录不全，查到就能对上，查不到也算正常，"
+            "请务必上传受理单或截图（说明、截图任填一项）"
+        )
     begin_immediate(conn)
     cur = conn.execute(
         """
-        INSERT INTO imei_reports(imei, store_id, action, note, photo, user_id, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO imei_reports(imei, store_id, action, biz_type, note, photo, user_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (imei, store_id, action, _text(note, 200), photo, user_id, _now()),
+        (imei, store_id, action, biz, _text(note, 200), photo, user_id, _now()),
     )
     return int(cur.lastrowid or 0)
 
@@ -584,6 +695,9 @@ def export_reports(conn: sqlite3.Connection, store_ids: Sequence[int]) -> List[s
 
     台账那边按 imei 覆盖结论：门店说「已办」就进已办，「非本店」就换归属，
     「待核」保持待办。导出不改库，可以反复导。
+
+    带业务类型，并且跟清单里 POS 证据类型（`imei_todo.pos_biz_type`）对一下：
+    不一致只在导出里标出来，**不改变「已兑现」判定**（四类业务 + 已办 = 已兑现）。
     """
     ensure(conn)
     ids = [int(s) for s in store_ids]
@@ -594,10 +708,13 @@ def export_reports(conn: sqlite3.Connection, store_ids: Sequence[int]) -> List[s
     return list(
         conn.execute(
             f"""
-            SELECT r.imei, s.name AS store_name, r.action, r.note, r.photo, r.created_at,
+            SELECT r.imei, s.name AS store_name, r.action, r.biz_type,
+                   COALESCE(t.pos_biz_type, '') AS pos_type,
+                   r.note, r.photo, r.created_at,
                    COALESCE(u.display_name, u.username, '') AS reporter
             FROM imei_reports r
             JOIN stores s ON s.id = r.store_id
+            LEFT JOIN imei_todo t ON t.imei = r.imei
             LEFT JOIN users u ON u.id = r.user_id
             WHERE {clause}
             ORDER BY r.id

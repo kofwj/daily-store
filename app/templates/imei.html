@@ -106,7 +106,7 @@
           <td>{{ row.state }}{% if row.strength and row.strength != '无' %}<div class="muted">{{ row.strength }}</div>{% endif %}</td>
           <td>
             {% if row.report_action %}
-              <span class="chip">{{ row.report_action }}</span>
+              <span class="chip">{{ row.report_action }}</span>{% if row.report_biz_type %}<span class="chip">{{ row.report_biz_type }}</span><span class="chip muted">{{ evidence_label(row.report_biz_type) }}</span>{% endif %}
               <div class="muted">{{ row.reporter }} · {{ row.report_at }}</div>
               {% if row.report_note %}<div class="muted">{{ row.report_note }}</div>{% endif %}
               {% if row.report_photo %}
@@ -127,7 +127,12 @@
                 <select name="action">
                   {% for a in actions %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
                 </select>
-                <input type="text" name="note" maxlength="200" placeholder="说明（可选，如受理单号）">
+                <select name="biz_type" required>
+                  <option value="" selected disabled>业务类型（必选）</option>
+                  {% for b in biz_choices %}<option value="{{ b }}">{{ b }}</option>{% endfor %}
+                </select>
+                <div class="muted biz-hint" hidden></div>
+                <input type="text" name="note" maxlength="200" placeholder="说明（选「其他」必填，其他情况可写受理单号）">
                 <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" capture="environment">
                 <button type="submit">提交</button>
               </form>
@@ -141,4 +146,39 @@
   </div>
 </div>
 {% endfor %}
+<script>
+(function () {
+  var NEEDS = {{ needs_evidence|tojson }};
+  var OTHER = {{ biz_other|tojson }};
+  var MSG = "「送2G流量」「顺差让利」这类业务系统记录不全，查到就能对上，查不到也算正常，请务必上传受理单或截图";
+  function sync(form) {
+    var biz = form.biz_type.value;
+    var hint = form.querySelector(".biz-hint");
+    form.note.required = biz === OTHER;
+    var need = NEEDS.indexOf(biz) >= 0;
+    hint.hidden = !need;
+    hint.textContent = need ? MSG : "";
+    form.note.placeholder = need
+      ? "受理单号或说明（这两类必填，和截图二选一）"
+      : (biz === OTHER ? "说明（选「其他」必填，写清是什么业务）" : "说明（可选，如受理单号）");
+  }
+  document.addEventListener("DOMContentLoaded", function () {
+    Array.prototype.forEach.call(
+      document.querySelectorAll("form.imei-report-form"),
+      function (form) {
+        form.biz_type.addEventListener("change", function () { sync(form); });
+        form.addEventListener("submit", function (e) {
+          var biz = form.biz_type.value;
+          if (!biz) { e.preventDefault(); alert("请先选业务类型"); return; }
+          var hasPhoto = form.photo.files && form.photo.files.length > 0;
+          if (NEEDS.indexOf(biz) >= 0 && !form.note.value.trim() && !hasPhoto) {
+            e.preventDefault();
+            alert(MSG);
+          }
+        });
+      }
+    );
+  });
+})();
+</script>
 {% endblock %}
