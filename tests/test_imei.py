@@ -6,7 +6,10 @@
 注意：conftest 的 admin_client / filler_client 是同一个 FlaskClient（同一个 client 夹具），
 一个用例里同时要两个角色时只能显式再登录一次，否则会话被后一次登录顶掉。
 """
+from datetime import date
 from io import BytesIO
+
+import pytest
 
 from app import db, db_core, db_imei, views_imei
 
@@ -14,6 +17,12 @@ CSV_HEAD = "imei,store,model,sp,day,age,remain,stage,state,strength,evidence\n"
 
 ALPHA = "示例市甲街vivo体验店"
 BETA = "示例市乙街vivo专卖店"
+
+
+@pytest.fixture(autouse=True)
+def _freeze_imei_today(monkeypatch):
+    """串码用例固定「今天」= 清单 asof，天数断言才不随真实日期漂。"""
+    monkeypatch.setattr(db_imei, "today_local", lambda: date(2026, 11, 2))
 
 
 def _csv(*rows):
@@ -69,6 +78,9 @@ def test_admin_import_then_store_sees_only_own(client):
     today = client.get("/imei").get_data(as_text=True)
     assert "860000000000001" in today
     assert "860000000000002" not in today
+    # 手机端入口：每行第一列有「自报」，点开是全屏抽屉（桌面端隐藏）
+    assert 'class="btn imei-open"' in today
+    assert "imei-mobile-tip" in today
     # 档案里没有的店不给店员看，管理员能看到它挂在「待建店」下
     assert "860000000000003" not in today
     _login(client)
@@ -117,7 +129,9 @@ def test_readonly_can_see_cannot_report(client):
     _upload(client, _row("860000000000031", ALPHA))
     _make_readonly()
     _login(client, "dz_a")
-    assert "860000000000031" in client.get("/imei").get_data(as_text=True)
+    page = client.get("/imei").get_data(as_text=True)
+    assert "860000000000031" in page
+    assert 'class="btn imei-open"' not in page and "imei-mobile-tip" not in page
     resp = client.post("/imei/report", data={"imei": "860000000000031", "action": "已办", "biz_type": "顺差让利"})
     assert resp.status_code == 302
     with db.get_db() as conn:
@@ -802,6 +816,7 @@ def test_mark_remote_pending_drops_out_of_overdue(client):
     assert cards["pending"] == 1 and cards["overdue"] == 0 and cards["soon"] == 0
     page = client.get("/imei").get_data(as_text=True)
     assert "待激活" in page and "等激活" in page
+    assert "门店用改串机" in page
     # 待激活不混在逾期里：这一行不出现「逾期 5 天」
     assert "逾期 5 天" not in page
 
@@ -975,7 +990,7 @@ def test_remote_then_activated_keeps_remote_mark(client):
 
 
 def test_non_done_actions_do_not_require_biz_type(client):
-    """选 已退货 / 非本店 / 待核 时不需要选合约业务类型，带了残留值也不入库、不逼传凭证。"""
+    """选 已退货 / 待核 时不需要选合约业务类型，带了残留值也不入库、不逼传凭证。"""
     _login(client)
     _upload(
         client,
@@ -1003,19 +1018,23 @@ def test_non_done_actions_do_not_require_biz_type(client):
     assert "已记下：000501 → 已退货" in r1
     assert "已退货 ·" not in r1  # 不挂多余的分隔点
 
-    # 非本店 / 待核 完全不带 biz_type
-    r2 = client.post(
-        "/imei/report",
-        data={"imei": "860000000000502", "action": "非本店"},
-        follow_redirects=True,
-    ).get_data(as_text=True)
+    # 待核 完全不带 biz_type
     r3 = client.post(
         "/imei/report",
         data={"imei": "860000000000503", "action": "待核", "note": "核实中"},
         follow_redirects=True,
     ).get_data(as_text=True)
-    assert "已记下：000502 → 非本店" in r2
     assert "已记下：000503 → 待核" in r3
+
+    # 「非本店」已下线：下拉里没有，硬发 POST 也被拒，库里不落记录
+    page = client.get("/imei").get_data(as_text=True)
+    assert '<option value="非本店">' not in page
+    r2 = client.post(
+        "/imei/report",
+        data={"imei": "860000000000502", "action": "非本店"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "结论只能是" in r2
 
     with db.get_db() as conn:
         rows = {
@@ -1023,8 +1042,25 @@ def test_non_done_actions_do_not_require_biz_type(client):
             for r in conn.execute("SELECT imei, action, biz_type FROM imei_reports").fetchall()
         }
     assert rows["860000000000501"]["action"] == "已退货" and rows["860000000000501"]["biz_type"] == ""
-    assert rows["860000000000502"]["action"] == "非本店" and rows["860000000000502"]["biz_type"] == ""
+    assert "860000000000502" not in rows
     assert rows["860000000000503"]["action"] == "待核" and rows["860000000000503"]["biz_type"] == ""
+
+
+def test_legacy_non_own_store_report_still_displays_and_exports(client):
+    """历史「非本店」不再接受新报，但老记录原样显示、原样导出，不做数据清洗。"""
+    _login(client)
+    _upload(client, _row("860000000000505", ALPHA))
+    sid = _store_id()
+    with db.get_db() as conn:
+        conn.execute(
+            "INSERT INTO imei_reports(imei, store_id, action, biz_type, note, photo, user_id, created_at)"
+            " VALUES (?, ?, '非本店', '', '历史记录', '', NULL, ?)",
+            ("860000000000505", sid, "2026-11-01 10:00:00"),
+        )
+    page = client.get("/imei?show=all").get_data(as_text=True)
+    assert "历史记录" in page and ">非本店<" in page
+    body = client.get("/imei/export").get_data().decode("utf-8-sig")
+    assert "860000000000505" in body and "非本店" in body
 
 
 def test_summary_and_mark_summary_exclude_closed_reports(client):
@@ -1404,3 +1440,118 @@ def test_photo_upload_stores_jpeg_with_jpg_suffix(client):
     assert saved[:3] == b"\xff\xd8\xff"
     got = client.get(f"/uploads/imei/{name}")
     assert got.status_code == 200 and got.headers["Content-Type"] == "image/jpeg"
+
+
+# ---- 2026-11-09 13:30 三项：存量宽限 rule_ver / 超 30 天核实清单 / 非本店下线 ----
+
+
+def _insert_legacy(imei, *, sold_day, age_days, remain_days, rule_ver=1):
+    """直接插一条老清单（不经过导入），模拟 2026-11-09 之前的存量。"""
+    sid = _store_id()
+    with db.get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO imei_todo(
+                imei, status, store_id, sold_store, own_store, dispatch_store,
+                model, sp, sold_day, age_days, remain_days, stage, state,
+                asof, rule_ver, updated_at
+            ) VALUES (?, '已售', ?, ?, '', ?, 'Y600 Pro', '小李', ?, ?, ?, 'D7+', '确认未办',
+                      '2026-11-02', ?, '2026-11-02 09:00:00')
+            """,
+            (imei, sid, ALPHA, ALPHA, sold_day, age_days, remain_days, rule_ver),
+        )
+    return imei
+
+
+def test_rule_ver_new_import_is_2_and_reimport_keeps_legacy_1(client):
+    """新 IMEI 插入写 2；老行重导也保持 1（UPSERT 不碰 rule_ver），11-16 宽限不被冲掉。"""
+    _login(client)
+    _upload(client, _row("860000000000601", ALPHA))
+    _insert_legacy("860000000000602", sold_day="2026-10-29", age_days=4, remain_days=3)
+    _upload(
+        client,
+        _row("860000000000601", ALPHA),
+        _row("860000000000602", ALPHA),
+        asof="2026-11-02",
+    )
+    with db.get_db() as conn:
+        got = {
+            r["imei"]: r["rule_ver"]
+            for r in conn.execute(
+                "SELECT imei, rule_ver FROM imei_todo WHERE imei IN (?, ?)",
+                ("860000000000601", "860000000000602"),
+            )
+        }
+    assert got["860000000000601"] == 2
+    assert got["860000000000602"] == 1
+
+    # 11-16 宽限清单重导：remain 会更新，但 rule_ver 仍是 1（存量不会被升级）
+    _upload(
+        client,
+        _row("860000000000601", ALPHA, remain=7),
+        _row("860000000000602", ALPHA, remain=7),
+        asof="2026-11-02",
+    )
+    with db.get_db() as conn:
+        got = {
+            r["imei"]: (r["rule_ver"], r["remain_days"])
+            for r in conn.execute(
+                "SELECT imei, rule_ver, remain_days FROM imei_todo WHERE imei IN (?, ?)",
+                ("860000000000601", "860000000000602"),
+            )
+        }
+    assert got["860000000000601"] == (2, 7)
+    assert got["860000000000602"] == (1, 7)
+
+
+def test_rule_ver_1_uses_stored_remain_and_does_not_jump(client, monkeypatch):
+    """存量按库里 remain_days 显示；今天走到 11-16 也不跳逾期。新导入则实时算。"""
+    _login(client)
+    _upload(
+        client,
+        f"860000000000604,{ALPHA},Y600 Pro,小李,2026-10-01,32,-25,D7+,确认未办,无,",
+    )
+    _insert_legacy("860000000000603", sold_day="2026-10-01", age_days=32, remain_days=5)
+    page = client.get("/imei").get_data(as_text=True)
+    assert "860000000000603" in page and "剩 5 天" in page
+    assert "逾期 25 天" in page
+    cards = _cards([_store_id()])
+    assert cards["overdue"] == 1 and cards["soon"] == 1
+
+    # 存量已经 11-16：remain 仍是 5，不因今天变成逾期；新导入那台继续走实时
+    monkeypatch.setattr(db_imei, "today_local", lambda: date(2026, 11, 16))
+    page = client.get("/imei").get_data(as_text=True)
+    assert "剩 5 天" in page
+    assert "逾期 25 天" not in page and "逾期 39 天" in page
+    cards = _cards([_store_id()])
+    assert cards["overdue"] == 1 and cards["soon"] == 1
+
+
+def test_review_page_lists_remote_pending_over_30_days(client):
+    """异地异网未激活超 30 天：管理员有核实页；门店端仍显示但不算逾期、不再催。"""
+    _login(client)
+    _upload(
+        client,
+        f"860000000000611,{ALPHA},Y600 Pro,小李,2026-09-20,43,-36,D7+,确认未办,无,",
+        f"860000000000612,{ALPHA},Y600 Pro,小李,2026-10-20,13,-6,D7+,确认未办,无,",
+    )
+    _mark(client, "860000000000611", "异网")
+    _mark(client, "860000000000612", "异网")
+
+    main = client.get("/imei").get_data(as_text=True)
+    assert "异地异网超 30 天未激活核实清单（1 台）" in main
+
+    review = client.get("/imei/review")
+    assert review.status_code == 200
+    html = review.get_data(as_text=True)
+    assert "860000000000611" in html and "860000000000612" not in html
+    assert "售出已超过 30 天" in html
+
+    # 门店端：老的那台仍看得到，标了「超30天」；待激活不计逾期/到期
+    _login(client, "alpha")
+    store = client.get("/imei").get_data(as_text=True)
+    assert "860000000000611" in store and "超30天·管理员核实" in store
+    cards = _cards([_store_id()])
+    assert cards["pending"] == 2 and cards["overdue"] == 0 and cards["soon"] == 0
+    # 非管理员进核实页被挡回
+    assert client.get("/imei/review").status_code == 302

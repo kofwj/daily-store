@@ -5,7 +5,7 @@
 {% block body %}
 {% macro todo_table(rows, pending=False) %}
 <div class="report-table-scroll">
-  <table class="data report-grid">
+  <table class="data report-grid imei-grid">
     <thead>
       <tr>
         <th>机型</th>
@@ -20,13 +20,17 @@
     <tbody>
       {% for row in rows %}
       <tr class="{{ 'act-pending' if pending }}">
-        <td>{{ row.model or '—' }}{% if row.sp %}<div class="muted">{{ row.sp }}</div>{% endif %}</td>
+        <td class="col-model">
+          {{ row.model or '—' }}{% if row.sp %}<div class="muted">{{ row.sp }}</div>{% endif %}
+          {% if can_write %}<a class="btn imei-open" href="#act-{{ row.imei }}" aria-expanded="false" aria-label="填报 {{ row.imei }}">自报</a>{% endif %}
+        </td>
         <td class="num">{{ row.imei }}</td>
         <td class="num">{{ row.age_eff }} 天</td>
         <td class="num {{ 'neg' if row.remain_eff < 0 and not pending else '' }}">
           {% if pending %}
             <span class="muted">等激活</span>
-            <div class="muted">售出 {{ row.age_days }} 天</div>
+            <div class="muted">售出 {{ row.sold_days if row.sold_days is not none else row.age_days }} 天</div>
+            {% if row.review_due %}<div><span class="chip">超30天·管理员核实</span></div>{% endif %}
           {% else %}
             {% if row.remain_eff < 0 %}逾期 {{ -row.remain_eff }} 天{% else %}剩 {{ row.remain_eff }} 天{% endif %}
             {% if row.manual_activated_at %}<div class="muted">自 {{ row.manual_activated_at[5:] }} 起算</div>{% endif %}
@@ -47,9 +51,12 @@
             <span class="muted">未报</span>
           {% endif %}
         </td>
-        <td>
+        <td class="col-act">
+          <div class="act-wrap" id="act-{{ row.imei }}">
+          <div class="sheet-head">{{ row.model or '—' }} · {{ row.imei }}</div>
+          <button type="button" class="btn ghost sheet-close">关闭</button>
           {% if can_write %}
-          <details>
+          <details class="imei-report">
             <summary>自报</summary>
             <form method="post" action="{{ url_for('imei_report') }}" enctype="multipart/form-data" class="imei-report-form">
               <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
@@ -100,6 +107,7 @@
           </details>
           {% endif %}
           {% endif %}
+          </div>
         </td>
       </tr>
       {% endfor %}
@@ -147,7 +155,7 @@
   <div class="kpi">
     <div class="muted">待激活</div>
     <div class="kpi-num">{{ cards.pending }}</div>
-    <div class="muted">异地异网，不计逾期</div>
+    <div class="muted">异地异网，改串机激活</div>
   </div>
   <div class="kpi">
     <div class="muted">门店已自报</div>
@@ -160,6 +168,13 @@
 <p class="flash-inline warn">
   <strong>{{ cards.unmapped }} 台</strong> 的销售门店在门店档案里没有（在营但没建账号），
   只在管理员这里显示。补门店档案或确认改名后重新导入即可自动归位。
+</p>
+{% endif %}
+
+{% if is_admin %}
+<p class="muted">
+  <a href="{{ url_for('imei_review') }}">异地异网超 30 天未激活核实清单{% if review_n %}（{{ review_n }} 台）{% endif %}</a>
+  —— 门店端仍显示在「待激活」里，不计逾期、不催办，由管理员线下核实。
 </p>
 {% endif %}
 
@@ -220,9 +235,9 @@
   <h2>{{ group.short }} <span class="muted">{{ group.rows|length + group.pending|length }} 台</span>
     {% if group.unmapped %}<span class="chip">待建店</span>{% endif %}</h2>
   {% if group.short != group.name %}<p class="muted">{{ group.name }}</p>{% endif %}
-  {% if group.rows %}{{ todo_table(group.rows) }}{% endif %}
+  {% if group.rows %}{% if can_write %}<p class="imei-mobile-tip">每行机型下面的「自报」直接点，不用往左滑；想看串码、状态再滑表格。</p>{% endif %}{{ todo_table(group.rows) }}{% endif %}
   {% if group.pending %}
-  <h3 class="pending-head">待激活 <span class="muted">{{ group.pending|length }} 台 · 异地异网，等客户自己激活，不算逾期</span></h3>
+  <h3 class="pending-head">待激活 <span class="muted">{{ group.pending|length }} 台 · 异地异网，等激活（门店用改串机），不算逾期；超 30 天由管理员核实</span></h3>
   {{ todo_table(group.pending, true) }}
   {% endif %}
 </div>
@@ -289,6 +304,57 @@
         });
       }
     );
+
+    // 手机端入口：点第一列的「自报」，把这一行的操作区提到 body 上做全屏抽屉。
+    // 桌面版按钮不显示；没 JS 时退回原来的最右列详情，功能不丢。
+    var sheet = null;
+    var sheetHome = null;
+    function closeSheet() {
+      if (!sheet) { return; }
+      var wrap = sheet;
+      var btn = wrap.__openBtn;
+      wrap.classList.remove("sheet-open");
+      document.body.classList.remove("imei-sheet-lock");
+      if (sheetHome && sheetHome.parent) {
+        sheetHome.parent.insertBefore(wrap, sheetHome.next);
+      }
+      if (btn) { btn.setAttribute("aria-expanded", "false"); }
+      sheet = null;
+      sheetHome = null;
+    }
+    function openSheet(wrap, btn) {
+      closeSheet();
+      sheetHome = { parent: wrap.parentNode, next: wrap.nextSibling };
+      document.body.appendChild(wrap);
+      wrap.classList.add("sheet-open");
+      document.body.classList.add("imei-sheet-lock");
+      var report = wrap.querySelector("details.imei-report");
+      if (report) { report.open = true; }
+      if (btn) { btn.setAttribute("aria-expanded", "true"); }
+      wrap.__openBtn = btn || null;
+      wrap.scrollTop = 0;
+      sheet = wrap;
+    }
+    Array.prototype.forEach.call(
+      document.querySelectorAll(".imei-grid tbody tr"),
+      function (tr) {
+        var btn = tr.querySelector(".imei-open");
+        var wrap = tr.querySelector(".act-wrap");
+        if (!btn || !wrap) { return; }
+        btn.addEventListener("click", function (e) {
+          e.preventDefault();
+          if (wrap.classList.contains("sheet-open")) { closeSheet(); } else { openSheet(wrap, btn); }
+        });
+        var close = wrap.querySelector(".sheet-close");
+        if (close) { close.addEventListener("click", closeSheet); }
+      }
+    );
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { closeSheet(); }
+    });
+    window.addEventListener("resize", function () {
+      if (window.innerWidth > 800) { closeSheet(); }
+    });
   });
 })();
 </script>

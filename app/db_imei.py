@@ -3,9 +3,10 @@
 为什么单独两张表：
 - `imei_todo` 只存「后台导出的一份清单」的最新一次样子（按 IMEI 覆盖，不删行），
   门店看到的是清单，不是系统算出来的结论。清单外的新机器由下一次导入带进来。
-- `imei_reports` 只追加，不更新不删除：门店点「已办 / 已退货 / 非本店 / 待核」
-  和截图都落在这里，谁、什么时候、写了什么，一条不改。台账要能回头算，
-  所以宁可多一条记录，也不覆盖上一条。
+- `imei_reports` 只追加，不更新不删除：门店点「已办 / 已退货 / 待核」和截图
+  都落在这里，谁、什么时候、写了什么，一条不改。台账要能回头算，
+  所以宁可多一条记录，也不覆盖上一条。历史上报过的「非本店」照原样显示、导出，
+  但 2026-11-09 起不再接受新报（用户拍板）。
 
 派活口径（2026-11-08 用户拍板）：
 - 只做南通：泰州不参与，导入时就丢掉（`SCOPE_CITY`）。
@@ -33,8 +34,9 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from .db_core import _now, begin_immediate, today_local
 from .db_core import sql_in as _store_in
 
-# 门店能自报的四种结论。前三种是「有答案」，待核是「我还得问」。
-ACTIONS = ("已办", "已退货", "非本店", "待核")
+# 门店能自报的三种结论。前两种是「有答案」，待核是「我还得问」。
+# 「非本店」2026-11-09 用户拍板下线：新报不接受，老记录仍原样显示/导出。
+ACTIONS = ("已办", "已退货", "待核")
 
 # 「已兑现」认这四类业务（2026-11-08 用户拍板）：AI 手机合约、直降合约、顺差让利、送 2G 流量。
 # 「其他」允许选，但必须写清是什么业务，核销时人工看说明，不自动算已兑现。
@@ -101,28 +103,50 @@ def activation_state(user_type: str, manual_activated_at: str) -> str:
 def effective_days(
     row: Dict[str, Any],
 ) -> Tuple[int, int, str, str]:
-    """(已售天数, 剩余天数, 阶段, 起算日) —— 有手动激活日就从那天重新起算 7 天。
+    """(已售天数, 剩余天数, 阶段, 起算日)。
 
-    清单里的 age_days / remain_days 是台账按「售出日」算的；客户异地异网、
-    机器晚激活时，那套数会提前把机器推成逾期。激活日一填，就以激活日为准。
+    两套口径，由导入批次 `rule_ver` 决定：
+    - 1 = 2026-11-09 之前的存量：台账给的 remain_days 原样用，不按今天重算，
+      所以 91 台不会在升级当天突然从「正常」跳成「逾期」，统一按 11-16 宽限看。
+    - 2 = 新导入：从起算日（手动激活日优先，否则售出日）到**今天**实时算 7 天。
+
+    手动激活日对两套口径都优先：门店已经用改串机激活了，就从激活日重新起算，
+    不能还拿台账按售出日算的旧数压着。
     """
     state = activation_state(str(row.get("user_type") or ""), str(row.get("manual_activated_at") or ""))
     start = str(row.get("manual_activated_at") or "").strip()[:10]
+    today = today_local()
     if state == "已激活":
-        d0, d1 = _parse_day(start), _parse_day(str(row.get("asof") or ""))
-        if d0 and d1:
-            # 台账常见 T-1 截至日（如昨晚导表、今早点激活）：钳到 >=0，避免出现「已售 -1 天 / 剩 8 天」
-            age = max(0, (d1 - d0).days)
+        d0 = _parse_day(start)
+        if d0:
+            age = max(0, (today - d0).days)
             remain = ACT_WINDOW_DAYS - age
             return age, remain, _stage_of(age), start
         return int(row.get("age_days") or 0), int(row.get("remain_days") or 0), str(row.get("stage") or ""), start
+
+    try:
+        rule_ver = int(row.get("rule_ver") or 1)
+    except (TypeError, ValueError):
+        rule_ver = 1
+    if rule_ver <= 1:
+        age = int(row.get("age_days") or 0)
+        remain = int(row.get("remain_days") or 0)
+        stage = str(row.get("stage") or "") or _stage_of(age)
+        if state == "待激活":
+            return age, remain, "待激活", ""
+        return age, remain, stage, str(row.get("sold_day") or "")
+
+    sold = _parse_day(str(row.get("sold_day") or ""))
+    if sold:
+        age = max(0, (today - sold).days)
+        remain = ACT_WINDOW_DAYS - age
+        if state == "待激活":
+            return age, remain, "待激活", ""
+        return age, remain, _stage_of(age), sold.isoformat()
+    # 没有售出日就没法实时算，退回清单里的数，至少不崩
     age = int(row.get("age_days") or 0)
     remain = int(row.get("remain_days") or 0)
-    stage = str(row.get("stage") or "") or _stage_of(age)
-    if state == "待激活":
-        return age, remain, "待激活", ""
-    return age, remain, stage, str(row.get("sold_day") or "")
-
+    return age, remain, ("待激活" if state == "待激活" else str(row.get("stage") or "") or _stage_of(age)), ""
 
 def norm_biz_type(value: str) -> str:
     """业务类型归一：去空格、全角括号转半角、别名归到标准写法，再比对。"""
@@ -177,7 +201,7 @@ def redeem_state(action: str, biz_type: str) -> str:
 CLOSED_STATES = ("已办", "已退货")
 
 # 客户类型：门店提交时自己判断（2026-11-09 用户拍板「门店绝大部分能判断」）。
-# 异地异网客户要等客户手动激活，所以这类机器在激活前不计逾期、不催办。
+# 异地异网号码要等门店用改串机激活，所以这类机器在激活前不计逾期、不催办。
 USER_TYPES = ("本地移动", "异地异网", "未知")
 USER_DEFAULT = "本地移动"
 USER_REMOTE = "异地异网"
@@ -185,6 +209,8 @@ USER_REMOTE = "异地异网"
 MARKS = ("异网", "已激活", "撤销")
 # 从「售出日」或「手动激活日」起算 7 天
 ACT_WINDOW_DAYS = 7
+# 异地异网一直没激活的，超过这么多天进管理员核实清单（门店端只显示，不再催）
+REVIEW_DAYS = 30
 
 _USER_ALIAS = {
     "异地异网": USER_REMOTE,
@@ -244,6 +270,7 @@ _SCHEMA_STMTS = (
         user_type TEXT NOT NULL DEFAULT '本地移动',
         manual_activated_at TEXT NOT NULL DEFAULT '',
         asof TEXT NOT NULL DEFAULT '',
+        rule_ver INTEGER NOT NULL DEFAULT 1,
         seen INTEGER NOT NULL DEFAULT 1,
         updated_at TEXT NOT NULL
     )
@@ -276,6 +303,9 @@ _ADDED_COLUMNS = {
     "pos_biz_type": "TEXT NOT NULL DEFAULT ''",
     "user_type": "TEXT NOT NULL DEFAULT '本地移动'",
     "manual_activated_at": "TEXT NOT NULL DEFAULT ''",
+    # 1 = 2026-11 存量宽限（用库里 remain_days，不随今天跳变）；2 = 新导入，按起算日+7 实时算。
+    # 老库补这一列时所有存量自动是 1，正是要的效果。
+    "rule_ver": "INTEGER NOT NULL DEFAULT 1",
 }
 
 # 自报表也要能给老库补列（生产上表已经建了，新版加了 biz_type）
@@ -501,13 +531,15 @@ def import_rows(
             if stock_mode
             else ""
         )
+        # rule_ver 故意不在 UPSERT 里更新：老行永远保持 1，重导不能把存量升成 2，
+        # 否则 11-16 宽限当天就失效、27 台会跳成逾期。只有全新 IMEI 的 INSERT 写 2。
         cur = conn.execute(
             f"""
             INSERT INTO imei_todo(
                 imei, status, store_id, sold_store, own_store, dispatch_store,
                 model, sp, sold_day, age_days, remain_days,
-                stage, state, strength, evidence, pos_biz_type, asof, seen, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                stage, state, strength, evidence, pos_biz_type, asof, rule_ver, seen, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2, 1, ?)
             ON CONFLICT(imei) DO UPDATE SET
                 status=excluded.status, store_id=excluded.store_id,
                 sold_store=excluded.sold_store, own_store=excluded.own_store,
@@ -638,10 +670,11 @@ def todo_rows(
 
 
 def enrich(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """给每行补三样页面要用的东西：待激活/已激活、按激活日重算的天数、是否逾期。
+    """给每行补页面要用的东西：待激活/已激活、生效天数、是否逾期、售出几天。
 
     排序跟着改：同一个店里，正常要办的排前面，待激活的沉到后面单独成组。
     """
+    today = today_local()
     for row in rows:
         age, remain, stage, start = effective_days(row)
         row["act_state"] = activation_state(
@@ -652,6 +685,13 @@ def enrich(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         row["stage_eff"] = stage
         row["start_day"] = start
         row["overdue"] = row["act_state"] != "待激活" and remain < 0
+        sold = _parse_day(str(row.get("sold_day") or ""))
+        row["sold_days"] = max(0, (today - sold).days) if sold else None
+        row["review_due"] = bool(
+            row["act_state"] == "待激活"
+            and row["sold_days"] is not None
+            and row["sold_days"] > REVIEW_DAYS
+        )
     rows.sort(
         key=lambda r: (
             r["act_state"] == "待激活",
@@ -662,6 +702,21 @@ def enrich(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         )
     )
     return rows
+
+
+def review_rows(
+    conn: sqlite3.Connection,
+    store_ids: Sequence[int],
+    *,
+    include_unmapped: bool = False,
+) -> List[Dict[str, Any]]:
+    """管理员待核实清单：异地异网、还没激活、售出已超过 30 天。
+
+    只给管理员看。门店端原样保留在「待激活」分组里，但不计逾期、不进催办；
+    这里列出来是让管理员人工核实（号码是不是真的还没激活、机器还在不在店）。
+    """
+    rows = todo_rows(conn, store_ids, show="open", include_unmapped=include_unmapped)
+    return [row for row in rows if row["review_due"]]
 
 
 def mark_summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> List[Dict[str, Any]]:
@@ -782,9 +837,12 @@ def summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> Dict[str, Any
     clause, raw_params = _store_in("t.store_id", ids) if ids else ("1=0", [])
     params: List[Any] = list(raw_params)
     closed_marks = ",".join("?" * len(CLOSED_STATES))
-    # 逾期/到期按「生效天数」算：填了手动激活日的，从激活日重新起算 7 天；
-    # 标了异地异网还没激活的（待激活）单独计数，不计逾期、不算催办；
-    # 门店自报为已办/已退货的同步退出在跟，与列表口径保持一致。
+    # 逾期/到期按「生效天数」算：
+    # - rule_ver=1 的存量继续用清单里的 remain_days（不随今天跳变，11-16 宽限）；
+    # - rule_ver=2 的新导入从起算日（手动激活日优先，否则售出日）到**今天**实时算；
+    # - 标了异地异网还没激活的（待激活）单独计数，不计逾期、不算催办；
+    # - 门店自报为已办/已退货的同步退出在跟，与列表口径保持一致。
+    today_iso = today_local().isoformat()
     row = conn.execute(
         f"""
         WITH latest_r AS (
@@ -794,11 +852,14 @@ def summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> Dict[str, Any
         ),
         base AS (
           SELECT t.store_id, t.user_type, t.manual_activated_at,
+                 COALESCE(t.rule_ver, 1) AS rule_ver,
                  CASE WHEN t.manual_activated_at<>''
-                           AND date(t.asof) IS NOT NULL
                            AND date(t.manual_activated_at) IS NOT NULL
-                      THEN MAX(0, CAST(julianday(date(t.asof)) - julianday(date(t.manual_activated_at)) AS INTEGER))
-                      ELSE NULL END AS age_act,
+                      THEN MAX(0, CAST(julianday(date(?)) - julianday(date(t.manual_activated_at)) AS INTEGER))
+                      WHEN COALESCE(t.rule_ver, 1) >= 2
+                           AND date(t.sold_day) IS NOT NULL
+                      THEN MAX(0, CAST(julianday(date(?)) - julianday(date(t.sold_day)) AS INTEGER))
+                      ELSE NULL END AS age_eff,
                  t.remain_days
           FROM imei_todo t
           LEFT JOIN latest_r r ON r.imei = t.imei
@@ -806,30 +867,38 @@ def summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> Dict[str, Any
             AND t.state NOT IN ({closed_marks})
             AND COALESCE(r.action, '') NOT IN ({closed_marks})
             AND {clause}
+        ),
+        calc AS (
+          SELECT *,
+                 CASE WHEN user_type=? AND manual_activated_at='' THEN NULL
+                      WHEN rule_ver <= 1 AND manual_activated_at='' THEN remain_days
+                      WHEN age_eff IS NOT NULL THEN ? - age_eff
+                      ELSE remain_days END AS remain_eff
+          FROM base
         )
         SELECT
           COUNT(*) AS open_n,
           SUM(CASE WHEN user_type=? AND manual_activated_at='' THEN 1 ELSE 0 END) AS pending_n,
           SUM(CASE WHEN manual_activated_at<>'' THEN 1 ELSE 0 END) AS activated_n,
           SUM(CASE WHEN NOT (user_type=? AND manual_activated_at='')
-                    AND (CASE WHEN age_act IS NULL THEN remain_days ELSE ? - age_act END) < 0
-                   THEN 1 ELSE 0 END) AS overdue_n,
+                    AND remain_eff < 0 THEN 1 ELSE 0 END) AS overdue_n,
           SUM(CASE WHEN NOT (user_type=? AND manual_activated_at='')
-                    AND (CASE WHEN age_act IS NULL THEN remain_days ELSE ? - age_act END) BETWEEN 0 AND 6
-                   THEN 1 ELSE 0 END) AS soon_n,
+                    AND remain_eff BETWEEN 0 AND 6 THEN 1 ELSE 0 END) AS soon_n,
           COUNT(DISTINCT store_id) AS store_n
-        FROM base
+        FROM calc
         """,
         [
+            today_iso,
+            today_iso,
             STATUS_SOLD,
             *CLOSED_STATES,
             *CLOSED_STATES,
             *params,
             USER_REMOTE,
-            USER_REMOTE,
             ACT_WINDOW_DAYS,
             USER_REMOTE,
-            ACT_WINDOW_DAYS,
+            USER_REMOTE,
+            USER_REMOTE,
         ],
     ).fetchone()
     asof = conn.execute(
@@ -891,11 +960,11 @@ def add_report(
     """门店自报一条（只增不改）。返回新记录 id。
 
     选「已办」时业务类型必填（四类之一或「其他」，选「其他」必填说明，记录不全的两类必填说明或截图）；
-    选「已退货 / 非本店 / 待核」时不要求业务类型。
+    选「已退货 / 待核」时不要求业务类型。「非本店」已下线，新报直接拒绝。
     """
     ensure(conn)
     if action not in ACTIONS:
-        raise ValueError("结论只能是「已办 / 已退货 / 非本店 / 待核」")
+        raise ValueError("结论只能是「已办 / 已退货 / 待核」")
     if action == "已办":
         biz = norm_biz_type(biz_type)
         if not biz:
@@ -972,8 +1041,8 @@ def set_mark(
 ) -> Dict[str, Any]:
     """门店的两个动作 + 管理员的撤销与修正。
 
-    - mark='异网'：客户是异地异网，要等他自己激活 → 转「待激活」，不计逾期、不催办
-    - mark='已激活'：客户已经激活 → 记下激活日，7 天从这一天重新起算
+    - mark='异网'：号码是异地异网，要等门店用改串机激活 → 转「待激活」，不计逾期、不催办
+    - mark='已激活'：门店已用改串机激活 → 记下激活日，7 天从这一天重新起算
     - mark='撤销'：仅管理员可操作 → 回到「本地移动」，按售出日算
 
     门店一旦点过「已激活」即锁死起算日，非管理员不可再改期或切回异网；
@@ -1047,9 +1116,9 @@ def export_todo(
 
 
 def export_reports(conn: sqlite3.Connection, store_ids: Sequence[int]) -> List[sqlite3.Row]:
-    """导出自报记录（含已办、待核、非本店），给台账回灌用。
+    """导出自报记录（含已办、待核，以及历史遗留的「非本店」），给台账回灌用。
 
-    台账那边按 imei 覆盖结论：门店说「已办」就进已办，「非本店」就换归属，
+    台账那边按 imei 覆盖结论：门店说「已办」就进已办，历史「非本店」仍按原记录换归属，
     「待核」保持待办。导出不改库，可以反复导。
 
     带业务类型，并且跟清单里 POS 证据类型（`imei_todo.pos_biz_type`）对一下：

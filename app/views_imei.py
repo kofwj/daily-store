@@ -140,6 +140,12 @@ def register_imei(app) -> None:
             cards = db_imei.summary(conn, ids)
             # 各店标了多少台异网/已激活：管理员用来发现「全标异网躲催办」
             marks = db_imei.mark_summary(conn, ids) if is_admin else []
+            # 异地异网超过 30 天还没激活：管理员人工核实，门店端只显示不再催
+            review_n = (
+                len(db_imei.review_rows(conn, ids, include_unmapped=not scope["active"]))
+                if is_admin
+                else 0
+            )
         groups: List[Dict[str, Any]] = []
         by_store: Dict[Any, Dict[str, Any]] = {}
         for row in rows:
@@ -163,6 +169,7 @@ def register_imei(app) -> None:
             groups=groups,
             cards=cards,
             marks=marks,
+            review_n=review_n,
             today_iso=db.today_local().isoformat(),
             user_types=db_imei.USER_TYPES,
             scope=scope,
@@ -174,6 +181,25 @@ def register_imei(app) -> None:
             needs_evidence=list(db_imei.NO_SYSTEM_EVIDENCE),
             evidence_label=db_imei.evidence_label,
             is_admin=is_admin,
+        )
+
+    @app.route("/imei/review")
+    @admin_required
+    def imei_review():
+        """管理员待核实清单：异地异网、未激活、售出超过 30 天。"""
+        with db.get_db() as conn:
+            if not db_imei.user_in_imei_scope(conn, g.user):
+                return Response("forbidden", status=403)
+            stores = accessible_stores(conn)
+            scope = request_scope(stores)
+            rows = db_imei.review_rows(
+                conn, scope["ids"], include_unmapped=not scope["active"]
+            )
+        return render_template(
+            "imei_review.html",
+            rows=rows,
+            scope=scope,
+            today_iso=db.today_local().isoformat(),
         )
 
     @app.route("/imei/report", methods=["POST"])
@@ -283,7 +309,7 @@ def register_imei(app) -> None:
                 return redirect(back)
         tail = imei[-6:]
         if res["mark"] == "异网":
-            flash(f"已标记：{tail} 异地异网待激活（等客户激活后点「已激活」，期间不算逾期）", "ok")
+            flash(f"已标记：{tail} 异地异网待激活（门店用改串机激活后点「已激活」，期间不算逾期）", "ok")
         elif res["mark"] == "撤销":
             flash(f"已撤销：{tail} 回到本地移动，按售出日算", "ok")
         else:

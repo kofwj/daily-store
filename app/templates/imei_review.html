@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}待激活超 30 天核实 · 串码待办{% endblock %}
+{% block body_class %}imei-page{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div class="page-title">
+    <h1>待激活超 30 天核实</h1>
+    <p class="muted">异地异网、还没点「已激活」、售出已超过 30 天 · 截至 {{ today_iso }}</p>
+  </div>
+  <div class="page-filters">
+    <a class="btn ghost" href="{{ url_for('imei_page') }}">返回串码待办</a>
+  </div>
+</div>
+
+<div class="flash-inline warn">
+  这里只把机器列出来，<strong>不自动改门店清单、不自动判逾期</strong>。门店端仍在「待激活」分组里看得到，
+  但不计逾期、不进催办；请管理员线下核实号码 / 机器去向，再决定让门店补激活还是撤回标记。
+</div>
+
+{% if rows %}
+<div class="card">
+  <div class="report-table-scroll">
+    <table class="data report-grid">
+      <thead>
+        <tr>
+          <th>门店</th>
+          <th>机型</th>
+          <th>串码</th>
+          <th>售出日期</th>
+          <th>已售</th>
+          <th>清单状态</th>
+          <th>门店自报</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.store_short or row.store_name or row.dispatch_store or '待建店' }}</td>
+          <td>{{ row.model or '—' }}{% if row.sp %}<div class="muted">{{ row.sp }}</div>{% endif %}</td>
+          <td class="num"><a href="{{ url_for('imei_page', show='all') }}#act-{{ row.imei }}">{{ row.imei }}</a></td>
+          <td class="num">{{ row.sold_day or '—' }}</td>
+          <td class="num">{{ row.sold_days if row.sold_days is not none else row.age_days }} 天</td>
+          <td>{{ row.state }}{% if row.act_state %}<div><span class="chip">{{ row.user_type }}·待激活</span></div>{% endif %}</td>
+          <td>
+            {% if row.report_action %}
+              <span class="chip">{{ row.report_action }}</span>
+              <div class="muted">{{ row.reporter }} · {{ row.report_at }}</div>
+            {% else %}
+              <span class="muted">未报</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<p class="muted">没有超过 30 天还没激活的异地异网机器。</p>
+{% endif %}
+{% endblock %}

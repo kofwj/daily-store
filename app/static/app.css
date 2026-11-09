@@ -2224,3 +2224,109 @@ h3.pending-head {
 }
 table.report-grid tr.act-pending td { background: #fbfcfe; }
 table.report-grid tr.act-pending td.num { color: var(--muted); }
+
+/* ===== 串码待办：手机端自报入口 =====
+   桌面版保持原样（表格第 1 列只有机型）；手机宽度下每行机型格多一个「自报」按钮，
+   点它把操作区提到 body 上做全屏抽屉，不用再横滑到最右列找入口。 */
+.imei-open,
+.imei-mobile-tip,
+.imei-grid .sheet-head,
+.imei-grid .sheet-close { display: none; }
+
+@media (max-width: 800px) {
+  /* 表格保留可读列宽（15 位串码不折行），横向滑动只为了看后面几列；
+     第一列吸住，所以「自报」入口永远在第一屏，不用滑。 */
+  .imei-grid { min-width: 560px; }
+  /* 第一列吸住：横向滑动看串码时，「自报」入口一直在 */
+  .imei-grid th:first-child,
+  .imei-grid td.col-model {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    min-width: 92px;
+    max-width: 116px;
+    background: #fff;
+    box-shadow: 1px 0 0 var(--line);
+  }
+  .imei-grid thead th:first-child { z-index: 3; background: #f8fafc; }
+  .imei-grid tr.act-pending td.col-model { background: #fbfcfe; }
+  .imei-grid .imei-open {
+    display: inline-flex;
+    margin-top: 6px;
+    height: 32px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+  .imei-mobile-tip {
+    display: block;
+    margin: 2px 0 8px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  /* JS 把这层挪到 body 上；fixed 全屏，表单在手机上一屏能填完 */
+  .act-wrap.sheet-open {
+    position: fixed;
+    inset: 0;
+    z-index: 120;
+    display: block;
+    padding: 14px 14px calc(18px + env(safe-area-inset-bottom, 0px));
+    background: var(--bg);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .act-wrap.sheet-open .sheet-head {
+    display: block;
+    margin-bottom: 10px;
+    font-size: 15px;
+    font-weight: 650;
+    line-height: 1.4;
+    word-break: break-all;
+  }
+  .act-wrap.sheet-open .sheet-close {
+    display: inline-flex;
+    margin-bottom: 10px;
+    height: 34px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+  .act-wrap.sheet-open details.imei-report > summary,
+  .act-wrap.sheet-open details.mark-form > summary {
+    padding: 10px 12px;
+    font-size: 15px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+  }
+  .act-wrap.sheet-open details.imei-report > summary { font-weight: 650; }
+  .act-wrap.sheet-open details.imei-report[open] > summary { border-radius: 10px 10px 0 0; }
+  .act-wrap.sheet-open form.imei-report-form,
+  .act-wrap.sheet-open details.mark-form form {
+    display: grid;
+    gap: 10px;
+    margin: 0;
+    padding: 12px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-top: 0;
+    border-radius: 0 0 10px 10px;
+  }
+  .act-wrap.sheet-open details.mark-form form {
+    border-radius: 10px;
+    margin: 8px 0;
+  }
+  .act-wrap.sheet-open form.imei-report-form select,
+  .act-wrap.sheet-open form.imei-report-form input[type="text"],
+  .act-wrap.sheet-open form.imei-report-form input[type="file"],
+  .act-wrap.sheet-open details.mark-form input[type="date"] {
+    width: 100%;
+    height: 40px;
+    font-size: 15px;
+  }
+  .act-wrap.sheet-open form button[type="submit"] {
+    width: 100%;
+    height: 44px;
+    font-size: 15px;
+  }
+  .act-wrap.sheet-open form.imei-report-form .muted { margin: 0; }
+  body.imei-sheet-lock { overflow: hidden; }
+}
