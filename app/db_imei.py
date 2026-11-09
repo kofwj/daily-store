@@ -215,6 +215,11 @@ REVIEW_DAYS = 30
 # 存量才标「宽限已过」。改期改这里或环境变量 STORE_DAILY_IMEI_GRACE_END，别写死在模板。
 IMEI_GRACE_END = os.environ.get("STORE_DAILY_IMEI_GRACE_END", "2026-11-16")
 
+# 管理员手动结转（V0.3.69）：只往 imei_carry_log 追加审计快照，
+# **不改** imei_todo 的 state / seen / remain_days / rule_ver，也不删行；
+# 结转后 grace 谓词排除该行（门店仍可补报）；撤销 = 再追加一条「撤销」，历史不删。
+CARRY_ACTIONS = ("结转", "撤销")
+
 _USER_ALIAS = {
     "异地异网": USER_REMOTE,
     "异网": USER_REMOTE,
@@ -312,6 +317,31 @@ _SCHEMA_STMTS = (
     """,
     "CREATE INDEX IF NOT EXISTS idx_imei_mark_log_imei ON imei_mark_log(imei, id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_imei_mark_log_store ON imei_mark_log(store_id, id DESC)",
+    """
+    CREATE TABLE IF NOT EXISTS imei_carry_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        imei TEXT NOT NULL,
+        store_id INTEGER,
+        user_id INTEGER,
+        action TEXT NOT NULL,
+        store_name TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL DEFAULT '',
+        sold_day TEXT NOT NULL DEFAULT '',
+        remain_days INTEGER NOT NULL DEFAULT 0,
+        state TEXT NOT NULL DEFAULT '',
+        user_type TEXT NOT NULL DEFAULT '',
+        manual_activated_at TEXT NOT NULL DEFAULT '',
+        data_flag TEXT NOT NULL DEFAULT '',
+        rule_ver INTEGER NOT NULL DEFAULT 1,
+        seen INTEGER NOT NULL DEFAULT 1,
+        asof TEXT NOT NULL DEFAULT '',
+        report_action TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_imei_carry_log_imei ON imei_carry_log(imei, id DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_imei_carry_log_store ON imei_carry_log(store_id, id DESC)",
 )
 
 # ensure() 的快速路径要认全这些对象；新增审计表时同步加进来，否则老库会漏建。
@@ -325,6 +355,9 @@ _SCHEMA_OBJECTS = (
     "idx_imei_reports_store",
     "idx_imei_mark_log_imei",
     "idx_imei_mark_log_store",
+    "imei_carry_log",
+    "idx_imei_carry_log_imei",
+    "idx_imei_carry_log_store",
 )
 
 # 老库上补列（表是懒建的，之前跑过的库没有这些列）
@@ -729,13 +762,19 @@ def todo_rows(
         SELECT t.*, s.name AS store_name, s.short_name AS store_short,
                r.action AS report_action, r.biz_type AS report_biz_type,
                r.note AS report_note, r.photo AS report_photo,
-               r.created_at AS report_at, u.display_name AS reporter
+               r.created_at AS report_at, u.display_name AS reporter,
+               c.action AS carry_action, c.created_at AS carried_at,
+               cu.display_name AS carrier
         FROM imei_todo t
         LEFT JOIN stores s ON s.id = t.store_id
         LEFT JOIN imei_reports r ON r.id = (
             SELECT MAX(id) FROM imei_reports WHERE imei = t.imei
         )
         LEFT JOIN users u ON u.id = r.user_id
+        LEFT JOIN imei_carry_log c ON c.id = (
+            SELECT MAX(id) FROM imei_carry_log WHERE imei = t.imei
+        )
+        LEFT JOIN users cu ON cu.id = c.user_id
         WHERE {' AND '.join(where)}
         ORDER BY (t.store_id IS NULL), t.store_id, t.remain_days, t.imei
         """,
@@ -768,6 +807,8 @@ def enrich(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             and row["sold_days"] > REVIEW_DAYS
         )
         # 软失效/宽限已过（计算谓词，零迁移）：页面 chip 与 carryover scope=grace 同源
+        # 管理员手动结转过的行不再算「宽限已过」（grace 谓词排除，见 is_grace_row）
+        row["carried"] = str(row.get("carry_action") or "") == CARRY_ACTIONS[0]
         row["in_grace"] = is_grace_row(row, today)
     rows.sort(
         key=lambda r: (
@@ -786,6 +827,15 @@ def grace_day() -> Optional[date]:
     return _parse_day(IMEI_GRACE_END)
 
 
+def grace_label() -> str:
+    """宽限截止日的短标签（如 11-16），给页面/模板用；不把日期写死在模板里。
+
+    跟着 `IMEI_GRACE_END` 一起走；解析不出来就原样返回环境变量值，不报错、不瞎猜。
+    """
+    day = grace_day()
+    return f"{day.month:02d}-{day.day:02d}" if day else IMEI_GRACE_END
+
+
 def grace_active(today: Optional[date] = None) -> bool:
     """今天是否已过 11-16 宽限（软失效/grace 的时间门）。11-16 当天 00:00 起生效。"""
     today = today or today_local()
@@ -802,11 +852,14 @@ def is_grace_row(row: Dict[str, Any], today: Optional[date] = None) -> bool:
     - seen=1（还在最新清单）；
     - 未办（清单状态不是已办/已退货，且最新自报不是已办/已退货）；
     - 非异地异网；
-    - 不在 7 天激活窗口（无激活日，或激活日距今超过 ACT_WINDOW_DAYS 天）。
+    - 不在 7 天激活窗口（无激活日，或激活日距今超过 ACT_WINDOW_DAYS 天）；
+    - **未被管理员手动结转**（V0.3.69：结转后退出 grace，但门店仍可补报）。
 
     软失效只标提示、不改 state/seen/remain_days；截止后仍允许补报 已办/已退货/待核。
     """
     if not grace_active(today):
+        return False
+    if str(row.get("carry_action") or "") == CARRY_ACTIONS[0]:
         return False
     try:
         rule_ver = int(row.get("rule_ver") or 1)
@@ -856,11 +909,12 @@ def carryover_rows(
     生产上 91 行都是 rule_ver=1，其中 13 行已不在最新清单（`seen=0`），
     这里一并列出并标出来，否则清单只有 78 台，对不上「91 台」。
 
-    `scope` 三个口径（只认这三值，其他当 all）：
+    `scope` 四个口径（只认这四值，其他当 all）：
     - all：rule_ver=1 全部（含 seen=0 的老行）；
     - lost：`seen=0`（最新清单已没有）；
     - grace：软失效范围 = `is_grace_row`（过 11-16 宽限、seen=1、未办、非异地异网、
-      不在 7 天激活窗口），与 §7 软失效谓词同源，不另写一套 SQL。
+      不在 7 天激活窗口、未被手动结转），与 §7 软失效谓词同源，不另写一套 SQL；
+    - carried：管理员已手动结转（最新一条结转审计是「结转」），可逐行/批量撤销。
     """
     rows = todo_rows(
         conn,
@@ -872,11 +926,14 @@ def carryover_rows(
     )
     for row in rows:
         row["in_latest"] = bool(row.get("seen"))
+        row["carried"] = str(row.get("carry_action") or "") == CARRY_ACTIONS[0]
         row["in_grace"] = is_grace_row(row)
     if scope == "lost":
         rows = [r for r in rows if not r["in_latest"]]
     elif scope == "grace":
         rows = [r for r in rows if r["in_grace"]]
+    elif scope == "carried":
+        rows = [r for r in rows if r["carried"]]
     rows.sort(
         key=lambda r: (
             r.get("store_id") is None,
@@ -885,6 +942,150 @@ def carryover_rows(
         )
     )
     return rows
+
+
+def _carry_snapshot(row: Dict[str, Any]) -> Tuple[Any, ...]:
+    """结转审计要存的快照列（IMEI/门店/机型/剩余/标记状态…），顺序跟 INSERT 对齐。"""
+    return (
+        row["imei"],
+        row.get("store_id"),
+        _text(row.get("store_name") or row.get("dispatch_store") or "", 60),
+        _text(row.get("model") or "", 80),
+        row.get("sold_day") or "",
+        int(row.get("remain_days") or 0),
+        row.get("state") or "",
+        row.get("user_type") or "",
+        row.get("manual_activated_at") or "",
+        row.get("data_flag") or "",
+        int(row.get("rule_ver") or 1),
+        int(row.get("seen") or 0),
+        row.get("asof") or "",
+        row.get("report_action") or "",
+    )
+
+
+_CARRY_INSERT = """
+    INSERT INTO imei_carry_log(
+        imei, store_id, store_name, model, sold_day, remain_days,
+        state, user_type, manual_activated_at, data_flag, rule_ver, seen, asof,
+        report_action, action, user_id, note, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+
+def carry_over(
+    conn: sqlite3.Connection,
+    imeis: Sequence[str],
+    *,
+    store_ids: Sequence[int] = (),
+    include_unmapped: bool = False,
+    is_admin: bool = False,
+    user_id: Optional[int] = None,
+    note: str = "",
+) -> Dict[str, Any]:
+    """管理员手动结转（V0.3.69）：把这批「宽限已过」的存量写一份快照到 imei_carry_log。
+
+    - 仅 admin；**只结当前还在 grace 范围里的行**，别的行（已办/已退货/异地异网/
+      未过宽限/已经结转）一律跳过并在返回里报数，不报错中断整批；
+    - 不删行、不改 `state` / `seen` / `remain_days` / `rule_ver`，也不动 `updated_at`：
+      结转只是管理员这边的账，门店那边照旧看得见、照旧能补报；
+    - 结转后 grace 谓词排除该行（`is_grace_row` 看最新一条审计）；撤销见 `undo_carry`。
+
+    返回 `{carried, skipped, now}`：真正写进去的台数 / 被跳过的台数 / 结转时间。
+    """
+    if not is_admin:
+        raise PermissionError("forbidden")
+    ensure(conn)
+    wanted = [str(i).strip() for i in imeis if str(i).strip()]
+    if not wanted:
+        raise ValueError("没有选中要结转的机器")
+    grace_rows = carryover_rows(
+        conn, store_ids, include_unmapped=include_unmapped, scope="grace"
+    )
+    by_imei = {r["imei"]: r for r in grace_rows}
+    hit = [by_imei[i] for i in dict.fromkeys(wanted) if i in by_imei]
+    if not hit:
+        raise ValueError(
+            "选中的机器都不在「宽限已过」范围里（未过宽限 / 已办理 / 异地异网 / 已结转），没有可结转的"
+        )
+    begin_immediate(conn)
+    now = _now()
+    for row in hit:
+        conn.execute(
+            _CARRY_INSERT,
+            (*_carry_snapshot(row), CARRY_ACTIONS[0], user_id, _text(note, 200), now),
+        )
+    return {"carried": len(hit), "skipped": len(wanted) - len(hit), "now": now}
+
+
+def undo_carry(
+    conn: sqlite3.Connection,
+    imeis: Sequence[str],
+    *,
+    store_ids: Sequence[int] = (),
+    include_unmapped: bool = False,
+    is_admin: bool = False,
+    user_id: Optional[int] = None,
+    note: str = "",
+) -> Dict[str, Any]:
+    """撤销结转（仅 admin）：再追加一条「撤销」审计，历史不删、`imei_todo` 不动。
+
+    撤销后这行如果仍满足软失效条件，会重新回到 grace 范围（门店又能看到「宽限已过」）。
+    只认当前确实处于「已结转」状态的行。
+    """
+    if not is_admin:
+        raise PermissionError("forbidden")
+    ensure(conn)
+    wanted = [str(i).strip() for i in imeis if str(i).strip()]
+    if not wanted:
+        raise ValueError("没有选中要撤销的机器")
+    carried = carryover_rows(
+        conn, store_ids, include_unmapped=include_unmapped, scope="carried"
+    )
+    by_imei = {r["imei"]: r for r in carried}
+    hit = [by_imei[i] for i in dict.fromkeys(wanted) if i in by_imei]
+    if not hit:
+        raise ValueError("选中的机器不是已结转状态（可能已经撤销），没有可撤销的")
+    begin_immediate(conn)
+    now = _now()
+    for row in hit:
+        conn.execute(
+            _CARRY_INSERT,
+            (*_carry_snapshot(row), CARRY_ACTIONS[1], user_id, _text(note, 200), now),
+        )
+    return {"undone": len(hit), "skipped": len(wanted) - len(hit), "now": now}
+
+
+def carry_log_rows(
+    conn: sqlite3.Connection,
+    store_ids: Sequence[int],
+    *,
+    include_unmapped: bool = False,
+    limit: int = 200,
+) -> List[Dict[str, Any]]:
+    """结转审计留痕（最近在前）：谁、什么时候、结转还是撤销、当时那行的快照。"""
+    ensure(conn)
+    ids = [int(s) for s in store_ids]
+    if not ids:
+        return []
+    clause, raw_params = _store_in("l.store_id", ids)
+    where = f"({clause} OR l.store_id IS NULL)" if include_unmapped else clause
+    limit = max(1, min(int(limit), 1000))
+    rows = conn.execute(
+        f"""
+        SELECT l.*, s.short_name AS store_short, s.name AS db_store_name,
+               COALESCE(u.display_name, u.username, '') AS actor,
+               COALESCE(u.role, '') AS actor_role
+        FROM imei_carry_log l
+        LEFT JOIN stores s ON s.id = l.store_id
+        LEFT JOIN users u ON u.id = l.user_id
+        WHERE {where}
+        ORDER BY l.id DESC
+        LIMIT ?
+        """,
+        [*raw_params, limit],
+    )
+    return [dict(row) for row in rows]
 
 
 def marked_rows(

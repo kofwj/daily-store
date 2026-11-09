@@ -59,8 +59,8 @@ def _looks_like_image(data: bytes) -> bool:
 
 
 def _carryover_scope(value: str) -> str:
-    """carryover 页/CSV 的 scope 参数：只认 all/lost/grace，其他值一律当 all。"""
-    return value if value in ("all", "lost", "grace") else "all"
+    """carryover 页/CSV 的 scope 参数：只认 all/lost/grace/carried，其他值一律当 all。"""
+    return value if value in ("all", "lost", "grace", "carried") else "all"
 
 
 def _to_rgb(im: Any) -> Any:
@@ -191,6 +191,7 @@ def register_imei(app) -> None:
             marked_n=marked_n,
             today_iso=db.today_local().isoformat(),
             user_types=db_imei.USER_TYPES,
+            grace_label=db_imei.grace_label(),
             scope=scope,
             show=show,
             can_write=_can_write(g.user["role"]),
@@ -226,8 +227,9 @@ def register_imei(app) -> None:
     def imei_carryover():
         """11-16 存量结转清单：rule_ver=1 的机器 + CSV 导出（仅管理员）。
 
-        支持 `scope=all|lost|grace` 三个 tab：all 全列、lost=seen=0、
-        grace=软失效范围（与 §7 谓词同源）；tab 计数与行集同源。
+        支持 `scope=all|lost|grace|carried` 四个 tab：all 全列、lost=seen=0、
+        grace=软失效范围（与 §7 谓词同源）、carried=管理员已手动结转；
+        tab 计数与行集同源。
         """
         scope_arg = _carryover_scope(request.args.get("scope", "all"))
         with db.get_db() as conn:
@@ -242,26 +244,103 @@ def register_imei(app) -> None:
             rows = db_imei.carryover_rows(
                 conn, scope["ids"], include_unmapped=include_unmapped, scope=scope_arg
             )
+            logs = db_imei.carry_log_rows(
+                conn, scope["ids"], include_unmapped=include_unmapped, limit=50
+            )
         counts = {
             "all": len(all_rows),
             "lost": sum(1 for r in all_rows if not r["in_latest"]),
             "grace": sum(1 for r in all_rows if r["in_grace"]),
+            "carried": sum(1 for r in all_rows if r["carried"]),
         }
         return render_template(
             "imei_carryover.html",
             rows=rows,
             counts=counts,
+            logs=logs,
             active_scope=scope_arg,
             scope=scope,
+            grace_label=db_imei.grace_label(),
             today_iso=db.today_local().isoformat(),
         )
+
+    @app.route("/imei/carryover/mark", methods=["POST"])
+    @admin_required
+    def imei_carryover_mark():
+        """管理员手动结转 / 撤销结转（V0.3.69）：逐台或整批。
+
+        - 只写 `imei_carry_log` 审计快照（谁、何时、当时那行的门店/机型/剩余/标记状态），
+          **不删行、不改 state/seen/remain_days/rule_ver**，门店仍可补报；
+        - 逐台：`imei_one` 一次一台；批量：勾选 `imei` 或 `batch=1`（整批按服务端
+          重算的当前范围，不信前端传来的清单）；
+        - 仅 admin（路由级 `@admin_required` + 数据层 `is_admin` 双保险）。
+        """
+        mode = (request.form.get("mode") or "").strip()
+        if mode not in ("carry", "undo"):
+            flash("不认识的结转动作", "error")
+            return redirect(url_for("imei_carryover"))
+        back = request.form.get("back") or url_for("imei_carryover", scope="grace")
+        if not back.startswith("/") or back.startswith("//"):
+            back = url_for("imei_carryover", scope="grace")
+        one = (request.form.get("imei_one") or "").strip()
+        batch = request.form.get("batch") == "1"
+        imeis = [one] if one else [i.strip() for i in request.form.getlist("imei") if i.strip()]
+        with db.get_db() as conn:
+            if not db_imei.user_in_imei_scope(conn, g.user):
+                return Response("forbidden", status=403)
+            stores = accessible_stores(conn)
+            scope = request_scope(stores)
+            include_unmapped = not scope["active"]
+            if batch:
+                target = "grace" if mode == "carry" else "carried"
+                imeis = [
+                    r["imei"]
+                    for r in db_imei.carryover_rows(
+                        conn,
+                        scope["ids"],
+                        include_unmapped=include_unmapped,
+                        scope=target,
+                    )
+                ]
+            try:
+                if mode == "carry":
+                    res = db_imei.carry_over(
+                        conn,
+                        imeis,
+                        store_ids=scope["ids"],
+                        include_unmapped=include_unmapped,
+                        is_admin=True,
+                        user_id=g.user["id"],
+                    )
+                    msg = f"已结转 {res['carried']} 台（门店仍可补报，可在「已结转」撤销）"
+                    if res["skipped"]:
+                        msg += f"；{res['skipped']} 台不在宽限范围，跳过"
+                    flash(msg, "ok")
+                else:
+                    res = db_imei.undo_carry(
+                        conn,
+                        imeis,
+                        store_ids=scope["ids"],
+                        include_unmapped=include_unmapped,
+                        is_admin=True,
+                        user_id=g.user["id"],
+                    )
+                    msg = f"已撤销结转 {res['undone']} 台"
+                    if res["skipped"]:
+                        msg += f"；{res['skipped']} 台不是已结转状态，跳过"
+                    flash(msg, "ok")
+            except PermissionError:
+                return Response("forbidden", status=403)
+            except ValueError as exc:
+                flash(str(exc), "error")
+        return redirect(back)
 
     @app.route("/imei/export/carryover")
     @admin_required
     def imei_export_carryover():
         """导出 11-16 存量结转清单（UTF-8 BOM，Excel 直接打开）。
 
-        与页面同筛选：`scope` 透传同一 all/lost/grace，行数与页面一致。
+        与页面同筛选：`scope` 透传同一 all/lost/grace/carried，行数与页面一致。
         """
         scope_arg = _carryover_scope(request.args.get("scope", "all"))
         with db.get_db() as conn:
@@ -294,6 +373,8 @@ def register_imei(app) -> None:
                 "自报时间",
                 "清单截至",
                 "是否在最新清单",
+                "结转时间",
+                "结转人",
             ]
         )
         for row in rows:
@@ -317,6 +398,8 @@ def register_imei(app) -> None:
                     (row["report_at"] or "")[:16],
                     (row["asof"] or "")[:10],
                     "是" if row["in_latest"] else "否（最新清单已没有）",
+                    (row.get("carried_at") or "")[:16] if row.get("carried") else "",
+                    (row.get("carrier") or "") if row.get("carried") else "",
                 ]
             )
         body = "\ufeff" + out.getvalue()

@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}11-16 存量结转清单 · 串码待办{% endblock %}
+{% block title %}{{ grace_label }} 存量结转清单 · 串码待办{% endblock %}
 {% block body_class %}imei-page{% endblock %}
 {% block body %}
 <div class="page-head">
   <div class="page-title">
-    <h1>11-16 存量结转清单</h1>
+    <h1>{{ grace_label }} 存量结转清单</h1>
     <p class="muted">
-      2026-11-09 前导入的存量（<code>rule_ver=1</code>）· {{ counts.all }} 台 · 宽限至 11-16 · 截至 {{ today_iso }}
+      2026-11-09 前导入的存量（<code>rule_ver=1</code>）· {{ counts.all }} 台 · 宽限至 {{ grace_label }} · 截至 {{ today_iso }}
       {% if scope.active %} · {{ scope.label }}{% endif %}
     </p>
   </div>
@@ -20,15 +20,17 @@
   <a class="tab{{ ' active' if active_scope == 'all' }}" href="{{ url_for('imei_carryover', scope='all') }}">全部（{{ counts.all }}）</a>
   <a class="tab{{ ' active' if active_scope == 'lost' }}" href="{{ url_for('imei_carryover', scope='lost') }}">不在最新清单（{{ counts.lost }}）</a>
   <a class="tab{{ ' active' if active_scope == 'grace' }}" href="{{ url_for('imei_carryover', scope='grace') }}">宽限已过（{{ counts.grace }}）</a>
+  <a class="tab{{ ' active' if active_scope == 'carried' }}" href="{{ url_for('imei_carryover', scope='carried') }}">已结转（{{ counts.carried }}）</a>
 </div>
 
-<div class="flash-inline">
-  这张表列全部 <strong>rule_ver=1</strong> 的存量（含最新清单里已经没有的存量，标「不在最新清单」），
-  剩余天数仍用清单里的 <code>remain_days</code>，<strong>不按今天重算</strong>。
-  存量统一按 <strong>11-16 宽限</strong>看：从今天到 11-16 天数冻住、不随日期递减，
-  所以不会自己跳成逾期。导出 CSV 后逐店核对；要改清单状态 / 剩余天数，走原来的重导
-  （重导不会把 rule_ver 从 1 升到 2）。
-</div>
+{% if active_scope in ('grace', 'carried') and (counts.grace or counts.carried) %}
+{# 管理员手动结转：只写审计快照，不改清单状态/剩余天数；门店仍可补报；可撤销 #}
+<form method="post" action="{{ url_for('imei_carryover_mark') }}" id="carryForm">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="mode" value="{{ 'undo' if active_scope == 'carried' else 'carry' }}">
+  <input type="hidden" name="scope" value="{{ active_scope }}">
+  <input type="hidden" name="back" value="{{ request.full_path }}">
+{% endif %}
 
 {% if rows %}
 <div class="card">
@@ -36,6 +38,7 @@
     <table class="data report-grid">
       <thead>
         <tr>
+          {% if active_scope in ('grace', 'carried') %}<th class="pick"><input type="checkbox" id="pickAll" aria-label="全选本页" title="全选本页"></th>{% endif %}
           <th>门店</th>
           <th>机型</th>
           <th>串码</th>
@@ -47,6 +50,7 @@
           <th>标记</th>
           <th>数据标记</th>
           <th>门店自报</th>
+          <th>结转</th>
           <th>清单截至</th>
           <th>最新清单</th>
         </tr>
@@ -54,6 +58,9 @@
       <tbody>
         {% for row in rows %}
         <tr>
+          {% if active_scope in ('grace', 'carried') %}
+          <td class="pick"><input type="checkbox" class="js-pick" name="imei" value="{{ row.imei }}" aria-label="选中 {{ row.imei }}"></td>
+          {% endif %}
           <td>{{ row.store_short or row.store_name or row.dispatch_store or '待建店' }}</td>
           <td>{{ row.model or '—' }}{% if row.sp %}<div class="muted">{{ row.sp }}</div>{% endif %}</td>
           <td class="num">{{ row.imei }}</td>
@@ -80,6 +87,21 @@
               <span class="muted">未报</span>
             {% endif %}
           </td>
+          <td>
+            {% if row.carried %}
+              <span class="chip">已结转</span>
+              <div class="muted">{{ row.carrier or '管理员' }} · {{ (row.carried_at or '')[:16] }}</div>
+              {% if active_scope == 'carried' %}
+                <button class="btn ghost small" type="submit" name="imei_one" value="{{ row.imei }}"
+                        title="撤销这台结转，回到「宽限已过」">撤销</button>
+              {% endif %}
+            {% elif active_scope == 'grace' %}
+              <button class="btn ghost small" type="submit" name="imei_one" value="{{ row.imei }}"
+                      title="这台转管理员线下跟进，门店仍可补报">结转</button>
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
           <td class="num">{{ (row.asof or '')[:10] }}</td>
           <td>
             {% if row.in_latest %}<span class="muted">在</span>
@@ -92,6 +114,92 @@
   </div>
 </div>
 {% else %}
-<p class="muted">没有 rule_ver=1 的存量机器。</p>
+<p class="muted">
+  {% if active_scope == 'carried' %}还没有结转过的机器。
+  {% elif active_scope == 'grace' %}没有宽限已过的机器（{{ grace_label }} 前为 0 是对的）。
+  {% elif active_scope == 'lost' %}最新清单没有丢机器。
+  {% else %}没有 rule_ver=1 的存量机器。{% endif %}
+</p>
+{% endif %}
+
+{% if active_scope in ('grace', 'carried') and (counts.grace or counts.carried) %}
+  {% if active_scope == 'grace' %}
+  <div class="page-filters carry-actions">
+    <button class="btn" type="submit" id="btnCarryPicked" disabled>结转选中（<span id="pickedN">0</span> 台）</button>
+    <button class="btn ghost" type="submit" name="batch" value="1"
+            onclick="return confirm('把当前筛选范围里 {{ counts.grace }} 台「宽限已过」全部结转？只写审计快照，门店仍可补报，可撤销。')">全部结转（{{ counts.grace }} 台）</button>
+    <span class="muted">结转只记管理员这边的账：不删行、不改清单状态/剩余天数，门店照旧看得见、能补报；点错了在「已结转」里撤销。</span>
+  </div>
+  {% elif active_scope == 'carried' %}
+  <div class="page-filters carry-actions">
+    <button class="btn" type="submit" id="btnCarryPicked" disabled>撤销选中（<span id="pickedN">0</span> 台）</button>
+    <button class="btn ghost" type="submit" name="batch" value="1"
+            onclick="return confirm('撤销当前筛选范围里 {{ counts.carried }} 台结转？撤销后它们会回到「宽限已过」。')">全部撤销（{{ counts.carried }} 台）</button>
+    <span class="muted">撤销只追加一条审计，历史不删；清单行的状态/剩余天数从来没被改过。</span>
+  </div>
+  {% endif %}
+</form>
+{% endif %}
+
+<div class="flash-inline">
+  这张表列全部 <strong>rule_ver=1</strong> 的存量（含最新清单里已经没有的存量，标「不在最新清单」），
+  剩余天数仍用清单里的 <code>remain_days</code>，<strong>不按今天重算</strong>。
+  存量统一按 <strong>{{ grace_label }} 宽限</strong>看：从今天到 {{ grace_label }} 天数冻住、不随日期递减，
+  所以不会自己跳成逾期。导出 CSV 后逐店核对；要改清单状态 / 剩余天数，走原来的重导
+  （重导不会把 rule_ver 从 1 升到 2）。
+</div>
+
+{% if logs %}
+<div class="card">
+  <h2 class="card-title">结转审计（最近 {{ logs|length }} 条）</h2>
+  <div class="report-table-scroll">
+    <table class="data report-grid">
+      <thead>
+        <tr><th>时间</th><th>动作</th><th>门店</th><th>串码</th><th>机型</th><th>清单状态</th><th>剩余</th><th>操作人</th><th>备注</th></tr>
+      </thead>
+      <tbody>
+        {% for log in logs %}
+        <tr>
+          <td class="num">{{ (log.created_at or '')[:16] }}</td>
+          <td>{% if log.action == '结转' %}<span class="chip">结转</span>{% else %}<span class="chip">撤销</span>{% endif %}</td>
+          <td>{{ log.store_short or log.store_name or '待建店' }}</td>
+          <td class="num">{{ log.imei }}</td>
+          <td>{{ log.model or '—' }}</td>
+          <td>{{ log.state or '—' }}</td>
+          <td class="num">{{ log.remain_days }} 天</td>
+          <td>{{ log.actor or '—' }}</td>
+          <td>{{ log.note or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if active_scope in ('grace', 'carried') %}
+<script>
+(function () {
+  var form = document.getElementById('carryForm');
+  if (!form) return;
+  var all = document.getElementById('pickAll');
+  var btn = document.getElementById('btnCarryPicked');
+  var cnt = document.getElementById('pickedN');
+  var boxes = function () { return Array.prototype.slice.call(form.querySelectorAll('input.js-pick')); };
+  function sync() {
+    var n = boxes().filter(function (b) { return b.checked; }).length;
+    if (cnt) cnt.textContent = String(n);
+    if (btn) btn.disabled = n === 0;
+  }
+  if (all) all.addEventListener('change', function () {
+    boxes().forEach(function (b) { b.checked = all.checked; });
+    sync();
+  });
+  form.addEventListener('change', function (e) {
+    if (e.target && e.target.classList && e.target.classList.contains('js-pick')) sync();
+  });
+  sync();
+})();
+</script>
 {% endif %}
 {% endblock %}

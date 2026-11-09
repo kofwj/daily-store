@@ -37,7 +37,7 @@
           {% endif %}
         </td>
         <td>{{ row.state }}{% if row.strength and row.strength != '无' %}<div class="muted">{{ row.strength }}</div>{% endif %}
-          {% if row.in_grace %}<div><span class="chip">宽限已过（11-16）</span></div>{% endif %}
+          {% if row.in_grace %}<div><span class="chip">宽限已过（{{ grace_label }}）</span></div>{% endif %}
           {% if row.act_state %}<div><span class="chip">{{ row.user_type }}{% if row.act_state == '待激活' %}·待激活{% else %}·已激活 {{ row.manual_activated_at[5:] }}{% endif %}</span></div>{% endif %}
           {% if row.data_flag %}<div><span class="chip">{{ row.data_flag }}</span></div>{% endif %}
         </td>
@@ -123,7 +123,7 @@
     <h1>串码待办</h1>
     <p class="muted">
       顺差机器办没办移动合约{% if cards.asof %} · 清单截至 {{ cards.asof }}{% endif %}
-      · 存量宽限至 11-16（剩余天数不随日期递减）
+      · 存量宽限至 {{ grace_label }}（剩余天数不随日期递减）
       {% if scope.active %} · {{ scope.label }}{% endif %}
     </p>
   </div>
@@ -181,7 +181,7 @@
   —— 标过异网 / 点过已激活的机器，可逐行撤销，每次动作都有留痕。
 </p>
 <p class="muted">
-  <a href="{{ url_for('imei_carryover') }}">11-16 存量结转清单{% if carryover_n %}（{{ carryover_n }} 台）{% endif %}</a>
+  <a href="{{ url_for('imei_carryover') }}">{{ grace_label }} 存量结转清单{% if carryover_n %}（{{ carryover_n }} 台）{% endif %}</a>
   · <a href="{{ url_for('imei_export_carryover') }}">导出 CSV</a>
   —— 2026-11-09 前导入的存量（rule_ver=1），含清单剩余天数和截至日；不在最新清单的机器也在这里（标「不在最新清单」）。
 </p>

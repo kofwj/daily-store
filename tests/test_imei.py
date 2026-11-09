@@ -1982,3 +1982,228 @@ def test_carryover_scope_unknown_falls_back_all(client, monkeypatch):
     assert page.status_code == 200
     assert "全部（2）" in html
     assert "860000000000991" in html and "860000000000992" in html
+
+
+# ---- V0.3.69：管理员手动结转（只写审计快照，不删行、不改清单字段，可撤销）----
+
+
+def _todo_raw(imei):
+    with db.get_db() as conn:
+        row = conn.execute("SELECT * FROM imei_todo WHERE imei=?", (imei,)).fetchone()
+    return dict(row) if row else None
+
+
+def _carry_logs():
+    with db.get_db() as conn:
+        return [dict(r) for r in conn.execute("SELECT * FROM imei_carry_log ORDER BY id")]
+
+
+def _post_carry(client, follow_redirects=False, **data):
+    return client.post("/imei/carryover/mark", data=data, follow_redirects=follow_redirects)
+
+
+def test_carry_single_writes_snapshot_and_keeps_row(client, monkeypatch):
+    """逐台结转：grace 少一台、carried 多一台；imei_todo 关键列一列不动；审计一行带快照。"""
+    _freeze_after_grace(monkeypatch)
+    _login(client)
+    imei = _insert_legacy("860000000001001", sold_day="2026-10-31", age_days=7, remain_days=0)
+    sid = [_store_id()]
+    before = _todo_raw(imei)
+    assert before["state"] == "确认未办" and before["seen"] == 1
+
+    resp = _post_carry(client, mode="carry", imei_one=imei, scope="grace")
+    assert resp.status_code == 302
+
+    after = _todo_raw(imei)
+    frozen = ("state", "seen", "remain_days", "rule_ver", "user_type", "asof", "updated_at")
+    assert {k: after[k] for k in frozen} == {k: before[k] for k in frozen}
+
+    with db.get_db() as conn:
+        assert {r["imei"] for r in db_imei.carryover_rows(conn, sid, scope="grace")} == set()
+        carried = db_imei.carryover_rows(conn, sid, scope="carried")
+    assert {r["imei"] for r in carried} == {imei}
+    assert carried[0]["carrier"] and carried[0]["carried_at"]
+
+    logs = _carry_logs()
+    assert len(logs) == 1
+    log = logs[0]
+    assert (log["imei"], log["action"]) == (imei, "结转")
+    assert (log["store_id"], log["state"], log["remain_days"]) == (
+        before["store_id"],
+        before["state"],
+        before["remain_days"],
+    )
+    assert log["rule_ver"] == 1 and log["seen"] == 1 and log["model"] == "Y600 Pro"
+
+    # 门店那边照旧看得见（结转只是管理员这边的账），只是不再标「宽限已过」
+    _login(client, "alpha")
+    page = client.get("/imei").get_data(as_text=True)
+    assert imei in page
+    assert "宽限已过" not in page
+
+
+def test_carry_batch_and_undo(client, monkeypatch):
+    """批量结转当前 grace 范围；撤销一台后它回到「宽限已过」，审计留两条。"""
+    _freeze_after_grace(monkeypatch)
+    _login(client)
+    a = _insert_legacy("860000000001011", sold_day="2026-10-31", age_days=7, remain_days=0)
+    b = _insert_legacy("860000000001012", sold_day="2026-10-31", age_days=7, remain_days=0)
+    sid = [_store_id()]
+    with db.get_db() as conn:
+        assert len(db_imei.carryover_rows(conn, sid, scope="grace")) == 2
+
+    assert _post_carry(client, mode="carry", batch="1", scope="grace").status_code == 302
+    with db.get_db() as conn:
+        assert db_imei.carryover_rows(conn, sid, scope="grace") == []
+        assert {r["imei"] for r in db_imei.carryover_rows(conn, sid, scope="carried")} == {a, b}
+        all_rows = db_imei.carryover_rows(conn, sid, scope="all")
+        lost = db_imei.carryover_rows(conn, sid, scope="lost")
+        grace = db_imei.carryover_rows(conn, sid, scope="grace")
+        carried = db_imei.carryover_rows(conn, sid, scope="carried")
+    assert len(all_rows) == len(lost) + len(grace) + len(carried) == 2
+
+    assert _post_carry(client, mode="undo", imei_one=a, scope="carried").status_code == 302
+    with db.get_db() as conn:
+        assert {r["imei"] for r in db_imei.carryover_rows(conn, sid, scope="grace")} == {a}
+        assert {r["imei"] for r in db_imei.carryover_rows(conn, sid, scope="carried")} == {b}
+    assert [log["action"] for log in _carry_logs()] == ["结转", "结转", "撤销"]
+    assert _todo_raw(a)["state"] == "确认未办"
+
+
+def test_carry_skips_rows_outside_grace(client, monkeypatch):
+    """只有当前 grace 范围的行能结转：异地异网 / 已办 / 已结转过的一律跳过，库不变。"""
+    _freeze_after_grace(monkeypatch)
+    _login(client)
+    remote = _insert_legacy("860000000001021", sold_day="2026-10-31", age_days=7, remain_days=0)
+    closed = _insert_legacy("860000000001022", sold_day="2026-10-31", age_days=7, remain_days=0)
+    ok = _insert_legacy("860000000001023", sold_day="2026-10-31", age_days=7, remain_days=0)
+    with db.get_db() as conn:
+        conn.execute("UPDATE imei_todo SET user_type='异地异网' WHERE imei=?", (remote,))
+        conn.execute("UPDATE imei_todo SET state='已办' WHERE imei=?", (closed,))
+
+    # 单台点不在范围的行：报错、不写审计
+    resp = _post_carry(client, mode="carry", imei_one=remote, scope="grace", follow_redirects=True)
+    assert "都不在「宽限已过」范围" in resp.get_data(as_text=True)
+    assert _carry_logs() == []
+
+    # 一次多选里混进去：只结转在范围的那台，其余跳过并报数
+    resp = _post_carry(
+        client,
+        mode="carry",
+        imei=[remote, closed, ok],
+        scope="grace",
+        follow_redirects=True,
+    )
+    html = resp.get_data(as_text=True)
+    assert "已结转 1 台" in html and "2 台不在宽限范围" in html
+    assert [log["imei"] for log in _carry_logs()] == [ok]
+
+    # 已经结转过的再点一次：没有可结转的，审计不重复写
+    resp = _post_carry(client, mode="carry", imei_one=ok, scope="grace", follow_redirects=True)
+    assert "没有可结转的" in resp.get_data(as_text=True)
+    assert len(_carry_logs()) == 1
+
+    # 不是已结转的行不能撤销
+    resp = _post_carry(client, mode="undo", imei_one=ok, scope="carried", follow_redirects=True)
+    assert "已撤销结转 1 台" in resp.get_data(as_text=True)
+    resp = _post_carry(client, mode="undo", imei_one=ok, scope="carried", follow_redirects=True)
+    assert "没有可撤销的" in resp.get_data(as_text=True)
+
+
+def test_carry_is_admin_only(client, monkeypatch):
+    """门店账号 POST 结转 → 302，库和审计都不动。"""
+    _freeze_after_grace(monkeypatch)
+    _login(client)
+    imei = _insert_legacy("860000000001031", sold_day="2026-10-31", age_days=7, remain_days=0)
+    _login(client, "alpha")
+    resp = _post_carry(client, mode="carry", imei_one=imei, scope="grace")
+    assert resp.status_code == 302
+    assert _carry_logs() == []
+    sid = [_store_id()]
+    with db.get_db() as conn:
+        assert {r["imei"] for r in db_imei.carryover_rows(conn, sid, scope="grace")} == {imei}
+
+
+def test_carry_data_layer_refuses_non_admin():
+    """数据层双保险：is_admin=False 直接 PermissionError，不留半条记录。"""
+    with db.get_db() as conn:
+        db_imei.ensure(conn)
+        with pytest.raises(PermissionError):
+            db_imei.carry_over(conn, ["860000000001099"], is_admin=False)
+        with pytest.raises(PermissionError):
+            db_imei.undo_carry(conn, ["860000000001099"], is_admin=False)
+    assert _carry_logs() == []
+
+
+def test_carry_page_counts_and_csv_match(client, monkeypatch):
+    """已结转 tab 的计数/行集/CSV 同源；守恒 全部 = 不在清单 + 宽限已过 + 已结转。"""
+    _freeze_after_grace(monkeypatch)
+    _login(client)
+    a = _insert_legacy("860000000001041", sold_day="2026-10-31", age_days=7, remain_days=0)
+    b = _insert_legacy("860000000001042", sold_day="2026-10-31", age_days=7, remain_days=0)
+    lost = _insert_legacy("860000000001043", sold_day="2026-10-31", age_days=7, remain_days=0)
+    with db.get_db() as conn:
+        conn.execute("UPDATE imei_todo SET seen=0 WHERE imei=?", (lost,))
+
+    assert _post_carry(client, mode="carry", imei_one=a, scope="grace").status_code == 302
+
+    html = client.get("/imei/carryover?scope=carried").get_data(as_text=True)
+    assert "已结转（1）" in html
+    assert "全部（3）" in html and "不在最新清单（1）" in html and "宽限已过（1）" in html
+    assert a in html and b not in html and lost not in html
+
+    csv_resp = client.get("/imei/export/carryover?scope=carried")
+    body = csv_resp.get_data().decode("utf-8-sig")
+    header, *lines = [ln for ln in body.splitlines() if ln.strip()]
+    assert "结转时间" in header and "结转人" in header
+    assert len(lines) == 1 and a in lines[0]
+    assert lines[0].count(",") == header.count(",")
+
+    # 全部 tab 里能看到「已结转」标记，也不丢行
+    html_all = client.get("/imei/carryover?scope=all").get_data(as_text=True)
+    assert a in html_all and b in html_all and lost in html_all
+
+
+def test_reimport_keeps_carried_state(client, monkeypatch):
+    """结转后再重导同一批：carried 仍然成立（结转记在审计表，不靠清单行），grace 仍排除。"""
+    _freeze_after_grace(monkeypatch)
+    _login(client)
+    imei = _insert_legacy("860000000001051", sold_day="2026-10-31", age_days=7, remain_days=0)
+    assert _post_carry(client, mode="carry", imei_one=imei, scope="grace").status_code == 302
+    _upload(client, _row(imei, ALPHA, remain=0), asof="2026-11-02")
+    sid = [_store_id()]
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT rule_ver, state FROM imei_todo WHERE imei=?", (imei,)
+        ).fetchone()
+        assert row["rule_ver"] == 1 and row["state"] == "确认未办"
+        assert {r["imei"] for r in db_imei.carryover_rows(conn, sid, scope="carried")} == {imei}
+        assert db_imei.carryover_rows(conn, sid, scope="grace") == []
+    assert len(_carry_logs()) == 1
+
+
+def test_grace_chip_and_label_follow_config(client, monkeypatch):
+    """P2 遗留：门店页「宽限已过」chip 有测试兜底；日期标签跟 IMEI_GRACE_END 走，不写死在模板。"""
+    _freeze_after_grace(monkeypatch)
+    _login(client)
+    hit = _insert_legacy("860000000001061", sold_day="2026-10-31", age_days=7, remain_days=0)
+    remote = _insert_legacy("860000000001062", sold_day="2026-10-31", age_days=7, remain_days=0)
+    with db.get_db() as conn:
+        conn.execute("UPDATE imei_todo SET user_type='异地异网' WHERE imei=?", (remote,))
+    _login(client, "alpha")
+    page = client.get("/imei").get_data(as_text=True)
+    assert "宽限已过（11-16）" in page
+    # chip 只挂在 grace 行上：拿到 chip 的 <tr> 里只有命中那台
+    chip_rows = [seg for seg in page.split("<tr") if "宽限已过（11-16）" in seg]
+    assert len(chip_rows) == 1
+    assert hit in chip_rows[0] and remote not in chip_rows[0]
+
+    # 改期只改一个常量：页面/结转页标签一起跟着变，模板里没有写死 11-16
+    monkeypatch.setattr(db_imei, "IMEI_GRACE_END", "2026-12-01")
+    _freeze_after_grace(monkeypatch, day="2026-12-02")
+    assert db_imei.grace_label() == "12-01"
+    store_page = client.get("/imei").get_data(as_text=True)
+    assert "宽限已过（12-01）" in store_page and "11-16" not in store_page
+    _login(client)
+    admin_page = client.get("/imei/carryover").get_data(as_text=True)
+    assert "宽限至 12-01" in admin_page and "11-16" not in admin_page
