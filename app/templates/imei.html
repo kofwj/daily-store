@@ -37,6 +37,7 @@
           {% endif %}
         </td>
         <td>{{ row.state }}{% if row.strength and row.strength != '无' %}<div class="muted">{{ row.strength }}</div>{% endif %}
+          {% if row.in_grace %}<div><span class="chip">宽限已过（11-16）</span></div>{% endif %}
           {% if row.act_state %}<div><span class="chip">{{ row.user_type }}{% if row.act_state == '待激活' %}·待激活{% else %}·已激活 {{ row.manual_activated_at[5:] }}{% endif %}</span></div>{% endif %}
           {% if row.data_flag %}<div><span class="chip">{{ row.data_flag }}</span></div>{% endif %}
         </td>

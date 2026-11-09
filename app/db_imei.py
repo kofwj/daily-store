@@ -211,6 +211,9 @@ MARKS = ("异网", "已激活", "撤销")
 ACT_WINDOW_DAYS = 7
 # 异地异网一直没激活的，超过这么多天进管理员核实清单（门店端只显示，不再催）
 REVIEW_DAYS = 30
+# 11-16 软失效宽限截止日（CST）：过了这天仍未办、非异地异网、不在 7 天激活窗口的
+# 存量才标「宽限已过」。改期改这里或环境变量 STORE_DAILY_IMEI_GRACE_END，别写死在模板。
+IMEI_GRACE_END = os.environ.get("STORE_DAILY_IMEI_GRACE_END", "2026-11-16")
 
 _USER_ALIAS = {
     "异地异网": USER_REMOTE,
@@ -764,6 +767,8 @@ def enrich(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             and row["sold_days"] is not None
             and row["sold_days"] > REVIEW_DAYS
         )
+        # 软失效/宽限已过（计算谓词，零迁移）：页面 chip 与 carryover scope=grace 同源
+        row["in_grace"] = is_grace_row(row, today)
     rows.sort(
         key=lambda r: (
             r["act_state"] == "待激活",
@@ -774,6 +779,52 @@ def enrich(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         )
     )
     return rows
+
+
+def grace_day() -> Optional[date]:
+    """11-16 软失效宽限截止日（IMEI_GRACE_END 解析成 date）。"""
+    return _parse_day(IMEI_GRACE_END)
+
+
+def grace_active(today: Optional[date] = None) -> bool:
+    """今天是否已过 11-16 宽限（软失效/grace 的时间门）。11-16 当天 00:00 起生效。"""
+    today = today or today_local()
+    end = grace_day()
+    return bool(end and today >= end)
+
+
+def is_grace_row(row: Dict[str, Any], today: Optional[date] = None) -> bool:
+    """软失效/grace 范围谓词（唯一来源，页面 chip、carryover scope=grace 共用）。
+
+    条件（全部满足才算「宽限已过」）：
+    - 已过 11-16 宽限（grace_active 时间门）；
+    - rule_ver=1（存量，2026-11-09 前导入）；
+    - seen=1（还在最新清单）；
+    - 未办（清单状态不是已办/已退货，且最新自报不是已办/已退货）；
+    - 非异地异网；
+    - 不在 7 天激活窗口（无激活日，或激活日距今超过 ACT_WINDOW_DAYS 天）。
+
+    软失效只标提示、不改 state/seen/remain_days；截止后仍允许补报 已办/已退货/待核。
+    """
+    if not grace_active(today):
+        return False
+    try:
+        rule_ver = int(row.get("rule_ver") or 1)
+    except (TypeError, ValueError):
+        rule_ver = 1
+    if rule_ver != 1 or not row.get("seen"):
+        return False
+    if norm_user_type(str(row.get("user_type") or "")) == USER_REMOTE:
+        return False
+    if str(row.get("state") or "") in CLOSED_STATES:
+        return False
+    if str(row.get("report_action") or "") in CLOSED_STATES:
+        return False
+    act = _parse_day(str(row.get("manual_activated_at") or ""))
+    if not act:
+        return True
+    today = today or today_local()
+    return (today - act).days > ACT_WINDOW_DAYS
 
 
 def review_rows(
@@ -796,6 +847,7 @@ def carryover_rows(
     store_ids: Sequence[int],
     *,
     include_unmapped: bool = False,
+    scope: str = "all",
 ) -> List[Dict[str, Any]]:
     """11-16 存量结转清单：2026-11-09 前导入的 `rule_ver=1` 机器。
 
@@ -803,6 +855,12 @@ def carryover_rows(
     导出 CSV 后逐店核对或重导。口径不动：这些行仍按库里 `remain_days` 看。
     生产上 91 行都是 rule_ver=1，其中 13 行已不在最新清单（`seen=0`），
     这里一并列出并标出来，否则清单只有 78 台，对不上「91 台」。
+
+    `scope` 三个口径（只认这三值，其他当 all）：
+    - all：rule_ver=1 全部（含 seen=0 的老行）；
+    - lost：`seen=0`（最新清单已没有）；
+    - grace：软失效范围 = `is_grace_row`（过 11-16 宽限、seen=1、未办、非异地异网、
+      不在 7 天激活窗口），与 §7 软失效谓词同源，不另写一套 SQL。
     """
     rows = todo_rows(
         conn,
@@ -814,6 +872,11 @@ def carryover_rows(
     )
     for row in rows:
         row["in_latest"] = bool(row.get("seen"))
+        row["in_grace"] = is_grace_row(row)
+    if scope == "lost":
+        rows = [r for r in rows if not r["in_latest"]]
+    elif scope == "grace":
+        rows = [r for r in rows if r["in_grace"]]
     rows.sort(
         key=lambda r: (
             r.get("store_id") is None,

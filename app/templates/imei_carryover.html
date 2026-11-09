@@ -6,14 +6,20 @@
   <div class="page-title">
     <h1>11-16 存量结转清单</h1>
     <p class="muted">
-      2026-11-09 前导入的存量（<code>rule_ver=1</code>）· {{ rows|length }} 台 · 宽限至 11-16 · 截至 {{ today_iso }}
+      2026-11-09 前导入的存量（<code>rule_ver=1</code>）· {{ counts.all }} 台 · 宽限至 11-16 · 截至 {{ today_iso }}
       {% if scope.active %} · {{ scope.label }}{% endif %}
     </p>
   </div>
   <div class="page-filters">
-    <a class="btn" href="{{ url_for('imei_export_carryover') }}">导出 CSV</a>
+    <a class="btn" href="{{ url_for('imei_export_carryover', scope=active_scope) }}">导出 CSV</a>
     <a class="btn ghost" href="{{ url_for('imei_page') }}">返回串码待办</a>
   </div>
+</div>
+
+<div class="tabs" role="tablist">
+  <a class="tab{{ ' active' if active_scope == 'all' }}" href="{{ url_for('imei_carryover', scope='all') }}">全部（{{ counts.all }}）</a>
+  <a class="tab{{ ' active' if active_scope == 'lost' }}" href="{{ url_for('imei_carryover', scope='lost') }}">不在最新清单（{{ counts.lost }}）</a>
+  <a class="tab{{ ' active' if active_scope == 'grace' }}" href="{{ url_for('imei_carryover', scope='grace') }}">宽限已过（{{ counts.grace }}）</a>
 </div>
 
 <div class="flash-inline">

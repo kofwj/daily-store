@@ -1868,3 +1868,117 @@ def test_export_todo_and_carryover_include_data_flag_column(client):
     assert "数据标记" in cbody
     assert "台账无此串码；二销" in cbody
     assert "860000000000831" not in cbody and "860000000000832" not in cbody
+
+
+# ---- V0.3.68：P2-1 carryover scope（all/lost/grace）+ P2-2 11-16 软失效（计算谓词） ----
+
+
+def _freeze_after_grace(monkeypatch, day="2026-11-17"):
+    """把「今天」拨到 11-16 宽限之后，软失效/grace 才生效。"""
+    monkeypatch.setattr(db_imei, "today_local", lambda: date.fromisoformat(day))
+
+
+def test_carryover_scope_conservation(client, monkeypatch):
+    """all = lost + grace + 其余；lost=seen=0；grace=软失效范围。新导入不进 carryover。"""
+    _freeze_after_grace(monkeypatch)
+    _login(client)
+    _upload(client, _row("860000000000941", ALPHA))  # rule_ver=2，不进 carryover
+    _insert_legacy("860000000000942", sold_day="2026-10-31", age_days=7, remain_days=0)  # seen=1 未办
+    _insert_legacy("860000000000943", sold_day="2026-10-31", age_days=7, remain_days=0)  # seen=1
+    with db.get_db() as conn:
+        conn.execute("UPDATE imei_todo SET seen=0 WHERE imei='860000000000943'")  # lost
+    sid = [_store_id()]
+    with db.get_db() as conn:
+        all_rows = db_imei.carryover_rows(conn, sid, scope="all")
+        lost_rows = db_imei.carryover_rows(conn, sid, scope="lost")
+        grace_rows = db_imei.carryover_rows(conn, sid, scope="grace")
+    assert {r["imei"] for r in all_rows} == {"860000000000942", "860000000000943"}
+    assert {r["imei"] for r in lost_rows} == {"860000000000943"}
+    assert {r["imei"] for r in grace_rows} == {"860000000000942"}
+    assert len(all_rows) == len(lost_rows) + len(grace_rows)
+
+
+def test_carryover_csv_rows_match_page_scope(client, monkeypatch):
+    """CSV 行数 = 页面行数；三个 scope 各查一遍，筛选完全一致。"""
+    _freeze_after_grace(monkeypatch)
+    _login(client)
+    _insert_legacy("860000000000951", sold_day="2026-10-31", age_days=7, remain_days=0)
+    _insert_legacy("860000000000952", sold_day="2026-10-31", age_days=7, remain_days=0)
+    with db.get_db() as conn:
+        conn.execute("UPDATE imei_todo SET seen=0 WHERE imei='860000000000952'")
+
+    for scope in ("all", "lost", "grace"):
+        page = client.get(f"/imei/carryover?scope={scope}")
+        assert page.status_code == 200
+        csv_resp = client.get(f"/imei/export/carryover?scope={scope}")
+        assert csv_resp.status_code == 200
+        html = page.get_data(as_text=True)
+        page_rows = html.count('<td class="num">86')
+        body = csv_resp.get_data().decode("utf-8-sig")
+        csv_rows = len([ln for ln in body.splitlines() if ln.strip()]) - 1  # 去表头
+        assert csv_rows == page_rows, f"scope={scope}: csv={csv_rows} != page={page_rows}"
+
+
+def test_carryover_scope_still_admin_only(client, monkeypatch):
+    """scope 只是筛选口径，权限不变：门店账号对所有 scope 一律 302。"""
+    _freeze_after_grace(monkeypatch)
+    _login(client)
+    _insert_legacy("860000000000961", sold_day="2026-10-31", age_days=7, remain_days=0)
+    _login(client, "alpha")
+    for scope in ("all", "lost", "grace"):
+        assert client.get(f"/imei/carryover?scope={scope}").status_code == 302
+        assert client.get(f"/imei/export/carryover?scope={scope}").status_code == 302
+
+
+def test_grace_excludes_remote_and_in_window_and_closed(client, monkeypatch):
+    """grace 排除异地异网、激活窗口内、已办；只留「过了宽限仍未办」的常规存量。"""
+    _freeze_after_grace(monkeypatch)
+    _login(client)
+    _insert_legacy("860000000000971", sold_day="2026-10-31", age_days=7, remain_days=0)  # 命中
+    _insert_legacy("860000000000972", sold_day="2026-10-31", age_days=7, remain_days=0)  # 异地异网
+    _insert_legacy("860000000000973", sold_day="2026-10-31", age_days=7, remain_days=0)  # 窗口内已激活
+    _insert_legacy("860000000000974", sold_day="2026-10-31", age_days=7, remain_days=0)  # 已办
+    with db.get_db() as conn:
+        conn.execute("UPDATE imei_todo SET user_type='异地异网' WHERE imei='860000000000972'")
+        conn.execute(
+            "UPDATE imei_todo SET manual_activated_at='2026-11-14' WHERE imei='860000000000973'"
+        )
+        conn.execute("UPDATE imei_todo SET state='已办' WHERE imei='860000000000974'")
+    sid = [_store_id()]
+    with db.get_db() as conn:
+        grace_rows = db_imei.carryover_rows(conn, sid, scope="grace")
+    assert {r["imei"] for r in grace_rows} == {"860000000000971"}
+
+
+def test_grace_zero_before_cutoff_nonzero_after(client, monkeypatch):
+    """宽限前（11-15 及更早）grace 为 0；11-16 当天起才非 0。"""
+    _login(client)
+    _insert_legacy("860000000000981", sold_day="2026-10-31", age_days=7, remain_days=0)
+    sid = [_store_id()]
+    # 默认 frozen 11-02：grace 为 0
+    with db.get_db() as conn:
+        assert db_imei.carryover_rows(conn, sid, scope="grace") == []
+    # 11-15 仍是宽限内：为 0
+    _freeze_after_grace(monkeypatch, day="2026-11-15")
+    with db.get_db() as conn:
+        assert db_imei.carryover_rows(conn, sid, scope="grace") == []
+    # 11-16 当天：软失效生效
+    _freeze_after_grace(monkeypatch, day="2026-11-16")
+    with db.get_db() as conn:
+        rows = db_imei.carryover_rows(conn, sid, scope="grace")
+    assert {r["imei"] for r in rows} == {"860000000000981"}
+
+
+def test_carryover_scope_unknown_falls_back_all(client, monkeypatch):
+    """非法 scope 当 all 处理，不 500、不丢行。"""
+    _freeze_after_grace(monkeypatch)
+    _login(client)
+    _insert_legacy("860000000000991", sold_day="2026-10-31", age_days=7, remain_days=0)
+    _insert_legacy("860000000000992", sold_day="2026-10-31", age_days=7, remain_days=0)
+    with db.get_db() as conn:
+        conn.execute("UPDATE imei_todo SET seen=0 WHERE imei='860000000000992'")
+    page = client.get("/imei/carryover?scope=bogus")
+    html = page.get_data(as_text=True)
+    assert page.status_code == 200
+    assert "全部（2）" in html
+    assert "860000000000991" in html and "860000000000992" in html

@@ -58,6 +58,11 @@ def _looks_like_image(data: bytes) -> bool:
     return any(data.startswith(magic) for magic in _IMAGE_MAGIC)
 
 
+def _carryover_scope(value: str) -> str:
+    """carryover 页/CSV 的 scope 参数：只认 all/lost/grace，其他值一律当 all。"""
+    return value if value in ("all", "lost", "grace") else "all"
+
+
 def _to_rgb(im: Any) -> Any:
     """透明图先铺白底再转 RGB——直接砍 alpha，透明区的文字会压成黑块/花边。"""
     from PIL import Image
@@ -219,18 +224,34 @@ def register_imei(app) -> None:
     @app.route("/imei/carryover")
     @admin_required
     def imei_carryover():
-        """11-16 存量结转清单：rule_ver=1 的机器 + CSV 导出（仅管理员）。"""
+        """11-16 存量结转清单：rule_ver=1 的机器 + CSV 导出（仅管理员）。
+
+        支持 `scope=all|lost|grace` 三个 tab：all 全列、lost=seen=0、
+        grace=软失效范围（与 §7 谓词同源）；tab 计数与行集同源。
+        """
+        scope_arg = _carryover_scope(request.args.get("scope", "all"))
         with db.get_db() as conn:
             if not db_imei.user_in_imei_scope(conn, g.user):
                 return Response("forbidden", status=403)
             stores = accessible_stores(conn)
             scope = request_scope(stores)
-            rows = db_imei.carryover_rows(
-                conn, scope["ids"], include_unmapped=not scope["active"]
+            include_unmapped = not scope["active"]
+            all_rows = db_imei.carryover_rows(
+                conn, scope["ids"], include_unmapped=include_unmapped, scope="all"
             )
+            rows = db_imei.carryover_rows(
+                conn, scope["ids"], include_unmapped=include_unmapped, scope=scope_arg
+            )
+        counts = {
+            "all": len(all_rows),
+            "lost": sum(1 for r in all_rows if not r["in_latest"]),
+            "grace": sum(1 for r in all_rows if r["in_grace"]),
+        }
         return render_template(
             "imei_carryover.html",
             rows=rows,
+            counts=counts,
+            active_scope=scope_arg,
             scope=scope,
             today_iso=db.today_local().isoformat(),
         )
@@ -238,14 +259,18 @@ def register_imei(app) -> None:
     @app.route("/imei/export/carryover")
     @admin_required
     def imei_export_carryover():
-        """导出 11-16 存量结转清单（UTF-8 BOM，Excel 直接打开）。"""
+        """导出 11-16 存量结转清单（UTF-8 BOM，Excel 直接打开）。
+
+        与页面同筛选：`scope` 透传同一 all/lost/grace，行数与页面一致。
+        """
+        scope_arg = _carryover_scope(request.args.get("scope", "all"))
         with db.get_db() as conn:
             if not db_imei.user_in_imei_scope(conn, g.user):
                 return Response("forbidden", status=403)
             stores = accessible_stores(conn)
             scope = request_scope(stores)
             rows = db_imei.carryover_rows(
-                conn, scope["ids"], include_unmapped=not scope["active"]
+                conn, scope["ids"], include_unmapped=not scope["active"], scope=scope_arg
             )
         out = io.StringIO()
         writer = csv.writer(out)

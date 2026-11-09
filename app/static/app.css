@@ -291,6 +291,21 @@ button.ghost:hover, .btn.ghost:hover { background: var(--accent-soft); }
   font-size: 13px;
   color: var(--ink);
 }
+/* carryover 页三个 tab：全部 / 不在最新清单 / 宽限已过 */
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 0; }
+.tab {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 13px;
+  text-decoration: none;
+  color: var(--muted);
+  background: #fafafa;
+}
+.tab:hover { background: var(--accent-soft); }
+.tab.active { background: #1f2937; border-color: #1f2937; color: #fff; }
 /* KPI 行作为头部区结尾: 顶部留小间隙, 底部统一 16px 再进正文卡片(与 .page-head 一致) */
 .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 12px; margin-bottom: 16px; }
 .kpi { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fafafa; }
