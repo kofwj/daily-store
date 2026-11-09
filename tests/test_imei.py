@@ -8,7 +8,7 @@
 """
 from io import BytesIO
 
-from app import db, db_core, db_imei
+from app import db, db_core, db_imei, views_imei
 
 CSV_HEAD = "imei,store,model,sp,day,age,remain,stage,state,strength,evidence\n"
 
@@ -160,7 +160,8 @@ def test_photo_upload_scoped_to_store(client):
     assert resp.status_code == 200
     with db.get_db() as conn:
         name = conn.execute("SELECT photo FROM imei_reports").fetchone()["photo"]
-    assert name.endswith(".png")
+    assert name.endswith(".jpg")
+    assert client.get(f"/uploads/imei/{name}").headers["Content-Type"] == "image/jpeg"
     assert (db_core.DATA_DIR / "uploads" / "imei" / name).is_file()
     assert client.get(f"/uploads/imei/{name}").status_code == 200
     # 别家店员看不到（beta 店员）
@@ -608,7 +609,7 @@ def test_2g_flow_requires_note_or_photo(client):
     assert "已记下" in ok.get_data(as_text=True)
     with db.get_db() as conn:
         row = conn.execute("SELECT biz_type, photo, note FROM imei_reports").fetchone()
-    assert row["biz_type"] == "送2G流量" and row["photo"].endswith(".png") and row["note"] == ""
+    assert row["biz_type"] == "送2G流量" and row["photo"].endswith(".jpg") and row["note"] == ""
 
 
 def test_shuncha_requires_note_or_photo(client):
@@ -1259,3 +1260,147 @@ def test_photo_exif_orientation_transposed(client):
     assert saved.size == (20, 40)
     assert 0x0112 not in saved.getexif()
 
+
+# ---- 截图落盘：长截图保清晰 + 统一转 JPEG（2026-11-09 用户拍板）----
+
+
+def _make_img(w, h, *, fmt="PNG", transparent=False, noise=False, exif_rotate=None):
+    from PIL import Image
+
+    if noise:
+        im = Image.effect_noise((w, h), 64).convert("RGB")
+    elif transparent:
+        im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        im.paste((0, 0, 0, 255), (w // 2, 0, w, h))
+    else:
+        im = Image.new("RGB", (w, h), (30, 120, 200))
+    buf = BytesIO()
+    if exif_rotate:
+        exif = Image.Exif()
+        exif[0x0112] = exif_rotate
+        im.save(buf, format=fmt, exif=exif)
+    else:
+        im.save(buf, format=fmt)
+    return buf.getvalue()
+
+
+def _open(data):
+    from PIL import Image
+
+    im = Image.open(BytesIO(data))
+    im.load()
+    return im
+
+
+def test_shrink_long_screenshot_keeps_text_size():
+    """1170×6000 的长截图：按宽度缩到 1080（高 5538），不再被压成 312×1600。"""
+    out = views_imei._shrink(_make_img(1170, 6000))
+    im = _open(out)
+    assert im.format == "JPEG"
+    assert im.width == 1080
+    assert abs(im.height - 5538) <= 1
+
+
+def test_shrink_very_tall_capped_by_height():
+    """1000×12000 这种极端长图：宽度不超 1080，但高度由 6000 兜底。"""
+    im = _open(views_imei._shrink(_make_img(1000, 12000)))
+    assert im.height == 6000
+    assert im.width == 500
+
+
+def test_shrink_portrait_and_landscape_fit_1080():
+    """竖 2000×4000、横 4000×2000：都缩到宽 1080，比例不变。"""
+    tall = _open(views_imei._shrink(_make_img(2000, 4000)))
+    assert (tall.width, tall.height) == (1080, 2160)
+    wide = _open(views_imei._shrink(_make_img(4000, 2000)))
+    assert (wide.width, wide.height) == (1080, 540)
+
+
+def test_shrink_small_image_not_upscaled():
+    """小图不放大，但仍然统一转成 JPEG。"""
+    out = views_imei._shrink(_make_img(200, 100))
+    im = _open(out)
+    assert (im.width, im.height) == (200, 100)
+    assert im.format == "JPEG"
+
+
+def test_shrink_transparent_png_gets_white_background():
+    """透明 PNG：透明区铺白，不能变成黑块。"""
+    from PIL import Image
+
+    im: Image.Image = _open(views_imei._shrink(_make_img(500, 500, transparent=True)))
+    assert im.mode == "RGB"
+    left = im.getpixel((10, 250))
+    right = im.getpixel((490, 250))
+    assert min(left) >= 240, left
+    assert max(right) <= 40, right
+
+
+def test_shrink_cmyk_jpeg_to_rgb():
+    """印刷用的 CMYK JPEG 也能转（没有 alpha，直接转 RGB）。"""
+    from PIL import Image
+
+    buf = BytesIO()
+    Image.new("CMYK", (1200, 800), (0, 0, 0, 0)).save(buf, format="JPEG")
+    im = _open(views_imei._shrink(buf.getvalue()))
+    assert im.mode == "RGB" and (im.width, im.height) == (1080, 720)
+
+
+def test_shrink_photo_like_png_becomes_smaller_jpeg():
+    """照片类内容：PNG 转 JPEG q85，体积明显变小、魔数是 JPEG。"""
+    src = _make_img(1600, 1200, noise=True)
+    out = views_imei._shrink(src)
+    assert out[:3] == b"\xff\xd8\xff"
+    assert len(out) < len(src) * 0.6, (len(src), len(out))
+
+
+def test_shrink_huge_24mp_image_ok():
+    """2400 万像素（旧上限 2000 万直接判「图片打不开」）现在能正常缩到 1080×720。"""
+    im = _open(views_imei._shrink(_make_img(6000, 4000)))
+    assert (im.width, im.height) == (1080, 720)
+
+
+def test_shrink_rejects_too_many_pixels(monkeypatch):
+    """超过像素上限就明确报错，别把机器拖死。"""
+    import pytest
+
+    from app import views_imei as mod
+
+    monkeypatch.setattr(mod, "_PHOTO_MAX_PIXELS", 30_000)
+    with pytest.raises(ValueError) as err:
+        mod._shrink(_make_img(200, 200))
+    assert "图片太大" in str(err.value)
+
+
+def test_shrink_applies_exif_orientation():
+    """手机竖拍照片带 EXIF 方向：转正后再缩，别让凭证横躺着。"""
+    im = _open(views_imei._shrink(_make_img(4000, 2000, fmt="JPEG", exif_rotate=6)))
+    # 方向对了才会是竖图 1080×2160；不认 EXIF 的话会变成 1080×540
+    assert (im.width, im.height) == (1080, 2160)
+
+
+def test_photo_upload_stores_jpeg_with_jpg_suffix(client):
+    """走真实上传接口：PNG（含透明）存成 .jpg，取出是 JPEG。"""
+    _login(client)
+    _upload(client, _row("860000000000901", ALPHA))
+    _login(client, "alpha")
+    resp = client.post(
+        "/imei/report",
+        data={
+            "imei": "860000000000901",
+            "action": "已办",
+            "biz_type": "AI手机合约",
+            "photo": (BytesIO(_make_img(1170, 6000, transparent=True)), "shot.png"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert "已记下" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        name = conn.execute("SELECT photo FROM imei_reports").fetchone()["photo"]
+    assert name.endswith(".jpg")
+    saved = (db_core.DATA_DIR / "uploads" / "imei" / name).read_bytes()
+    assert saved[:3] == b"\xff\xd8\xff"
+    got = client.get(f"/uploads/imei/{name}")
+    assert got.status_code == 200 and got.headers["Content-Type"] == "image/jpeg"

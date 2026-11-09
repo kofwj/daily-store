@@ -34,9 +34,15 @@ from .helpers import (
     request_scope,
 )
 
-# 原图允许到 15MB（现代手机直拍常见 6–12MB），落盘前统一缩到 1600px 重编码（约 100–300KB）
+# 原图允许到 15MB（现代手机直拍常见 6–12MB），落盘前统一缩到宽 1080 并转 JPEG（约 100–600KB）
 _PHOTO_MAX_BYTES = 15 * 1024 * 1024
-_PHOTO_MAX_EDGE = 1600
+# 凭证要能看清字：宽度按 1080 缩（手机整屏宽度那一档），高度 6000 兜底，
+# 免得 1170×6000 的长截图被「长边 1600」压成 312 px 宽、字全糊。
+_PHOTO_MAX_W = 1080
+_PHOTO_MAX_H = 6000
+_PHOTO_JPEG_QUALITY = 85
+# 6400 万像素：48MP 手机原图还能进，同时挡住解压炸弹（PIL 超过 2 倍会直接报错）
+_PHOTO_MAX_PIXELS = 64_000_000
 _PHOTO_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 _IMAGE_MAGIC = (
     b"\x89PNG\r\n\x1a\n",
@@ -52,24 +58,45 @@ def _looks_like_image(data: bytes) -> bool:
     return any(data.startswith(magic) for magic in _IMAGE_MAGIC)
 
 
-def _shrink(data: bytes, ext: str) -> bytes:
-    """扶正 EXIF 方向，长边 > 1600 才缩，重编码顺带丢掉手机截图/照片里的 EXIF（含定位）。"""
+def _to_rgb(im: Any) -> Any:
+    """透明图先铺白底再转 RGB——直接砍 alpha，透明区的文字会压成黑块/花边。"""
+    from PIL import Image
+
+    if im.mode == "RGB":
+        return im
+    if im.mode == "L":
+        return im.convert("RGB")
+    if im.mode not in ("RGBA", "LA", "P"):
+        # CMYK 之类的印刷色彩空间直接转 RGB，没有 alpha 可铺
+        return im.convert("RGB")
+    rgba = im.convert("RGBA")
+    bg = Image.new("RGB", rgba.size, (255, 255, 255))
+    bg.paste(rgba, mask=rgba.getchannel("A"))
+    return bg
+
+
+def _shrink(data: bytes) -> bytes:
+    """统一转 JPEG q85，等比例缩到 宽 ≤1080 / 高 ≤6000；扶正 EXIF 方向并丢掉 EXIF（含定位）。
+
+    PNG 重编码常常比原图还大（手机截图尤甚），统一转 JPEG 体积约为原来的四成多；
+    长截图按宽度缩（高度不是主要约束），单张超长图才由 6000 兜底。
+    """
     from PIL import Image, ImageOps
 
-    Image.MAX_IMAGE_PIXELS = 20_000_000
+    Image.MAX_IMAGE_PIXELS = _PHOTO_MAX_PIXELS
     try:
         im: Any = Image.open(BytesIO(data))
+        if im.width * im.height > _PHOTO_MAX_PIXELS:
+            raise ValueError("图片太大了（超过 6400 万像素），先压缩再传")
         im.load()
-        im = ImageOps.exif_transpose(im)
+    except ValueError:
+        raise
     except Exception as exc:  # noqa: BLE001 — 任何解码失败都当「不是图片」
         raise ValueError("图片打不开，换一张试试") from exc
-    if im.width > _PHOTO_MAX_EDGE or im.height > _PHOTO_MAX_EDGE:
-        im.thumbnail((_PHOTO_MAX_EDGE, _PHOTO_MAX_EDGE), Image.Resampling.LANCZOS)
-    fmt = {".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG", ".webp": "WEBP"}[ext]
-    if fmt == "JPEG" and im.mode not in ("RGB", "L"):
-        im = im.convert("RGB")
+    im = ImageOps.exif_transpose(im)
+    im.thumbnail((_PHOTO_MAX_W, _PHOTO_MAX_H), Image.Resampling.LANCZOS)
     out = BytesIO()
-    im.save(out, format=fmt, optimize=True, quality=85)
+    _to_rgb(im).save(out, format="JPEG", quality=_PHOTO_JPEG_QUALITY, optimize=True)
     return out.getvalue()
 
 
@@ -82,10 +109,11 @@ def _save_photo(upload, store_id: int) -> str:
         raise ValueError("截图是空的或超过 15MB")
     if not _looks_like_image(data):
         raise ValueError("这个文件不是图片")
-    name = f"{secrets.token_hex(12)}{ext}"
+    # 存下来一律是 JPEG，后缀跟着内容走（不然浏览器按 .png 的 MIME 读 JPEG）
+    name = f"{secrets.token_hex(12)}.jpg"
     folder = db_core.DATA_DIR / "uploads" / "imei"
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / name).write_bytes(_shrink(data, ext))
+    (folder / name).write_bytes(_shrink(data))
     return name
 
 
