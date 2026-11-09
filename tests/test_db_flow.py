@@ -855,3 +855,34 @@ def test_report_aux_queries_row_edits_like_other_metrics(admin_client):
             (store["id"], day.isoformat()),
         ).fetchone()["n"]
     assert gone == 0
+
+
+def test_delete_daily_report_clears_aux_queries(admin_client):
+    """删除日报时顺带清理同店同日 aux_queries，避免留孤儿数在服务通报/报表里。"""
+    day = date(2026, 8, 14)
+    with db.get_db() as conn:
+        store = conn.execute("SELECT * FROM stores WHERE code=?", (NINGHAI_CODE,)).fetchone()
+        user_id = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        db.save_daily(
+            conn,
+            store_id=store["id"],
+            biz_date=day,
+            values={"phone_sales": 5},
+            user_id=user_id,
+        )
+        conn.commit()
+        db.set_aux(conn, store_id=store["id"], biz_date=day, n=11, user_id=user_id)
+        conn.commit()
+        db.delete_daily_report(conn, store["id"], day)
+        conn.commit()
+        rem_rep = conn.execute(
+            "SELECT COUNT(*) AS n FROM daily_reports WHERE store_id=? AND biz_date=?",
+            (store["id"], day.isoformat()),
+        ).fetchone()["n"]
+        rem_aux = conn.execute(
+            "SELECT COUNT(*) AS n FROM aux_queries WHERE store_id=? AND biz_date=?",
+            (store["id"], day.isoformat()),
+        ).fetchone()["n"]
+    assert rem_rep == 0
+    assert rem_aux == 0
+

@@ -11,7 +11,6 @@ from __future__ import annotations
 import csv
 import io
 import secrets
-from datetime import date
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -27,8 +26,7 @@ from flask import (
     url_for,
 )
 
-from . import db, db_imei
-from .db_core import DATA_DIR
+from . import db, db_core, db_imei
 from .helpers import (
     accessible_stores,
     admin_required,
@@ -36,7 +34,8 @@ from .helpers import (
     request_scope,
 )
 
-_PHOTO_MAX_BYTES = 5 * 1024 * 1024
+# 原图允许到 15MB（现代手机直拍常见 6–12MB），落盘前统一缩到 1600px 重编码（约 100–300KB）
+_PHOTO_MAX_BYTES = 15 * 1024 * 1024
 _PHOTO_MAX_EDGE = 1600
 _PHOTO_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 _IMAGE_MAGIC = (
@@ -54,13 +53,14 @@ def _looks_like_image(data: bytes) -> bool:
 
 
 def _shrink(data: bytes, ext: str) -> bytes:
-    """长边 > 1600 才缩，重编码顺带丢掉手机截图里的 EXIF（含定位）。"""
-    from PIL import Image
+    """扶正 EXIF 方向，长边 > 1600 才缩，重编码顺带丢掉手机截图/照片里的 EXIF（含定位）。"""
+    from PIL import Image, ImageOps
 
     Image.MAX_IMAGE_PIXELS = 20_000_000
     try:
         im: Any = Image.open(BytesIO(data))
         im.load()
+        im = ImageOps.exif_transpose(im)
     except Exception as exc:  # noqa: BLE001 — 任何解码失败都当「不是图片」
         raise ValueError("图片打不开，换一张试试") from exc
     if im.width > _PHOTO_MAX_EDGE or im.height > _PHOTO_MAX_EDGE:
@@ -79,11 +79,11 @@ def _save_photo(upload, store_id: int) -> str:
         raise ValueError("截图只支持 png / jpg / webp")
     data = upload.read()
     if not data or len(data) > _PHOTO_MAX_BYTES:
-        raise ValueError("截图是空的或超过 5MB")
+        raise ValueError("截图是空的或超过 15MB")
     if not _looks_like_image(data):
         raise ValueError("这个文件不是图片")
     name = f"{secrets.token_hex(12)}{ext}"
-    folder = DATA_DIR / "uploads" / "imei"
+    folder = db_core.DATA_DIR / "uploads" / "imei"
     folder.mkdir(parents=True, exist_ok=True)
     (folder / name).write_bytes(_shrink(data, ext))
     return name
@@ -100,11 +100,15 @@ def register_imei(app) -> None:
         show = "all" if request.args.get("show") == "all" else "open"
         is_admin = g.user["role"] == "admin"
         with db.get_db() as conn:
+            if not db_imei.user_in_imei_scope(conn, g.user):
+                return Response("forbidden", status=403)
             stores = accessible_stores(conn)
             scope = request_scope(stores)
             ids = scope["ids"]
-            # 店员只盯自己店：默认不铺全站，页头直接给「还剩几天」
-            rows = db_imei.todo_rows(conn, ids, show=show, include_unmapped=is_admin)
+            # 店员只盯自己店：默认不铺全站，页头直接给「还剩几天」；筛选了具体地市/区域经理时不混入待建店
+            rows = db_imei.todo_rows(
+                conn, ids, show=show, include_unmapped=(is_admin and not scope["active"])
+            )
             cards = db_imei.summary(conn, ids)
             # 各店标了多少台异网/已激活：管理员用来发现「全标异网躲催办」
             marks = db_imei.mark_summary(conn, ids) if is_admin else []
@@ -131,7 +135,7 @@ def register_imei(app) -> None:
             groups=groups,
             cards=cards,
             marks=marks,
-            today_iso=date.today().isoformat(),
+            today_iso=db.today_local().isoformat(),
             user_types=db_imei.USER_TYPES,
             scope=scope,
             show=show,
@@ -154,10 +158,12 @@ def register_imei(app) -> None:
         back = request.form.get("back") or url_for("imei_page")
         if not back.startswith("/") or back.startswith("//"):
             back = url_for("imei_page")
-        if not _can_write(g.user["role"]):
-            flash("只读账号只能看，不能自报", "error")
-            return redirect(back)
         with db.get_db() as conn:
+            if not db_imei.user_in_imei_scope(conn, g.user):
+                return Response("forbidden", status=403)
+            if not _can_write(g.user["role"]):
+                flash("只读账号只能看，不能自报", "error")
+                return redirect(back)
             row = conn.execute(
                 "SELECT store_id FROM imei_todo WHERE imei=?", (imei,)
             ).fetchone()
@@ -173,9 +179,10 @@ def register_imei(app) -> None:
                 return Response("forbidden", status=403)
             upload = request.files.get("photo")
             has_photo = upload is not None and bool(upload.filename)
-            # 送2G流量 / 顺差让利 系统没有记录：先拦一道，别白存图片再报错
+            # 送2G流量 / 顺差让利 系统没有记录：仅在报「已办」时先拦一道，别白存图片再报错
             if (
-                db_imei.norm_biz_type(biz_type) in db_imei.NO_SYSTEM_EVIDENCE
+                action == "已办"
+                and db_imei.norm_biz_type(biz_type) in db_imei.NO_SYSTEM_EVIDENCE
                 and not note
                 and not has_photo
             ):
@@ -206,13 +213,15 @@ def register_imei(app) -> None:
             except ValueError as exc:
                 flash(str(exc), "error")
                 return redirect(back)
-        flash(f"已记下：{imei[-6:]} → {action} · {db_imei.norm_biz_type(biz_type)}", "ok")
+        norm_biz = db_imei.norm_biz_type(biz_type) if action == "已办" else ""
+        suffix = f" · {norm_biz}" if norm_biz else ""
+        flash(f"已记下：{imei[-6:]} → {action}{suffix}", "ok")
         return redirect(back)
 
     @app.route("/imei/mark", methods=["POST"])
     @login_required
     def imei_mark():
-        """门店标「异地异网待激活」/「已激活」，管理员可撤销。
+        """门店标「异地异网待激活」/「已激活」（点过已激活即锁死起算日），仅管理员可撤销或改期。
 
         这两个动作**不是**自报结论：不改「已办/未办」，只调 7 天怎么算。
         """
@@ -222,13 +231,23 @@ def register_imei(app) -> None:
         back = request.form.get("back") or url_for("imei_page")
         if not back.startswith("/") or back.startswith("//"):
             back = url_for("imei_page")
-        if not _can_write(g.user["role"]):
-            flash("只读账号只能看，不能标记", "error")
-            return redirect(back)
+        is_admin = g.user["role"] == "admin"
         with db.get_db() as conn:
+            if not db_imei.user_in_imei_scope(conn, g.user):
+                return Response("forbidden", status=403)
+            if not _can_write(g.user["role"]):
+                flash("只读账号只能看，不能标记", "error")
+                return redirect(back)
             ids = [s["id"] for s in accessible_stores(conn)]
             try:
-                res = db_imei.set_mark(conn, imei=imei, mark=mark, day=day, store_ids=ids)
+                res = db_imei.set_mark(
+                    conn,
+                    imei=imei,
+                    mark=mark,
+                    day=day,
+                    store_ids=ids,
+                    is_admin=is_admin,
+                )
             except PermissionError:
                 return Response("forbidden", status=403)
             except ValueError as exc:
@@ -400,6 +419,8 @@ def register_imei(app) -> None:
         group_key = (request.args.get("by") or "store").strip()
         one = (request.args.get("store") or "").strip()
         with db.get_db() as conn:
+            if not db_imei.user_in_imei_scope(conn, g.user):
+                return Response("forbidden", status=403)
             rows = db_imei.pool_rows(conn, own_store=one) if one else []
             stores = db_imei.pool_summary(conn)
             cards = db_imei.summary(conn, [s["id"] for s in accessible_stores(conn)])
@@ -430,7 +451,9 @@ def register_imei(app) -> None:
     def imei_photo(filename):
         name = Path(filename).name
         with db.get_db() as conn:
+            if not db_imei.user_in_imei_scope(conn, g.user):
+                return Response("not found", status=404)
             store_id: Optional[int] = db_imei.photo_store(conn, name)
             if store_id is None or not db.user_can_access_store(conn, g.user, store_id):
                 return Response("not found", status=404)
-        return send_from_directory(DATA_DIR / "uploads" / "imei", name)
+        return send_from_directory(db_core.DATA_DIR / "uploads" / "imei", name)

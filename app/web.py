@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 from flask import Flask, g, request, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import backup, db
+from . import backup, db, db_imei
 from . import version as app_version
 from .errors import register_errors
 from .helpers import (
@@ -129,6 +129,10 @@ def create_app(*, testing: bool = False) -> Flask:
             session["_csrf_token"] = secrets.token_hex(16)
         info = app_version.current()
         brand = brand_settings()
+        show_imei_nav = False
+        if getattr(g, "user", None) is not None:
+            with db.get_db() as conn:
+                show_imei_nav = db_imei.user_in_imei_scope(conn, g.user)
         return {
             "today_iso": db.today_local().isoformat(),
             "now": datetime.now(db.TZ),
@@ -137,6 +141,7 @@ def create_app(*, testing: bool = False) -> Flask:
             "app_built_at": info["built_at"],
             "app_summary": info["summary"],
             "brand": brand,
+            "show_imei_nav": show_imei_nav,
         }
 
     register_auth(app)

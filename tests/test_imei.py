@@ -8,8 +8,7 @@
 """
 from io import BytesIO
 
-from app import db, db_imei
-from app.db_core import DATA_DIR
+from app import db, db_core, db_imei
 
 CSV_HEAD = "imei,store,model,sp,day,age,remain,stage,state,strength,evidence\n"
 
@@ -162,7 +161,7 @@ def test_photo_upload_scoped_to_store(client):
     with db.get_db() as conn:
         name = conn.execute("SELECT photo FROM imei_reports").fetchone()["photo"]
     assert name.endswith(".png")
-    assert (DATA_DIR / "uploads" / "imei" / name).is_file()
+    assert (db_core.DATA_DIR / "uploads" / "imei" / name).is_file()
     assert client.get(f"/uploads/imei/{name}").status_code == 200
     # 别家店员看不到（beta 店员）
     _login(client, "beta")
@@ -969,3 +968,294 @@ def test_remote_then_activated_keeps_remote_mark(client):
     assert cards["pending"] == 0 and cards["activated"] == 1 and cards["soon"] == 0
     page = client.get("/imei").get_data(as_text=True)
     assert "异地异网·已激活 11-02" in page and "剩 7 天" in page
+
+
+# ---- 2026-11-09 回归：非已办不逼选业务类型 / 激活锁死起算日 / 泰州隔离 / 卡片口径 ----
+
+
+def test_non_done_actions_do_not_require_biz_type(client):
+    """选 已退货 / 非本店 / 待核 时不需要选合约业务类型，带了残留值也不入库、不逼传凭证。"""
+    _login(client)
+    _upload(
+        client,
+        _row("860000000000501", ALPHA),
+        _row("860000000000502", ALPHA),
+        _row("860000000000503", ALPHA),
+        _row("860000000000504", ALPHA),
+    )
+    _login(client, "alpha")
+
+    # 已办 仍然必须选合约业务类型
+    bad = client.post(
+        "/imei/report",
+        data={"imei": "860000000000501", "action": "已办", "biz_type": ""},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "业务类型要选一个" in bad
+
+    # 已退货（就算前端残留了「送2G流量」且没传截图/备注）直接放行，库里 biz_type 清空
+    r1 = client.post(
+        "/imei/report",
+        data={"imei": "860000000000501", "action": "已退货", "biz_type": "送2G流量"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "已记下：000501 → 已退货" in r1
+    assert "已退货 ·" not in r1  # 不挂多余的分隔点
+
+    # 非本店 / 待核 完全不带 biz_type
+    r2 = client.post(
+        "/imei/report",
+        data={"imei": "860000000000502", "action": "非本店"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    r3 = client.post(
+        "/imei/report",
+        data={"imei": "860000000000503", "action": "待核", "note": "核实中"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "已记下：000502 → 非本店" in r2
+    assert "已记下：000503 → 待核" in r3
+
+    with db.get_db() as conn:
+        rows = {
+            r["imei"]: r
+            for r in conn.execute("SELECT imei, action, biz_type FROM imei_reports").fetchall()
+        }
+    assert rows["860000000000501"]["action"] == "已退货" and rows["860000000000501"]["biz_type"] == ""
+    assert rows["860000000000502"]["action"] == "非本店" and rows["860000000000502"]["biz_type"] == ""
+    assert rows["860000000000503"]["action"] == "待核" and rows["860000000000503"]["biz_type"] == ""
+
+
+def test_summary_and_mark_summary_exclude_closed_reports(client):
+    """自报了「已办 / 已退货」的机器不再算进页顶待办/逾期/待激活，也不再稀释或虚增各店标记台数。"""
+    _login(client)
+    _upload(
+        client,
+        f"860000000000511,{ALPHA},Y600 Pro,小李,2026-10-21,12,-5,D7+,确认未办,无,",
+        f"860000000000512,{ALPHA},Y600 Pro,小李,2026-10-21,12,-5,D7+,确认未办,无,",
+        f"860000000000513,{ALPHA},Y600 Pro,小李,2026-10-21,12,-5,D7+,确认未办,无,",
+    )
+    _mark(client, "860000000000512", "异网")
+    sid = _store_id()
+    c0 = _cards([sid])
+    assert (c0["open"], c0["overdue"], c0["soon"], c0["reported"], c0["pending"], c0["activated"]) == (
+        3,
+        2,
+        0,
+        0,
+        1,
+        0,
+    )
+
+    _login(client, "alpha")
+    client.post(
+        "/imei/report",
+        data={"imei": "860000000000511", "action": "已办", "biz_type": "AI手机合约"},
+    )
+    client.post(
+        "/imei/report",
+        data={"imei": "860000000000512", "action": "已退货"},
+    )
+    # 待核还没结掉，仍留在待办里
+    client.post(
+        "/imei/report",
+        data={"imei": "860000000000513", "action": "待核"},
+    )
+    c1 = _cards([sid])
+    assert (c1["open"], c1["overdue"], c1["soon"], c1["reported"], c1["pending"], c1["activated"]) == (
+        1,
+        1,
+        0,
+        3,
+        0,
+        0,
+    )
+    with db.get_db() as conn:
+        marks = db_imei.mark_summary(conn, [sid])
+    assert marks[0]["open_n"] == 1 and marks[0]["pending_n"] == 0
+
+
+def test_activated_after_asof_clamps_age_to_zero(client):
+    """T-1 台账（asof=昨天）下门店填今天已激活：已过天数钳在 0，显示剩 7 天，绝不出 -1 天 / 剩 8 天。"""
+    _login(client)
+    _upload(
+        client,
+        f"860000000000521,{ALPHA},Y600 Pro,小李,2026-10-25,7,0,D3-6,确认未办,无,",
+        asof="2026-11-01",
+    )
+    _mark(client, "860000000000521", "已激活", "2026-11-02")
+    cards = _cards([_store_id()])
+    assert cards["activated"] == 1 and cards["overdue"] == 0 and cards["soon"] == 0
+    page = client.get("/imei").get_data(as_text=True)
+    assert "剩 7 天" in page
+    assert "剩 8 天" not in page and "-1 天" not in page
+
+
+def test_filler_cannot_undo_and_activated_date_is_locked(client):
+    """撤销只允许管理员；门店点过「已激活」后锁死起算日，不能重填或改标异网。"""
+    _login(client)
+    _upload(client, f"860000000000531,{ALPHA},Y600 Pro,小李,2026-10-21,12,-5,D7+,确认未办,无,")
+
+    _login(client, "alpha")
+    # 1) 门店能标异网，但页面上没有「撤销标记」，强发 POST /imei/mark mark=撤销 返 403
+    assert "异地异网待激活" in _mark(client, "860000000000531", "异网").get_data(as_text=True)
+    assert "撤销标记" not in client.get("/imei").get_data(as_text=True)
+    assert client.post("/imei/mark", data={"imei": "860000000000531", "mark": "撤销"}).status_code == 403
+    assert _todo_row("860000000000531")["user_type"] == "异地异网"
+
+    # 2) 门店点一次「已激活」成功，之后页面隐藏 mark-form，再 POST 已激活或异网都被拦下
+    assert "起算" in _mark(client, "860000000000531", "已激活", "2026-11-01").get_data(as_text=True)
+    assert _todo_row("860000000000531")["manual_activated_at"] == "2026-11-01"
+    filler_html = client.get("/imei").get_data(as_text=True)
+    assert 'class="mark-form"' not in filler_html
+
+    re_act = _mark(client, "860000000000531", "已激活", "2026-11-02").get_data(as_text=True)
+    assert "起算日已锁定" in re_act
+    assert _todo_row("860000000000531")["manual_activated_at"] == "2026-11-01"
+
+    re_remote = _mark(client, "860000000000531", "异网").get_data(as_text=True)
+    assert "起算日已锁定" in re_remote
+    assert _todo_row("860000000000531")["manual_activated_at"] == "2026-11-01"
+
+    assert client.post("/imei/mark", data={"imei": "860000000000531", "mark": "撤销"}).status_code == 403
+
+    # 3) 管理员可以重标或撤销解锁
+    _login(client)
+    admin_html = client.get("/imei").get_data(as_text=True)
+    assert "撤销标记" in admin_html
+    _mark(client, "860000000000531", "撤销")
+    row = _todo_row("860000000000531")
+    assert row["user_type"] == "本地移动" and row["manual_activated_at"] == ""
+
+
+def test_stock_import_does_not_overwrite_active_sold_machine(client):
+    """滞后的库存快照里还带着已售串码时，绝不能把活跃已售待办覆盖成「未售」。"""
+    _login(client)
+    _upload(client, _row("860000000000550", ALPHA))
+    body = _stock_csv(
+        f"860000000000550,示例市,{ALPHA},Y600 Pro,移动顺差,2026-11-02,,1",
+        f"860000000000551,示例市,{ALPHA},Y600 Pro,移动顺差,2026-11-02,,1",
+    )
+    resp = client.post(
+        "/imei/import",
+        data={"csv_file": (body, "stock.csv"), "asof": "2026-11-02"},
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert "入库 1 台" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        sold = conn.execute(
+            "SELECT status, seen, sold_store FROM imei_todo WHERE imei='860000000000550'"
+        ).fetchone()
+        unsold = conn.execute(
+            "SELECT status, seen FROM imei_todo WHERE imei='860000000000551'"
+        ).fetchone()
+    assert sold["status"] == "已售" and sold["seen"] == 1 and sold["sold_store"] == ALPHA
+    assert unsold["status"] == "未售" and unsold["seen"] == 1
+
+
+def test_taizhou_accounts_hide_nav_and_forbid_access(client):
+    """泰州账号（店员 / 店长 / 地市负责人）顶栏隐藏「串码待办」，直接访问 /imei* 全返 403。"""
+    from PIL import Image
+
+    _login(client)
+    _upload(client, _row("860000000000560", ALPHA))
+
+    # 先传一张甲店截图，验证泰州账号连截图路由也是 404
+    _login(client, "alpha")
+    buf = BytesIO()
+    Image.new("RGB", (8, 8), (20, 120, 200)).save(buf, format="PNG")
+    buf.seek(0)
+    client.post(
+        "/imei/report",
+        data={
+            "imei": "860000000000560",
+            "action": "已办",
+            "biz_type": "送2G流量",
+            "photo": (buf, "p.png"),
+        },
+        content_type="multipart/form-data",
+    )
+    with db.get_db() as conn:
+        photo_name = conn.execute("SELECT photo FROM imei_reports").fetchone()["photo"]
+        cur = conn.execute(
+            "INSERT INTO stores(name, code, city, sort_order, active, created_at) "
+            "VALUES('TZ泰州市海陵区测试店', 'store-tz', '泰州市', 99, 1, '2026-01-01')"
+        )
+        tz_sid = cur.lastrowid
+        db.create_user(
+            conn,
+            username="tz_filler",
+            display_name="泰州店员",
+            pin="123456",
+            role="filler",
+            store_ids=[tz_sid],
+            scope="",
+        )
+        db.create_user(
+            conn,
+            username="tz_city",
+            display_name="泰州负责人",
+            pin="123456",
+            role="city",
+            store_ids=[],
+            scope="泰州市",
+        )
+        conn.execute("UPDATE users SET must_change_pin=0 WHERE username IN ('tz_filler', 'tz_city')")
+
+    # 南通/示例市账号正常看到导航并能进
+    alpha_nav = client.get("/today").get_data(as_text=True)
+    assert "串码待办" in alpha_nav
+    assert client.get("/imei").status_code == 200
+
+    # 泰州店员：顶栏无「串码待办」，四个串码路由全 403，截图 404
+    _login(client, "tz_filler")
+    tz_filler_nav = client.get("/today").get_data(as_text=True)
+    assert "串码待办" not in tz_filler_nav
+    assert client.get("/imei").status_code == 403
+    assert client.get("/imei/pool").status_code == 403
+    assert client.post("/imei/report", data={"imei": "860000000000560", "action": "待核"}).status_code == 403
+    assert client.post("/imei/mark", data={"imei": "860000000000560", "mark": "异网"}).status_code == 403
+    assert client.get(f"/uploads/imei/{photo_name}").status_code == 404
+
+    # 泰州地市负责人同样隐藏导航、访问 403
+    _login(client, "tz_city")
+    tz_city_nav = client.get("/compare").get_data(as_text=True)
+    assert "串码待办" not in tz_city_nav
+    assert client.get("/imei").status_code == 403
+    assert client.get("/imei/pool").status_code == 403
+
+
+def test_photo_exif_orientation_transposed(client):
+    """手机竖拍带 EXIF Orientation=6（顺时针 90°）时，落盘前自动扶正像素并剥除 EXIF。"""
+    from PIL import Image
+
+    _login(client)
+    _upload(client, _row("860000000000570", ALPHA))
+    _login(client, "alpha")
+
+    im = Image.new("RGB", (40, 20), (100, 150, 200))
+    exif = im.getexif()
+    exif[0x0112] = 6  # Orientation = Rotate 90 CW → 扶正后应变成 20x40
+    buf = BytesIO()
+    im.save(buf, format="JPEG", exif=exif)
+    buf.seek(0)
+
+    resp = client.post(
+        "/imei/report",
+        data={
+            "imei": "860000000000570",
+            "action": "已办",
+            "biz_type": "顺差让利",
+            "photo": (buf, "cam.jpg"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    with db.get_db() as conn:
+        name = conn.execute("SELECT photo FROM imei_reports").fetchone()["photo"]
+    saved = Image.open(db_core.DATA_DIR / "uploads" / "imei" / name)
+    assert saved.size == (20, 40)
+    assert 0x0112 not in saved.getexif()
+

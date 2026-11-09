@@ -283,10 +283,14 @@ def get_report(conn: sqlite3.Connection, store_id: int, biz_date: date) -> Optio
     ).fetchone()
 
 def delete_daily_report(conn: sqlite3.Connection, store_id: int, biz_date: date) -> None:
-    """删除某门店特定日期的日报和事实记录。调用方需在事务内。"""
+    """删除某门店特定日期的日报、事实记录及同步写入的业辅查询登记。调用方需在事务内。"""
     date_str = biz_date.isoformat()
     conn.execute(
         "DELETE FROM daily_facts WHERE store_id=? AND biz_date=?",
+        (store_id, date_str),
+    )
+    conn.execute(
+        "DELETE FROM aux_queries WHERE store_id=? AND biz_date=?",
         (store_id, date_str),
     )
     conn.execute(

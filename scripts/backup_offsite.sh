@@ -284,9 +284,9 @@ snapshot_primary() {
   else
     echo "警告: 生产机没有 .env" >&2
   fi
-  # uploads 快照每天只打一份：今天已存在就不再打，避免每小时全量放大
+  # uploads 快照每天只打一份：今天（北京时间，与 STAMP 同口径）已存在就不再打，避免每小时全量放大
   if [[ -d "${PRIMARY_DIR}/data/uploads" ]] && \
-     ! ls -1 "${PRIMARY_DIR}"/data/backups/uploads_offsite_$(date +%Y%m%d)_*.tar.gz >/dev/null 2>&1; then
+     ! ls -1 "${PRIMARY_DIR}"/data/backups/uploads_offsite_$(TZ=Asia/Shanghai date +%Y%m%d)_*.tar.gz >/dev/null 2>&1; then
     # --exclude 照片目录：照片是纯增量、体量大，由 backup_photos.sh 每天单独镜像，别混进份数放大
     tar czf "${PRIMARY_DIR}/data/backups/${REMOTE_UPLOADS_NAME}" --exclude='uploads/imei' -C "${PRIMARY_DIR}/data" uploads
     echo "已附带 uploads（不含 imei 照片）-> ${REMOTE_UPLOADS_NAME}"
@@ -336,7 +336,7 @@ else
   echo "警告: 生产机没有 .env" >&2
 fi
 if [[ -d "${PRIMARY_DIR}/data/uploads" ]] && \
-   ! ls -1 "${PRIMARY_DIR}"/data/backups/uploads_offsite_$(date +%Y%m%d)_*.tar.gz >/dev/null 2>&1; then
+   ! ls -1 "${PRIMARY_DIR}"/data/backups/uploads_offsite_$(TZ=Asia/Shanghai date +%Y%m%d)_*.tar.gz >/dev/null 2>&1; then
   # 每天只打一份；--exclude 照片目录（照片由 backup_photos.sh 单独镜像）
   tar czf "${PRIMARY_DIR}/data/backups/${UPLOADS_NAME}" --exclude='uploads/imei' -C "${PRIMARY_DIR}/data" uploads
   chmod 600 "${PRIMARY_DIR}/data/backups/${UPLOADS_NAME}" 2>/dev/null || true
@@ -460,7 +460,7 @@ if [[ "${DRY_RUN}" != "1" ]]; then
     prune_local
   else
     ssh_p "${PRIMARY_SSH_PORT}" "${PRIMARY}" \
-      "MAX_KEEP=$(printf %q "${MAX_KEEP}") bash -s" <<'EOS'
+      "PRIMARY_DIR=$(printf %q "${PRIMARY_DIR}") KEEP_DAYS=$(printf %q "${KEEP_DAYS}") UPLOADS_KEEP=$(printf %q "${UPLOADS_KEEP}") MAX_KEEP=$(printf %q "${MAX_KEEP}") bash -s" <<'EOS'
 set -euo pipefail
 # 只留最新 MAX_KEEP 份，防止异机写进来的库无限堆积
 ls -1t "${PRIMARY_DIR}"/data/backups/store_daily_*.db 2>/dev/null | tail -n +$((MAX_KEEP + 1)) | while read -r f; do
@@ -469,6 +469,9 @@ done || true
 find "${PRIMARY_DIR}/data/backups" -type f \
   \( -name 'store_daily_offsite_*.db' -o -name 'env_offsite_*.env' \) \
   -mtime +"${KEEP_DAYS}" -delete 2>/dev/null || true
+ls -1t "${PRIMARY_DIR}"/data/backups/uploads_offsite_*.tar.gz 2>/dev/null | tail -n +$((UPLOADS_KEEP + 1)) | while read -r f; do
+  rm -f -- "$f" 2>/dev/null || true
+done || true
 EOS
   fi
 fi

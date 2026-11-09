@@ -30,7 +30,7 @@ import sqlite3
 from datetime import date
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from .db_core import _now, begin_immediate
+from .db_core import _now, begin_immediate, today_local
 from .db_core import sql_in as _store_in
 
 # 门店能自报的四种结论。前三种是「有答案」，待核是「我还得问」。
@@ -111,7 +111,8 @@ def effective_days(
     if state == "已激活":
         d0, d1 = _parse_day(start), _parse_day(str(row.get("asof") or ""))
         if d0 and d1:
-            age = (d1 - d0).days
+            # 台账常见 T-1 截至日（如昨晚导表、今早点激活）：钳到 >=0，避免出现「已售 -1 天 / 剩 8 天」
+            age = max(0, (d1 - d0).days)
             remain = ACT_WINDOW_DAYS - age
             return age, remain, _stage_of(age), start
         return int(row.get("age_days") or 0), int(row.get("remain_days") or 0), str(row.get("stage") or ""), start
@@ -221,46 +222,50 @@ _OUT_OF_SCOPE_HINT = (
     "泰州", "泰兴", "兴化", "靖江", "姜堰", "海陵", "高港", "黄桥", "戴南", "口岸",
 )
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS imei_todo (
-    imei TEXT PRIMARY KEY,
-    status TEXT NOT NULL DEFAULT '已售',
-    store_id INTEGER,
-    sold_store TEXT NOT NULL DEFAULT '',
-    own_store TEXT NOT NULL DEFAULT '',
-    dispatch_store TEXT NOT NULL DEFAULT '',
-    model TEXT NOT NULL DEFAULT '',
-    sp TEXT NOT NULL DEFAULT '',
-    sold_day TEXT NOT NULL DEFAULT '',
-    age_days INTEGER NOT NULL DEFAULT 0,
-    remain_days INTEGER NOT NULL DEFAULT 0,
-    stage TEXT NOT NULL DEFAULT '',
-    state TEXT NOT NULL DEFAULT '',
-    strength TEXT NOT NULL DEFAULT '',
-    evidence TEXT NOT NULL DEFAULT '',
-    pos_biz_type TEXT NOT NULL DEFAULT '',
-    user_type TEXT NOT NULL DEFAULT '本地移动',
-    manual_activated_at TEXT NOT NULL DEFAULT '',
-    asof TEXT NOT NULL DEFAULT '',
-    seen INTEGER NOT NULL DEFAULT 1,
-    updated_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_imei_todo_store ON imei_todo(store_id, remain_days);
-CREATE INDEX IF NOT EXISTS idx_imei_todo_status ON imei_todo(status, seen);
-CREATE TABLE IF NOT EXISTS imei_reports (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    imei TEXT NOT NULL,
-    store_id INTEGER NOT NULL REFERENCES stores(id),
-    action TEXT NOT NULL,
-    biz_type TEXT NOT NULL DEFAULT '',
-    note TEXT NOT NULL DEFAULT '',
-    photo TEXT NOT NULL DEFAULT '',
-    user_id INTEGER,
-    created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_imei_reports_imei ON imei_reports(imei, id DESC);
-CREATE INDEX IF NOT EXISTS idx_imei_reports_store ON imei_reports(store_id, id DESC);
-"""
+_SCHEMA_STMTS = (
+    """
+    CREATE TABLE IF NOT EXISTS imei_todo (
+        imei TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT '已售',
+        store_id INTEGER,
+        sold_store TEXT NOT NULL DEFAULT '',
+        own_store TEXT NOT NULL DEFAULT '',
+        dispatch_store TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL DEFAULT '',
+        sp TEXT NOT NULL DEFAULT '',
+        sold_day TEXT NOT NULL DEFAULT '',
+        age_days INTEGER NOT NULL DEFAULT 0,
+        remain_days INTEGER NOT NULL DEFAULT 0,
+        stage TEXT NOT NULL DEFAULT '',
+        state TEXT NOT NULL DEFAULT '',
+        strength TEXT NOT NULL DEFAULT '',
+        evidence TEXT NOT NULL DEFAULT '',
+        pos_biz_type TEXT NOT NULL DEFAULT '',
+        user_type TEXT NOT NULL DEFAULT '本地移动',
+        manual_activated_at TEXT NOT NULL DEFAULT '',
+        asof TEXT NOT NULL DEFAULT '',
+        seen INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_imei_todo_store ON imei_todo(store_id, remain_days)",
+    "CREATE INDEX IF NOT EXISTS idx_imei_todo_status ON imei_todo(status, seen)",
+    """
+    CREATE TABLE IF NOT EXISTS imei_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        imei TEXT NOT NULL,
+        store_id INTEGER NOT NULL REFERENCES stores(id),
+        action TEXT NOT NULL,
+        biz_type TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        photo TEXT NOT NULL DEFAULT '',
+        user_id INTEGER,
+        created_at TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_imei_reports_imei ON imei_reports(imei, id DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_imei_reports_store ON imei_reports(store_id, id DESC)",
+)
 
 # 老库上补列（表是懒建的，之前跑过的库没有这些列）
 _ADDED_COLUMNS = {
@@ -298,7 +303,19 @@ _COLUMNS = {
 
 
 def ensure(conn: sqlite3.Connection) -> None:
-    conn.executescript(_SCHEMA)
+    # 不用 executescript：sqlite3.executescript 会先发隐式 COMMIT，若外层正握着写事务会被提前提交；
+    # 先只读查 sqlite_master / table_info，表与索引齐备时零 DDL 执行、零表结构锁。
+    existing = {
+        str(r[0])
+        for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE name IN ("
+            "'imei_todo', 'imei_reports', 'idx_imei_todo_store', "
+            "'idx_imei_todo_status', 'idx_imei_reports_imei', 'idx_imei_reports_store')"
+        )
+    }
+    if len(existing) < 6:
+        for stmt in _SCHEMA_STMTS:
+            conn.execute(stmt)
     for table, added in (
         ("imei_todo", _ADDED_COLUMNS),
         ("imei_reports", _REPORTS_ADDED_COLUMNS),
@@ -307,6 +324,31 @@ def ensure(conn: sqlite3.Connection) -> None:
         for name, decl in added.items():
             if name not in have:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
+def user_in_imei_scope(conn: sqlite3.Connection, user: Any) -> bool:
+    """判断账号是否在顺差串码待办范围内（泰州等排除城市直接隐藏导航并禁止访问）。"""
+    if user is None:
+        return False
+    role = user["role"]
+    if role == "admin":
+        return True
+    scope = (user["scope"] or "").strip() if "scope" in user.keys() else ""
+    if role == "city" and scope in OUT_CITIES:
+        return False
+    from .db_stores import list_user_stores
+
+    stores = list_user_stores(conn, user)
+    if stores:
+        return any(((s["city"] or "").strip() not in OUT_CITIES) for s in stores)
+    if role == "readonly" and scope:
+        cities = [
+            (r["city"] or "").strip()
+            for r in conn.execute("SELECT DISTINCT city FROM stores WHERE area_manager=?", (scope,))
+        ]
+        if cities:
+            return any(c not in OUT_CITIES for c in cities)
+    return True
 
 
 def _ensure(conn: sqlite3.Connection) -> None:
@@ -453,11 +495,14 @@ def import_rows(
         if _looks_out_of_scope(dispatch, city):
             skipped_city += 1
             continue
-        if not store_id:
-            unmapped[dispatch or "(空)"] = unmapped.get(dispatch or "(空)", 0) + 1
-
-        conn.execute(
-            """
+        # 库存导出往往滞后于 POS 销售：已在在跟台账里的已售机器（status='已售' AND seen=1）绝不被未售库存覆盖回池子
+        conflict_guard = (
+            f" WHERE imei_todo.status <> '{STATUS_SOLD}' OR imei_todo.seen = 0"
+            if stock_mode
+            else ""
+        )
+        cur = conn.execute(
+            f"""
             INSERT INTO imei_todo(
                 imei, status, store_id, sold_store, own_store, dispatch_store,
                 model, sp, sold_day, age_days, remain_days,
@@ -473,7 +518,7 @@ def import_rows(
                 state=excluded.state, strength=excluded.strength,
                 evidence=excluded.evidence, pos_biz_type=excluded.pos_biz_type,
                 asof=excluded.asof,
-                seen=1, updated_at=excluded.updated_at
+                seen=1, updated_at=excluded.updated_at{conflict_guard}
             """,
             (
                 imei,
@@ -496,7 +541,10 @@ def import_rows(
                 now,
             ),
         )
-        written += 1
+        if cur.rowcount > 0:
+            written += 1
+            if not store_id:
+                unmapped[dispatch or "(空)"] = unmapped.get(dispatch or "(空)", 0) + 1
     return {
         "rows": rows_total,
         "written": written,
@@ -626,20 +674,28 @@ def mark_summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> List[Dic
     if not ids:
         return []
     clause, params = _store_in("t.store_id", ids)
+    closed_marks = ",".join("?" * len(CLOSED_STATES))
     rows = conn.execute(
         f"""
+        WITH latest_r AS (
+          SELECT imei, action
+          FROM imei_reports
+          WHERE id IN (SELECT MAX(id) FROM imei_reports GROUP BY imei)
+        )
         SELECT t.store_id, s.short_name AS short, s.name AS name,
                COUNT(*) AS open_n,
                SUM(CASE WHEN t.user_type=? AND t.manual_activated_at='' THEN 1 ELSE 0 END) AS pending_n,
                SUM(CASE WHEN t.manual_activated_at<>'' THEN 1 ELSE 0 END) AS activated_n
         FROM imei_todo t
         LEFT JOIN stores s ON s.id = t.store_id
-        WHERE t.seen=1 AND t.status=? AND t.state NOT IN ({','.join('?' * len(CLOSED_STATES))})
+        LEFT JOIN latest_r r ON r.imei = t.imei
+        WHERE t.seen=1 AND t.status=? AND t.state NOT IN ({closed_marks})
+          AND COALESCE(r.action, '') NOT IN ({closed_marks})
           AND {clause}
         GROUP BY t.store_id
         ORDER BY pending_n DESC, open_n DESC
         """,
-        [USER_REMOTE, STATUS_SOLD, *CLOSED_STATES, *params],
+        [USER_REMOTE, STATUS_SOLD, *CLOSED_STATES, *CLOSED_STATES, *params],
     )
     out: List[Dict[str, Any]] = []
     for row in rows:
@@ -725,20 +781,30 @@ def summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> Dict[str, Any
     ids = [int(s) for s in store_ids]
     clause, raw_params = _store_in("t.store_id", ids) if ids else ("1=0", [])
     params: List[Any] = list(raw_params)
+    closed_marks = ",".join("?" * len(CLOSED_STATES))
     # 逾期/到期按「生效天数」算：填了手动激活日的，从激活日重新起算 7 天；
-    # 标了异地异网还没激活的（待激活）单独计数，不计逾期、不算催办。
+    # 标了异地异网还没激活的（待激活）单独计数，不计逾期、不算催办；
+    # 门店自报为已办/已退货的同步退出在跟，与列表口径保持一致。
     row = conn.execute(
         f"""
-        WITH base AS (
+        WITH latest_r AS (
+          SELECT imei, action
+          FROM imei_reports
+          WHERE id IN (SELECT MAX(id) FROM imei_reports GROUP BY imei)
+        ),
+        base AS (
           SELECT t.store_id, t.user_type, t.manual_activated_at,
                  CASE WHEN t.manual_activated_at<>''
                            AND date(t.asof) IS NOT NULL
                            AND date(t.manual_activated_at) IS NOT NULL
-                      THEN CAST(julianday(date(t.asof)) - julianday(date(t.manual_activated_at)) AS INTEGER)
+                      THEN MAX(0, CAST(julianday(date(t.asof)) - julianday(date(t.manual_activated_at)) AS INTEGER))
                       ELSE NULL END AS age_act,
                  t.remain_days
           FROM imei_todo t
-          WHERE t.seen=1 AND t.status=? AND t.state NOT IN ({",".join("?" * len(CLOSED_STATES))})
+          LEFT JOIN latest_r r ON r.imei = t.imei
+          WHERE t.seen=1 AND t.status=?
+            AND t.state NOT IN ({closed_marks})
+            AND COALESCE(r.action, '') NOT IN ({closed_marks})
             AND {clause}
         )
         SELECT
@@ -757,6 +823,7 @@ def summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> Dict[str, Any
         [
             STATUS_SOLD,
             *CLOSED_STATES,
+            *CLOSED_STATES,
             *params,
             USER_REMOTE,
             USER_REMOTE,
@@ -766,25 +833,32 @@ def summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> Dict[str, Any
         ],
     ).fetchone()
     asof = conn.execute(
-        f"SELECT MAX(t.asof) FROM imei_todo t WHERE {clause}", params
+        f"SELECT MAX(t.asof) FROM imei_todo t WHERE t.seen=1 AND {clause}", params
     ).fetchone()[0]
     reported = conn.execute(
         f"""
         SELECT COUNT(DISTINCT r.imei) FROM imei_reports r
         JOIN imei_todo t ON t.imei = r.imei
-        WHERE {clause}
+        WHERE t.seen=1 AND t.status=? AND {clause}
         """,
-        params,
+        [STATUS_SOLD, *params],
     ).fetchone()[0]
     unmapped = 0
     if ids:
         unmapped = conn.execute(
-            """
+            f"""
+            WITH latest_r AS (
+              SELECT imei, action
+              FROM imei_reports
+              WHERE id IN (SELECT MAX(id) FROM imei_reports GROUP BY imei)
+            )
             SELECT COUNT(*) FROM imei_todo t
+            LEFT JOIN latest_r r ON r.imei = t.imei
             WHERE t.seen=1 AND t.status=? AND t.store_id IS NULL
-              AND t.state NOT IN (%s)
-            """ % ",".join("?" * len(CLOSED_STATES)),
-            [STATUS_SOLD, *CLOSED_STATES],
+              AND t.state NOT IN ({closed_marks})
+              AND COALESCE(r.action, '') NOT IN ({closed_marks})
+            """,
+            [STATUS_SOLD, *CLOSED_STATES, *CLOSED_STATES],
         ).fetchone()[0]
     pool = conn.execute(
         "SELECT COUNT(*) FROM imei_todo WHERE seen=1 AND status=?", (STATUS_STOCK,)
@@ -816,23 +890,27 @@ def add_report(
 ) -> int:
     """门店自报一条（只增不改）。返回新记录 id。
 
-    业务类型必填，只能是四类之一或「其他」；选「其他」必须写说明。
+    选「已办」时业务类型必填（四类之一或「其他」，选「其他」必填说明，记录不全的两类必填说明或截图）；
+    选「已退货 / 非本店 / 待核」时不要求业务类型。
     """
     ensure(conn)
     if action not in ACTIONS:
         raise ValueError("结论只能是「已办 / 已退货 / 非本店 / 待核」")
-    biz = norm_biz_type(biz_type)
-    if not biz:
-        raise ValueError("业务类型要选一个（AI手机合约 / 直降合约 / 顺差让利 / 送2G流量 / 其他）")
-    if biz not in BIZ_CHOICES:
-        raise ValueError("业务类型只能选 AI手机合约 / 直降合约 / 顺差让利 / 送2G流量 / 其他")
-    if biz == BIZ_OTHER and not (note or "").strip():
-        raise ValueError("选「其他」要在说明里写清是什么业务")
-    if biz in NO_SYSTEM_EVIDENCE and not (note or "").strip() and not photo:
-        raise ValueError(
-            f"「{biz}」这类业务系统记录不全，查到就能对上，查不到也算正常，"
-            "请务必上传受理单或截图（说明、截图任填一项）"
-        )
+    if action == "已办":
+        biz = norm_biz_type(biz_type)
+        if not biz:
+            raise ValueError("业务类型要选一个（AI手机合约 / 直降合约 / 顺差让利 / 送2G流量 / 其他）")
+        if biz not in BIZ_CHOICES:
+            raise ValueError("业务类型只能选 AI手机合约 / 直降合约 / 顺差让利 / 送2G流量 / 其他")
+        if biz == BIZ_OTHER and not (note or "").strip():
+            raise ValueError("选「其他」要在说明里写清是什么业务")
+        if biz in NO_SYSTEM_EVIDENCE and not (note or "").strip() and not photo:
+            raise ValueError(
+                f"「{biz}」这类业务系统记录不全，查到就能对上，查不到也算正常，"
+                "请务必上传受理单或截图（说明、截图任填一项）"
+            )
+    else:
+        biz = ""
     begin_immediate(conn)
     cur = conn.execute(
         """
@@ -859,16 +937,26 @@ def todo_stores(conn: sqlite3.Connection, store_ids: Iterable[int]) -> List[sqli
         return []
     clause, raw_params = _store_in("t.store_id", ids)
     params: List[Any] = list(raw_params)
+    closed_marks = ",".join("?" * len(CLOSED_STATES))
     return list(
         conn.execute(
             f"""
+            WITH latest_r AS (
+              SELECT imei, action
+              FROM imei_reports
+              WHERE id IN (SELECT MAX(id) FROM imei_reports GROUP BY imei)
+            )
             SELECT s.id, s.name, s.short_name, COUNT(*) AS n
-            FROM imei_todo t JOIN stores s ON s.id = t.store_id
+            FROM imei_todo t
+            JOIN stores s ON s.id = t.store_id
+            LEFT JOIN latest_r r ON r.imei = t.imei
             WHERE t.seen=1 AND t.status=?
-              AND t.state NOT IN ({','.join('?' * len(CLOSED_STATES))}) AND {clause}
+              AND t.state NOT IN ({closed_marks})
+              AND COALESCE(r.action, '') NOT IN ({closed_marks})
+              AND {clause}
             GROUP BY s.id ORDER BY n DESC
             """,
-            [STATUS_SOLD, *CLOSED_STATES, *params],
+            [STATUS_SOLD, *CLOSED_STATES, *CLOSED_STATES, *params],
         )
     )
 
@@ -880,28 +968,36 @@ def set_mark(
     mark: str,
     day: str = "",
     store_ids: Sequence[int] = (),
+    is_admin: bool = False,
 ) -> Dict[str, Any]:
-    """门店的两个动作 + 管理员的撤销。
+    """门店的两个动作 + 管理员的撤销与修正。
 
     - mark='异网'：客户是异地异网，要等他自己激活 → 转「待激活」，不计逾期、不催办
     - mark='已激活'：客户已经激活 → 记下激活日，7 天从这一天重新起算
-    - mark='撤销'：标错了 → 回到「本地移动」，按售出日算
+    - mark='撤销'：仅管理员可操作 → 回到「本地移动」，按售出日算
 
+    门店一旦点过「已激活」即锁死起算日，非管理员不可再改期或切回异网；
     只能动自己看得见的店；待建店（store_id 为空）不许标——没有店就没有责任人。
     """
     if mark not in MARKS:
         raise ValueError("动作只能是「异网」「已激活」「撤销」")
+    if mark == "撤销" and not is_admin:
+        raise PermissionError("forbidden")
     ensure(conn)
+    begin_immediate(conn)
     row = conn.execute(
-        "SELECT imei, store_id, sold_day, status FROM imei_todo WHERE imei=?", (imei,)
+        "SELECT imei, store_id, sold_day, status, manual_activated_at FROM imei_todo WHERE imei=?",
+        (imei,),
     ).fetchone()
     if row is None:
         raise ValueError("这条串码不在清单里，刷新后再试")
     if row["store_id"] is None:
         raise ValueError("这家店还没建档案，先补门店档案再标")
     allowed = [int(s) for s in store_ids]
-    if allowed and int(row["store_id"]) not in allowed:
+    if not is_admin and (not allowed or int(row["store_id"]) not in allowed):
         raise PermissionError("forbidden")
+    if (row["manual_activated_at"] or "").strip() and not is_admin:
+        raise ValueError("这台机器已激活，起算日已锁定；标错了找管理员撤销")
     now = _now()
     if mark == "异网":
         conn.execute(
@@ -915,12 +1011,13 @@ def set_mark(
             (USER_DEFAULT, now, imei),
         )
         return {"imei": imei, "mark": mark, "user_type": USER_DEFAULT, "manual_activated_at": ""}
-    # 已激活：激活日默认今天，不能是未来、不能早于售出日
+    # 已激活：激活日默认业务时区今天，不能是未来、不能早于售出日
+    today = today_local()
     raw = (day or "").strip()[:10]
-    act = _parse_day(raw) if raw else date.today()
+    act = _parse_day(raw) if raw else today
     if act is None:
         raise ValueError("激活日要填成 2026-11-09 这样的日期")
-    if raw and act > date.today():
+    if raw and act > today:
         raise ValueError("激活日不能填将来的日期")
     sold = _parse_day(str(row["sold_day"] or ""))
     if sold and act < sold:

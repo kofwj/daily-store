@@ -72,9 +72,11 @@ cp scripts/backup.env.example scripts/backup.env
 ~/store-daily-backups/
   db/store_daily_offsite_YYYYMMDD_HHMMSS.db
   env/env_offsite_YYYYMMDD_HHMMSS.env   # 权限 600
+  uploads/uploads_offsite_YYYYMMDD.tar.gz  # 每日一份（不含 imei 照片）
+  imei_photos.tar                       # 仅局域网备份机（backup_photos.sh 每日镜像）
 ```
 
-### 3. 定时（cron，推荐生产机每小时）
+### 3. 定时（cron，推荐生产机每小时 + 每日照片镜像）
 
 开发机睡觉会漏备份，所以 **cron 装在生产机上**。
 
@@ -86,7 +88,10 @@ ssh user@your-primary-host /opt/store-daily/scripts/install_backup_cron.sh
 
 ```cron
 5 * * * * /opt/store-daily/scripts/backup_offsite.sh >>/var/log/store-daily-offsite.log 2>&1
+20 4 * * * /opt/store-daily/scripts/backup_photos.sh >>/var/log/store-daily-photos.log 2>&1
 ```
+
+其中 `backup_photos.sh` 同样读取 `scripts/backup.env` 的 `LAN_BACKUP_*` 配置，只推局域网备份机（单包流式镜像 `imei_photos.tar`，落盘经 `.part` + `tar tf` 校验后再原子替换），并通过 `notify_failure.py`（独立状态文件 `data/backups/.photo-alert-state.json`）发企微失败/恢复告警。
 
 并生成本机 SSH 钥匙。把打印出的公钥加到局域网备份机和异地备份机。
 
@@ -186,9 +191,13 @@ curl -s http://127.0.0.1:8099/health
 mkdir -p /opt/store-daily && cd /opt/store-daily
 ./scripts/sync_to_vps.sh --no-db   # 或 git clone + 拷 .env
 
-mkdir -p data
+mkdir -p data/uploads/imei
 scp user@your-lan-backup-host:~/store-daily-backups/db/最新.db data/store_daily.db
 scp user@your-lan-backup-host:~/store-daily-backups/env/最新.env .env
+scp user@your-lan-backup-host:~/store-daily-backups/uploads/最新.tar.gz /tmp/uploads.tar.gz
+scp user@your-lan-backup-host:~/store-daily-backups/imei_photos.tar /tmp/imei_photos.tar
+tar xzf /tmp/uploads.tar.gz -C data/
+tar xf /tmp/imei_photos.tar -C data/uploads/imei/
 chmod 600 .env data/store_daily.db
 
 ./scripts/deploy_vps.sh

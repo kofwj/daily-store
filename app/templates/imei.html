@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_scope_filters.html" import scope_filters %}
 {% block title %}串码待办 · 顺差合约{% endblock %}
 {% block body_class %}imei-page{% endblock %}
 {% block body %}
@@ -63,10 +64,11 @@
               </select>
               <div class="muted biz-hint" hidden></div>
               <input type="text" name="note" maxlength="200" placeholder="说明（选「其他」必填，其他情况可写受理单号）">
-              <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" capture="environment">
+              <input type="file" name="photo" accept="image/png,image/jpeg,image/webp">
               <button type="submit">提交</button>
             </form>
           </details>
+          {% if is_admin or row.act_state != '已激活' %}
           <details class="mark-form">
             <summary>{{ '待激活' if pending else ('客户类型' if not row.act_state else '已激活') }}</summary>
             {% if not pending %}
@@ -86,7 +88,7 @@
               <input type="date" name="act_date" value="{{ today_iso }}" max="{{ today_iso }}">
               <button type="submit">已激活（从这天起算 7 天）</button>
             </form>
-            {% if row.act_state %}
+            {% if is_admin and row.act_state %}
             <form method="post" action="{{ url_for('imei_mark') }}">
               <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="imei" value="{{ row.imei }}">
@@ -96,6 +98,7 @@
             </form>
             {% endif %}
           </details>
+          {% endif %}
           {% endif %}
         </td>
       </tr>
@@ -113,6 +116,7 @@
     </p>
   </div>
   <form method="get" class="page-filters">
+    {{ scope_filters(scope.cities, scope.managers, city=scope.city, manager=scope.manager) }}
     <label class="filter">
       <span>范围</span>
       <select name="show" onchange="this.form.submit()">
@@ -172,7 +176,7 @@
       <span>数据截至</span>
       <input type="date" name="asof" value="{{ today_iso }}">
     </label>
-    <p class="muted">按 IMEI 覆盖；清单里没有的行不删，只是不再推给门店。店名对不上的行不入库，导入后会列出来。</p>
+    <p class="muted">按 IMEI 覆盖；清单里没有的行不删，只是不再推给门店。店名对不上的行先挂在「待建店」（仅管理员可见），补门店档案后再导即可归位。</p>
     <button type="submit">导入</button>
   </form>
   <p class="muted">门店报完的结论在这里导出，回灌台账用：<a href="{{ url_for('imei_export') }}">导出门店自报 CSV</a>
@@ -229,13 +233,31 @@
   var OTHER = {{ biz_other|tojson }};
   var MSG = "「送2G流量」「顺差让利」这类业务系统记录不全，查到就能对上，查不到也算正常，请务必上传受理单或截图";
   function sync(form) {
-    var biz = form.biz_type.value;
+    var actEl = form.elements["action"];
+    var bizEl = form.elements["biz_type"];
+    var noteEl = form.elements["note"];
     var hint = form.querySelector(".biz-hint");
-    form.note.required = biz === OTHER;
+    var isDone = !actEl || actEl.value === "已办";
+    if (!isDone) {
+      bizEl.value = "";
+      bizEl.required = false;
+      bizEl.disabled = true;
+      bizEl.hidden = true;
+      noteEl.required = false;
+      hint.hidden = true;
+      hint.textContent = "";
+      noteEl.placeholder = "说明（可选，如退货单号、调往哪家店、待核原因）";
+      return;
+    }
+    bizEl.hidden = false;
+    bizEl.disabled = false;
+    bizEl.required = true;
+    var biz = bizEl.value;
+    noteEl.required = biz === OTHER;
     var need = NEEDS.indexOf(biz) >= 0;
     hint.hidden = !need;
     hint.textContent = need ? MSG : "";
-    form.note.placeholder = need
+    noteEl.placeholder = need
       ? "受理单号或说明（这两类必填，和截图二选一）"
       : (biz === OTHER ? "说明（选「其他」必填，写清是什么业务）" : "说明（可选，如受理单号）");
   }
@@ -243,15 +265,27 @@
     Array.prototype.forEach.call(
       document.querySelectorAll("form.imei-report-form"),
       function (form) {
-        form.biz_type.addEventListener("change", function () { sync(form); });
+        var actEl = form.elements["action"];
+        var bizEl = form.elements["biz_type"];
+        var noteEl = form.elements["note"];
+        var photoEl = form.elements["photo"];
+        if (actEl) { actEl.addEventListener("change", function () { sync(form); }); }
+        if (bizEl) { bizEl.addEventListener("change", function () { sync(form); }); }
+        sync(form);
         form.addEventListener("submit", function (e) {
-          var biz = form.biz_type.value;
-          if (!biz) { e.preventDefault(); alert("请先选业务类型"); return; }
-          var hasPhoto = form.photo.files && form.photo.files.length > 0;
-          if (NEEDS.indexOf(biz) >= 0 && !form.note.value.trim() && !hasPhoto) {
-            e.preventDefault();
-            alert(MSG);
+          var isDone = !actEl || actEl.value === "已办";
+          if (isDone) {
+            var biz = bizEl.value;
+            if (!biz) { e.preventDefault(); alert("请先选业务类型"); return; }
+            var hasPhoto = photoEl && photoEl.files && photoEl.files.length > 0;
+            if (NEEDS.indexOf(biz) >= 0 && !noteEl.value.trim() && !hasPhoto) {
+              e.preventDefault();
+              alert(MSG);
+              return;
+            }
           }
+          var btn = form.querySelector('button[type="submit"]');
+          if (btn) { btn.disabled = true; }
         });
       }
     );

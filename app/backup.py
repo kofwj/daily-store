@@ -182,16 +182,21 @@ def restore_bytes(data: bytes) -> Path:
                 src.close()
         finally:
             dst.close()
-        # 旧备份可能缺新列/表，恢复后补上，避免当场把登录打挂
+        # 旧备份可能缺新列/表，恢复后补上，避免当场把登录或懒建表页面打挂
         with db_core.get_db() as conn:
+            conn.executescript(db_schema.SCHEMA)
+            db_schema._ensure_store_columns(conn)
             db_schema._ensure_user_columns(conn)
             db_auth._ensure_login_attempts(conn)
             db_auth._ensure_auth_events(conn)
             db_schema._ensure_advance_edits(conn)
             db_schema._ensure_advance_sesame(conn)
+            db_schema._ensure_sesame_orders(conn)
+            from .db_imei import ensure as _ensure_imei
             from .db_invoice import _ensure_invoice_tables
 
             _ensure_invoice_tables(conn)
+            _ensure_imei(conn)
         # 旧备份可能停在更早的 schema 版本，恢复后再补索引/金额单位
         db_schema.migrate()
         with db_core.get_db() as conn:
