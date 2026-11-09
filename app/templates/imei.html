@@ -2,6 +2,108 @@
 {% block title %}串码待办 · 顺差合约{% endblock %}
 {% block body_class %}imei-page{% endblock %}
 {% block body %}
+{% macro todo_table(rows, pending=False) %}
+<div class="report-table-scroll">
+  <table class="data report-grid">
+    <thead>
+      <tr>
+        <th>机型</th>
+        <th>串码</th>
+        <th>已售</th>
+        <th>剩余</th>
+        <th>清单状态</th>
+        <th>门店自报</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr class="{{ 'act-pending' if pending }}">
+        <td>{{ row.model or '—' }}{% if row.sp %}<div class="muted">{{ row.sp }}</div>{% endif %}</td>
+        <td class="num">{{ row.imei }}</td>
+        <td class="num">{{ row.age_eff }} 天</td>
+        <td class="num {{ 'neg' if row.remain_eff < 0 and not pending else '' }}">
+          {% if pending %}
+            <span class="muted">等激活</span>
+            <div class="muted">售出 {{ row.age_days }} 天</div>
+          {% else %}
+            {% if row.remain_eff < 0 %}逾期 {{ -row.remain_eff }} 天{% else %}剩 {{ row.remain_eff }} 天{% endif %}
+            {% if row.manual_activated_at %}<div class="muted">自 {{ row.manual_activated_at[5:] }} 起算</div>{% endif %}
+          {% endif %}
+        </td>
+        <td>{{ row.state }}{% if row.strength and row.strength != '无' %}<div class="muted">{{ row.strength }}</div>{% endif %}
+          {% if row.act_state %}<div><span class="chip">{{ row.user_type }}{% if row.act_state == '待激活' %}·待激活{% else %}·已激活 {{ row.manual_activated_at[5:] }}{% endif %}</span></div>{% endif %}
+        </td>
+        <td>
+          {% if row.report_action %}
+            <span class="chip">{{ row.report_action }}</span>{% if row.report_biz_type %}<span class="chip">{{ row.report_biz_type }}</span><span class="chip muted">{{ evidence_label(row.report_biz_type) }}</span>{% endif %}
+            <div class="muted">{{ row.reporter }} · {{ row.report_at }}</div>
+            {% if row.report_note %}<div class="muted">{{ row.report_note }}</div>{% endif %}
+            {% if row.report_photo %}
+              <a href="{{ url_for('imei_photo', filename=row.report_photo) }}" target="_blank" rel="noopener">看截图</a>
+            {% endif %}
+          {% else %}
+            <span class="muted">未报</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if can_write %}
+          <details>
+            <summary>自报</summary>
+            <form method="post" action="{{ url_for('imei_report') }}" enctype="multipart/form-data" class="imei-report-form">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="imei" value="{{ row.imei }}">
+              <input type="hidden" name="back" value="{{ request.full_path }}">
+              <select name="action">
+                {% for a in actions %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+              </select>
+              <select name="biz_type" required>
+                <option value="" selected disabled>业务类型（必选）</option>
+                {% for b in biz_choices %}<option value="{{ b }}">{{ b }}</option>{% endfor %}
+              </select>
+              <div class="muted biz-hint" hidden></div>
+              <input type="text" name="note" maxlength="200" placeholder="说明（选「其他」必填，其他情况可写受理单号）">
+              <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" capture="environment">
+              <button type="submit">提交</button>
+            </form>
+          </details>
+          <details class="mark-form">
+            <summary>{{ '待激活' if pending else ('客户类型' if not row.act_state else '已激活') }}</summary>
+            {% if not pending %}
+            <form method="post" action="{{ url_for('imei_mark') }}">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="imei" value="{{ row.imei }}">
+              <input type="hidden" name="back" value="{{ request.full_path }}">
+              <input type="hidden" name="mark" value="异网">
+              <button type="submit">标记异网需手动激活</button>
+            </form>
+            {% endif %}
+            <form method="post" action="{{ url_for('imei_mark') }}">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="imei" value="{{ row.imei }}">
+              <input type="hidden" name="back" value="{{ request.full_path }}">
+              <input type="hidden" name="mark" value="已激活">
+              <input type="date" name="act_date" value="{{ today_iso }}" max="{{ today_iso }}">
+              <button type="submit">已激活（从这天起算 7 天）</button>
+            </form>
+            {% if row.act_state %}
+            <form method="post" action="{{ url_for('imei_mark') }}">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="imei" value="{{ row.imei }}">
+              <input type="hidden" name="back" value="{{ request.full_path }}">
+              <input type="hidden" name="mark" value="撤销">
+              <button type="submit">撤销标记</button>
+            </form>
+            {% endif %}
+          </details>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
 <div class="page-head">
   <div class="page-title">
     <h1>串码待办</h1>
@@ -39,6 +141,11 @@
     <div class="muted">这几天要催</div>
   </div>
   <div class="kpi">
+    <div class="muted">待激活</div>
+    <div class="kpi-num">{{ cards.pending }}</div>
+    <div class="muted">异地异网，不计逾期</div>
+  </div>
+  <div class="kpi">
     <div class="muted">门店已自报</div>
     <div class="kpi-num">{{ cards.reported }}</div>
     <div class="muted">含截图</div>
@@ -68,7 +175,35 @@
     <p class="muted">按 IMEI 覆盖；清单里没有的行不删，只是不再推给门店。店名对不上的行不入库，导入后会列出来。</p>
     <button type="submit">导入</button>
   </form>
-  <p class="muted">门店报完的结论在这里导出，回灌台账用：<a href="{{ url_for('imei_export') }}">导出门店自报 CSV</a></p>
+  <p class="muted">门店报完的结论在这里导出，回灌台账用：<a href="{{ url_for('imei_export') }}">导出门店自报 CSV</a>
+    · <a href="{{ url_for('imei_export_todo') }}">导出待办清单（含客户类型 / 激活日）</a></p>
+</details>
+
+<details class="card" {{ 'open' if marks and marks[0].pending_n }}>
+  <summary>各店标记台数（管理员）{{ '· 有店标得多' if marks and marks[0].suspicious }}</summary>
+  {% if marks %}
+  <div class="report-table-scroll">
+    <table class="data report-grid">
+      <thead>
+        <tr><th>门店</th><th>待办</th><th>待激活</th><th>已激活</th><th>待激活占比</th></tr>
+      </thead>
+      <tbody>
+        {% for m in marks %}
+        <tr>
+          <td>{{ m.short or m.name }}{% if m.suspicious %} <span class="chip">偏高</span>{% endif %}</td>
+          <td class="num">{{ m.open_n }}</td>
+          <td class="num">{{ m.pending_n }}</td>
+          <td class="num">{{ m.activated_n }}</td>
+          <td class="num">{{ m.ratio }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted">待激活 = 门店标了「异地异网」但还没点「已激活」。台数多、占比过半（≥3 台）会标「偏高」，问一句再算。</p>
+  {% else %}
+  <p class="muted">还没有门店标记。</p>
+  {% endif %}
 </details>
 {% endif %}
 
@@ -78,72 +213,14 @@
 
 {% for group in groups %}
 <div class="card" id="store-{{ group.id }}">
-  <h2>{{ group.short }} <span class="muted">{{ group.rows|length }} 台</span>
+  <h2>{{ group.short }} <span class="muted">{{ group.rows|length + group.pending|length }} 台</span>
     {% if group.unmapped %}<span class="chip">待建店</span>{% endif %}</h2>
   {% if group.short != group.name %}<p class="muted">{{ group.name }}</p>{% endif %}
-  <div class="report-table-scroll">
-    <table class="data report-grid">
-      <thead>
-        <tr>
-          <th>机型</th>
-          <th>串码</th>
-          <th>已售</th>
-          <th>剩余</th>
-          <th>清单状态</th>
-          <th>门店自报</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in group.rows %}
-        <tr>
-          <td>{{ row.model or '—' }}{% if row.sp %}<div class="muted">{{ row.sp }}</div>{% endif %}</td>
-          <td class="num">{{ row.imei }}</td>
-          <td class="num">{{ row.age_days }} 天</td>
-          <td class="num {{ 'neg' if row.remain_days < 0 else '' }}">
-            {% if row.remain_days < 0 %}逾期 {{ -row.remain_days }} 天{% else %}剩 {{ row.remain_days }} 天{% endif %}
-          </td>
-          <td>{{ row.state }}{% if row.strength and row.strength != '无' %}<div class="muted">{{ row.strength }}</div>{% endif %}</td>
-          <td>
-            {% if row.report_action %}
-              <span class="chip">{{ row.report_action }}</span>{% if row.report_biz_type %}<span class="chip">{{ row.report_biz_type }}</span><span class="chip muted">{{ evidence_label(row.report_biz_type) }}</span>{% endif %}
-              <div class="muted">{{ row.reporter }} · {{ row.report_at }}</div>
-              {% if row.report_note %}<div class="muted">{{ row.report_note }}</div>{% endif %}
-              {% if row.report_photo %}
-                <a href="{{ url_for('imei_photo', filename=row.report_photo) }}" target="_blank" rel="noopener">看截图</a>
-              {% endif %}
-            {% else %}
-              <span class="muted">未报</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if can_write and not group.unmapped %}
-            <details>
-              <summary>自报</summary>
-              <form method="post" action="{{ url_for('imei_report') }}" enctype="multipart/form-data" class="imei-report-form">
-                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-                <input type="hidden" name="imei" value="{{ row.imei }}">
-                <input type="hidden" name="back" value="{{ request.full_path }}">
-                <select name="action">
-                  {% for a in actions %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
-                </select>
-                <select name="biz_type" required>
-                  <option value="" selected disabled>业务类型（必选）</option>
-                  {% for b in biz_choices %}<option value="{{ b }}">{{ b }}</option>{% endfor %}
-                </select>
-                <div class="muted biz-hint" hidden></div>
-                <input type="text" name="note" maxlength="200" placeholder="说明（选「其他」必填，其他情况可写受理单号）">
-                <input type="file" name="photo" accept="image/png,image/jpeg,image/webp" capture="environment">
-                <button type="submit">提交</button>
-              </form>
-            </details>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  {% if group.rows %}{{ todo_table(group.rows) }}{% endif %}
+  {% if group.pending %}
+  <h3 class="pending-head">待激活 <span class="muted">{{ group.pending|length }} 台 · 异地异网，等客户自己激活，不算逾期</span></h3>
+  {{ todo_table(group.pending, true) }}
+  {% endif %}
 </div>
 {% endfor %}
 <script>

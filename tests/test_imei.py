@@ -8,7 +8,7 @@
 """
 from io import BytesIO
 
-from app import db
+from app import db, db_imei
 from app.db_core import DATA_DIR
 
 CSV_HEAD = "imei,store,model,sp,day,age,remain,stage,state,strength,evidence\n"
@@ -235,7 +235,7 @@ def test_admin_export_reports(client):
     body = resp.get_data().decode("utf-8-sig")
     lines = body.strip().splitlines()
     assert lines[0] == (
-        "imei,门店,结论,业务类型,POS证据类型,类型一致性,核销结论,备注,截图,报人,时间"
+        "imei,门店,结论,业务类型,POS证据类型,类型一致性,核销结论,备注,截图,报人,时间,客户类型,手动激活日"
     )
     assert len(lines) == 2
     assert "860000000000071" in lines[1] and "已办" in lines[1] and "受理单 B1" in lines[1]
@@ -500,6 +500,8 @@ def test_export_flags_pos_type_mismatch(client):
         "截图",
         "报人",
         "时间",
+        "客户类型",
+        "手动激活日",
     ]
     by_imei = {line.split(",")[0]: line for line in lines[1:]}
     mismatch = by_imei["860000000000211"].split(",")
@@ -748,3 +750,222 @@ def test_export_marks_match_when_pos_happens_to_record(client):
     row = body.strip().splitlines()[1].split(",")
     assert row[3] == "送2G流量" and row[4] == "送2G流量"
     assert row[5] == "一致" and row[6] == "已兑现"
+
+
+# ---- 客户端客户类型：异地异网待激活 / 手动激活日起算 ----------------------------------
+
+
+def _mark(client, imei, mark, act_date=""):
+    data = {"imei": imei, "mark": mark}
+    if act_date:
+        data["act_date"] = act_date
+    return client.post("/imei/mark", data=data, follow_redirects=True)
+
+
+def _store_id(code="store-alpha"):
+    with db.get_db() as conn:
+        return conn.execute("SELECT id FROM stores WHERE code=?", (code,)).fetchone()["id"]
+
+
+def _todo_row(imei):
+    with db.get_db() as conn:
+        return conn.execute(
+            "SELECT user_type, manual_activated_at FROM imei_todo WHERE imei=?", (imei,)
+        ).fetchone()
+
+
+def _cards(store_ids):
+    with db.get_db() as conn:
+        return db_imei.summary(conn, store_ids)
+
+
+def test_mark_defaults_to_local_mobile(client):
+    _login(client)
+    _upload(client, _row("860000000000401", ALPHA))
+    row = _todo_row("860000000000401")
+    assert row["user_type"] == "本地移动" and row["manual_activated_at"] == ""
+    cards = _cards([_store_id()])
+    assert cards["pending"] == 0 and cards["activated"] == 0
+
+
+def test_mark_remote_pending_drops_out_of_overdue(client):
+    _login(client)
+    # 已售 12 天、remain -5：本来是逾期
+    _upload(client, f"860000000000402,{ALPHA},Y600 Pro,小李,2026-10-21,12,-5,D7+,确认未办,无,")
+    sid = _store_id()
+    assert _cards([sid])["overdue"] == 1
+    html = _mark(client, "860000000000402", "异网").get_data(as_text=True)
+    assert "异地异网待激活" in html
+    row = _todo_row("860000000000402")
+    assert row["user_type"] == "异地异网" and row["manual_activated_at"] == ""
+    cards = _cards([sid])
+    assert cards["pending"] == 1 and cards["overdue"] == 0 and cards["soon"] == 0
+    page = client.get("/imei").get_data(as_text=True)
+    assert "待激活" in page and "等激活" in page
+    # 待激活不混在逾期里：这一行不出现「逾期 5 天」
+    assert "逾期 5 天" not in page
+
+
+def test_mark_activated_restarts_seven_days(client):
+    _login(client)
+    _upload(client, f"860000000000403,{ALPHA},Y600 Pro,小李,2026-10-21,12,-5,D7+,确认未办,无,")
+    sid = _store_id()
+    _mark(client, "860000000000403", "已激活", "2026-11-01")
+    row = _todo_row("860000000000403")
+    assert row["manual_activated_at"] == "2026-11-01"
+    cards = _cards([sid])
+    assert cards["activated"] == 1 and cards["overdue"] == 0 and cards["soon"] == 1
+    page = client.get("/imei").get_data(as_text=True)
+    assert "剩 6 天" in page and "自 11-01 起算" in page
+
+
+def test_activated_row_goes_overdue_again_after_window(client):
+    _login(client)
+    _upload(client, f"860000000000404,{ALPHA},Y600 Pro,小李,2026-10-01,32,-25,D7+,确认未办,无,")
+    sid = _store_id()
+    _mark(client, "860000000000404", "已激活", "2026-10-20")
+    cards = _cards([sid])
+    # asof 2026-11-02 - 2026-10-20 = 13 天 → 逾期 6 天
+    assert cards["overdue"] == 1 and cards["soon"] == 0
+    assert "逾期 6 天" in client.get("/imei").get_data(as_text=True)
+
+
+def test_mark_rejects_bad_activation_dates(client):
+    _login(client)
+    _upload(client, f"860000000000405,{ALPHA},Y600 Pro,小李,2026-10-29,4,3,D3-6,确认未办,无,")
+    html = _mark(client, "860000000000405", "已激活", "2099-01-01").get_data(as_text=True)
+    assert "不能填将来的日期" in html
+    html = _mark(client, "860000000000405", "已激活", "2026-01-01").get_data(as_text=True)
+    assert "不能早于售出日" in html
+    html = _mark(client, "860000000000405", "已激活", "2026/11/02").get_data(as_text=True)
+    assert "激活日要填成" in html
+    assert _todo_row("860000000000405")["manual_activated_at"] == ""
+
+
+def test_mark_permissions(client):
+    _login(client)
+    _upload(
+        client,
+        _row("860000000000406", ALPHA),
+        _row("860000000000407", BETA),
+    )
+    # 店员只能标自己店；别店 403 且库里不动
+    _login(client, "alpha")
+    resp = client.post("/imei/mark", data={"imei": "860000000000407", "mark": "异网"})
+    assert resp.status_code == 403
+    assert _todo_row("860000000000407")["user_type"] == "本地移动"
+    # 只读账号（店长）不能标
+    _make_readonly()
+    _login(client, "dz_a")
+    html = _mark(client, "860000000000406", "异网").get_data(as_text=True)
+    assert "只读账号只能看" in html
+    assert _todo_row("860000000000406")["user_type"] == "本地移动"
+
+
+def test_mark_unmapped_store_rejected(client):
+    _login(client)
+    _upload(client, _row("860000000000408", "不存在的店"))
+    html = _mark(client, "860000000000408", "异网").get_data(as_text=True)
+    assert "先补门店档案" in html
+    assert _todo_row("860000000000408")["user_type"] == "本地移动"
+
+
+def test_mark_undo_returns_to_local(client):
+    _login(client)
+    _upload(client, f"860000000000409,{ALPHA},Y600 Pro,小李,2026-10-21,12,-5,D7+,确认未办,无,")
+    _mark(client, "860000000000409", "异网")
+    assert _cards([_store_id()])["pending"] == 1
+    _mark(client, "860000000000409", "撤销")
+    row = _todo_row("860000000000409")
+    assert row["user_type"] == "本地移动" and row["manual_activated_at"] == ""
+    assert _cards([_store_id()])["pending"] == 0
+
+
+def test_mark_unknown_action_rejected(client):
+    _login(client)
+    _upload(client, _row("860000000000410", ALPHA))
+    html = _mark(client, "860000000000410", "随便标").get_data(as_text=True)
+    assert "动作只能是" in html
+    assert _todo_row("860000000000410")["user_type"] == "本地移动"
+
+
+def test_reimport_keeps_manual_marks(client):
+    _login(client)
+    _upload(client, f"860000000000411,{ALPHA},Y600 Pro,小李,2026-10-21,12,-5,D7+,确认未办,无,")
+    _mark(client, "860000000000411", "异网")
+    _upload(client, f"860000000000411,{ALPHA},Y600 Pro,小李,2026-10-21,12,-5,D7+,确认未办,无,")
+    row = _todo_row("860000000000411")
+    assert row["user_type"] == "异地异网" and row["manual_activated_at"] == ""
+
+
+def test_admin_sees_per_store_mark_counts(client):
+    _login(client)
+    rows = [
+        f"86000000000042{i},{ALPHA},Y600 Pro,小李,2026-10-21,12,-5,D7+,确认未办,无," for i in range(4)
+    ] + [f"86000000000043{i},{BETA},Y600 Pro,小李,2026-10-21,12,-5,D7+,确认未办,无," for i in range(3)]
+    _upload(client, *rows)
+    for i in range(2):  # 甲店 2/4：占一半但只有 2 台，不算「偏高」
+        _mark(client, f"86000000000042{i}", "异网")
+    for i in range(3):  # 乙店 3/3：≥3 台且过半 → 偏高
+        _mark(client, f"86000000000043{i}", "异网")
+    with db.get_db() as conn:
+        marks = {
+            m["short"]: m
+            for m in db_imei.mark_summary(conn, [_store_id(), _store_id("store-beta")])
+        }
+    a = [m for m in marks.values() if m["open_n"] == 4][0]
+    b = [m for m in marks.values() if m["open_n"] == 3][0]
+    assert a["pending_n"] == 2 and a["ratio"] == 50 and not a["suspicious"]
+    assert b["pending_n"] == 3 and b["ratio"] == 100 and b["suspicious"]
+    page = client.get("/imei").get_data(as_text=True)
+    assert "各店标记台数" in page and "偏高" in page and "100%" in page
+
+
+def test_admin_export_todo_carries_mark_columns(client):
+    _login(client)
+    _upload(client, f"860000000000440,{ALPHA},Y600 Pro,小李,2026-10-21,12,-5,D7+,确认未办,无,")
+    _mark(client, "860000000000440", "已激活", "2026-11-01")
+    resp = client.get("/imei/export/todo")
+    assert resp.status_code == 200
+    body = resp.get_data().decode("utf-8-sig")
+    lines = body.strip().splitlines()
+    assert lines[0].split(",")[9:13] == ["客户类型", "手动激活日", "标记状态", "生效剩余天数"]
+    row = {line.split(",")[0]: line.split(",") for line in lines[1:]}["860000000000440"]
+    assert row[9] == "本地移动" and row[10] == "2026-11-01" and row[11] == "已激活" and row[12] == "6"
+    # 非管理员不给导
+    _login(client, "alpha")
+    assert client.get("/imei/export/todo").status_code == 302
+
+
+def test_export_reports_appends_mark_columns(client):
+    _login(client)
+    _upload(client, f"860000000000441,{ALPHA},Y600 Pro,小李,2026-10-21,12,-5,D7+,确认未办,无,")
+    _mark(client, "860000000000441", "异网")
+    _login(client, "alpha")
+    client.post(
+        "/imei/report",
+        data={"imei": "860000000000441", "action": "待核", "biz_type": "AI手机合约"},
+        follow_redirects=True,
+    )
+    _login(client)
+    line = client.get("/imei/export").get_data().decode("utf-8-sig").strip().splitlines()[1].split(",")
+    assert line[11] == "异地异网" and line[12] == ""
+
+
+def test_remote_then_activated_keeps_remote_mark(client):
+    """先标异网再点已激活：类型还是异地异网，但不再算待激活。"""
+    _login(client)
+    _upload(client, f"860000000000450,{ALPHA},Y600 Pro,小李,2026-10-21,12,-5,D7+,确认未办,无,")
+    _mark(client, "860000000000450", "异网")
+    _mark(client, "860000000000450", "已激活", "2026-11-02")
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT user_type, manual_activated_at FROM imei_todo WHERE imei=?",
+            ("860000000000450",),
+        ).fetchone()
+        cards = db_imei.summary(conn, [_store_id()])
+    assert row["user_type"] == "异地异网" and row["manual_activated_at"] == "2026-11-02"
+    # 激活当天算第 0 天 → 还有整整 7 天，既不是「7 天内到期」也没逾期
+    assert cards["pending"] == 0 and cards["activated"] == 1 and cards["soon"] == 0
+    page = client.get("/imei").get_data(as_text=True)
+    assert "异地异网·已激活 11-02" in page and "剩 7 天" in page

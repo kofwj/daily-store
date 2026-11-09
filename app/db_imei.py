@@ -27,6 +27,7 @@ import io
 import os
 import re
 import sqlite3
+from datetime import date
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .db_core import _now, begin_immediate
@@ -62,6 +63,64 @@ _BIZ_ALIAS = {
     "2G流量": "送2G流量",
     "其他": "其他",
 }
+
+
+def norm_user_type(value: str) -> str:
+    """客户类型归一成三种；认不出返回空串（由调用方决定用默认值还是报错）。"""
+    text = re.sub(r"\s+", "", str(value or "")).replace("（", "(").replace("）", ")")
+    return _USER_ALIAS.get(text, "")
+
+
+def _parse_day(value: str) -> Optional[date]:
+    text = (value or "").strip()[:10]
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _stage_of(age: int) -> str:
+    if age < 0:
+        return "D0-2"
+    if age <= 2:
+        return "D0-2"
+    if age <= 6:
+        return "D3-6"
+    return "D7+"
+
+
+def activation_state(user_type: str, manual_activated_at: str) -> str:
+    """待激活 = 标了异地异网但还没点「已激活」；已激活 = 有激活日；否则常规。"""
+    if (manual_activated_at or "").strip():
+        return "已激活"
+    if norm_user_type(user_type) == USER_REMOTE:
+        return "待激活"
+    return ""
+
+
+def effective_days(
+    row: Dict[str, Any],
+) -> Tuple[int, int, str, str]:
+    """(已售天数, 剩余天数, 阶段, 起算日) —— 有手动激活日就从那天重新起算 7 天。
+
+    清单里的 age_days / remain_days 是台账按「售出日」算的；客户异地异网、
+    机器晚激活时，那套数会提前把机器推成逾期。激活日一填，就以激活日为准。
+    """
+    state = activation_state(str(row.get("user_type") or ""), str(row.get("manual_activated_at") or ""))
+    start = str(row.get("manual_activated_at") or "").strip()[:10]
+    if state == "已激活":
+        d0, d1 = _parse_day(start), _parse_day(str(row.get("asof") or ""))
+        if d0 and d1:
+            age = (d1 - d0).days
+            remain = ACT_WINDOW_DAYS - age
+            return age, remain, _stage_of(age), start
+        return int(row.get("age_days") or 0), int(row.get("remain_days") or 0), str(row.get("stage") or ""), start
+    age = int(row.get("age_days") or 0)
+    remain = int(row.get("remain_days") or 0)
+    stage = str(row.get("stage") or "") or _stage_of(age)
+    if state == "待激活":
+        return age, remain, "待激活", ""
+    return age, remain, stage, str(row.get("sold_day") or "")
 
 
 def norm_biz_type(value: str) -> str:
@@ -116,6 +175,28 @@ def redeem_state(action: str, biz_type: str) -> str:
 # 清单里这些状态不需要门店再动手：已经查到合约 / 已经退货。
 CLOSED_STATES = ("已办", "已退货")
 
+# 客户类型：门店提交时自己判断（2026-11-09 用户拍板「门店绝大部分能判断」）。
+# 异地异网客户要等客户手动激活，所以这类机器在激活前不计逾期、不催办。
+USER_TYPES = ("本地移动", "异地异网", "未知")
+USER_DEFAULT = "本地移动"
+USER_REMOTE = "异地异网"
+# 标记类型（页面两个按钮 + 管理员的撤销）
+MARKS = ("异网", "已激活", "撤销")
+# 从「售出日」或「手动激活日」起算 7 天
+ACT_WINDOW_DAYS = 7
+
+_USER_ALIAS = {
+    "异地异网": USER_REMOTE,
+    "异网": USER_REMOTE,
+    "异地": USER_REMOTE,
+    "外地": USER_REMOTE,
+    "异地用户": USER_REMOTE,
+    "本地": USER_DEFAULT,
+    "本地移动": USER_DEFAULT,
+    "本地用户": USER_DEFAULT,
+    "未知": "未知",
+}
+
 # 第一阶段只做南通：泰州不参与，导入时就丢掉。
 # 写成「排除泰州」而不是「只要南通市」，这样示例店（示例市）和以后新开的城市不会被误杀；
 # 要加排除城市就设环境变量 STORE_DAILY_IMEI_OUT_CITIES=泰州市,某某市。
@@ -158,6 +239,8 @@ CREATE TABLE IF NOT EXISTS imei_todo (
     strength TEXT NOT NULL DEFAULT '',
     evidence TEXT NOT NULL DEFAULT '',
     pos_biz_type TEXT NOT NULL DEFAULT '',
+    user_type TEXT NOT NULL DEFAULT '本地移动',
+    manual_activated_at TEXT NOT NULL DEFAULT '',
     asof TEXT NOT NULL DEFAULT '',
     seen INTEGER NOT NULL DEFAULT 1,
     updated_at TEXT NOT NULL
@@ -186,6 +269,8 @@ _ADDED_COLUMNS = {
     "own_store": "TEXT NOT NULL DEFAULT ''",
     "dispatch_store": "TEXT NOT NULL DEFAULT ''",
     "pos_biz_type": "TEXT NOT NULL DEFAULT ''",
+    "user_type": "TEXT NOT NULL DEFAULT '本地移动'",
+    "manual_activated_at": "TEXT NOT NULL DEFAULT ''",
 }
 
 # 自报表也要能给老库补列（生产上表已经建了，新版加了 biz_type）
@@ -501,7 +586,74 @@ def todo_rows(
         """,
         params,
     )
-    return [dict(row) for row in rows]
+    return enrich([dict(row) for row in rows])
+
+
+def enrich(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """给每行补三样页面要用的东西：待激活/已激活、按激活日重算的天数、是否逾期。
+
+    排序跟着改：同一个店里，正常要办的排前面，待激活的沉到后面单独成组。
+    """
+    for row in rows:
+        age, remain, stage, start = effective_days(row)
+        row["act_state"] = activation_state(
+            str(row.get("user_type") or ""), str(row.get("manual_activated_at") or "")
+        )
+        row["age_eff"] = age
+        row["remain_eff"] = remain
+        row["stage_eff"] = stage
+        row["start_day"] = start
+        row["overdue"] = row["act_state"] != "待激活" and remain < 0
+    rows.sort(
+        key=lambda r: (
+            r["act_state"] == "待激活",
+            r.get("store_id") is None,
+            r.get("store_id") or 0,
+            r["remain_eff"],
+            str(r.get("imei") or ""),
+        )
+    )
+    return rows
+
+
+def mark_summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> List[Dict[str, Any]]:
+    """各店标了多少台异地异网（管理员用：一家店全标异网就是在躲催办）。
+
+    只统计还没关单的机器；`ratio` 是待激活占该店待办的百分比。
+    """
+    ensure(conn)
+    ids = [int(s) for s in store_ids]
+    if not ids:
+        return []
+    clause, params = _store_in("t.store_id", ids)
+    rows = conn.execute(
+        f"""
+        SELECT t.store_id, s.short_name AS short, s.name AS name,
+               COUNT(*) AS open_n,
+               SUM(CASE WHEN t.user_type=? AND t.manual_activated_at='' THEN 1 ELSE 0 END) AS pending_n,
+               SUM(CASE WHEN t.manual_activated_at<>'' THEN 1 ELSE 0 END) AS activated_n
+        FROM imei_todo t
+        LEFT JOIN stores s ON s.id = t.store_id
+        WHERE t.seen=1 AND t.status=? AND t.state NOT IN ({','.join('?' * len(CLOSED_STATES))})
+          AND {clause}
+        GROUP BY t.store_id
+        ORDER BY pending_n DESC, open_n DESC
+        """,
+        [USER_REMOTE, STATUS_SOLD, *CLOSED_STATES, *params],
+    )
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        open_n = int(item["open_n"] or 0)
+        pending_n = int(item["pending_n"] or 0)
+        item["open_n"] = open_n
+        item["pending_n"] = pending_n
+        item["activated_n"] = int(item["activated_n"] or 0)
+        item["ratio"] = int(round(100.0 * pending_n / open_n)) if open_n else 0
+        # 偏高的口子：3 台以上且过半标成待激活，值得问一句
+        item["suspicious"] = pending_n >= 3 and open_n > 0 and pending_n * 2 >= open_n
+        out.append(item)
+    return out
 
 
 def pool_summary(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
@@ -573,20 +725,49 @@ def summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> Dict[str, Any
     ids = [int(s) for s in store_ids]
     clause, raw_params = _store_in("t.store_id", ids) if ids else ("1=0", [])
     params: List[Any] = list(raw_params)
+    # 逾期/到期按「生效天数」算：填了手动激活日的，从激活日重新起算 7 天；
+    # 标了异地异网还没激活的（待激活）单独计数，不计逾期、不算催办。
     row = conn.execute(
         f"""
+        WITH base AS (
+          SELECT t.store_id, t.user_type, t.manual_activated_at,
+                 CASE WHEN t.manual_activated_at<>''
+                           AND date(t.asof) IS NOT NULL
+                           AND date(t.manual_activated_at) IS NOT NULL
+                      THEN CAST(julianday(date(t.asof)) - julianday(date(t.manual_activated_at)) AS INTEGER)
+                      ELSE NULL END AS age_act,
+                 t.remain_days
+          FROM imei_todo t
+          WHERE t.seen=1 AND t.status=? AND t.state NOT IN ({",".join("?" * len(CLOSED_STATES))})
+            AND {clause}
+        )
         SELECT
           COUNT(*) AS open_n,
-          SUM(CASE WHEN t.remain_days < 0 THEN 1 ELSE 0 END) AS overdue_n,
-          SUM(CASE WHEN t.remain_days BETWEEN 0 AND 6 THEN 1 ELSE 0 END) AS soon_n,
-          MAX(t.asof) AS asof,
-          COUNT(DISTINCT t.store_id) AS store_n
-        FROM imei_todo t
-        WHERE t.seen=1 AND t.status=? AND t.state NOT IN ({",".join("?" * len(CLOSED_STATES))})
-          AND {clause}
+          SUM(CASE WHEN user_type=? AND manual_activated_at='' THEN 1 ELSE 0 END) AS pending_n,
+          SUM(CASE WHEN manual_activated_at<>'' THEN 1 ELSE 0 END) AS activated_n,
+          SUM(CASE WHEN NOT (user_type=? AND manual_activated_at='')
+                    AND (CASE WHEN age_act IS NULL THEN remain_days ELSE ? - age_act END) < 0
+                   THEN 1 ELSE 0 END) AS overdue_n,
+          SUM(CASE WHEN NOT (user_type=? AND manual_activated_at='')
+                    AND (CASE WHEN age_act IS NULL THEN remain_days ELSE ? - age_act END) BETWEEN 0 AND 6
+                   THEN 1 ELSE 0 END) AS soon_n,
+          COUNT(DISTINCT store_id) AS store_n
+        FROM base
         """,
-        [STATUS_SOLD, *CLOSED_STATES, *params],
+        [
+            STATUS_SOLD,
+            *CLOSED_STATES,
+            *params,
+            USER_REMOTE,
+            USER_REMOTE,
+            ACT_WINDOW_DAYS,
+            USER_REMOTE,
+            ACT_WINDOW_DAYS,
+        ],
     ).fetchone()
+    asof = conn.execute(
+        f"SELECT MAX(t.asof) FROM imei_todo t WHERE {clause}", params
+    ).fetchone()[0]
     reported = conn.execute(
         f"""
         SELECT COUNT(DISTINCT r.imei) FROM imei_reports r
@@ -612,8 +793,10 @@ def summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> Dict[str, Any
         "open": int(row["open_n"] or 0),
         "overdue": int(row["overdue_n"] or 0),
         "soon": int(row["soon_n"] or 0),
+        "pending": int(row["pending_n"] or 0),
+        "activated": int(row["activated_n"] or 0),
         "reported": int(reported or 0),
-        "asof": (row["asof"] or "")[:10],
+        "asof": (asof or "")[:10],
         "stores": int(row["store_n"] or 0),
         "unmapped": int(unmapped or 0),
         "pool": int(pool or 0),
@@ -690,6 +873,82 @@ def todo_stores(conn: sqlite3.Connection, store_ids: Iterable[int]) -> List[sqli
     )
 
 
+def set_mark(
+    conn: sqlite3.Connection,
+    *,
+    imei: str,
+    mark: str,
+    day: str = "",
+    store_ids: Sequence[int] = (),
+) -> Dict[str, Any]:
+    """门店的两个动作 + 管理员的撤销。
+
+    - mark='异网'：客户是异地异网，要等他自己激活 → 转「待激活」，不计逾期、不催办
+    - mark='已激活'：客户已经激活 → 记下激活日，7 天从这一天重新起算
+    - mark='撤销'：标错了 → 回到「本地移动」，按售出日算
+
+    只能动自己看得见的店；待建店（store_id 为空）不许标——没有店就没有责任人。
+    """
+    if mark not in MARKS:
+        raise ValueError("动作只能是「异网」「已激活」「撤销」")
+    ensure(conn)
+    row = conn.execute(
+        "SELECT imei, store_id, sold_day, status FROM imei_todo WHERE imei=?", (imei,)
+    ).fetchone()
+    if row is None:
+        raise ValueError("这条串码不在清单里，刷新后再试")
+    if row["store_id"] is None:
+        raise ValueError("这家店还没建档案，先补门店档案再标")
+    allowed = [int(s) for s in store_ids]
+    if allowed and int(row["store_id"]) not in allowed:
+        raise PermissionError("forbidden")
+    now = _now()
+    if mark == "异网":
+        conn.execute(
+            "UPDATE imei_todo SET user_type=?, manual_activated_at='', updated_at=? WHERE imei=?",
+            (USER_REMOTE, now, imei),
+        )
+        return {"imei": imei, "mark": mark, "user_type": USER_REMOTE, "manual_activated_at": ""}
+    if mark == "撤销":
+        conn.execute(
+            "UPDATE imei_todo SET user_type=?, manual_activated_at='', updated_at=? WHERE imei=?",
+            (USER_DEFAULT, now, imei),
+        )
+        return {"imei": imei, "mark": mark, "user_type": USER_DEFAULT, "manual_activated_at": ""}
+    # 已激活：激活日默认今天，不能是未来、不能早于售出日
+    raw = (day or "").strip()[:10]
+    act = _parse_day(raw) if raw else date.today()
+    if act is None:
+        raise ValueError("激活日要填成 2026-11-09 这样的日期")
+    if raw and act > date.today():
+        raise ValueError("激活日不能填将来的日期")
+    sold = _parse_day(str(row["sold_day"] or ""))
+    if sold and act < sold:
+        raise ValueError("激活日不能早于售出日")
+    conn.execute(
+        "UPDATE imei_todo SET manual_activated_at=?, updated_at=? WHERE imei=?",
+        (act.isoformat(), now, imei),
+    )
+    return {"imei": imei, "mark": mark, "user_type": "", "manual_activated_at": act.isoformat()}
+
+
+def export_todo(
+    conn: sqlite3.Connection, store_ids: Sequence[int], *, include_unmapped: bool = False
+) -> List[Dict[str, Any]]:
+    """导出待办清单（含客户类型和手动激活日），给台账回读门店的标记。
+
+    台账那边按 imei 对：user_type=异地异网 且 manual_activated_at 为空 = 待激活，
+    不计逾期；有激活日的按激活日重算 7 天。导出不改库，可以反复导。
+    """
+    ids = [int(s) for s in store_ids]
+    rows = todo_rows(conn, ids, show="all", include_unmapped=include_unmapped)
+    for row in rows:
+        row["act_state"] = activation_state(
+            str(row.get("user_type") or ""), str(row.get("manual_activated_at") or "")
+        )
+    return rows
+
+
 def export_reports(conn: sqlite3.Connection, store_ids: Sequence[int]) -> List[sqlite3.Row]:
     """导出自报记录（含已办、待核、非本店），给台账回灌用。
 
@@ -710,6 +969,8 @@ def export_reports(conn: sqlite3.Connection, store_ids: Sequence[int]) -> List[s
             f"""
             SELECT r.imei, s.name AS store_name, r.action, r.biz_type,
                    COALESCE(t.pos_biz_type, '') AS pos_type,
+                   COALESCE(t.user_type, '') AS user_type,
+                   COALESCE(t.manual_activated_at, '') AS manual_activated_at,
                    r.note, r.photo, r.created_at,
                    COALESCE(u.display_name, u.username, '') AS reporter
             FROM imei_reports r

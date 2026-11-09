@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import io
 import secrets
+from datetime import date
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -105,6 +106,8 @@ def register_imei(app) -> None:
             # 店员只盯自己店：默认不铺全站，页头直接给「还剩几天」
             rows = db_imei.todo_rows(conn, ids, show=show, include_unmapped=is_admin)
             cards = db_imei.summary(conn, ids)
+            # 各店标了多少台异网/已激活：管理员用来发现「全标异网躲催办」
+            marks = db_imei.mark_summary(conn, ids) if is_admin else []
         groups: List[Dict[str, Any]] = []
         by_store: Dict[Any, Dict[str, Any]] = {}
         for row in rows:
@@ -118,14 +121,18 @@ def register_imei(app) -> None:
                     "short": row["store_short"] or row.get("dispatch_store") or "待建店",
                     "unmapped": not row["store_id"],
                     "rows": [],
+                    "pending": [],
                 }
                 by_store[key] = group
                 groups.append(group)
-            group["rows"].append(row)
+            group["pending" if row["act_state"] == "待激活" else "rows"].append(row)
         return render_template(
             "imei.html",
             groups=groups,
             cards=cards,
+            marks=marks,
+            today_iso=date.today().isoformat(),
+            user_types=db_imei.USER_TYPES,
             scope=scope,
             show=show,
             can_write=_can_write(g.user["role"]),
@@ -202,6 +209,40 @@ def register_imei(app) -> None:
         flash(f"已记下：{imei[-6:]} → {action} · {db_imei.norm_biz_type(biz_type)}", "ok")
         return redirect(back)
 
+    @app.route("/imei/mark", methods=["POST"])
+    @login_required
+    def imei_mark():
+        """门店标「异地异网待激活」/「已激活」，管理员可撤销。
+
+        这两个动作**不是**自报结论：不改「已办/未办」，只调 7 天怎么算。
+        """
+        imei = (request.form.get("imei") or "").strip()
+        mark = (request.form.get("mark") or "").strip()
+        day = (request.form.get("act_date") or "").strip()
+        back = request.form.get("back") or url_for("imei_page")
+        if not back.startswith("/") or back.startswith("//"):
+            back = url_for("imei_page")
+        if not _can_write(g.user["role"]):
+            flash("只读账号只能看，不能标记", "error")
+            return redirect(back)
+        with db.get_db() as conn:
+            ids = [s["id"] for s in accessible_stores(conn)]
+            try:
+                res = db_imei.set_mark(conn, imei=imei, mark=mark, day=day, store_ids=ids)
+            except PermissionError:
+                return Response("forbidden", status=403)
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(back)
+        tail = imei[-6:]
+        if res["mark"] == "异网":
+            flash(f"已标记：{tail} 异地异网待激活（等客户激活后点「已激活」，期间不算逾期）", "ok")
+        elif res["mark"] == "撤销":
+            flash(f"已撤销：{tail} 回到本地移动，按售出日算", "ok")
+        else:
+            flash(f"已激活：{tail} 从 {res['manual_activated_at']} 起算 7 天", "ok")
+        return redirect(back)
+
     @app.route("/imei/export")
     @admin_required
     def imei_export():
@@ -223,6 +264,8 @@ def register_imei(app) -> None:
                 "截图",
                 "报人",
                 "时间",
+                "客户类型",
+                "手动激活日",
             ]
         )
         for row in rows:
@@ -239,6 +282,8 @@ def register_imei(app) -> None:
                     row["photo"],
                     row["reporter"],
                     row["created_at"],
+                    row["user_type"] if "user_type" in row.keys() else "",
+                    row["manual_activated_at"] if "manual_activated_at" in row.keys() else "",
                 ]
             )
         body = "\ufeff" + out.getvalue()
@@ -247,6 +292,64 @@ def register_imei(app) -> None:
             mimetype="text/csv",
             headers={
                 "Content-Disposition": "attachment; filename=imei_reports.csv",
+                "Cache-Control": "no-store",
+            },
+        )
+
+    @app.route("/imei/export/todo")
+    @admin_required
+    def imei_export_todo():
+        """导出待办清单（带客户类型 + 手动激活日），给台账回读门店的标记。"""
+        is_admin = g.user["role"] == "admin"
+        with db.get_db() as conn:
+            rows = db_imei.export_todo(
+                conn, [s["id"] for s in accessible_stores(conn)], include_unmapped=is_admin
+            )
+        out = io.StringIO()
+        writer = csv.writer(out)
+        writer.writerow(
+            [
+                "imei",
+                "门店",
+                "机型",
+                "营业员",
+                "售出日期",
+                "已售天数",
+                "剩余天数",
+                "阶段",
+                "清单状态",
+                "客户类型",
+                "手动激活日",
+                "标记状态",
+                "生效剩余天数",
+                "清单截至",
+            ]
+        )
+        for row in rows:
+            writer.writerow(
+                [
+                    row["imei"],
+                    row["store_name"] or row.get("dispatch_store") or "",
+                    row["model"],
+                    row["sp"],
+                    row["sold_day"],
+                    row["age_days"],
+                    row["remain_days"],
+                    row["stage"],
+                    row["state"],
+                    row["user_type"],
+                    row["manual_activated_at"],
+                    row["act_state"],
+                    row["remain_eff"],
+                    (row["asof"] or "")[:10],
+                ]
+            )
+        body = "\ufeff" + out.getvalue()
+        return Response(
+            body,
+            mimetype="text/csv",
+            headers={
+                "Content-Disposition": "attachment; filename=imei_todo.csv",
                 "Cache-Control": "no-store",
             },
         )

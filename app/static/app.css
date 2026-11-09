@@ -2208,3 +2208,19 @@ table.board-table td.fill { background: #fff3cd; color: #7c5e10; }
   .dev-summary { grid-template-columns: repeat(2, 1fr); }
   .dev-bar-col { min-width: 72px; }
 }
+
+/* 串码待办：客户类型标记（异地异网待激活）/ 手动激活日起算 */
+details.mark-form { margin-top: 6px; }
+details.mark-form > summary { font-size: 12px; color: var(--info); cursor: pointer; }
+details.mark-form form { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 4px 0; }
+details.mark-form form button { font-size: 12px; padding: 4px 8px; }
+details.mark-form input[type="date"] { font-size: 12px; padding: 2px 4px; }
+h3.pending-head {
+  margin: 14px 0 6px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line-strong);
+  font-size: 13px;
+  font-weight: 650;
+}
+table.report-grid tr.act-pending td { background: #fbfcfe; }
+table.report-grid tr.act-pending td.num { color: var(--muted); }
