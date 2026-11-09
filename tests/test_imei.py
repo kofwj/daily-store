@@ -944,9 +944,9 @@ def test_admin_export_todo_carries_mark_columns(client):
     assert resp.status_code == 200
     body = resp.get_data().decode("utf-8-sig")
     lines = body.strip().splitlines()
-    assert lines[0].split(",")[9:13] == ["客户类型", "手动激活日", "标记状态", "生效剩余天数"]
+    assert lines[0].split(",")[9:14] == ["客户类型", "手动激活日", "标记状态", "数据标记", "生效剩余天数"]
     row = {line.split(",")[0]: line.split(",") for line in lines[1:]}["860000000000440"]
-    assert row[9] == "本地移动" and row[10] == "2026-11-01" and row[11] == "已激活" and row[12] == "6"
+    assert row[9] == "本地移动" and row[10] == "2026-11-01" and row[11] == "已激活" and row[12] == "" and row[13] == "6"
     # 非管理员不给导
     _login(client, "alpha")
     assert client.get("/imei/export/todo").status_code == 302
@@ -1710,3 +1710,161 @@ def test_carryover_and_marks_are_admin_only(client):
     assert client.get("/imei/carryover").status_code == 302
     assert client.get("/imei/export/carryover").status_code == 302
     assert client.get("/imei/marks").status_code == 302
+
+
+# ---- V0.3.67：P1-1 门店全量视图（只认 seen=1，不按自然月切）+ P1-2 data_flag 落库 ----
+
+
+def _flag_head():
+    return "imei,store,model,sp,day,age,remain,stage,state,strength,evidence,数据标记\n"
+
+
+def _flag_row(imei, store, flag, remain=3):
+    return _row(imei, store, remain=remain) + "," + flag
+
+
+def _upload_flag(client, *rows, asof="2026-11-02"):
+    data = BytesIO((_flag_head() + "".join(r + "\n" for r in rows)).encode("utf-8"))
+    return client.post(
+        "/imei/import",
+        data={"csv_file": (data, "todo.csv"), "asof": asof},
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+
+def test_todo_keeps_seen1_across_month_boundary(client, monkeypatch):
+    """P1-1：门店边界只认 seen=1，不按自然月切。10-31 卖的、seen=1 的机器，
+    哪怕「今天」滚到 12-01 也在待办里；seen=0 的机器任何日期都不可见。"""
+    _login(client)
+    _upload(
+        client,
+        f"860000000000901,{ALPHA},Y600 Pro,小李,2026-10-31,2,3,D3-6,确认未办,无,",
+        f"860000000000902,{ALPHA},Y600 Pro,小李,2026-10-31,2,3,D3-6,确认未办,无,",
+    )
+    # 第二次只导一台：901 还在最新清单（seen=1），902 被标 seen=0（不在最新清单）
+    _upload(client, f"860000000000901,{ALPHA},Y600 Pro,小李,2026-10-31,2,3,D3-6,确认未办,无,")
+    monkeypatch.setattr(db_imei, "today_local", lambda: date(2026, 12, 1))
+    with db.get_db() as conn:
+        ids = [r["id"] for r in conn.execute("SELECT id FROM stores WHERE code='store-alpha'")]
+        imeis = {r["imei"] for r in db_imei.todo_rows(conn, ids, show="open")}
+        seen = {
+            r["imei"]: r["seen"]
+            for r in conn.execute(
+                "SELECT imei, seen FROM imei_todo WHERE imei IN ('860000000000901','860000000000902')"
+            )
+        }
+    assert seen == {"860000000000901": 1, "860000000000902": 0}
+    assert "860000000000901" in imeis
+    assert "860000000000902" not in imeis
+
+
+def test_page_kpi_label_says_latest_list_not_month(client):
+    """P1-1：待办统计卡写「已售未办（最新清单内）」，不写「本月」。"""
+    _login(client)
+    _upload(client, _row("860000000000903", ALPHA))
+    page = client.get("/imei").get_data(as_text=True)
+    assert "已售未办（最新清单内）" in page
+
+
+def test_import_with_data_flag_column_sets_flag(client):
+    """P1-2：CSV 真含「数据标记」列时才写 data_flag（多值用「；」原样保留）。"""
+    _login(client)
+    resp = _upload_flag(client, _flag_row("860000000000821", ALPHA, "台账无此串码；二销"))
+    assert "入库 1 台" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT data_flag, seen, rule_ver FROM imei_todo WHERE imei='860000000000821'"
+        ).fetchone()
+    assert row["data_flag"] == "台账无此串码；二销"
+    assert row["seen"] == 1 and row["rule_ver"] == 2
+
+
+def test_import_without_data_flag_column_preserves_flag(client):
+    """P1-2：没有「数据标记」列的重导不清掉库里已回填的标记。"""
+    _login(client)
+    _upload_flag(client, _flag_row("860000000000822", ALPHA, "台账无此串码"))
+    _upload(client, _row("860000000000822", ALPHA, remain=5))
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT data_flag, remain_days FROM imei_todo WHERE imei='860000000000822'"
+        ).fetchone()
+    assert row["data_flag"] == "台账无此串码"
+    assert row["remain_days"] == 5
+
+
+def test_update_data_flags_only_touches_flag(client):
+    """P1-2：独立回填只改 data_flag，seen / rule_ver / remain_days / sold_day / asof / updated_at 全不变。"""
+    _login(client)
+    _upload(client, _row("860000000000811", ALPHA), _row("860000000000812", ALPHA))
+    frozen = ("seen", "rule_ver", "remain_days", "sold_day", "asof", "updated_at")
+    with db.get_db() as conn:
+        before = {
+            r["imei"]: tuple(r[k] for k in frozen)
+            for r in conn.execute(
+                "SELECT * FROM imei_todo WHERE imei IN ('860000000000811','860000000000812')"
+            )
+        }
+        res = db_imei.update_data_flags(
+            conn, [("860000000000811", "台账无此串码"), ("860000000000999", "二销")]
+        )
+    assert res == {"updated": 1, "missed": 1}
+    with db.get_db() as conn:
+        after = {
+            r["imei"]: tuple(r[k] for k in frozen)
+            for r in conn.execute(
+                "SELECT * FROM imei_todo WHERE imei IN ('860000000000811','860000000000812')"
+            )
+        }
+        flags = {
+            r["imei"]: r["data_flag"]
+            for r in conn.execute(
+                "SELECT imei, data_flag FROM imei_todo WHERE imei IN ('860000000000811','860000000000812')"
+            )
+        }
+    assert after == before
+    assert flags == {"860000000000811": "台账无此串码", "860000000000812": ""}
+
+
+def test_update_data_flags_multivalue_and_empty(client):
+    """P1-2：多值用「；」原样存；空标记也是合法回填（清回空）。"""
+    _login(client)
+    _upload(client, _row("860000000000813", ALPHA))
+    with db.get_db() as conn:
+        db_imei.update_data_flags(conn, [("860000000000813", "台账无此串码；二销")])
+        flag = conn.execute(
+            "SELECT data_flag FROM imei_todo WHERE imei='860000000000813'"
+        ).fetchone()["data_flag"]
+    assert flag == "台账无此串码；二销"
+    with db.get_db() as conn:
+        db_imei.update_data_flags(conn, [("860000000000813", "")])
+        flag = conn.execute(
+            "SELECT data_flag FROM imei_todo WHERE imei='860000000000813'"
+        ).fetchone()["data_flag"]
+    assert flag == ""
+
+
+def test_export_todo_and_carryover_include_data_flag_column(client):
+    """P1-2：待办导出与结转导出都带「数据标记」列；结转只含 rule_ver=1。"""
+    _login(client)
+    _upload_flag(
+        client,
+        _flag_row("860000000000831", ALPHA, "台账无此串码"),
+        _flag_row("860000000000832", ALPHA, "二销"),
+    )
+    _insert_legacy("860000000000833", sold_day="2026-10-31", age_days=7, remain_days=0)
+    with db.get_db() as conn:
+        db_imei.update_data_flags(conn, [("860000000000833", "台账无此串码；二销")])
+
+    todo = client.get("/imei/export/todo")
+    assert todo.status_code == 200
+    body = todo.get_data().decode("utf-8-sig")
+    assert "数据标记" in body
+    assert "台账无此串码" in body and "二销" in body
+
+    carry = client.get("/imei/export/carryover")
+    assert carry.status_code == 200
+    cbody = carry.get_data().decode("utf-8-sig")
+    assert "数据标记" in cbody
+    assert "台账无此串码；二销" in cbody
+    assert "860000000000831" not in cbody and "860000000000832" not in cbody

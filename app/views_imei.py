@@ -263,6 +263,7 @@ def register_imei(app) -> None:
                 "客户类型",
                 "手动激活日",
                 "标记状态",
+                "数据标记",
                 "门店自报",
                 "报人",
                 "自报时间",
@@ -285,6 +286,7 @@ def register_imei(app) -> None:
                     row["user_type"],
                     row["manual_activated_at"],
                     row["act_state"],
+                    row.get("data_flag", ""),
                     row["report_action"] or "",
                     row["reporter"] or "",
                     (row["report_at"] or "")[:16],
@@ -519,6 +521,7 @@ def register_imei(app) -> None:
                 "客户类型",
                 "手动激活日",
                 "标记状态",
+                "数据标记",
                 "生效剩余天数",
                 "清单截至",
             ]
@@ -538,6 +541,7 @@ def register_imei(app) -> None:
                     row["user_type"],
                     row["manual_activated_at"],
                     row["act_state"],
+                    row.get("data_flag", ""),
                     row["remain_eff"],
                     (row["asof"] or "")[:10],
                 ]

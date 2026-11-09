@@ -38,6 +38,7 @@
         </td>
         <td>{{ row.state }}{% if row.strength and row.strength != '无' %}<div class="muted">{{ row.strength }}</div>{% endif %}
           {% if row.act_state %}<div><span class="chip">{{ row.user_type }}{% if row.act_state == '待激活' %}·待激活{% else %}·已激活 {{ row.manual_activated_at[5:] }}{% endif %}</span></div>{% endif %}
+          {% if row.data_flag %}<div><span class="chip">{{ row.data_flag }}</span></div>{% endif %}
         </td>
         <td>
           {% if row.report_action %}
@@ -140,7 +141,7 @@
 
 <div class="kpi-row">
   <div class="kpi">
-    <div class="muted">待办</div>
+    <div class="muted">已售未办（最新清单内）</div>
     <div class="kpi-num">{{ cards.open }}</div>
     <div class="muted">{{ cards.stores }} 家店在跟</div>
   </div>
@@ -181,7 +182,7 @@
 <p class="muted">
   <a href="{{ url_for('imei_carryover') }}">11-16 存量结转清单{% if carryover_n %}（{{ carryover_n }} 台）{% endif %}</a>
   · <a href="{{ url_for('imei_export_carryover') }}">导出 CSV</a>
-  —— 2026-11-09 前导入的存量（rule_ver=1），含清单剩余天数和截至日。
+  —— 2026-11-09 前导入的存量（rule_ver=1），含清单剩余天数和截至日；不在最新清单的机器也在这里（标「不在最新清单」）。
 </p>
 <p class="muted">
   <a href="{{ url_for('imei_review') }}">异地异网超 30 天未激活核实清单{% if review_n %}（{{ review_n }} 台）{% endif %}</a>

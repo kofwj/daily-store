@@ -39,6 +39,7 @@
           <th>阶段</th>
           <th>清单状态</th>
           <th>标记</th>
+          <th>数据标记</th>
           <th>门店自报</th>
           <th>清单截至</th>
           <th>最新清单</th>
@@ -64,6 +65,7 @@
               <span class="muted">本地移动</span>
             {% endif %}
           </td>
+          <td>{% if row.data_flag %}<span class="chip">{{ row.data_flag }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
           <td>
             {% if row.report_action %}
               <span class="chip">{{ row.report_action }}</span>

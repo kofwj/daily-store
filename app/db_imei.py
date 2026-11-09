@@ -267,6 +267,7 @@ _SCHEMA_STMTS = (
         strength TEXT NOT NULL DEFAULT '',
         evidence TEXT NOT NULL DEFAULT '',
         pos_biz_type TEXT NOT NULL DEFAULT '',
+        data_flag TEXT NOT NULL DEFAULT '',
         user_type TEXT NOT NULL DEFAULT '本地移动',
         manual_activated_at TEXT NOT NULL DEFAULT '',
         asof TEXT NOT NULL DEFAULT '',
@@ -330,6 +331,7 @@ _ADDED_COLUMNS = {
     "own_store": "TEXT NOT NULL DEFAULT ''",
     "dispatch_store": "TEXT NOT NULL DEFAULT ''",
     "pos_biz_type": "TEXT NOT NULL DEFAULT ''",
+    "data_flag": "TEXT NOT NULL DEFAULT ''",
     "user_type": "TEXT NOT NULL DEFAULT '本地移动'",
     "manual_activated_at": "TEXT NOT NULL DEFAULT ''",
     # 1 = 2026-11 存量宽限（用库里 remain_days，不随今天跳变）；2 = 新导入，按起算日+7 实时算。
@@ -356,6 +358,7 @@ _COLUMNS = {
     "strength": ("strength", "证据强度"),
     "evidence": ("evidence", "证据"),
     "pos_type": ("pos_biz_type", "POS业务类型", "业务类型", "合约类型", "合约名称"),
+    "data_flag": ("data_flag", "数据标记"),
     "tag": ("串码标签", "标签"),
     "city": ("市", "城市"),
 }
@@ -560,6 +563,9 @@ def import_rows(
             if stock_mode
             else ""
         )
+        # data_flag 只在 CSV 真含「数据标记」列时写：INSERT 带上，DO UPDATE 才更新；
+        # 没有该列就用默认 ''，DO UPDATE 不碰 data_flag，保住库里的原值（回填走独立 UPDATE）。
+        data_flag_set = ", data_flag=excluded.data_flag" if cols["data_flag"] else ""
         # rule_ver 故意不在 UPSERT 里更新：老行永远保持 1，重导不能把存量升成 2，
         # 否则 11-16 宽限当天就失效、27 台会跳成逾期。只有全新 IMEI 的 INSERT 写 2。
         cur = conn.execute(
@@ -567,8 +573,9 @@ def import_rows(
             INSERT INTO imei_todo(
                 imei, status, store_id, sold_store, own_store, dispatch_store,
                 model, sp, sold_day, age_days, remain_days,
-                stage, state, strength, evidence, pos_biz_type, asof, rule_ver, seen, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2, 1, ?)
+                stage, state, strength, evidence, pos_biz_type, data_flag,
+                asof, rule_ver, seen, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2, 1, ?)
             ON CONFLICT(imei) DO UPDATE SET
                 status=excluded.status, store_id=excluded.store_id,
                 sold_store=excluded.sold_store, own_store=excluded.own_store,
@@ -577,7 +584,7 @@ def import_rows(
                 sold_day=excluded.sold_day, age_days=excluded.age_days,
                 remain_days=excluded.remain_days, stage=excluded.stage,
                 state=excluded.state, strength=excluded.strength,
-                evidence=excluded.evidence, pos_biz_type=excluded.pos_biz_type,
+                evidence=excluded.evidence, pos_biz_type=excluded.pos_biz_type{data_flag_set},
                 asof=excluded.asof,
                 seen=1, updated_at=excluded.updated_at{conflict_guard}
             """,
@@ -598,6 +605,7 @@ def import_rows(
                 _text(row.get(cols["strength"]), 20) if cols["strength"] else "",
                 _text(row.get(cols["evidence"]), 200) if cols["evidence"] else "",
                 _text(row.get(cols["pos_type"]), 40) if cols["pos_type"] else "",
+                _text(row.get(cols["data_flag"]), 200) if cols["data_flag"] else "",
                 stamp,
                 now,
             ),
@@ -615,6 +623,31 @@ def import_rows(
         "asof": stamp,
         "mode": "stock" if stock_mode else "ledger",
     }
+
+
+def update_data_flags(
+    conn: sqlite3.Connection,
+    pairs: Sequence[Tuple[str, str]],
+) -> Dict[str, int]:
+    """独立回填 `data_flag`：只 SET 这一列，不碰 seen / rule_ver / remain_days / asof / updated_at。
+
+    pairs = [(imei, data_flag), ...]。回填源不完整时只更命中的行，未命中的原样保留。
+    事务提交；返回 {updated, missed}。绝不打印完整串码清单。
+    """
+    ensure(conn)
+    updated = 0
+    missed = 0
+    begin_immediate(conn)
+    for imei, flag in pairs:
+        cur = conn.execute(
+            "UPDATE imei_todo SET data_flag=? WHERE imei=?",
+            (_text(flag, 200), _text(imei, 32)),
+        )
+        if cur.rowcount > 0:
+            updated += 1
+        else:
+            missed += 1
+    return {"updated": updated, "missed": missed}
 
 
 def latest_reports(
