@@ -83,6 +83,10 @@ REMOTE_BACKUP_DIR="${REMOTE_BACKUP_DIR:-store-daily-backups}"
 REMOTE_BACKUP_SSH_PORT="${REMOTE_BACKUP_SSH_PORT:-22}"
 
 KEEP_DAYS="${KEEP_DAYS:-14}"
+# uploads 快照：每天最多 1 份、只留最新 24 份（2026-11-09 起）。
+# 背景：原来每小时全量打 uploads，14 天 = 336 份；照片一上线就会按份数放大，生产机 8 天盘满。
+# 照片改由 scripts/backup_photos.sh 每天单独镜像一份（不参与这里的份数放大）。
+UPLOADS_KEEP="${UPLOADS_KEEP:-24}"
 if [[ -z "${PRIMARY_HOST}" && ! -f "${PRIMARY_DIR}/data/store_daily.db" ]]; then
   echo "请在 scripts/backup.env 或环境变量里设置 PRIMARY_HOST" >&2
   exit 1
@@ -280,9 +284,12 @@ snapshot_primary() {
   else
     echo "警告: 生产机没有 .env" >&2
   fi
-  if [[ -d "${PRIMARY_DIR}/data/uploads" ]]; then
-    tar czf "${PRIMARY_DIR}/data/backups/${REMOTE_UPLOADS_NAME}" -C "${PRIMARY_DIR}/data" uploads
-    echo "已附带 uploads -> ${REMOTE_UPLOADS_NAME}"
+  # uploads 快照每天只打一份：今天已存在就不再打，避免每小时全量放大
+  if [[ -d "${PRIMARY_DIR}/data/uploads" ]] && \
+     ! ls -1 "${PRIMARY_DIR}"/data/backups/uploads_offsite_$(date +%Y%m%d)_*.tar.gz >/dev/null 2>&1; then
+    # --exclude 照片目录：照片是纯增量、体量大，由 backup_photos.sh 每天单独镜像，别混进份数放大
+    tar czf "${PRIMARY_DIR}/data/backups/${REMOTE_UPLOADS_NAME}" --exclude='uploads/imei' -C "${PRIMARY_DIR}/data" uploads
+    echo "已附带 uploads（不含 imei 照片）-> ${REMOTE_UPLOADS_NAME}"
     chmod 600 "${PRIMARY_DIR}/data/backups/${REMOTE_UPLOADS_NAME}" 2>/dev/null || true
   fi
   ls -la "${host_snap}" "${host_env}" 2>/dev/null || ls -la "${host_snap}"
@@ -328,10 +335,12 @@ if [[ -f "${PRIMARY_DIR}/.env" ]]; then
 else
   echo "警告: 生产机没有 .env" >&2
 fi
-if [[ -d "${PRIMARY_DIR}/data/uploads" ]]; then
-  tar czf "${PRIMARY_DIR}/data/backups/${UPLOADS_NAME}" -C "${PRIMARY_DIR}/data" uploads
+if [[ -d "${PRIMARY_DIR}/data/uploads" ]] && \
+   ! ls -1 "${PRIMARY_DIR}"/data/backups/uploads_offsite_$(date +%Y%m%d)_*.tar.gz >/dev/null 2>&1; then
+  # 每天只打一份；--exclude 照片目录（照片由 backup_photos.sh 单独镜像）
+  tar czf "${PRIMARY_DIR}/data/backups/${UPLOADS_NAME}" --exclude='uploads/imei' -C "${PRIMARY_DIR}/data" uploads
   chmod 600 "${PRIMARY_DIR}/data/backups/${UPLOADS_NAME}" 2>/dev/null || true
-  echo "已附带 uploads -> ${UPLOADS_NAME}"
+  echo "已附带 uploads（不含 imei 照片）-> ${UPLOADS_NAME}"
 fi
 ls -la "${HOST_SNAP}" "${HOST_ENV}" 2>/dev/null || ls -la "${HOST_SNAP}"
 EOS
@@ -390,14 +399,17 @@ push_one() {
     scp_p "${dest_port}" "${LOCAL_UPLOADS}" "${dest_host}:${dest_dir}/uploads/"
   fi
   ssh_p "${dest_port}" "${dest_host}" \
-    "DIR=$(printf %q "${dest_dir}") DAYS=$(printf %q "${KEEP_DAYS}") DB=$(printf %q "${REMOTE_SNAP_NAME}") ENV=$(printf %q "${REMOTE_ENV_NAME}") bash -s" <<'EOS'
+    "DIR=$(printf %q "${dest_dir}") DAYS=$(printf %q "${KEEP_DAYS}") UKEEP=$(printf %q "${UPLOADS_KEEP}") DB=$(printf %q "${REMOTE_SNAP_NAME}") ENV=$(printf %q "${REMOTE_ENV_NAME}") bash -s" <<'EOS'
 set -euo pipefail
 chmod 600 "${DIR}/db/${DB}" 2>/dev/null || true
 chmod 600 "${DIR}/env/${ENV}" 2>/dev/null || true
 chmod 600 "${DIR}"/uploads/*.tar.gz 2>/dev/null || true
 find "${DIR}/db" -type f -name 'store_daily_offsite_*.db' -mtime +"${DAYS}" -delete 2>/dev/null || true
 find "${DIR}/env" -type f -name 'env_offsite_*.env' -mtime +"${DAYS}" -delete 2>/dev/null || true
-find "${DIR}/uploads" -type f -name 'uploads_offsite_*.tar.gz' -mtime +"${DAYS}" -delete 2>/dev/null || true
+# uploads 按份数留（每天 1 份），不按时间：时间口径会随时间漂
+ls -1t "${DIR}"/uploads/uploads_offsite_*.tar.gz 2>/dev/null | tail -n +$((UKEEP + 1)) | while read -r f; do
+  rm -f -- "$f" 2>/dev/null || true
+done || true
 echo "  最近备份："
 ls -lt "${DIR}/db" 2>/dev/null | head -5 || true
 EOS
@@ -434,9 +446,13 @@ prune_primary_count() {
 }
 prune_local() {
   find "${PRIMARY_DIR}/data/backups" -type f \
-    \( -name 'store_daily_offsite_*.db' -o -name 'env_offsite_*.env' -o -name 'uploads_offsite_*.tar.gz' \) \
+    \( -name 'store_daily_offsite_*.db' -o -name 'env_offsite_*.env' \) \
     -mtime +"${KEEP_DAYS}" -delete 2>/dev/null || true
   prune_primary_count
+  # uploads 快照按份数留（每天 1 份）
+  ls -1t "${PRIMARY_DIR}"/data/backups/uploads_offsite_*.tar.gz 2>/dev/null | tail -n +$((UPLOADS_KEEP + 1)) | while read -r f; do
+    rm -f -- "$f" 2>/dev/null || true
+  done || true
 }
 
 if [[ "${DRY_RUN}" != "1" ]]; then
