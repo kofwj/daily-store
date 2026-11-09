@@ -146,6 +146,18 @@ def register_imei(app) -> None:
                 if is_admin
                 else 0
             )
+            # 管理员两个台账：11-16 存量结转（rule_ver=1）、门店标记清单
+            include_unmapped = is_admin and not scope["active"]
+            carryover_n = (
+                len(db_imei.carryover_rows(conn, ids, include_unmapped=include_unmapped))
+                if is_admin
+                else 0
+            )
+            marked_n = (
+                len(db_imei.marked_rows(conn, ids, include_unmapped=include_unmapped))
+                if is_admin
+                else 0
+            )
         groups: List[Dict[str, Any]] = []
         by_store: Dict[Any, Dict[str, Any]] = {}
         for row in rows:
@@ -170,6 +182,8 @@ def register_imei(app) -> None:
             cards=cards,
             marks=marks,
             review_n=review_n,
+            carryover_n=carryover_n,
+            marked_n=marked_n,
             today_iso=db.today_local().isoformat(),
             user_types=db_imei.USER_TYPES,
             scope=scope,
@@ -198,6 +212,116 @@ def register_imei(app) -> None:
         return render_template(
             "imei_review.html",
             rows=rows,
+            scope=scope,
+            today_iso=db.today_local().isoformat(),
+        )
+
+    @app.route("/imei/carryover")
+    @admin_required
+    def imei_carryover():
+        """11-16 存量结转清单：rule_ver=1 的机器 + CSV 导出（仅管理员）。"""
+        with db.get_db() as conn:
+            if not db_imei.user_in_imei_scope(conn, g.user):
+                return Response("forbidden", status=403)
+            stores = accessible_stores(conn)
+            scope = request_scope(stores)
+            rows = db_imei.carryover_rows(
+                conn, scope["ids"], include_unmapped=not scope["active"]
+            )
+        return render_template(
+            "imei_carryover.html",
+            rows=rows,
+            scope=scope,
+            today_iso=db.today_local().isoformat(),
+        )
+
+    @app.route("/imei/export/carryover")
+    @admin_required
+    def imei_export_carryover():
+        """导出 11-16 存量结转清单（UTF-8 BOM，Excel 直接打开）。"""
+        with db.get_db() as conn:
+            if not db_imei.user_in_imei_scope(conn, g.user):
+                return Response("forbidden", status=403)
+            stores = accessible_stores(conn)
+            scope = request_scope(stores)
+            rows = db_imei.carryover_rows(
+                conn, scope["ids"], include_unmapped=not scope["active"]
+            )
+        out = io.StringIO()
+        writer = csv.writer(out)
+        writer.writerow(
+            [
+                "门店",
+                "机型",
+                "串码",
+                "营业员",
+                "售出日期",
+                "清单已售天数",
+                "清单剩余天数",
+                "阶段",
+                "清单状态",
+                "客户类型",
+                "手动激活日",
+                "标记状态",
+                "门店自报",
+                "报人",
+                "自报时间",
+                "清单截至",
+                "是否在最新清单",
+            ]
+        )
+        for row in rows:
+            writer.writerow(
+                [
+                    row["store_name"] or row.get("dispatch_store") or "",
+                    row["model"],
+                    row["imei"],
+                    row["sp"],
+                    row["sold_day"],
+                    row["age_days"],
+                    row["remain_days"],
+                    row["stage"],
+                    row["state"],
+                    row["user_type"],
+                    row["manual_activated_at"],
+                    row["act_state"],
+                    row["report_action"] or "",
+                    row["reporter"] or "",
+                    (row["report_at"] or "")[:16],
+                    (row["asof"] or "")[:10],
+                    "是" if row["in_latest"] else "否（最新清单已没有）",
+                ]
+            )
+        body = "\ufeff" + out.getvalue()
+        return Response(
+            body,
+            mimetype="text/csv",
+            headers={
+                "Content-Disposition": "attachment; filename=imei_carryover.csv",
+                "Cache-Control": "no-store",
+            },
+        )
+
+    @app.route("/imei/marks")
+    @admin_required
+    def imei_marks():
+        """门店标记清单 + 标记动作审计（仅管理员，可逐行一键撤销）。"""
+        with db.get_db() as conn:
+            if not db_imei.user_in_imei_scope(conn, g.user):
+                return Response("forbidden", status=403)
+            stores = accessible_stores(conn)
+            scope = request_scope(stores)
+            include_unmapped = not scope["active"]
+            rows = db_imei.marked_rows(
+                conn, scope["ids"], include_unmapped=include_unmapped
+            )
+            logs = db_imei.mark_log_rows(
+                conn, scope["ids"], include_unmapped=include_unmapped
+            )
+        return render_template(
+            "imei_marks.html",
+            rows=rows,
+            logs=logs,
             scope=scope,
             today_iso=db.today_local().isoformat(),
         )
@@ -301,6 +425,7 @@ def register_imei(app) -> None:
                     day=day,
                     store_ids=ids,
                     is_admin=is_admin,
+                    user_id=g.user["id"],
                 )
             except PermissionError:
                 return Response("forbidden", status=403)

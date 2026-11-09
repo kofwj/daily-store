@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}门店标记清单 · 串码待办{% endblock %}
+{% block body_class %}imei-page{% endblock %}
+{% block body %}
+{% macro mark_val(user_type, activated_at) -%}
+  {{ user_type or '—' }}{% if activated_at %} · {{ activated_at }}{% endif %}
+{%- endmacro %}
+<div class="page-head">
+  <div class="page-title">
+    <h1>门店标记清单</h1>
+    <p class="muted">当前待激活 / 已激活 {{ rows|length }} 台 · 截至 {{ today_iso }}{% if scope.active %} · {{ scope.label }}{% endif %}</p>
+  </div>
+  <div class="page-filters">
+    <a class="btn ghost" href="{{ url_for('imei_page') }}">返回串码待办</a>
+  </div>
+</div>
+
+<div class="flash-inline warn">
+  「撤销」会立即把客户类型恢复成「本地移动」、清空手动激活日，7 天重新按售出日算；
+  <strong>不会删除审计记录</strong>，撤销后仍能在下面查到是谁、什么时候改的。
+</div>
+
+<div class="card">
+  <h2>当前标记 <span class="muted">{{ rows|length }} 台</span></h2>
+  {% if rows %}
+  <div class="report-table-scroll">
+    <table class="data report-grid">
+      <thead>
+        <tr>
+          <th>门店</th>
+          <th>机型</th>
+          <th>串码</th>
+          <th>售出日期</th>
+          <th>已售</th>
+          <th>标记</th>
+          <th>清单状态</th>
+          <th>门店自报</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.store_short or row.store_name or row.dispatch_store or '待建店' }}</td>
+          <td>{{ row.model or '—' }}{% if row.sp %}<div class="muted">{{ row.sp }}</div>{% endif %}</td>
+          <td class="num">{{ row.imei }}</td>
+          <td class="num">{{ row.sold_day or '—' }}</td>
+          <td class="num">{{ row.sold_days if row.sold_days is not none else row.age_days }} 天</td>
+          <td>
+            {% if row.act_state == '待激活' %}
+              <span class="chip">异地异网·待激活</span>
+              {% if row.review_due %}<div><span class="chip">超30天</span></div>{% endif %}
+            {% elif row.act_state == '已激活' %}
+              <span class="chip">已激活</span>
+              <div class="muted">激活日 {{ row.manual_activated_at }} · 剩 {{ row.remain_eff }} 天</div>
+            {% endif %}
+            {% if not row.in_latest %}<div><span class="chip">不在最新清单</span></div>{% endif %}
+          </td>
+          <td>{{ row.state or '—' }}</td>
+          <td>
+            {% if row.report_action %}
+              <span class="chip">{{ row.report_action }}</span>
+              <div class="muted">{{ row.reporter }} · {{ (row.report_at or '')[:16] }}</div>
+            {% else %}
+              <span class="muted">未报</span>
+            {% endif %}
+          </td>
+          <td>
+            <form method="post" action="{{ url_for('imei_mark') }}"
+                  onsubmit="return confirm('撤销 {{ row.imei }} 的标记？会恢复到本地移动，按售出日算。');">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="imei" value="{{ row.imei }}">
+              <input type="hidden" name="mark" value="撤销">
+              <input type="hidden" name="back" value="{{ url_for('imei_marks') }}">
+              <button class="btn ghost" type="submit">撤销</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">当前没有门店标记：没有待激活，也没有手动激活日。</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>标记留痕 <span class="muted">最近 {{ logs|length }} 条</span></h2>
+  <p class="muted">谁、什么时候、做了什么、原值 → 新值。审计只增不改，撤销也不删历史。</p>
+  {% if logs %}
+  <div class="report-table-scroll">
+    <table class="data report-grid">
+      <thead>
+        <tr>
+          <th>时间</th>
+          <th>门店</th>
+          <th>串码</th>
+          <th>动作</th>
+          <th>原值 → 新值</th>
+          <th>操作人</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in logs %}
+        <tr>
+          <td class="num">{{ (log.created_at or '')[:16] }}</td>
+          <td>{{ log.store_short or log.store_name or '待建店' }}</td>
+          <td class="num">{{ log.imei }}</td>
+          <td><span class="chip">{{ log.action }}</span></td>
+          <td>{{ mark_val(log.old_user_type, log.old_activated_at) }} → {{ mark_val(log.new_user_type, log.new_activated_at) }}</td>
+          <td>{{ log.actor or '—' }}{% if log.actor_role %}<div class="muted">{{ log.actor_role }}</div>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">还没有标记动作。</p>
+  {% endif %}
+</div>
+{% endblock %}

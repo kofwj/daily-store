@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}11-16 存量结转清单 · 串码待办{% endblock %}
+{% block body_class %}imei-page{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div class="page-title">
+    <h1>11-16 存量结转清单</h1>
+    <p class="muted">
+      2026-11-09 前导入的存量（<code>rule_ver=1</code>）· {{ rows|length }} 台 · 宽限至 11-16 · 截至 {{ today_iso }}
+      {% if scope.active %} · {{ scope.label }}{% endif %}
+    </p>
+  </div>
+  <div class="page-filters">
+    <a class="btn" href="{{ url_for('imei_export_carryover') }}">导出 CSV</a>
+    <a class="btn ghost" href="{{ url_for('imei_page') }}">返回串码待办</a>
+  </div>
+</div>
+
+<div class="flash-inline">
+  这张表列全部 <strong>rule_ver=1</strong> 的存量（含最新清单里已经没有的存量，标「不在最新清单」），
+  剩余天数仍用清单里的 <code>remain_days</code>，<strong>不按今天重算</strong>。
+  存量统一按 <strong>11-16 宽限</strong>看：从今天到 11-16 天数冻住、不随日期递减，
+  所以不会自己跳成逾期。导出 CSV 后逐店核对；要改清单状态 / 剩余天数，走原来的重导
+  （重导不会把 rule_ver 从 1 升到 2）。
+</div>
+
+{% if rows %}
+<div class="card">
+  <div class="report-table-scroll">
+    <table class="data report-grid">
+      <thead>
+        <tr>
+          <th>门店</th>
+          <th>机型</th>
+          <th>串码</th>
+          <th>售出日期</th>
+          <th>清单已售</th>
+          <th>清单剩余</th>
+          <th>阶段</th>
+          <th>清单状态</th>
+          <th>标记</th>
+          <th>门店自报</th>
+          <th>清单截至</th>
+          <th>最新清单</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.store_short or row.store_name or row.dispatch_store or '待建店' }}</td>
+          <td>{{ row.model or '—' }}{% if row.sp %}<div class="muted">{{ row.sp }}</div>{% endif %}</td>
+          <td class="num">{{ row.imei }}</td>
+          <td class="num">{{ row.sold_day or '—' }}</td>
+          <td class="num">{{ row.age_days }} 天</td>
+          <td class="num {{ 'neg' if row.remain_days < 0 }}">{{ row.remain_days }} 天</td>
+          <td>{{ row.stage or '—' }}</td>
+          <td>{{ row.state or '—' }}</td>
+          <td>
+            {% if row.act_state == '待激活' %}
+              <span class="chip">异地异网·待激活</span>
+            {% elif row.act_state == '已激活' %}
+              <span class="chip">已激活 {{ row.manual_activated_at }}</span>
+            {% else %}
+              <span class="muted">本地移动</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.report_action %}
+              <span class="chip">{{ row.report_action }}</span>
+              <div class="muted">{{ row.reporter }} · {{ (row.report_at or '')[:16] }}</div>
+            {% else %}
+              <span class="muted">未报</span>
+            {% endif %}
+          </td>
+          <td class="num">{{ (row.asof or '')[:10] }}</td>
+          <td>
+            {% if row.in_latest %}<span class="muted">在</span>
+            {% else %}<span class="chip">不在最新清单</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<p class="muted">没有 rule_ver=1 的存量机器。</p>
+{% endif %}
+{% endblock %}

@@ -1555,3 +1555,158 @@ def test_review_page_lists_remote_pending_over_30_days(client):
     assert cards["pending"] == 2 and cards["overdue"] == 0 and cards["soon"] == 0
     # 非管理员进核实页被挡回
     assert client.get("/imei/review").status_code == 302
+
+
+# ---- 2026-11-09 14:30 V0.3.66：激活日必填 + 标记留痕 + 存量结转 / 标记清单 ----
+
+
+def test_activation_requires_real_date_and_logs_actor(client):
+    """「已激活」不默认今天：空日期 / 早于售出日 / 未来都必须被拦；成功后审计记谁、原值→新值。"""
+    _login(client)
+    _upload(client, f"860000000000701,{ALPHA},Y600 Pro,小李,2026-10-29,4,3,D3-6,确认未办,无,")
+    _login(client, "alpha")
+    page = client.get("/imei").get_data(as_text=True)
+    assert 'name="act_date" required' in page
+    assert 'name="act_date" value=' not in page
+
+    html = _mark(client, "860000000000701", "已激活").get_data(as_text=True)
+    assert "请填写真实激活日期" in html
+    assert _todo_row("860000000000701")["manual_activated_at"] == ""
+
+    # 售出日之前 / 今天之后都拦下，且失败不留审计
+    assert "不能早于售出日" in _mark(
+        client, "860000000000701", "已激活", "2026-10-28"
+    ).get_data(as_text=True)
+    assert "不能填将来的日期" in _mark(
+        client, "860000000000701", "已激活", "2026-11-03"
+    ).get_data(as_text=True)
+    assert _todo_row("860000000000701")["manual_activated_at"] == ""
+    with db.get_db() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM imei_mark_log").fetchone()[0] == 0
+
+    _mark(client, "860000000000701", "已激活", "2026-11-01")
+    assert _todo_row("860000000000701")["manual_activated_at"] == "2026-11-01"
+    with db.get_db() as conn:
+        log = conn.execute(
+            """
+            SELECT action, old_user_type, old_activated_at,
+                   new_user_type, new_activated_at, user_id, created_at
+            FROM imei_mark_log
+            """
+        ).fetchone()
+        alpha_id = conn.execute("SELECT id FROM users WHERE username='alpha'").fetchone()["id"]
+    assert log["action"] == "已激活"
+    assert log["old_user_type"] == "本地移动" and log["old_activated_at"] == ""
+    assert log["new_user_type"] == "本地移动" and log["new_activated_at"] == "2026-11-01"
+    assert log["user_id"] == alpha_id and log["created_at"]
+
+
+def test_mark_log_sequence_and_one_click_revoke(client):
+    """异网 → 已激活 → 撤销，每一步留原值/新值；管理员在标记清单里一键撤销。"""
+    _login(client)
+    _upload(
+        client,
+        f"860000000000711,{ALPHA},Y600 Pro,小李,2026-10-21,12,-5,D7+,确认未办,无,",
+        f"860000000000712,{ALPHA},Y600 Pro,小李,2026-10-21,12,-5,D7+,确认未办,无,",
+        f"860000000000713,{ALPHA},Y600 Pro,小李,2026-10-21,12,-5,D7+,确认未办,无,",
+    )
+    _login(client, "alpha")
+    _mark(client, "860000000000711", "异网")
+    _mark(client, "860000000000711", "已激活", "2026-11-01")
+    _login(client, "admin")
+    _login(client)  # admin
+
+    page = client.get("/imei/marks")
+    assert page.status_code == 200
+    html = page.get_data(as_text=True)
+    assert "860000000000711" in html and "标记留痕" in html
+    assert "860000000000712" not in html  # 没标记的不进当前清单
+    assert "异地异网" in html and "2026-11-01" in html
+    assert "撤销" in html
+
+    with db.get_db() as conn:
+        logs = [dict(r) for r in conn.execute(
+            "SELECT action, old_user_type, old_activated_at, new_user_type, new_activated_at FROM imei_mark_log ORDER BY id"
+        )]
+        assert [x["action"] for x in logs] == ["异网", "已激活"]
+        assert logs[0]["old_user_type"] == "本地移动"
+        assert logs[1]["old_user_type"] == "异地异网"
+        assert logs[1]["new_activated_at"] == "2026-11-01"
+
+    resp = client.post(
+        "/imei/mark",
+        data={"imei": "860000000000711", "mark": "撤销", "back": "/imei/marks"},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert "已撤销" in resp.get_data(as_text=True)
+    row = _todo_row("860000000000711")
+    assert row["user_type"] == "本地移动" and row["manual_activated_at"] == ""
+    with db.get_db() as conn:
+        logs = [dict(r) for r in conn.execute(
+            "SELECT action, old_user_type, old_activated_at, new_user_type, new_activated_at FROM imei_mark_log ORDER BY id"
+        )]
+        marked = db_imei.marked_rows(conn, [_store_id()])
+    assert [x["action"] for x in logs] == ["异网", "已激活", "撤销"]
+    assert logs[2]["old_user_type"] == "异地异网" and logs[2]["old_activated_at"] == "2026-11-01"
+    assert logs[2]["new_user_type"] == "本地移动" and logs[2]["new_activated_at"] == ""
+    assert marked == []
+
+
+def test_marks_page_keeps_unseen_marked_rows_revocable(client):
+    """机器从最新清单消失后，标记仍要出现在管理员标记清单里，并能撤销。"""
+    _login(client)
+    _upload(client, _row("860000000000741", ALPHA))
+    _login(client, "alpha")
+    _mark(client, "860000000000741", "异网")
+    _login(client)
+    with db.get_db() as conn:
+        conn.execute("UPDATE imei_todo SET seen=0 WHERE imei='860000000000741'")
+
+    html = client.get("/imei/marks").get_data(as_text=True)
+    assert "860000000000741" in html and "不在最新清单" in html
+
+    resp = client.post(
+        "/imei/mark",
+        data={"imei": "860000000000741", "mark": "撤销", "back": "/imei/marks"},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200 and "已撤销" in resp.get_data(as_text=True)
+    row = _todo_row("860000000000741")
+    assert row["user_type"] == "本地移动" and row["manual_activated_at"] == ""
+    with db.get_db() as conn:
+        assert db_imei.marked_rows(conn, [_store_id()]) == []
+
+
+def test_carryover_lists_all_rule_ver_1_even_unseen_and_exports(client):
+    """存量结转按 91 台口径：rule_ver=1 全列，含 seen=0 的老行，新导入不进。"""
+    _login(client)
+    _upload(client, _row("860000000000721", ALPHA))
+    _insert_legacy("860000000000722", sold_day="2026-10-31", age_days=7, remain_days=0)
+    _insert_legacy("860000000000723", sold_day="2026-10-31", age_days=7, remain_days=0)
+    with db.get_db() as conn:
+        conn.execute("UPDATE imei_todo SET seen=0 WHERE imei='860000000000723'")
+
+    page = client.get("/imei/carryover")
+    assert page.status_code == 200
+    html = page.get_data(as_text=True)
+    assert "860000000000722" in html and "860000000000723" in html
+    assert "860000000000721" not in html
+    assert "不在最新清单" in html and "宽限至 11-16" in html
+    assert "（2 台）" in client.get("/imei").get_data(as_text=True)
+
+    csv_resp = client.get("/imei/export/carryover")
+    assert csv_resp.status_code == 200
+    body = csv_resp.get_data().decode("utf-8-sig")
+    assert "860000000000722" in body and "860000000000723" in body
+    assert "860000000000721" not in body
+    assert "否（最新清单已没有）" in body
+
+
+def test_carryover_and_marks_are_admin_only(client):
+    _login(client)
+    _upload(client, _row("860000000000731", ALPHA))
+    _login(client, "alpha")
+    assert client.get("/imei/carryover").status_code == 302
+    assert client.get("/imei/export/carryover").status_code == 302
+    assert client.get("/imei/marks").status_code == 302

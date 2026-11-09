@@ -292,6 +292,35 @@ _SCHEMA_STMTS = (
     """,
     "CREATE INDEX IF NOT EXISTS idx_imei_reports_imei ON imei_reports(imei, id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_imei_reports_store ON imei_reports(store_id, id DESC)",
+    """
+    CREATE TABLE IF NOT EXISTS imei_mark_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        imei TEXT NOT NULL,
+        store_id INTEGER,
+        user_id INTEGER,
+        action TEXT NOT NULL,
+        old_user_type TEXT NOT NULL DEFAULT '',
+        old_activated_at TEXT NOT NULL DEFAULT '',
+        new_user_type TEXT NOT NULL DEFAULT '',
+        new_activated_at TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_imei_mark_log_imei ON imei_mark_log(imei, id DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_imei_mark_log_store ON imei_mark_log(store_id, id DESC)",
+)
+
+# ensure() 的快速路径要认全这些对象；新增审计表时同步加进来，否则老库会漏建。
+_SCHEMA_OBJECTS = (
+    "imei_todo",
+    "imei_reports",
+    "imei_mark_log",
+    "idx_imei_todo_store",
+    "idx_imei_todo_status",
+    "idx_imei_reports_imei",
+    "idx_imei_reports_store",
+    "idx_imei_mark_log_imei",
+    "idx_imei_mark_log_store",
 )
 
 # 老库上补列（表是懒建的，之前跑过的库没有这些列）
@@ -338,12 +367,12 @@ def ensure(conn: sqlite3.Connection) -> None:
     existing = {
         str(r[0])
         for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE name IN ("
-            "'imei_todo', 'imei_reports', 'idx_imei_todo_store', "
-            "'idx_imei_todo_status', 'idx_imei_reports_imei', 'idx_imei_reports_store')"
+            "SELECT name FROM sqlite_master WHERE name IN (%s)"
+            % ",".join("?" * len(_SCHEMA_OBJECTS)),
+            _SCHEMA_OBJECTS,
         )
     }
-    if len(existing) < 6:
+    if len(existing) < len(_SCHEMA_OBJECTS):
         for stmt in _SCHEMA_STMTS:
             conn.execute(stmt)
     for table, added in (
@@ -629,22 +658,32 @@ def todo_rows(
     *,
     show: str = "open",
     include_unmapped: bool = False,
+    rule_ver: Optional[int] = None,
+    include_unseen: bool = False,
 ) -> List[Dict[str, Any]]:
     """可见门店的待办行（已售机器），带最新自报。show=open 只给还要动手的。
 
     `include_unmapped` 给管理员：档案里没有的店那部分机器也一起看。
+    `rule_ver` 只用来筛「11-16 存量结转清单」（1=老存量，2=新导入）；不传就全都看。
+    `include_unseen` 给存量结转：最新一次清单里已经没有、但库里还留着的老行
+    （`seen=0`）也带上，页面上单独标「不在最新清单」。
     排序：逾期在前（remain 越小越靠前），同一天里 IMEI 稳定的顺序。
     """
     ensure(conn)
     ids = [int(s) for s in store_ids]
     if not ids and not include_unmapped:
         return []
-    where: List[str] = ["t.seen=1", "t.status='%s'" % STATUS_SOLD]
+    where: List[str] = ["t.status='%s'" % STATUS_SOLD]
+    if not include_unseen:
+        where.insert(0, "t.seen=1")
     params: List[Any] = []
     if show != "all":
         marks = ",".join("?" * len(CLOSED_STATES))
         where.append(f"t.state NOT IN ({marks}) AND COALESCE(r.action,'') NOT IN ('已办','已退货')")
         params = [*CLOSED_STATES, *params]
+    if rule_ver is not None:
+        where.append("COALESCE(t.rule_ver,1)=?")
+        params.append(int(rule_ver))
     if ids:
         clause, raw_params = _store_in("t.store_id", ids)
         params = [*params, *raw_params]
@@ -717,6 +756,107 @@ def review_rows(
     """
     rows = todo_rows(conn, store_ids, show="open", include_unmapped=include_unmapped)
     return [row for row in rows if row["review_due"]]
+
+
+def carryover_rows(
+    conn: sqlite3.Connection,
+    store_ids: Sequence[int],
+    *,
+    include_unmapped: bool = False,
+) -> List[Dict[str, Any]]:
+    """11-16 存量结转清单：2026-11-09 前导入的 `rule_ver=1` 机器。
+
+    只给管理员看；含清单状态、已售/剩余天数、截至日、门店自报，
+    导出 CSV 后逐店核对或重导。口径不动：这些行仍按库里 `remain_days` 看。
+    生产上 91 行都是 rule_ver=1，其中 13 行已不在最新清单（`seen=0`），
+    这里一并列出并标出来，否则清单只有 78 台，对不上「91 台」。
+    """
+    rows = todo_rows(
+        conn,
+        store_ids,
+        show="all",
+        include_unmapped=include_unmapped,
+        rule_ver=1,
+        include_unseen=True,
+    )
+    for row in rows:
+        row["in_latest"] = bool(row.get("seen"))
+    rows.sort(
+        key=lambda r: (
+            r.get("store_id") is None,
+            r.get("store_id") or 0,
+            str(r.get("imei") or ""),
+        )
+    )
+    return rows
+
+
+def marked_rows(
+    conn: sqlite3.Connection,
+    store_ids: Sequence[int],
+    *,
+    include_unmapped: bool = False,
+) -> List[Dict[str, Any]]:
+    """管理员「门店标记清单」：当前还是待激活 / 已激活的机器。
+
+    撤销过的不再出现在这里（已经回到本地移动），但 `imei_mark_log` 里留了历史。
+    含最新清单里已经没有（`seen=0`）的行：标记还在库里，就必须能看见、能撤销，
+    否则机器一从清单消失，标记就再也清不掉了。
+    """
+    rows = todo_rows(
+        conn,
+        store_ids,
+        show="all",
+        include_unmapped=include_unmapped,
+        include_unseen=True,
+    )
+    rows = [row for row in rows if row.get("act_state") in ("待激活", "已激活")]
+    for row in rows:
+        row["in_latest"] = bool(row.get("seen"))
+    rows.sort(
+        key=lambda r: (
+            r.get("store_id") is None,
+            r.get("store_id") or 0,
+            str(r.get("imei") or ""),
+        )
+    )
+    return rows
+
+
+def mark_log_rows(
+    conn: sqlite3.Connection,
+    store_ids: Sequence[int],
+    *,
+    include_unmapped: bool = False,
+    limit: int = 200,
+) -> List[Dict[str, Any]]:
+    """标记动作审计：谁、什么时候、什么动作、原值 → 新值（最近在前）。
+
+    只增不改；这里只读，给管理员看留痕，也方便撤销后回查。
+    """
+    ensure(conn)
+    ids = [int(s) for s in store_ids]
+    if not ids:
+        return []
+    clause, raw_params = _store_in("l.store_id", ids)
+    where = f"({clause} OR l.store_id IS NULL)" if include_unmapped else clause
+    limit = max(1, min(int(limit), 1000))
+    rows = conn.execute(
+        f"""
+        SELECT l.*, s.name AS store_name, s.short_name AS store_short,
+               COALESCE(u.display_name, u.username, '') AS actor,
+               COALESCE(u.username, '') AS actor_username,
+               COALESCE(u.role, '') AS actor_role
+        FROM imei_mark_log l
+        LEFT JOIN stores s ON s.id = l.store_id
+        LEFT JOIN users u ON u.id = l.user_id
+        WHERE {where}
+        ORDER BY l.id DESC
+        LIMIT ?
+        """,
+        [*raw_params, limit],
+    )
+    return [dict(row) for row in rows]
 
 
 def mark_summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> List[Dict[str, Any]]:
@@ -1038,15 +1178,19 @@ def set_mark(
     day: str = "",
     store_ids: Sequence[int] = (),
     is_admin: bool = False,
+    user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """门店的两个动作 + 管理员的撤销与修正。
 
     - mark='异网'：号码是异地异网，要等门店用改串机激活 → 转「待激活」，不计逾期、不催办
-    - mark='已激活'：门店已用改串机激活 → 记下激活日，7 天从这一天重新起算
+    - mark='已激活'：门店已用改串机激活 → 记下**真实**激活日，7 天从这一天重新起算
     - mark='撤销'：仅管理员可操作 → 回到「本地移动」，按售出日算
 
     门店一旦点过「已激活」即锁死起算日，非管理员不可再改期或切回异网；
     只能动自己看得见的店；待建店（store_id 为空）不许标——没有店就没有责任人。
+
+    每次成功动作都往 `imei_mark_log` 追加一条：谁、什么时候、从什么值改成什么值。
+    审计只增不改，撤销也不会删历史。
     """
     if mark not in MARKS:
         raise ValueError("动作只能是「异网」「已激活」「撤销」")
@@ -1055,7 +1199,10 @@ def set_mark(
     ensure(conn)
     begin_immediate(conn)
     row = conn.execute(
-        "SELECT imei, store_id, sold_day, status, manual_activated_at FROM imei_todo WHERE imei=?",
+        """
+        SELECT imei, store_id, sold_day, status, user_type, manual_activated_at
+        FROM imei_todo WHERE imei=?
+        """,
         (imei,),
     ).fetchone()
     if row is None:
@@ -1068,25 +1215,72 @@ def set_mark(
     if (row["manual_activated_at"] or "").strip() and not is_admin:
         raise ValueError("这台机器已激活，起算日已锁定；标错了找管理员撤销")
     now = _now()
+    old_user_type = str(row["user_type"] or "")
+    old_activated_at = str(row["manual_activated_at"] or "")
+    store_id = int(row["store_id"])
+
+    def log(new_user_type: str, new_activated_at: str) -> None:
+        conn.execute(
+            """
+            INSERT INTO imei_mark_log(
+                imei, store_id, user_id, action,
+                old_user_type, old_activated_at, new_user_type, new_activated_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                imei,
+                store_id,
+                int(user_id) if user_id is not None else None,
+                mark,
+                old_user_type,
+                old_activated_at,
+                new_user_type,
+                new_activated_at,
+                now,
+            ),
+        )
+
     if mark == "异网":
         conn.execute(
             "UPDATE imei_todo SET user_type=?, manual_activated_at='', updated_at=? WHERE imei=?",
             (USER_REMOTE, now, imei),
         )
-        return {"imei": imei, "mark": mark, "user_type": USER_REMOTE, "manual_activated_at": ""}
+        log(USER_REMOTE, "")
+        return {
+            "imei": imei,
+            "mark": mark,
+            "user_type": USER_REMOTE,
+            "manual_activated_at": "",
+            "old_user_type": old_user_type,
+            "old_activated_at": old_activated_at,
+            "new_user_type": USER_REMOTE,
+            "new_activated_at": "",
+        }
     if mark == "撤销":
         conn.execute(
             "UPDATE imei_todo SET user_type=?, manual_activated_at='', updated_at=? WHERE imei=?",
             (USER_DEFAULT, now, imei),
         )
-        return {"imei": imei, "mark": mark, "user_type": USER_DEFAULT, "manual_activated_at": ""}
-    # 已激活：激活日默认业务时区今天，不能是未来、不能早于售出日
+        log(USER_DEFAULT, "")
+        return {
+            "imei": imei,
+            "mark": mark,
+            "user_type": USER_DEFAULT,
+            "manual_activated_at": "",
+            "old_user_type": old_user_type,
+            "old_activated_at": old_activated_at,
+            "new_user_type": USER_DEFAULT,
+            "new_activated_at": "",
+        }
+    # 已激活：必须填真实激活日（不默认今天），不能是未来、不能早于售出日
     today = today_local()
     raw = (day or "").strip()[:10]
-    act = _parse_day(raw) if raw else today
+    if not raw:
+        raise ValueError("请填写真实激活日期（不能早于售出日、不能晚于今天）")
+    act = _parse_day(raw)
     if act is None:
         raise ValueError("激活日要填成 2026-11-09 这样的日期")
-    if raw and act > today:
+    if act > today:
         raise ValueError("激活日不能填将来的日期")
     sold = _parse_day(str(row["sold_day"] or ""))
     if sold and act < sold:
@@ -1095,7 +1289,18 @@ def set_mark(
         "UPDATE imei_todo SET manual_activated_at=?, updated_at=? WHERE imei=?",
         (act.isoformat(), now, imei),
     )
-    return {"imei": imei, "mark": mark, "user_type": "", "manual_activated_at": act.isoformat()}
+    # user_type 不变，审计里照实记（可能是本地移动直接点激活，也可能是异地异网）
+    log(old_user_type, act.isoformat())
+    return {
+        "imei": imei,
+        "mark": mark,
+        "user_type": old_user_type,
+        "manual_activated_at": act.isoformat(),
+        "old_user_type": old_user_type,
+        "old_activated_at": old_activated_at,
+        "new_user_type": old_user_type,
+        "new_activated_at": act.isoformat(),
+    }
 
 
 def export_todo(
