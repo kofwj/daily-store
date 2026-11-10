@@ -776,15 +776,24 @@ def register_imei(app) -> None:
             flash("只支持 .csv（Excel 先另存为 CSV）", "error")
             return redirect(url_for("imei_page"))
         asof = (request.form.get("asof") or "").strip()
+        # 导入模式：默认增量（2026-11-10 用户拍板）。
+        # 增量 = 只写本次清单里的行，不动清单外的行；全量 = 先把这一类 seen=0 再标回来。
+        mode = (request.form.get("import_mode") or "incremental").strip()
+        mark_seen = mode == "full"
         with db.get_db() as conn:
             try:
-                result = db_imei.import_rows(conn, upload.read(), asof)
+                result = db_imei.import_rows(conn, upload.read(), asof, mark_seen=mark_seen)
             except ValueError as exc:
                 flash(f"导入失败：{exc}", "error")
                 return redirect(url_for("imei_page"))
         kind = "库存（未售，按库存登记门店派）" if result["mode"] == "stock" else "台账（已售，按 POS 销售门店派）"
+        mode_text = (
+            "增量（不动清单外的行）"
+            if result.get("incremental", True)
+            else "全量快照（清单外的同类行已撤下，不再推给门店）"
+        )
         msg = (
-            f"{kind}：读 {result['rows']} 行，入库 {result['written']} 台，"
+            f"{kind} · {mode_text}：读 {result['rows']} 行，入库 {result['written']} 台，"
             f"数据截至 {result['asof']}"
         )
         if result["bad_imei"]:

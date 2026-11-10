@@ -246,11 +246,34 @@
       <input type="file" name="csv_file" accept=".csv" required>
     </label>
     <label class="field">
+      <span>导入方式</span>
+      <select name="import_mode" onchange="
+        var full=this.value==='full';
+        document.getElementById('modeHint').textContent = full
+          ? '全量快照：这份必须是完整清单，清单里没出现的同类机器会被撤下、不再推给门店。'
+          : '增量：只写这份清单里的机器，清单外的机器一律不动（日常日更选这个）。';
+      ">
+        <option value="incremental" selected>增量（推荐：只加这次清单里的）</option>
+        <option value="full">全量快照（完整清单才选）</option>
+      </select>
+    </label>
+    <label class="field">
       <span>数据截至</span>
       <input type="date" name="asof" value="{{ today_iso }}">
     </label>
-    <p class="muted">按 IMEI 覆盖；清单里没有的行不删，只是不再推给门店。店名对不上的行先挂在「待建店」（仅管理员可见），补门店档案后再导即可归位。</p>
-    <button type="submit">导入</button>
+    <p class="muted" id="modeHint">
+      增量：只写这份清单里的机器，清单外的机器一律不动（日常日更选这个）。
+    </p>
+    <p class="muted">
+      台账（已售）CSV 一般只带已建档门店，选增量；库存（未售）导出一般是整份快照，选全量才能把已卖掉的库存机撤下。
+      按 IMEI 覆盖、行不删；店名对不上的机器挂在「待建店」（仅管理员可见），补档案后重导即可归位。
+    </p>
+    <button type="submit" onclick="
+      if (this.form.import_mode.value === 'full') {
+        return confirm('全量快照会把这份清单里没出现的已售/未售机器从门店视图撤下（行还在，只是不再推给门店）。确认这是完整清单？');
+      }
+      return true;
+    ">导入</button>
   </form>
   <p class="muted">门店报完的结论在这里导出，回灌台账用：<a href="{{ url_for('imei_export') }}">导出门店自报 CSV</a>
     · <a href="{{ url_for('imei_export_todo') }}">导出待办清单（含客户类型 / 激活日）</a></p>

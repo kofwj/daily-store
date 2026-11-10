@@ -583,10 +583,16 @@ def import_rows(
     data: bytes,
     asof: str = "",
     *,
-    mark_seen: bool = True,
+    mark_seen: bool = False,
     rule_ver: int = 2,
 ) -> Dict[str, Any]:
     """导入一份 CSV：台账（已售）或库存明细（未售）都认，按 IMEI 覆盖，不删行。
+
+    `mark_seen`：**默认 False = 增量导入**（2026-11-10 用户拍板）。
+    - False：只写本次 CSV 里的行，**不动清单外的任何行**。日常日更（只带已建档店）
+      必须用这个，否则台账里没出现的机器会被整类 `seen=0`，从门店视图消失。
+    - True：完整快照模式，先把这一类（已售/未售各导各的）`seen=0` 再标回来；
+      只有下发的确实是**完整清单**时才用，页面下拉里有二次确认。
 
     台账模式：`store` = POS 销售门店 → 状态已售，派给销售店。
     库存模式：有「串码标签」列，只收 移动顺差 → 状态未售，派给库存登记店。
@@ -717,6 +723,8 @@ def import_rows(
         "unmatched": sorted(unmapped.items(), key=lambda kv: -kv[1]),
         "asof": stamp,
         "mode": "stock" if stock_mode else "ledger",
+        # 页面提示用：这次是增量还是全量（全量才会把清单外的行 seen=0）
+        "incremental": not mark_seen,
     }
 
 

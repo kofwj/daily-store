@@ -37,10 +37,15 @@ def _login(client, username="admin", pin="123456"):
     client.post("/login", data={"username": username, "pin": pin})
 
 
-def _upload(client, *rows, asof="2026-11-02"):
+def _upload(client, *rows, asof="2026-11-02", mode="incremental"):
+    """默认走**增量**（2026-11-10 起页面默认就是增量）；要全量语义的用例显式传 mode="full"。"""
     return client.post(
         "/imei/import",
-        data={"csv_file": (_csv(*rows), "todo.csv"), "asof": asof},
+        data={
+            "csv_file": (_csv(*rows), "todo.csv"),
+            "asof": asof,
+            "import_mode": mode,
+        },
         content_type="multipart/form-data",
         follow_redirects=True,
     )
@@ -203,10 +208,11 @@ def test_photo_rejects_non_image(client):
         assert conn.execute("SELECT COUNT(*) FROM imei_reports").fetchone()[0] == 0
 
 
-def test_reimport_hides_gone_rows_but_keeps_them(client):
+def test_full_import_hides_gone_rows_but_keeps_them(client):
+    """全量快照模式：清单里消失的行标 seen=0（行还在，只是不再推给门店）。"""
     _login(client)
-    _upload(client, _row("860000000000061", ALPHA))
-    _upload(client, _row("860000000000062", ALPHA))
+    _upload(client, _row("860000000000061", ALPHA), mode="full")
+    _upload(client, _row("860000000000062", ALPHA), mode="full")
     html = client.get("/imei?show=open").get_data(as_text=True)
     assert "860000000000061" not in html
     assert "860000000000062" in html
@@ -217,6 +223,41 @@ def test_reimport_hides_gone_rows_but_keeps_them(client):
         total = conn.execute("SELECT COUNT(*) FROM imei_todo").fetchone()[0]
     assert seen == 0 and total == 2
 
+
+def test_incremental_import_keeps_other_rows_visible(client):
+    """默认增量导入：只写本次清单里的行，清单外的行 seen/内容一律不动。
+
+    这是 2026-11-10 线上事故的回归：日更只带已建档店，走全量会把另外 56 台打 seen=0。
+    """
+    _login(client)
+    _upload(client, _row("860000000000071", ALPHA), _row("860000000000072", ALPHA), mode="full")
+    # 第二次只带 071（模拟"只下发已建档店"的日更）
+    _upload(client, _row("860000000000071", ALPHA))
+    html = client.get("/imei?show=open").get_data(as_text=True)
+    assert "860000000000071" in html
+    assert "860000000000072" in html  # 清单外那台没被撤下
+    with db.get_db() as conn:
+        assert conn.execute(
+            "SELECT seen FROM imei_todo WHERE imei='860000000000072'"
+        ).fetchone()["seen"] == 1
+        assert conn.execute("SELECT COUNT(*) FROM imei_todo WHERE seen=0").fetchone()[0] == 0
+
+
+def test_incremental_import_is_default(client):
+    """页面没传 import_mode 时按增量走（默认值就是增量）。"""
+    _login(client)
+    _upload(client, _row("860000000000081", ALPHA), _row("860000000000082", ALPHA), mode="full")
+    resp = client.post(
+        "/imei/import",
+        data={"csv_file": (_csv(_row("860000000000081", ALPHA)), "todo.csv"), "asof": "2026-11-02"},
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert "增量" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        assert conn.execute(
+            "SELECT seen FROM imei_todo WHERE imei='860000000000082'"
+        ).fetchone()["seen"] == 1
 
 def test_bad_csv_reports_error(client):
     _login(client)
@@ -1755,8 +1796,12 @@ def test_todo_keeps_seen1_across_month_boundary(client, monkeypatch):
         f"860000000000901,{ALPHA},Y600 Pro,小李,2026-10-31,2,3,D3-6,确认未办,无,",
         f"860000000000902,{ALPHA},Y600 Pro,小李,2026-10-31,2,3,D3-6,确认未办,无,",
     )
-    # 第二次只导一台：901 还在最新清单（seen=1），902 被标 seen=0（不在最新清单）
-    _upload(client, f"860000000000901,{ALPHA},Y600 Pro,小李,2026-10-31,2,3,D3-6,确认未办,无,")
+    # 第二次只导一台（**全量快照**语义）：901 还在最新清单（seen=1），902 被标 seen=0
+    _upload(
+        client,
+        f"860000000000901,{ALPHA},Y600 Pro,小李,2026-10-31,2,3,D3-6,确认未办,无,",
+        mode="full",
+    )
     monkeypatch.setattr(db_imei, "today_local", lambda: date(2026, 12, 1))
     with db.get_db() as conn:
         ids = [r["id"] for r in conn.execute("SELECT id FROM stores WHERE code='store-alpha'")]
@@ -2321,6 +2366,7 @@ def test_full_import_rejects_rule_ver_1(client):
                 conn,
                 (CSV_HEAD + _row("860000000002021", ALPHA) + "\n").encode("utf-8"),
                 "2026-11-02",
+                mark_seen=True,
                 rule_ver=1,
             )
         assert conn.execute("SELECT COUNT(*) FROM imei_todo").fetchone()[0] == 0
