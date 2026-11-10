@@ -344,7 +344,9 @@ def test_deal_picker_lists_only_own_stock(client):
         )
         opts = db_imei.pool_picker(conn, own)
         assert {o["imei"] for o in opts} == {"861000000000001", "861000000000002"}
-        assert all(o["label"].startswith(o["imei"][-6:]) for o in opts)
+        # 下拉只给串码本身，不带机型（机型由页面回填到「机型」栏）
+        assert "label" not in opts[0]
+        assert opts[0]["model"]
     page = client.get("/deal").get_data(as_text=True)
     assert "本店库存里还有 2 台在库顺差机" in page
     assert "861000000000001" in page
@@ -413,3 +415,54 @@ def test_deal_picker_hand_tail_wins_when_both_given(client):
     with db.get_db() as conn:
         decl = conn.execute("SELECT imei FROM imei_decl").fetchone()
         assert decl["imei"] == "861000000000022"
+
+
+def test_deal_picker_option_text_is_imei_only(client):
+    """下拉选项文字只有串码本身（用户 2026-11-10 拍板），机型颜色走「机型」那栏。"""
+    own = "示例市甲街vivo体验店"
+    _login(client)
+    with db.get_db() as conn:
+        db_imei.import_rows(
+            conn,
+            (
+                "imei,store,model,sp,day,串码标签\n"
+                f"861000000000031,{own},S60元气版全网通(12+256G) 星星海,小李,2026-11-01,移动顺差\n"
+            ).encode(),
+            asof="2026-11-02",
+        )
+    page = client.get("/deal").get_data(as_text=True)
+    assert '<option value="861000000000031"' in page
+    assert ">861000000000031</option>" in page  # 选项文字就是串码
+    assert "星星海</option>" not in page  # 机型不塞进选项
+    assert 'data-model="S60元气版全网通(12+256G) 星星海"' in page  # 但带给前端回填
+
+
+def test_deal_picker_writes_model_when_picked(client):
+    """下拉选中保存时，机型按串码台账回填（即使门店没填机型）。"""
+    own = "示例市甲街vivo体验店"
+    _login(client)
+    with db.get_db() as conn:
+        db_imei.import_rows(
+            conn,
+            (
+                "imei,store,model,sp,day,串码标签\n"
+                f"861000000000041,{own},Y600 Pro全网通(12+512G) 浮光金,小李,2026-11-01,移动顺差\n"
+            ).encode(),
+            asof="2026-11-02",
+        )
+    resp = client.post(
+        "/deal",
+        data={
+            "store_id": _store_id(),
+            "phone": "15500000097",
+            "closed": "1",
+            "imei_pick": "861000000000041",
+            "note": "客户直接要这台",
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    with db.get_db() as conn:
+        row = conn.execute("SELECT model, imei FROM deal_posts ORDER BY id DESC LIMIT 1").fetchone()
+        assert row["model"] == "Y600 Pro全网通(12+512G) 浮光金"
+        assert row["imei"] == "861000000000041"

@@ -297,6 +297,10 @@ def register_daily(app) -> None:
                 # 成交时填了串码：只认池子里还在的那台（尾号 6 位也认）。
                 # 池子里没有就不记垫资，但触客照常保存——条数是 KPI，不能因为串码丢记录。
                 raw_imei = (values.get("imei") or "").strip()
+                # 下拉选的（没手填串码）→ 机型和颜色一律按串码台账回填到「机型」那栏
+                picked_from_list = bool(
+                    (request.form.get("imei_pick") or "").strip() and not raw_imei
+                )
                 if raw_imei:
                     found = db_imei.find_stock_imei(conn, raw_imei)
                     if found is None:
@@ -308,7 +312,7 @@ def register_daily(app) -> None:
                         values["imei"] = ""
                     else:
                         values["imei"] = found["imei"]
-                        if not values["model"].strip():
+                        if picked_from_list or not values["model"].strip():
                             values["model"] = str(found["model"] or "")
                         values["imei_model"] = str(found["model"] or "")
                 text = deal.render_deal(

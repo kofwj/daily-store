@@ -456,6 +456,9 @@ def pool_picker(
     为什么只给本店：池子是南通共享池，A 店可以卖 B 店库存的机器，但门店最常卖的
     还是自己店里那几台；把 900 多台全塞进下拉，手机端没法用。要卖别家的机器，
     照旧填尾号 6 位（服务端按 IMEI 模糊查，全池都能命中）。
+
+    下拉只给**串码本身**（用户 2026-11-10 拍板）：机型和颜色由页面在选中后回填到
+    「机型」那一栏，串码这一格只放串码，对上机器上的标签最快。
     """
     ensure(conn)
     if not store_name:
@@ -467,22 +470,14 @@ def pool_picker(
         WHERE t.seen=1 AND t.status=?
           AND {no_live_decl_sql()}
           AND t.own_store=?
-        ORDER BY t.model, t.imei
+        ORDER BY t.imei
         LIMIT ?
         """,
         (STATUS_STOCK, store_name, int(limit)),
     ).fetchall()
     out: List[Dict[str, Any]] = []
     for row in rows:
-        imei = str(row["imei"])
-        out.append(
-            {
-                "imei": imei,
-                "model": str(row["model"] or ""),
-                # 下拉里给「尾号 · 机型」，店员按机器上的尾号就能对上
-                "label": f"{imei[-6:]} · {row['model'] or '未登记机型'}",
-            }
-        )
+        out.append({"imei": str(row["imei"]), "model": str(row["model"] or "")})
     return out
 
 
