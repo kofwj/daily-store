@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import Any, Dict, List
 
 from flask import (
     Response,
@@ -254,6 +255,10 @@ def register_daily(app) -> None:
             text = ""
             today_d = db.today_local()
             editable = True
+            # 触客页「顺差串码」下拉：本店库存登记的在库顺差机（只读，不写库）
+            imei_options: List[Dict[str, Any]] = []
+            if editable and db_imei.user_in_imei_scope(conn, g.user):
+                imei_options = db_imei.pool_picker(conn, str(store["name"] or ""))
             if request.method == "GET":
                 raw_deal_id = request.args.get("deal_id") or ""
                 edit_id = parse_int(raw_deal_id, None)
@@ -364,6 +369,7 @@ def register_daily(app) -> None:
                 store=store,
                 stores=stores,
                 form=values,
+                imei_options=imei_options,
                 deal_text=text,
                 is_admin=g.user["role"] == "admin",
                 mine_today=mine_today,

@@ -448,6 +448,44 @@ def find_stock_imei(conn: sqlite3.Connection, query: str) -> Optional[Dict[str, 
     return dict(rows[0])
 
 
+def pool_picker(
+    conn: sqlite3.Connection, store_name: str = "", limit: int = 120
+) -> List[Dict[str, Any]]:
+    """触客页「顺差串码」下拉候选：**本店库存登记的在库顺差机**。
+
+    为什么只给本店：池子是南通共享池，A 店可以卖 B 店库存的机器，但门店最常卖的
+    还是自己店里那几台；把 900 多台全塞进下拉，手机端没法用。要卖别家的机器，
+    照旧填尾号 6 位（服务端按 IMEI 模糊查，全池都能命中）。
+    """
+    ensure(conn)
+    if not store_name:
+        return []
+    rows = conn.execute(
+        f"""
+        SELECT t.imei, t.model, t.own_store
+        FROM imei_todo t
+        WHERE t.seen=1 AND t.status=?
+          AND {no_live_decl_sql()}
+          AND t.own_store=?
+        ORDER BY t.model, t.imei
+        LIMIT ?
+        """,
+        (STATUS_STOCK, store_name, int(limit)),
+    ).fetchall()
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        imei = str(row["imei"])
+        out.append(
+            {
+                "imei": imei,
+                "model": str(row["model"] or ""),
+                # 下拉里给「尾号 · 机型」，店员按机器上的尾号就能对上
+                "label": f"{imei[-6:]} · {row['model'] or '未登记机型'}",
+            }
+        )
+    return out
+
+
 def ensure(conn: sqlite3.Connection) -> None:
     # 不用 executescript：sqlite3.executescript 会先发隐式 COMMIT，若外层正握着写事务会被提前提交；
     # 先只读查 sqlite_master / table_info，表与索引齐备时零 DDL 执行、零表结构锁。

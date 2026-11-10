@@ -42,11 +42,22 @@
       </p>
       <p>
         <label>顺差串码<small class="muted">（可空）</small></label>
+        {% if imei_options %}
+        <select name="imei_pick" title="选本店在库的顺差机；也可以在下面填尾号搜全池">
+          <option value="">— 不关联 / 手填尾号 —</option>
+          {% for o in imei_options %}
+          <option value="{{ o.imei }}" {% if form.imei == o.imei %}selected{% endif %}>{{ o.label }}</option>
+          {% endfor %}
+        </select>
+        <span class="muted">本店库存里还有 {{ imei_options|length }} 台在库顺差机</span>
+        {% endif %}
         <input name="imei" value="{{ form.imei }}" inputmode="numeric" pattern="[0-9]{6,20}" maxlength="20"
                title="填全 15 位或后 6 位；只在顺差池子里找得到才记"
-               placeholder="尾号 6 位或完整串码，不填不影响成交" autocomplete="off">
+               placeholder="{{ '卖别店的机器？填尾号 6 位或完整串码' if imei_options else '尾号 6 位或完整串码，不填不影响成交' }}" autocomplete="off">
         {% if form.imei %}
         <span class="muted">已关联 {{ form.imei }}{% if form.imei_model %} · {{ form.imei_model }}{% endif %}</span>
+        {% elif imei_options %}
+        <span class="muted">上面选一台，或这里填尾号；填了才记 100 元让利垫资（待核）</span>
         {% else %}
         <span class="muted">填了才记 100 元让利垫资（待核）</span>
         {% endif %}

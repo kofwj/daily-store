@@ -325,3 +325,91 @@ def test_imei_auto_rows_are_locked(client):
             )
         with pytest.raises(ValueError):
             db.delete_advance(conn, int(adv["id"]), sid, user_id=1)
+
+
+def test_deal_picker_lists_only_own_stock(client):
+    """触客页下拉只给**本店库存登记**的在库顺差机（900 多台全塞进去手机端没法用）。"""
+    own = "示例市甲街vivo体验店"
+    _login(client)
+    with db.get_db() as conn:
+        db_imei.import_rows(
+            conn,
+            (
+                "imei,store,model,sp,day,串码标签\n"
+                f"861000000000001,{own},S60元气版,小李,2026-11-01,移动顺差\n"
+                f"861000000000002,{own},Y600 Pro,小李,2026-11-01,移动顺差\n"
+                "861000000000003,示例市乙街vivo专卖店,X500 Pro,小李,2026-11-01,移动顺差\n"
+            ).encode(),
+            asof="2026-11-02",
+        )
+        opts = db_imei.pool_picker(conn, own)
+        assert {o["imei"] for o in opts} == {"861000000000001", "861000000000002"}
+        assert all(o["label"].startswith(o["imei"][-6:]) for o in opts)
+    page = client.get("/deal").get_data(as_text=True)
+    assert "本店库存里还有 2 台在库顺差机" in page
+    assert "861000000000001" in page
+    assert "861000000000003" not in page  # 别店的机器不进下拉，但可手填尾号
+
+
+def test_deal_picker_selection_creates_pending(client):
+    """下拉选一台保存 → 生成待核垫资；选完再手填尾号时以手填为准。"""
+    own = "示例市甲街vivo体验店"
+    _login(client)
+    with db.get_db() as conn:
+        db_imei.import_rows(
+            conn,
+            (
+                "imei,store,model,sp,day,串码标签\n"
+                f"861000000000011,{own},S60元气版,小李,2026-11-01,移动顺差\n"
+                f"861000000000012,{own},Y600 Pro,小李,2026-11-01,移动顺差\n"
+            ).encode(),
+            asof="2026-11-02",
+        )
+    resp = client.post(
+        "/deal",
+        data={
+            "store_id": _store_id(),
+            "model": "S60元气版",
+            "phone": "15500000099",
+            "closed": "1",
+            "imei_pick": "861000000000011",
+            "note": "客户看中元气版",
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert "已记让利垫资待核".encode() in resp.data
+    with db.get_db() as conn:
+        decl = conn.execute("SELECT imei, state FROM imei_decl").fetchone()
+        assert decl["imei"] == "861000000000011" and decl["state"] == db_decl.DECL_PENDING
+
+
+def test_deal_picker_hand_tail_wins_when_both_given(client):
+    """下拉和责任田都填时，手填优先（门店卖别店机器要靠手填尾号）。"""
+    _login(client)
+    with db.get_db() as conn:
+        db_imei.import_rows(
+            conn,
+            (
+                "imei,store,model,sp,day,串码标签\n"
+                "861000000000021,示例市甲街vivo体验店,S60,小李,2026-11-01,移动顺差\n"
+                "861000000000022,示例市乙街vivo专卖店,Y600,小李,2026-11-01,移动顺差\n"
+            ).encode(),
+            asof="2026-11-02",
+        )
+    resp = client.post(
+        "/deal",
+        data={
+            "store_id": _store_id(),
+            "model": "Y600",
+            "phone": "15500000098",
+            "closed": "1",
+            "imei_pick": "861000000000021",
+            "imei": "000022",  # 尾号命中乙店那台
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    with db.get_db() as conn:
+        decl = conn.execute("SELECT imei FROM imei_decl").fetchone()
+        assert decl["imei"] == "861000000000022"

@@ -90,7 +90,11 @@ def form_values(raw: Mapping[str, str] | None = None, *, posted: bool = False) -
         "hall_query": raw.get("hall_query") or default_on,
         "recommend": (raw.get("recommend") or "").strip(),
         "closed": raw.get("closed") or "0",
-        "imei": (raw.get("imei") or "").strip()[:32],
+        # 下拉选中优先，其次手填串码：两处都给时以手填为准（门店要卖别店机器得手填）
+        "imei": (
+            (raw.get("imei") or "").strip()
+            or (raw.get("imei_pick") or "").strip()
+        )[:32],
         "student": raw.get("student") or "0",
         "show_phone": raw.get("show_phone") or "0",
         "opener": (raw.get("opener") or "").strip(),
