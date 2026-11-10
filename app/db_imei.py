@@ -342,6 +342,22 @@ _SCHEMA_STMTS = (
     """,
     "CREATE INDEX IF NOT EXISTS idx_imei_carry_log_imei ON imei_carry_log(imei, id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_imei_carry_log_store ON imei_carry_log(store_id, id DESC)",
+    """
+    CREATE TABLE IF NOT EXISTS imei_pool_lock (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        imei TEXT NOT NULL,
+        claim_store_id INTEGER NOT NULL REFERENCES stores(id),
+        claim_user_id INTEGER,
+        report_id INTEGER,
+        action TEXT NOT NULL DEFAULT '',
+        locked_at TEXT NOT NULL,
+        released_at TEXT,
+        released_by INTEGER
+    )
+    """,
+    # 一台机器同时只能有**一把**未释放的锁；释放后允许重新抢（历史行全部留着，释放不删行）
+    "CREATE UNIQUE INDEX IF NOT EXISTS uniq_imei_pool_lock_open ON imei_pool_lock(imei) WHERE released_at IS NULL",
+    "CREATE INDEX IF NOT EXISTS idx_imei_pool_lock_store ON imei_pool_lock(claim_store_id, released_at)",
 )
 
 # ensure() 的快速路径要认全这些对象；新增审计表时同步加进来，否则老库会漏建。
@@ -358,6 +374,9 @@ _SCHEMA_OBJECTS = (
     "imei_carry_log",
     "idx_imei_carry_log_imei",
     "idx_imei_carry_log_store",
+    "imei_pool_lock",
+    "uniq_imei_pool_lock_open",
+    "idx_imei_pool_lock_store",
 )
 
 # 老库上补列（表是懒建的，之前跑过的库没有这些列）
@@ -534,14 +553,22 @@ def import_rows(
     asof: str = "",
     *,
     mark_seen: bool = True,
+    rule_ver: int = 2,
 ) -> Dict[str, Any]:
     """导入一份 CSV：台账（已售）或库存明细（未售）都认，按 IMEI 覆盖，不删行。
 
     台账模式：`store` = POS 销售门店 → 状态已售，派给销售店。
     库存模式：有「串码标签」列，只收 移动顺差 → 状态未售，派给库存登记店。
     泰州行直接跳过（不计入库数，单独回报）。
+
+    `rule_ver` 只影响**新建行**（`ON CONFLICT` 不碰它，老行永远保持原值）：
+    1 = 2026-11-09 前存量（按库里 remain_days + 11-16 宽限看），2 = 按起算日实时算。
+    **全量导入（`mark_seen=True`）禁止写 1**：宽限是老存量的专利，外溢会让新机躲催办。
     """
     ensure(conn)
+    if int(rule_ver) != 2 and mark_seen:
+        raise ValueError("全量导入只能 rule_ver=2（1 只留给 2026-11-09 前存量，不能外溢）")
+    rule_ver = int(rule_ver)
     try:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError:
@@ -611,7 +638,7 @@ def import_rows(
                 model, sp, sold_day, age_days, remain_days,
                 stage, state, strength, evidence, pos_biz_type, data_flag,
                 asof, rule_ver, seen, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2, 1, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
             ON CONFLICT(imei) DO UPDATE SET
                 status=excluded.status, store_id=excluded.store_id,
                 sold_store=excluded.sold_store, own_store=excluded.own_store,
@@ -643,6 +670,7 @@ def import_rows(
                 _text(row.get(cols["pos_type"]), 40) if cols["pos_type"] else "",
                 _text(row.get(cols["data_flag"]), 200) if cols["data_flag"] else "",
                 stamp,
+                rule_ver,
                 now,
             ),
         )
@@ -1204,9 +1232,81 @@ def mark_summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> List[Dic
     return out
 
 
-def pool_summary(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
-    """池子按库存门店汇总：店名、台数、前三个机型（手机弱网别一上来铺 968 行）。"""
+def _unmapped_where() -> Tuple[str, List[Any]]:
+    """待建店池子的谓词（唯一来源）：`seen=1 AND status='已售' AND store_id IS NULL`，
+    **不加任何日期/天数/数据标记条件**（2026-11-10 用户拍板：超期照常能办）。
+
+    「未办」与 `summary.unmapped`、carryover 同一谓词：清单状态不是已办/已退货，
+    且最新一条自报不是已办/已退货。返回 `(where_sql, 占位参数)`，调用方自己加 join。
+    """
+    marks = ",".join("?" * len(CLOSED_STATES))
+    sql = (
+        "t.seen=1 AND t.status=? AND t.store_id IS NULL"
+        f" AND t.state NOT IN ({marks})"
+        f" AND COALESCE(r.action,'') NOT IN ({marks})"
+    )
+    return sql, [STATUS_SOLD, *CLOSED_STATES, *CLOSED_STATES]
+
+
+_LATEST_R_CTE = """
+        WITH latest_r AS (
+          SELECT imei, action, created_at, user_id
+          FROM imei_reports
+          WHERE id IN (SELECT MAX(id) FROM imei_reports GROUP BY imei)
+        )
+"""
+
+
+def pool_summary(
+    conn: sqlite3.Connection, *, source: str = "stock"
+) -> List[Dict[str, Any]]:
+    """池子分组汇总，两种来源各自一套口径（不复制查询、不改库存语义）：
+
+    - `source='stock'`（默认）：在库未售的顺差机，按**库存登记门店**（own_store）分组；
+    - `source='unmapped'`：待建店待办（已售但门店档案里没有），按 **dispatch_store**
+      （POS 销售店名）分组——已售行的 `own_store` 全是空串，按它分组会塌成一行「未登记」。
+    """
     ensure(conn)
+    if source == "unmapped":
+        where, pool_params = _unmapped_where()
+        rows = list(
+            conn.execute(
+                _LATEST_R_CTE
+                + f"""
+                SELECT t.dispatch_store AS grp, COUNT(*) AS n,
+                       COUNT(DISTINCT CASE WHEN t.model<>'' THEN t.model END) AS models
+                FROM imei_todo t
+                LEFT JOIN latest_r r ON r.imei = t.imei
+                WHERE {where}
+                GROUP BY t.dispatch_store ORDER BY n DESC
+                """,
+                pool_params,
+            )
+        )
+        seg: Dict[str, List[Dict[str, Any]]] = {}
+        for row in conn.execute(
+            _LATEST_R_CTE
+            + f"""
+            SELECT t.dispatch_store AS grp, t.model, COUNT(*) AS n
+            FROM imei_todo t
+            LEFT JOIN latest_r r ON r.imei = t.imei
+            WHERE {where}
+            GROUP BY t.dispatch_store, t.model ORDER BY t.dispatch_store, n DESC
+            """,
+            pool_params,
+        ):
+            bucket = seg.setdefault(row["grp"] or "", [])
+            if len(bucket) < 3:
+                bucket.append({"model": row["model"] or "未登记", "n": row["n"]})
+        return [
+            {
+                "own_store": row["grp"] or "(空)",
+                "dispatch_store": row["grp"] or "(空)",
+                "n": row["n"],
+                "models": seg.get(row["grp"] or "", []),
+            }
+            for row in rows
+        ]
     rows = list(
         conn.execute(
             """
@@ -1241,14 +1341,47 @@ def pool_summary(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
 
 
 def pool_rows(
-    conn: sqlite3.Connection, limit: int = 0, own_store: str = ""
+    conn: sqlite3.Connection,
+    limit: int = 0,
+    own_store: str = "",
+    *,
+    source: str = "stock",
 ) -> List[Dict[str, Any]]:
-    """南通池子里还没卖的顺差机器（第二阶段「可用串码查询」的口子）。
+    """南通池子里可以动手的机器（第二阶段「可用串码查询」的口子）。
 
     这条查询**不按门店过滤**：池子是共享的，A 店可以卖 B 店库存的机器，
     所以谁登录都能看到全池；真要调拨还是走线下审批，这里只回答「池子里有什么」。
+
+    `source`：
+    - `stock`（默认）：在库未售，行为与改前逐行一致；
+    - `unmapped`：待建店待办 = 已售但门店档案里没有的机器（`store_id IS NULL`），
+      **不设任何日期门**，超期行照样在池子里、照样可提交，只多一个 `overdue` 提示。
     """
     ensure(conn)
+    if source == "unmapped":
+        where, pool_params = _unmapped_where()
+        sql = (
+            _LATEST_R_CTE
+            + f"""
+            SELECT t.imei, t.model, t.sp, t.sold_store, t.dispatch_store, t.store_id,
+                   t.sold_day, t.age_days, t.remain_days, t.stage, t.state, t.data_flag,
+                   t.user_type, t.manual_activated_at, t.asof, t.status, t.rule_ver,
+                   r.action AS report_action, r.created_at AS report_at,
+                   u.display_name AS reporter
+            FROM imei_todo t
+            LEFT JOIN latest_r r ON r.imei = t.imei
+            LEFT JOIN users u ON u.id = r.user_id
+            WHERE {where}
+            ORDER BY t.remain_days, t.dispatch_store, t.imei
+            """
+        )
+        if own_store:
+            sql = sql.replace("ORDER BY", "AND t.dispatch_store=? ORDER BY")
+            pool_params = [*pool_params, own_store]
+        if limit:
+            sql += " LIMIT ?"
+            pool_params = [*pool_params, int(limit)]
+        return enrich([dict(row) for row in conn.execute(sql, pool_params)])
     sql = """
         SELECT t.imei, t.model, t.own_store, t.dispatch_store, t.store_id,
                t.sold_day, t.asof, s.name AS store_name, s.short_name AS store_short
@@ -1351,24 +1484,25 @@ def summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> Dict[str, Any
     ).fetchone()[0]
     unmapped = 0
     if ids:
+        where, where_params = _unmapped_where()
         unmapped = conn.execute(
-            f"""
-            WITH latest_r AS (
-              SELECT imei, action
-              FROM imei_reports
-              WHERE id IN (SELECT MAX(id) FROM imei_reports GROUP BY imei)
-            )
-            SELECT COUNT(*) FROM imei_todo t
-            LEFT JOIN latest_r r ON r.imei = t.imei
-            WHERE t.seen=1 AND t.status=? AND t.store_id IS NULL
-              AND t.state NOT IN ({closed_marks})
-              AND COALESCE(r.action, '') NOT IN ({closed_marks})
-            """,
-            [STATUS_SOLD, *CLOSED_STATES, *CLOSED_STATES],
+            _LATEST_R_CTE
+            + f"SELECT COUNT(*) FROM imei_todo t LEFT JOIN latest_r r ON r.imei = t.imei WHERE {where}",
+            where_params,
         ).fetchone()[0]
     pool = conn.execute(
         "SELECT COUNT(*) FROM imei_todo WHERE seen=1 AND status=?", (STATUS_STOCK,)
     ).fetchone()[0]
+    # 本店代办：待建店池子里由**本店**（claim_store_id）已经锁定的台数（未释放）
+    claimed = 0
+    if ids:
+        claimed = conn.execute(
+            f"""
+            SELECT COUNT(*) FROM imei_pool_lock
+            WHERE released_at IS NULL AND {_store_in('claim_store_id', ids)[0]}
+            """,
+            _store_in("claim_store_id", ids)[1],
+        ).fetchone()[0]
     return {
         "open": int(row["open_n"] or 0),
         "overdue": int(row["overdue_n"] or 0),
@@ -1380,6 +1514,9 @@ def summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> Dict[str, Any
         "stores": int(row["store_n"] or 0),
         "unmapped": int(unmapped or 0),
         "pool": int(pool or 0),
+        # 待建店池子（= unmapped，同一谓词，测试断言两者相等）；页头「待建店 M」用它
+        "pool_unmapped": int(unmapped or 0),
+        "claimed": int(claimed or 0),
     }
 
 
@@ -1393,11 +1530,15 @@ def add_report(
     note: str = "",
     photo: str = "",
     user_id: Optional[int] = None,
+    begin: bool = True,
 ) -> int:
     """门店自报一条（只增不改）。返回新记录 id。
 
     选「已办」时业务类型必填（四类之一或「其他」，选「其他」必填说明，记录不全的两类必填说明或截图）；
     选「已退货 / 待核」时不要求业务类型。「非本店」已下线，新报直接拒绝。
+
+    `begin=False` 给「抢锁 → 写报告」同一事务用：`claim_pool_row()` 已经 `BEGIN IMMEDIATE`，
+    再抢一次只会被 `db_core` 吞掉并刷 warning 日志。
     """
     ensure(conn)
     if action not in ACTIONS:
@@ -1417,7 +1558,8 @@ def add_report(
             )
     else:
         biz = ""
-    begin_immediate(conn)
+    if begin:
+        begin_immediate(conn)
     cur = conn.execute(
         """
         INSERT INTO imei_reports(imei, store_id, action, biz_type, note, photo, user_id, created_at)
@@ -1426,6 +1568,197 @@ def add_report(
         (imei, store_id, action, biz, _text(note, 200), photo, user_id, _now()),
     )
     return int(cur.lastrowid or 0)
+
+
+def pool_open_row(conn: sqlite3.Connection, imei: str) -> Optional[Dict[str, Any]]:
+    """按 IMEI 取一条**待建店池子行**（`store_id IS NULL` + 已售 + 未办）；不在池子返回 None。
+
+    这层只回答「这串码能不能代办」，**不判断日期**：不设 7 天窗/remain 门槛（2026-11-10 拍板）。
+    """
+    ensure(conn)
+    where, params = _unmapped_where()
+    row = conn.execute(
+        _LATEST_R_CTE
+        + f"""
+        SELECT t.imei, t.model, t.sold_store, t.dispatch_store, t.sold_day,
+               t.remain_days, t.state, t.data_flag, t.user_type, t.manual_activated_at,
+               t.rule_ver, t.asof, t.status
+        FROM imei_todo t
+        LEFT JOIN latest_r r ON r.imei = t.imei
+        WHERE {where} AND t.imei=?
+        """,
+        [*params, str(imei).strip()],
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def claim_pool_row(
+    conn: sqlite3.Connection,
+    *,
+    imei: str,
+    claim_store_id: int,
+    action: str = "",
+    user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """代办待建店机器时先抢锁：`imei_pool_lock` 一台只能被一家店办（V0.3.70 一期）。
+
+    为什么要锁而不是写回 `imei_todo.store_id`：下一份全量清单的 `DO UPDATE` 会把 store_id
+    覆盖回 POS 解析结果（待建店又变 NULL），写了也会被冲掉；而锁表是只增的审计事实。
+
+    - 本函数内含 `BEGIN IMMEDIATE`，调用方随后的 `add_report(..., begin=False)` 复用同一事务；
+      任一步失败由外层 `get_db()` 回滚（锁与自报同生同死，不会只留一半）；
+    - 已被别的店锁住 → `ValueError`（带店简称与锁时间，**不回显对方报告内容**）；
+    - 自己已锁过 → 幂等返回原锁（同一家店重复提交不报冲突）；
+    - 不在待建店池子里 → `ValueError`（已建档 / 已办 / 清单里没有）。
+    """
+    ensure(conn)
+    imei = str(imei).strip()
+    store_id = int(claim_store_id)
+    begin_immediate(conn)
+    # 先看锁：本店已经抢过就直接幂等返回（同一家店可以「待核 → 已办」接着补报，
+    # 那条行在第一次自报后就已经不在池子里了，所以锁必须先查、池子判定后查）
+    cur = conn.execute(
+        """
+        SELECT l.*, s.short_name AS claim_short, s.name AS claim_name
+        FROM imei_pool_lock l
+        LEFT JOIN stores s ON s.id = l.claim_store_id
+        WHERE l.imei=? AND l.released_at IS NULL
+        """,
+        (imei,),
+    ).fetchone()
+    if cur is not None:
+        if int(cur["claim_store_id"]) == store_id:
+            return {
+                "imei": imei,
+                "claim_store_id": store_id,
+                "locked_at": cur["locked_at"],
+                "own": True,
+                # 已经自报过的话这行可能已不在池子里（None 是正常的，调用方别当错）
+                "row": pool_open_row(conn, imei),
+            }
+        who = (cur["claim_short"] or cur["claim_name"] or "其他门店")
+        when = str(cur["locked_at"] or "")[5:16]
+        raise ValueError(f"这台已被 {who} 在 {when} 办理，不用重复报")
+    row = pool_open_row(conn, imei)
+    if row is None:
+        raise ValueError("这台不在待建店池子里（可能已办理、已退货或不在最新清单）")
+    try:
+        conn.execute(
+            """
+            INSERT INTO imei_pool_lock(
+                imei, claim_store_id, claim_user_id, report_id, action, locked_at
+            ) VALUES (?, ?, ?, NULL, ?, ?)
+            """,
+            (imei, store_id, int(user_id) if user_id is not None else None, _text(action, 20), _now()),
+        )
+    except sqlite3.IntegrityError:
+        raise ValueError("这台已被其他门店办理，不用重复报") from None
+    return {
+        "imei": imei,
+        "claim_store_id": store_id,
+        "locked_at": _now(),
+        "own": False,
+        "row": row,
+    }
+
+
+def attach_claim_report(conn: sqlite3.Connection, imei: str, report_id: int) -> None:
+    """把锁上的 `report_id` 补成对应的自报记录（同一事务内调用）。"""
+    if report_id:
+        conn.execute(
+            "UPDATE imei_pool_lock SET report_id=? WHERE imei=? AND released_at IS NULL",
+            (int(report_id), str(imei).strip()),
+        )
+
+
+def release_pool_lock(
+    conn: sqlite3.Connection,
+    *,
+    imei: str,
+    is_admin: bool = False,
+    user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """管理员释放锁（只记 `released_at/released_by`，**不删行**）。
+
+    默认不自动回池：已退货 / 办错了由管理员手动放回，留审计可查。
+    """
+    if not is_admin:
+        raise PermissionError("forbidden")
+    ensure(conn)
+    imei = str(imei).strip()
+    begin_immediate(conn)
+    cur = conn.execute(
+        "SELECT id FROM imei_pool_lock WHERE imei=? AND released_at IS NULL", (imei,)
+    ).fetchone()
+    if cur is None:
+        raise ValueError("这台没有未释放的代办锁")
+    now = _now()
+    conn.execute(
+        "UPDATE imei_pool_lock SET released_at=?, released_by=? WHERE id=?",
+        (now, int(user_id) if user_id is not None else None, int(cur["id"])),
+    )
+    return {"imei": imei, "released_at": now}
+
+
+def pool_claims(
+    conn: sqlite3.Connection,
+    store_ids: Sequence[int],
+) -> List[Dict[str, Any]]:
+    """本店代办过的待建店机器（锁未释放）：`/imei` 页折叠区用。
+
+    归属只认锁表，不写回 `imei_todo.store_id`；行上带原售出店（`dispatch_store`）。
+    池子行已办理完（已办/已退货）后从池子退出，但仍会留在这里，直到管理员释放。
+    """
+    ensure(conn)
+    ids = [int(s) for s in store_ids]
+    if not ids:
+        return []
+    clause, params = _store_in("l.claim_store_id", ids)
+    rows = conn.execute(
+        f"""
+        SELECT l.imei, l.claim_store_id, l.action AS claim_action, l.locked_at,
+               t.model, t.dispatch_store, t.sold_store, t.sold_day, t.remain_days,
+               t.state, t.data_flag, t.user_type, t.manual_activated_at, t.rule_ver,
+               t.asof, t.status, t.store_id,
+               s.short_name AS claim_short, s.name AS claim_name,
+               COALESCE(u.display_name, u.username, '') AS actor,
+               r.action AS report_action, r.biz_type AS report_biz_type,
+               r.created_at AS report_at, r.photo AS report_photo
+        FROM imei_pool_lock l
+        JOIN imei_todo t ON t.imei = l.imei
+        LEFT JOIN stores s ON s.id = l.claim_store_id
+        LEFT JOIN users u ON u.id = l.claim_user_id
+        LEFT JOIN imei_reports r ON r.id = l.report_id
+        WHERE l.released_at IS NULL AND {clause}
+        ORDER BY l.locked_at DESC, l.imei
+        """,
+        params,
+    )
+    out = [dict(row) for row in rows]
+    return enrich(out)
+
+
+def claim_log_rows(
+    conn: sqlite3.Connection, limit: int = 100
+) -> List[Dict[str, Any]]:
+    """代办锁审计（最近在前）：谁在哪家店抢了哪台、办了什么、释放了没有。"""
+    ensure(conn)
+    limit = max(1, min(int(limit), 500))
+    rows = conn.execute(
+        """
+        SELECT l.*, s.short_name AS claim_short, s.name AS claim_name,
+               COALESCE(u.display_name, u.username, '') AS actor,
+               COALESCE(ru.display_name, ru.username, '') AS releaser
+        FROM imei_pool_lock l
+        LEFT JOIN stores s ON s.id = l.claim_store_id
+        LEFT JOIN users u ON u.id = l.claim_user_id
+        LEFT JOIN users ru ON ru.id = l.released_by
+        ORDER BY l.locked_at DESC, l.imei
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    return [dict(row) for row in rows]
 
 
 def photo_store(conn: sqlite3.Connection, name: str) -> Optional[int]:
@@ -1639,11 +1972,14 @@ def export_reports(conn: sqlite3.Connection, store_ids: Sequence[int]) -> List[s
                    COALESCE(t.pos_biz_type, '') AS pos_type,
                    COALESCE(t.user_type, '') AS user_type,
                    COALESCE(t.manual_activated_at, '') AS manual_activated_at,
+                   COALESCE(t.sold_store, t.dispatch_store, '') AS sold_store,
+                   COALESCE(l.claim_store_id, 0) AS claim_store_id,
                    r.note, r.photo, r.created_at,
                    COALESCE(u.display_name, u.username, '') AS reporter
             FROM imei_reports r
             JOIN stores s ON s.id = r.store_id
             LEFT JOIN imei_todo t ON t.imei = r.imei
+            LEFT JOIN imei_pool_lock l ON l.imei = r.imei AND l.report_id = r.id
             LEFT JOIN users u ON u.id = r.user_id
             WHERE {clause}
             ORDER BY r.id

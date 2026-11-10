@@ -63,6 +63,11 @@ def _carryover_scope(value: str) -> str:
     return value if value in ("all", "lost", "grace", "carried") else "all"
 
 
+def _pool_tab(value: str) -> str:
+    """串码池的 tab：stock（默认＝原有在库视图）/ unmapped（待建店待办），其他值当 stock。"""
+    return "unmapped" if value == "unmapped" else "stock"
+
+
 def _to_rgb(im: Any) -> Any:
     """透明图先铺白底再转 RGB——直接砍 alpha，透明区的文字会压成黑块/花边。"""
     from PIL import Image
@@ -126,6 +131,31 @@ def _can_write(role: str) -> bool:
     return role in ("admin", "filler", "city")
 
 
+def _claim_target_store(conn, raw: str, back: str) -> Optional[int]:
+    """待建店池子行该记到哪家店：`target_store_id` 优先；没传且只有 1 家可访问店就默认那家。
+
+    - 只有 1 家店：不用选，直接那家（覆盖大多数店员账号）；
+    - 多家店 / admin：必须显式选，没选就 flash 让重选（**不静默落默认店**）；
+    - 选了没权限的店 → 403（由调用方按返回值判，这里直接抛给路由）。
+    """
+    stores = accessible_stores(conn)
+    ids = [int(s["id"]) for s in stores]
+    if not ids:
+        flash("你的账号没有可写的门店，不能代办", "error")
+        return None
+    if raw:
+        try:
+            store_id = int(raw)
+        except ValueError:
+            flash("代办门店选得不对，请重选", "error")
+            return None
+        return store_id
+    if len(ids) == 1:
+        return ids[0]
+    flash("这条是待建店（销售门店还没建账号），先在行里选「本店代办」要记到哪家店", "error")
+    return None
+
+
 def register_imei(app) -> None:
     @app.route("/imei")
     @login_required
@@ -163,6 +193,10 @@ def register_imei(app) -> None:
                 if is_admin
                 else 0
             )
+            # 本店代办过（未释放）的待建店机器：归属只认锁表，不写回 imei_todo.store_id
+            claims = db_imei.pool_claims(conn, ids)
+            # 「本店代办」下拉只列本人可写的门店（不受页面 city/manager 筛选影响）
+            target_stores = stores
         groups: List[Dict[str, Any]] = []
         by_store: Dict[Any, Dict[str, Any]] = {}
         for row in rows:
@@ -185,6 +219,8 @@ def register_imei(app) -> None:
             "imei.html",
             groups=groups,
             cards=cards,
+            claims=claims,
+            target_stores=target_stores,
             marks=marks,
             review_n=review_n,
             carryover_n=carryover_n,
@@ -439,10 +475,18 @@ def register_imei(app) -> None:
     @app.route("/imei/report", methods=["POST"])
     @login_required
     def imei_report():
+        """门店自报一条。
+
+        两类行：
+        - 已建档行（`imei_todo.store_id` 有值）：只写自己店，**忽略** `target_store_id`（防改派）；
+        - 待建店池子行（`store_id IS NULL`）：读 `target_store_id`（代办店）→ 先抢
+          `imei_pool_lock` 再写自报，两者同一事务。**不判断任何日期/天数**（超期照常能办）。
+        """
         imei = (request.form.get("imei") or "").strip()
         action = (request.form.get("action") or "").strip()
         biz_type = (request.form.get("biz_type") or "").strip()
         note = (request.form.get("note") or "").strip()
+        target_raw = (request.form.get("target_store_id") or "").strip()
         back = request.form.get("back") or url_for("imei_page")
         if not back.startswith("/") or back.startswith("//"):
             back = url_for("imei_page")
@@ -458,13 +502,23 @@ def register_imei(app) -> None:
             if row is None:
                 flash("这条串码不在清单里，刷新后再试", "error")
                 return redirect(back)
+            pool_row = None
             if row["store_id"] is None:
-                flash("这家店还没建账号，先补门店档案；这条不用门店报", "error")
-                return redirect(back)
-            store_id = int(row["store_id"])
-            if not db.user_can_access_store(conn, g.user, store_id):
-                # 写路径不静默落到别家店：宁可拒绝，也不能把结论记到别的店
-                return Response("forbidden", status=403)
+                pool_row = db_imei.pool_open_row(conn, imei)
+                if pool_row is None:
+                    flash("这台不在待建店池子里（可能已办完或不在最新清单），刷新后再试", "error")
+                    return redirect(back)
+                store_id = _claim_target_store(conn, target_raw, back)
+                if store_id is None:
+                    return redirect(back)
+                if not db.user_can_access_store(conn, g.user, store_id):
+                    # 代办的店也必须是本人可写的店（admin=在营、city=本市、filler=绑定店）
+                    return Response("forbidden", status=403)
+            else:
+                store_id = int(row["store_id"])
+                if not db.user_can_access_store(conn, g.user, store_id):
+                    # 写路径不静默落到别家店：宁可拒绝，也不能把结论记到别的店
+                    return Response("forbidden", status=403)
             upload = request.files.get("photo")
             has_photo = upload is not None and bool(upload.filename)
             # 送2G流量 / 顺差让利 系统没有记录：仅在报「已办」时先拦一道，别白存图片再报错
@@ -488,22 +542,47 @@ def register_imei(app) -> None:
                     flash(str(exc), "error")
                     return redirect(back)
             try:
-                db_imei.add_report(
-                    conn,
-                    imei=imei,
-                    store_id=store_id,
-                    action=action,
-                    biz_type=biz_type,
-                    note=note,
-                    photo=photo,
-                    user_id=g.user["id"],
-                )
+                if pool_row is not None:
+                    # 抢锁 → 自报：同一事务（add_report 传 begin=False，别二次 BEGIN IMMEDIATE）
+                    db_imei.claim_pool_row(
+                        conn,
+                        imei=imei,
+                        claim_store_id=store_id,
+                        action=action,
+                        user_id=g.user["id"],
+                    )
+                    report_id = db_imei.add_report(
+                        conn,
+                        imei=imei,
+                        store_id=store_id,
+                        action=action,
+                        biz_type=biz_type,
+                        note=note,
+                        photo=photo,
+                        user_id=g.user["id"],
+                        begin=False,
+                    )
+                    db_imei.attach_claim_report(conn, imei, report_id)
+                else:
+                    db_imei.add_report(
+                        conn,
+                        imei=imei,
+                        store_id=store_id,
+                        action=action,
+                        biz_type=biz_type,
+                        note=note,
+                        photo=photo,
+                        user_id=g.user["id"],
+                    )
             except ValueError as exc:
                 flash(str(exc), "error")
                 return redirect(back)
         norm_biz = db_imei.norm_biz_type(biz_type) if action == "已办" else ""
         suffix = f" · {norm_biz}" if norm_biz else ""
-        flash(f"已记下：{imei[-6:]} → {action}{suffix}", "ok")
+        if pool_row is not None:
+            flash(f"已记下：{imei[-6:]} → {action}{suffix}（待建店 · 本店代办）", "ok")
+        else:
+            flash(f"已记下：{imei[-6:]} → {action}{suffix}", "ok")
         return redirect(back)
 
     @app.route("/imei/mark", methods=["POST"])
@@ -574,6 +653,8 @@ def register_imei(app) -> None:
                 "时间",
                 "客户类型",
                 "手动激活日",
+                "原售出店",
+                "是否本店代办",
             ]
         )
         for row in rows:
@@ -592,6 +673,8 @@ def register_imei(app) -> None:
                     row["created_at"],
                     row["user_type"] if "user_type" in row.keys() else "",
                     row["manual_activated_at"] if "manual_activated_at" in row.keys() else "",
+                    row["sold_store"] if "sold_store" in row.keys() else "",
+                    "是（其他店售出）" if row["claim_store_id"] else "否",
                 ]
             )
         body = "\ufeff" + out.getvalue()
@@ -709,16 +792,26 @@ def register_imei(app) -> None:
         """
         group_key = (request.args.get("by") or "store").strip()
         one = (request.args.get("store") or "").strip()
+        tab = _pool_tab(request.args.get("tab", "stock"))
         with db.get_db() as conn:
             if not db_imei.user_in_imei_scope(conn, g.user):
                 return Response("forbidden", status=403)
-            rows = db_imei.pool_rows(conn, own_store=one) if one else []
-            stores = db_imei.pool_summary(conn)
+            if tab == "unmapped":
+                # 待建店待办：不分店也能看全池（不按 scope 过滤），"按店"分组用 dispatch_store
+                rows = db_imei.pool_rows(conn, own_store=one, source="unmapped")
+                stores = db_imei.pool_summary(conn, source="unmapped")
+            else:
+                rows = db_imei.pool_rows(conn, own_store=one) if one else []
+                stores = db_imei.pool_summary(conn)
             cards = db_imei.summary(conn, [s["id"] for s in accessible_stores(conn)])
+            target_stores = accessible_stores(conn)
         groups: List[Dict[str, Any]] = []
         by_key: Dict[str, Dict[str, Any]] = {}
         for row in rows:
-            key = (row["model"] or "未登记") if group_key == "model" else ""
+            if tab == "unmapped":
+                key = (row.get("dispatch_store") or "未登记") if group_key != "model" else (row["model"] or "未登记")
+            else:
+                key = (row["model"] or "未登记") if group_key == "model" else ""
             group = by_key.get(key)
             if group is None:
                 group = {"key": key, "rows": []}
@@ -735,6 +828,14 @@ def register_imei(app) -> None:
             by=group_key,
             total=total,
             shown=len(rows),
+            tab=tab,
+            target_stores=target_stores,
+            actions=db_imei.ACTIONS,
+            biz_choices=db_imei.BIZ_CHOICES,
+            biz_other=db_imei.BIZ_OTHER,
+            needs_evidence=list(db_imei.NO_SYSTEM_EVIDENCE),
+            can_write=_can_write(g.user["role"]),
+            is_admin=g.user["role"] == "admin",
         )
 
     @app.route("/uploads/imei/<path:filename>")

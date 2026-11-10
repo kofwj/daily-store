@@ -40,6 +40,7 @@
           {% if row.in_grace %}<div><span class="chip">宽限已过（{{ grace_label }}）</span></div>{% endif %}
           {% if row.act_state %}<div><span class="chip">{{ row.user_type }}{% if row.act_state == '待激活' %}·待激活{% else %}·已激活 {{ row.manual_activated_at[5:] }}{% endif %}</span></div>{% endif %}
           {% if row.data_flag %}<div><span class="chip">{{ row.data_flag }}</span></div>{% endif %}
+          {% if not row.store_id %}<div><span class="chip warn-chip">待建店 · 谁办算谁</span></div>{% endif %}
         </td>
         <td>
           {% if row.report_action %}
@@ -64,6 +65,18 @@
               <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="imei" value="{{ row.imei }}">
               <input type="hidden" name="back" value="{{ request.full_path }}">
+              {% if not row.store_id %}
+              {# 待建店行：售出店还没建账号，结论记到「谁办算谁」的那家店 #}
+              {% if target_stores|length > 1 %}
+              <select name="target_store_id" required>
+                <option value="" selected disabled>记到哪家店（本店代办，必选）</option>
+                {% for s in target_stores %}<option value="{{ s.id }}">{{ s.short_name or s.name }}</option>{% endfor %}
+              </select>
+              {% else %}
+              <input type="hidden" name="target_store_id" value="{{ target_stores[0].id if target_stores else '' }}">
+              <p class="muted">这台是待建店（售出店没建账号），办了记在本店名下：{{ target_stores[0].short_name if target_stores else '没有可写的门店' }}</p>
+              {% endif %}
+              {% endif %}
               <select name="action">
                 {% for a in actions %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
               </select>
@@ -136,7 +149,10 @@
         <option value="all" {{ 'selected' if show == 'all' }}>全部（含已办）</option>
       </select>
     </label>
-    <a class="btn ghost" href="{{ url_for('imei_pool') }}">串码池 {{ cards.pool }} 台</a>
+    <a class="btn ghost" href="{{ url_for('imei_pool') }}">串码池（在库）{{ cards.pool }} 台</a>
+    {% if is_admin %}
+    <a class="btn ghost" href="{{ url_for('imei_pool', tab='unmapped') }}">待建店待办 {{ cards.pool_unmapped }} 台</a>
+    {% endif %}
   </form>
 </div>
 
@@ -164,15 +180,44 @@
   <div class="kpi">
     <div class="muted">门店已自报</div>
     <div class="kpi-num">{{ cards.reported }}</div>
-    <div class="muted">含截图</div>
+    <div class="muted">{% if cards.claimed %}＋本店代办 {{ cards.claimed }} 台{% else %}含截图{% endif %}</div>
   </div>
 </div>
 
 {% if is_admin and cards.unmapped %}
 <p class="flash-inline warn">
   <strong>{{ cards.unmapped }} 台</strong> 的销售门店在门店档案里没有（在营但没建账号），
-  只在管理员这里显示。补门店档案或确认改名后重新导入即可自动归位。
+  这些机器在 <a href="{{ url_for('imei_pool', tab='unmapped') }}">待建店池子</a> 里，任何门店都能代办（谁办算谁）。
+  补门店档案或确认改名后重新导入即可自动归位。
+  <br><span class="muted">注意：待建店不计入上面「已售未办」「过了 7 天」的统计（那些只算已建档门店），所以列表里有逾期行而上面的数字是 0 属于正常。</span>
 </p>
+{% endif %}
+
+{% if claims %}
+<details class="card" open>
+  <summary>本店代办（其他店售出）{{ claims|length }} 台</summary>
+  <div class="report-table-scroll">
+    <table class="data report-grid">
+      <thead>
+        <tr><th>串码</th><th>机型</th><th>原售出店</th><th>售出日</th><th>代办店</th><th>提交结论</th><th>时间</th></tr>
+      </thead>
+      <tbody>
+        {% for c in claims %}
+        <tr>
+          <td class="num">{{ c.imei }}</td>
+          <td>{{ c.model or '—' }}</td>
+          <td>{{ c.dispatch_store or c.sold_store or '—' }}</td>
+          <td class="num">{{ (c.sold_day or '')[:10] }}</td>
+          <td>{{ c.claim_short or c.claim_name or '—' }}</td>
+          <td>{% if c.report_action %}<span class="chip">{{ c.report_action }}</span>{% if c.report_biz_type %}<span class="chip">{{ c.report_biz_type }}</span>{% endif %}{% else %}<span class="muted">未报（只抢了锁）</span>{% endif %}</td>
+          <td class="muted">{{ (c.locked_at or '')[:16] }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted">归属只记在代办锁上，不改原清单的门店（下份清单重导也不会被覆盖）。</p>
+</details>
 {% endif %}
 
 {% if is_admin %}

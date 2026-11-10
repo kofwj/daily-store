@@ -6,38 +6,66 @@
   <div class="page-title">
     <h1>串码池</h1>
     <p class="muted">
+      {% if tab == 'unmapped' %}
+      待建店待办（销售门店还没建账号）· 共 {{ total }} 台 / {{ stores|length }} 家店
+      {% else %}
       南通共享池里还没卖掉的顺差机器 · 共 {{ total }} 台 / {{ stores|length }} 家店
+      {% endif %}
       {% if cards.asof %} · 清单截至 {{ cards.asof }}{% endif %}
     </p>
   </div>
   <form method="get" class="page-filters">
+    <label class="filter">
+      <span>视图</span>
+      <select name="tab" onchange="this.form.submit()">
+        <option value="stock" {{ 'selected' if tab != 'unmapped' }}>在库待售（{{ cards.pool }} 台）</option>
+        <option value="unmapped" {{ 'selected' if tab == 'unmapped' }}>待建店待办（{{ cards.pool_unmapped }} 台）</option>
+      </select>
+    </label>
     <a class="btn ghost" href="{{ url_for('imei_page') }}">回串码待办</a>
   </form>
 </div>
 
+{% if tab == 'unmapped' %}
+<p class="flash-inline warn">
+  这些机器已经卖了，但销售门店还没建账号，所以没派到任何门店。
+  <strong>谁办算谁</strong>：任何门店只要在移动库里能查到，都可以直接在这里提交（结论记到本店名下）。
+  超期的照常能办，页面上只标「已过 7 天窗口」提示，不拦。
+  <br><span class="muted">待建店不计入「串码待办」页头的已售未办/逾期统计（那些只算已建档门店）。</span>
+</p>
+{% else %}
 <p class="flash-inline warn">
   池子是共享的：机器登记在 A 店，B 店也能卖（串码会跨店调拨）。
   这一页只回答「池子里还有什么」，调拨仍走线下审批，系统不代替门店做决定。
 </p>
+{% endif %}
 
 {% if not one %}
 {% if not stores %}
+{% if tab == 'unmapped' %}
+<p class="muted">现在没有待建店的机器。台账里出现「门店档案里没有」的行时，这里会自动填上。</p>
+{% else %}
 <p class="muted">池子是空的。导入一份库存明细（含「串码标签」列）就会填上。</p>
+{% endif %}
 {% endif %}
 <div class="report-table-scroll">
   <table class="data report-grid">
     <thead>
+      {% if tab == 'unmapped' %}
+      <tr><th>原售出店（POS）</th><th>待办</th><th>主要机型</th><th></th></tr>
+      {% else %}
       <tr><th>库存登记门店</th><th>在库待售</th><th>主要机型</th><th></th></tr>
+      {% endif %}
     </thead>
     <tbody>
       {% for s in stores %}
       <tr>
-        <td>{{ s.own_store or '未登记' }}</td>
+        <td>{{ (s.own_store if tab != 'unmapped' else s.dispatch_store) or '未登记' }}</td>
         <td class="num">{{ s.n }} 台</td>
         <td class="muted">
           {% for m in s.models %}{{ m.model }} ×{{ m.n }}{% if not loop.last %} · {% endif %}{% endfor %}
         </td>
-        <td><a href="{{ url_for('imei_pool', store=s.own_store, by=by) }}">看看这 {{ s.n }} 台</a></td>
+        <td><a href="{{ url_for('imei_pool', store=(s.own_store if tab != 'unmapped' else s.dispatch_store), by=by, tab=tab) }}">看看这 {{ s.n }} 台</a></td>
       </tr>
       {% endfor %}
     </tbody>
@@ -47,22 +75,88 @@
 <div class="page-head">
   <div class="page-title">
     <h2>{{ one }}</h2>
-    <p class="muted">{{ shown }} 台在库待售</p>
+    <p class="muted">{{ shown }} 台{% if tab == 'unmapped' %}待建店待办{% else %}在库待售{% endif %}</p>
   </div>
   <form method="get" class="page-filters">
-    <a class="btn ghost" href="{{ url_for('imei_pool') }}">回全池</a>
+    <input type="hidden" name="tab" value="{{ tab }}">
+    <a class="btn ghost" href="{{ url_for('imei_pool', tab=tab) }}">回全池</a>
   </form>
 </div>
 
 {% if not groups %}
-<p class="muted">这家店没有在库的顺差机器。</p>
+<p class="muted">
+  {% if tab == 'unmapped' %}这家店没有待建店的机器。{% else %}这家店没有在库的顺差机器。{% endif %}
+</p>
 {% endif %}
 
 {% for group in groups %}
 <div class="card">
   {% if group.key %}<h2>{{ group.key }} <span class="muted">{{ group.rows|length }} 台</span></h2>{% endif %}
   <div class="report-table-scroll">
-    <table class="data report-grid">
+    <table class="data report-grid imei-grid">
+      {% if tab == 'unmapped' %}
+      <thead>
+        <tr><th>机型</th><th>串码</th><th>原售出店</th><th>售出日</th><th>剩余</th><th>数据标记</th><th>操作</th></tr>
+      </thead>
+      <tbody>
+        {% for row in group.rows %}
+        <tr>
+          <td>{{ row.model or '—' }}{% if row.sp %}<div class="muted">{{ row.sp }}</div>{% endif %}</td>
+          <td class="num">{{ row.imei }}</td>
+          <td>{{ row.dispatch_store or row.sold_store or '—' }}</td>
+          <td class="num">{{ (row.sold_day or '')[:10] }}</td>
+          <td class="num {{ 'neg' if row.remain_eff < 0 else '' }}">
+            {% if row.remain_eff < 0 %}
+              逾期 {{ -row.remain_eff }} 天
+              <div><span class="chip">已过 7 天窗口</span></div>
+              <div class="muted">只要移动库里能查到，照常可以办</div>
+            {% else %}
+              剩 {{ row.remain_eff }} 天
+            {% endif %}
+            {% if row.report_action %}<div><span class="chip">{{ row.report_action }}</span>{{ row.reporter or '' }}</div>{% endif %}
+          </td>
+          <td>
+            {% if row.data_flag %}<span class="chip">{{ row.data_flag }}</span>{% else %}<span class="muted">—</span>{% endif %}
+            {% if row.act_state %}<div><span class="chip">{{ row.user_type }}{% if row.act_state == '待激活' %}·待激活{% else %}·已激活 {{ row.manual_activated_at[5:] }}{% endif %}</span></div>{% endif %}
+          </td>
+          <td class="col-act">
+            {% if can_write %}
+            <details class="imei-report">
+              <summary>本店代办</summary>
+              <form method="post" action="{{ url_for('imei_report') }}" enctype="multipart/form-data" class="imei-report-form">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="imei" value="{{ row.imei }}">
+                <input type="hidden" name="back" value="{{ request.full_path }}">
+                {% if target_stores|length > 1 %}
+                <select name="target_store_id" required>
+                  <option value="" selected disabled>记到哪家店（本店代办，必选）</option>
+                  {% for s in target_stores %}<option value="{{ s.id }}">{{ s.short_name or s.name }}</option>{% endfor %}
+                </select>
+                {% else %}
+                <input type="hidden" name="target_store_id" value="{{ target_stores[0].id if target_stores else '' }}">
+                <p class="muted">记在本店名下：{{ target_stores[0].short_name if target_stores else '没有可写的门店' }}</p>
+                {% endif %}
+                <select name="action">
+                  {% for a in actions %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+                </select>
+                <select name="biz_type" required>
+                  <option value="" selected disabled>业务类型（必选）</option>
+                  {% for b in biz_choices %}<option value="{{ b }}">{{ b }}</option>{% endfor %}
+                </select>
+                <div class="muted biz-hint" hidden></div>
+                <input type="text" name="note" maxlength="200" placeholder="说明（选「其他」必填，其他情况可写受理单号）">
+                <input type="file" name="photo" accept="image/png,image/jpeg,image/webp">
+                <button type="submit">提交</button>
+              </form>
+            </details>
+            {% else %}
+            <span class="muted">只读账号不能代办</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      {% else %}
       <thead>
         <tr><th>机型</th><th>串码</th><th>库存登记门店</th><th>状态</th></tr>
       </thead>
@@ -76,9 +170,57 @@
         </tr>
         {% endfor %}
       </tbody>
+      {% endif %}
     </table>
   </div>
 </div>
 {% endfor %}
+{% endif %}
+{% if tab == 'unmapped' and can_write %}
+<script>
+(function () {
+  var NEEDS = {{ needs_evidence|tojson }};
+  var OTHER = {{ biz_other|tojson }};
+  var MSG = "「送2G流量」「顺差让利」这类业务系统记录不全，查到就能对上，查不到也算正常，请务必上传受理单或截图";
+  function sync(form) {
+    var actEl = form.elements["action"];
+    var bizEl = form.elements["biz_type"];
+    var noteEl = form.elements["note"];
+    var hint = form.querySelector(".biz-hint");
+    var isDone = !actEl || actEl.value === "已办";
+    if (!isDone) {
+      bizEl.value = "";
+      bizEl.required = false;
+      bizEl.disabled = true;
+      bizEl.hidden = true;
+      noteEl.required = false;
+      hint.hidden = true;
+      hint.textContent = "";
+      noteEl.placeholder = "说明（可选，如退货单号、调往哪家店、待核原因）";
+      return;
+    }
+    bizEl.hidden = false;
+    bizEl.disabled = false;
+    bizEl.required = true;
+    var biz = bizEl.value;
+    noteEl.required = biz === OTHER;
+    var need = NEEDS.indexOf(biz) >= 0;
+    hint.hidden = !need;
+    hint.textContent = need ? MSG : "";
+  }
+  document.addEventListener("DOMContentLoaded", function () {
+    Array.prototype.forEach.call(
+      document.querySelectorAll("form.imei-report-form"),
+      function (form) {
+        var actEl = form.elements["action"];
+        var bizEl = form.elements["biz_type"];
+        if (actEl) { actEl.addEventListener("change", function () { sync(form); }); }
+        if (bizEl) { bizEl.addEventListener("change", function () { sync(form); }); }
+        sync(form);
+      }
+    );
+  });
+})();
+</script>
 {% endif %}
 {% endblock %}

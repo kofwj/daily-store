@@ -249,7 +249,8 @@ def test_admin_export_reports(client):
     body = resp.get_data().decode("utf-8-sig")
     lines = body.strip().splitlines()
     assert lines[0] == (
-        "imei,门店,结论,业务类型,POS证据类型,类型一致性,核销结论,备注,截图,报人,时间,客户类型,手动激活日"
+        "imei,门店,结论,业务类型,POS证据类型,类型一致性,核销结论,备注,截图,报人,时间,"
+        "客户类型,手动激活日,原售出店,是否本店代办"
     )
     assert len(lines) == 2
     assert "860000000000071" in lines[1] and "已办" in lines[1] and "受理单 B1" in lines[1]
@@ -319,19 +320,29 @@ def test_taizhou_rows_are_skipped(client):
         assert conn.execute("SELECT COUNT(*) FROM imei_todo").fetchone()[0] == 1
 
 
-def test_unmapped_store_machine_cannot_be_reported(client):
-    """待建店的机器没人能报：没有 store_id 就落不了账。"""
+def test_unmapped_store_machine_can_be_claimed(client):
+    """待建店的机器可以代办（V0.3.70）：结论记到本店，原清单 store_id 不写回。"""
     _login(client)
     _upload(client, _row("860000000000121", "不存在的店"))
     _login(client, "alpha")
     resp = client.post(
         "/imei/report",
-        data={"imei": "860000000000121", "action": "已办", "biz_type": "直降合约"},
+        data={
+            "imei": "860000000000121",
+            "action": "已办",
+            "biz_type": "直降合约",
+            "target_store_id": _store_id("store-alpha"),
+        },
         follow_redirects=True,
     )
-    assert "还没建账号" in resp.get_data(as_text=True)
+    assert "本店代办" in resp.get_data(as_text=True)
     with db.get_db() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM imei_reports").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM imei_reports").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM imei_pool_lock").fetchone()[0] == 1
+        todo = conn.execute(
+            "SELECT store_id FROM imei_todo WHERE imei=?", ("860000000000121",)
+        ).fetchone()
+        assert todo["store_id"] is None
 
 
 def test_stock_import_does_not_hide_sold_todo(client):
@@ -516,6 +527,8 @@ def test_export_flags_pos_type_mismatch(client):
         "时间",
         "客户类型",
         "手动激活日",
+        "原售出店",
+        "是否本店代办",
     ]
     by_imei = {line.split(",")[0]: line for line in lines[1:]}
     mismatch = by_imei["860000000000211"].split(",")
@@ -2207,3 +2220,441 @@ def test_grace_chip_and_label_follow_config(client, monkeypatch):
     _login(client)
     admin_page = client.get("/imei/carryover").get_data(as_text=True)
     assert "宽限至 12-01" in admin_page and "11-16" not in admin_page
+
+
+# ---- P3 待建店池子跨店代办（一期） ----------------------------------------------
+
+FLAG_CSV_HEAD = "imei,store,model,sp,day,age,remain,stage,state,strength,evidence,data_flag\n"
+
+
+def _upload_flagged(client, *rows, asof="2026-11-02"):
+    body = BytesIO((FLAG_CSV_HEAD + "".join(r + "\n" for r in rows)).encode("utf-8"))
+    return client.post(
+        "/imei/import",
+        data={"csv_file": (body, "todo.csv"), "asof": asof},
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+
+def _pool_count(conn=None, flag_ok=True):
+    """池子行数：唯一口径，不设任何日期门。"""
+    with db.get_db() as c:
+        return c.execute(
+            """
+            WITH latest_r AS (
+              SELECT imei, action FROM imei_reports
+              WHERE id IN (SELECT MAX(id) FROM imei_reports GROUP BY imei)
+            )
+            SELECT COUNT(*) FROM imei_todo t
+            LEFT JOIN latest_r r ON r.imei = t.imei
+            WHERE t.seen=1 AND t.status='已售' AND t.store_id IS NULL
+              AND t.state NOT IN ('已办','已退货')
+              AND COALESCE(r.action,'') NOT IN ('已办','已退货')
+            """
+        ).fetchone()[0]
+
+
+def _claim(imei, store_id, *, action="已办", biz_type="直降合约"):
+    """数据层直接抢锁 + 写自报（与路由同顺序）。"""
+    with db.get_db() as conn:
+        res = db_imei.claim_pool_row(conn, imei=imei, claim_store_id=store_id, action=action)
+        rid = db_imei.add_report(
+            conn,
+            imei=imei,
+            store_id=store_id,
+            action=action,
+            biz_type=biz_type,
+            begin=False,
+        )
+        db_imei.attach_claim_report(conn, imei, rid)
+    return res, rid
+
+
+def test_import_rule_ver_param_defaults_to_2_and_accepts_1(client):
+    """rule_ver 是参数不是碰巧：新行默认 2；显式传 1 时写 1。"""
+    _login(client)
+    _upload(client, _row("860000000002001", "不存在的店A"))
+    with db.get_db() as conn:
+        assert (
+            conn.execute(
+                "SELECT rule_ver FROM imei_todo WHERE imei=?", ("860000000002001",)
+            ).fetchone()[0]
+            == 2
+        )
+        db_imei.import_rows(
+            conn,
+            (CSV_HEAD + _row("860000000002002", "不存在的店B") + "\n").encode("utf-8"),
+            "2026-11-02",
+            mark_seen=False,
+            rule_ver=1,
+        )
+        assert (
+            conn.execute(
+                "SELECT rule_ver FROM imei_todo WHERE imei=?", ("860000000002002",)
+            ).fetchone()[0]
+            == 1
+        )
+
+
+def test_import_does_not_downgrade_or_upgrade_rule_ver(client):
+    """重导同一 IMEI：老行 rule_ver 不变（UPSERT 不碰这一列）。"""
+    _login(client)
+    _upload(client, _row("860000000002011", ALPHA))
+    with db.get_db() as conn:
+        conn.execute("UPDATE imei_todo SET rule_ver=1 WHERE imei=?", ("860000000002011",))
+    _upload(client, _row("860000000002011", ALPHA))
+    with db.get_db() as conn:
+        assert (
+            conn.execute(
+                "SELECT rule_ver FROM imei_todo WHERE imei=?", ("860000000002011",)
+            ).fetchone()[0]
+            == 1
+        )
+
+
+def test_full_import_rejects_rule_ver_1(client):
+    """全量导入禁止 rule_ver=1：宽限只留给 2026-11-09 前的存量。"""
+    with db.get_db() as conn:
+        with pytest.raises(ValueError):
+            db_imei.import_rows(
+                conn,
+                (CSV_HEAD + _row("860000000002021", ALPHA) + "\n").encode("utf-8"),
+                "2026-11-02",
+                rule_ver=1,
+            )
+        assert conn.execute("SELECT COUNT(*) FROM imei_todo").fetchone()[0] == 0
+
+
+def test_unmapped_rows_keep_sold_day_and_count_as_overdue(client):
+    """待建店行：sold_day 不能为空；超窗的行 page 上有 overdue，但 summary 不算它。"""
+    _login(client)
+    # rule_ver=2 按售出日实时算（今天冻在 11-02）：10-25 售出 = 已 8 天，超 7 天窗
+    _upload(
+        client,
+        "860000000002031,不存在的店,Y600 Pro,小李,2026-10-25,8,-1,D7+,确认未办,无,",
+        _row("860000000002032", "不存在的店", remain=3),
+    )
+    with db.get_db() as conn:
+        rows = conn.execute(
+            "SELECT imei, sold_day FROM imei_todo WHERE store_id IS NULL ORDER BY imei"
+        ).fetchall()
+        assert len(rows) == 2 and all(r["sold_day"] for r in rows)
+        cards = db_imei.summary(conn, [_store_id()])
+        assert cards["unmapped"] == 2 and cards["pool_unmapped"] == 2
+        assert cards["pool"] == 0
+        assert cards["open"] == 0 and cards["overdue"] == 0
+        pool = db_imei.pool_rows(conn, source="unmapped")
+        assert {r["imei"] for r in pool} == {"860000000002031", "860000000002032"}
+        assert any(r["remain_eff"] < 0 for r in pool)
+
+
+def test_pool_unmapped_equals_unmapped_and_lists_every_open_row(client):
+    """pool_unmapped == unmapped == 池子行数；池子不设日期门（超期行一个不少）。"""
+    _login(client)
+    _upload(
+        client,
+        _row("860000000002041", "不存在的店甲", remain=-30),
+        _row("860000000002042", "不存在的店乙", remain=-2),
+        _row("860000000002043", "不存在的店乙", remain=5),
+    )
+    with db.get_db() as conn:
+        sid = [_store_id()]
+        cards = db_imei.summary(conn, sid)
+        assert cards["pool_unmapped"] == cards["unmapped"] == _pool_count()
+        assert cards["unmapped"] == 3
+        summary_sum = sum(r["n"] for r in db_imei.pool_summary(conn, source="unmapped"))
+        rows = db_imei.pool_rows(conn, source="unmapped")
+        assert summary_sum == len(rows) == cards["pool_unmapped"]
+
+
+def test_pool_unmapped_grouped_by_dispatch_store(client):
+    """已售行 own_store 全空，池子必须按 dispatch_store（POS 销售店）分组。"""
+    _login(client)
+    _upload(
+        client,
+        _row("860000000002051", "不存在的店甲"),
+        _row("860000000002052", "不存在的店甲"),
+        _row("860000000002053", "不存在的店乙"),
+    )
+    with db.get_db() as conn:
+        groups = db_imei.pool_summary(conn, source="unmapped")
+    assert sorted(g["dispatch_store"] for g in groups) == ["不存在的店乙", "不存在的店甲"]
+    assert {g["dispatch_store"]: g["n"] for g in groups} == {"不存在的店甲": 2, "不存在的店乙": 1}
+
+
+def test_pool_page_unmapped_tab_renders_overdue_rows_without_gate(client):
+    """池子页：超期行也在页面上，且按钮没 disabled、没有二次确认字段。"""
+    _login(client)
+    # rule_ver=2 的行按售出日实时算：10-21 售出的这台今天（冻在 11-02）remain=-5，属超期
+    old = "860000000002061,不存在的店,Y600 Pro,小李,2026-10-21,12,-5,D7+,确认未办,无,"
+    _upload(client, old, _row("860000000002062", "不存在的店", remain=2))
+    html = client.get(
+        "/imei/pool", query_string={"tab": "unmapped", "store": "不存在的店"}
+    ).get_data(as_text=True)
+    assert "860000000002061" in html and "860000000002062" in html
+    assert "已过 7 天窗口" in html
+    assert "照常可以办" in html
+    row_seg = [seg for seg in html.split("<tr") if "860000000002061" in seg]
+    assert row_seg
+    assert '<button type="submit">提交</button>' in row_seg[0]
+    assert "二次确认" not in row_seg[0] and "需确认" not in row_seg[0]
+
+
+def test_pool_unmapped_shows_data_flag_but_does_not_filter(client):
+    """data_flag 只展示：带标记的行仍在池子里。"""
+    _login(client)
+    _upload_flagged(
+        client,
+        "860000000002071,不存在的店,Y600 Pro,小李,2026-10-29,4,3,D3-6,确认未办,无,,去向不明",
+        "860000000002072,不存在的店,Y600 Pro,小李,2026-10-29,4,3,D3-6,确认未办,无,,台账无此串码",
+    )
+    with db.get_db() as conn:
+        pool = db_imei.pool_rows(conn, source="unmapped")
+    assert {r["imei"] for r in pool} == {"860000000002071", "860000000002072"}
+    assert {r["data_flag"] for r in pool} == {"去向不明", "台账无此串码"}
+    html = client.get("/imei/pool?tab=unmapped&store=不存在的店").get_data(as_text=True)
+    assert "去向不明" in html and "台账无此串码" in html
+    # 不带视图参数时默认还是「在库待售」，池子行不该漏进来
+    stock = client.get("/imei/pool").get_data(as_text=True)
+    assert "860000000002071" not in stock
+
+
+def test_pool_claim_writes_lock_and_keeps_todo_store_null(client):
+    """代办：锁 + 自报各一行；imei_todo.store_id 仍 NULL；summary.claimed=1。"""
+    _login(client)
+    _upload(client, _row("860000000002081", "不存在的店"))
+    sid = _store_id()
+    res, rid = _claim("860000000002081", sid)
+    assert res["own"] is False and rid > 0
+    with db.get_db() as conn:
+        lock = conn.execute(
+            "SELECT * FROM imei_pool_lock WHERE imei=?", ("860000000002081",)
+        ).fetchone()
+        assert lock["claim_store_id"] == sid and lock["report_id"] == rid
+        assert (
+            conn.execute(
+                "SELECT store_id FROM imei_todo WHERE imei=?", ("860000000002081",)
+            ).fetchone()[0]
+            is None
+        )
+        cards = db_imei.summary(conn, [sid])
+        assert cards["claimed"] == 1
+        assert cards["reported"] == 0  # reported 口径不变（只算已建档门店），代办单独计 claimed
+        assert cards["unmapped"] == 0
+        claims = db_imei.pool_claims(conn, [sid])
+        assert [c["imei"] for c in claims] == ["860000000002081"]
+        assert claims[0]["dispatch_store"] == "不存在的店"
+
+
+def test_pool_claim_same_store_is_idempotent_other_store_conflicts(client):
+    """同店重复抢 = 幂等；别家店再抢 → ValueError，且不产生第二条自报。"""
+    _login(client)
+    _upload(client, _row("860000000002091", "不存在的店"))
+    sid_a, sid_b = _store_id("store-alpha"), _store_id("store-beta")
+    _claim("860000000002091", sid_a)
+    with db.get_db() as conn:
+        again = db_imei.claim_pool_row(conn, imei="860000000002091", claim_store_id=sid_a)
+        assert again["own"] is True
+        with pytest.raises(ValueError):
+            db_imei.claim_pool_row(conn, imei="860000000002091", claim_store_id=sid_b)
+        assert conn.execute("SELECT COUNT(*) FROM imei_pool_lock").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM imei_reports").fetchone()[0] == 1
+
+
+def test_pool_claim_concurrent_only_one_wins(tmp_db):
+    """并发两台店抢同一台：唯一索引兜底，1 成功 1 冲突。"""
+    with db.get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO imei_todo(imei, status, store_id, sold_store, own_store,
+                dispatch_store, model, sold_day, age_days, remain_days, stage, state,
+                asof, rule_ver, seen, updated_at)
+            VALUES ('860000000002101', '已售', NULL, '不存在的店', '', '不存在的店',
+                'Y600 Pro', '2026-10-29', 4, 3, 'D3-6', '确认未办', '2026-11-02', 2, 1,
+                '2026-11-02 09:00:00')
+            """
+        )
+    sid_a, sid_b = _store_id("store-alpha"), _store_id("store-beta")
+    results = []
+    import threading
+
+    def worker(sid):
+        conn = db.connect()
+        try:
+            db_imei.claim_pool_row(conn, imei="860000000002101", claim_store_id=sid)
+            conn.commit()
+            results.append("ok")
+        except ValueError:
+            conn.rollback()
+            results.append("conflict")
+        finally:
+            conn.close()
+
+    threads = [threading.Thread(target=worker, args=(s,)) for s in (sid_a, sid_b)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(results) == ["conflict", "ok"]
+    with db.get_db() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM imei_pool_lock WHERE imei=?", ("860000000002101",)
+        ).fetchone()[0] == 1
+
+
+def test_pool_claim_routes_multi_store_requires_target(client):
+    """多家店的账号不选 target_store_id → 提示重选，不静默落默认店。"""
+    with db.get_db() as conn:
+        db.create_user(
+            conn,
+            username="multi",
+            display_name="多店店员",
+            pin="123456",
+            role="filler",
+            store_ids=[_store_id("store-alpha"), _store_id("store-beta")],
+            scope="",
+        )
+        conn.execute("UPDATE users SET must_change_pin=0 WHERE username='multi'")
+    _login(client)
+    _upload(client, _row("860000000002111", "不存在的店"))
+    _login(client, "multi")
+    resp = client.post(
+        "/imei/report",
+        data={"imei": "860000000002111", "action": "已办", "biz_type": "直降合约"},
+        follow_redirects=True,
+    )
+    assert "选「本店代办」" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM imei_reports").fetchone()[0] == 0
+
+    ok = client.post(
+        "/imei/report",
+        data={
+            "imei": "860000000002111",
+            "action": "已办",
+            "biz_type": "直降合约",
+            "target_store_id": _store_id("store-beta"),
+        },
+        follow_redirects=True,
+    )
+    assert "本店代办" in ok.get_data(as_text=True)
+    with db.get_db() as conn:
+        assert (
+            conn.execute(
+                "SELECT store_id FROM imei_reports WHERE imei=?", ("860000000002111",)
+            ).fetchone()[0]
+            == _store_id("store-beta")
+        )
+
+
+def test_pool_claim_target_store_without_permission_is_403(client):
+    """选了自己没权限的店 → 403，不落库。"""
+    _login(client)
+    _upload(client, _row("860000000002121", "不存在的店"))
+    _login(client, "alpha")
+    resp = client.post(
+        "/imei/report",
+        data={
+            "imei": "860000000002121",
+            "action": "已办",
+            "biz_type": "直降合约",
+            "target_store_id": _store_id("store-beta"),
+        },
+    )
+    assert resp.status_code == 403
+    with db.get_db() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM imei_reports").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM imei_pool_lock").fetchone()[0] == 0
+
+
+def test_pool_claim_readonly_cannot_write(client):
+    """只读账号不能在池子里代办。"""
+    _make_readonly()
+    _login(client)
+    _upload(client, _row("860000000002131", "不存在的店"))
+    _login(client, "dz_a")
+    resp = client.post(
+        "/imei/report",
+        data={
+            "imei": "860000000002131",
+            "action": "已办",
+            "biz_type": "直降合约",
+            "target_store_id": _store_id(),
+        },
+        follow_redirects=True,
+    )
+    assert "只读账号只能看" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM imei_pool_lock").fetchone()[0] == 0
+
+
+def test_pool_claim_overdue_row_can_be_submitted_via_form(client):
+    """超期池子行用正常表单提交（不带任何确认字段）→ 抢锁 + 自报。"""
+    _login(client)
+    _upload(client, _row("860000000002141", "不存在的店", remain=-9))
+    _login(client, "alpha")
+    sid = _store_id()
+    with db.get_db() as conn:
+        assert db_imei.pool_open_row(conn, "860000000002141")["remain_days"] == -9
+    resp = client.post(
+        "/imei/report",
+        data={
+            "imei": "860000000002141",
+            "action": "已办",
+            "biz_type": "直降合约",
+            "target_store_id": sid,
+        },
+        follow_redirects=True,
+    )
+    assert "本店代办" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM imei_pool_lock").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM imei_reports").fetchone()[0] == 1
+
+
+def test_release_pool_lock_admin_only_keeps_history(client):
+    """释放锁只记 released_at，不删行；非 admin 禁止。"""
+    _login(client)
+    _upload(client, _row("860000000002151", "不存在的店"))
+    sid = _store_id()
+    with db.get_db() as conn:
+        db_imei.claim_pool_row(conn, imei="860000000002151", claim_store_id=sid)
+    with db.get_db() as conn:
+        with pytest.raises(PermissionError):
+            db_imei.release_pool_lock(conn, imei="860000000002151", is_admin=False)
+        db_imei.release_pool_lock(conn, imei="860000000002151", is_admin=True, user_id=1)
+        row = conn.execute(
+            "SELECT released_at, released_by FROM imei_pool_lock WHERE imei=?",
+            ("860000000002151",),
+        ).fetchone()
+        assert row["released_at"] and row["released_by"] == 1
+        # 释放后可以重新抢，历史行不删
+        db_imei.claim_pool_row(conn, imei="860000000002151", claim_store_id=_store_id("store-beta"))
+        assert conn.execute("SELECT COUNT(*) FROM imei_pool_lock").fetchone()[0] == 2
+
+
+def test_carryover_excludes_pool_rows(client, monkeypatch):
+    """池子行是 rule_ver=2 → 不进 carryover 四 tab（导入前后四数不变）。"""
+    _freeze_after_grace(monkeypatch)
+    _login(client)
+    with db.get_db() as conn:
+        sid = [_store_id()]
+        before = {s: len(db_imei.carryover_rows(conn, sid, scope=s)) for s in ("all", "lost", "grace", "carried")}
+        counts_before = conn.execute("SELECT COUNT(*) FROM imei_todo").fetchone()[0]
+    _upload(client, _row("860000000002161", "不存在的店", remain=-7), asof="2026-11-17")
+    with db.get_db() as conn:
+        after = {s: len(db_imei.carryover_rows(conn, sid, scope=s)) for s in ("all", "lost", "grace", "carried")}
+        assert conn.execute("SELECT COUNT(*) FROM imei_todo").fetchone()[0] == counts_before + 1
+    assert before == after
+
+
+def test_report_export_has_claim_columns(client):
+    """自报导出带「原售出店 / 是否本店代办」，代办那一票不丢原店。"""
+    _login(client)
+    _upload(client, _row("860000000002171", "不存在的店"))
+    _claim("860000000002171", _store_id())
+    body = client.get("/imei/export").get_data().decode("utf-8-sig")
+    head, line = body.strip().splitlines()
+    assert head.endswith("原售出店,是否本店代办")
+    assert "不存在的店" in line and "是（其他店售出）" in line
