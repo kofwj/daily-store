@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import io
 import secrets
+from datetime import date
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -471,6 +472,97 @@ def register_imei(app) -> None:
             scope=scope,
             today_iso=db.today_local().isoformat(),
         )
+
+    @app.route("/imei/transfer")
+    @login_required
+    def imei_transfer():
+        """调拨台账：调入店登记，管理员可撤销。只读列表对所有人开放（按 scope 过滤）。"""
+        with db.get_db() as conn:
+            if not db_imei.user_in_imei_scope(conn, g.user):
+                return Response("forbidden", status=403)
+            stores = accessible_stores(conn)
+            scope = request_scope(stores)
+            open_only = request.args.get("show", "open") != "all"
+            rows = db_imei.transfer_rows(
+                conn,
+                store_ids=scope["ids"] if scope["active"] else None,
+                open_only=open_only,
+            )
+            pool = db_imei.pool_rows(conn)
+            pool_by_imei = {str(r["imei"]): r for r in pool}
+        return render_template(
+            "imei_transfer.html",
+            rows=rows,
+            stores=stores,
+            scope=scope,
+            open_only=open_only,
+            can_write=_can_write(g.user["role"]),
+            is_admin=g.user["role"] == "admin",
+            pool_n=len(pool_by_imei),
+            today_iso=db.today_local().isoformat(),
+        )
+
+    @app.route("/imei/transfer", methods=["POST"])
+    @login_required
+    def imei_transfer_post():
+        """记一条调拨（调入店记）：串码 + 从哪店 + 哪天 + 说明。撤销只有管理员能做。"""
+        back = url_for("imei_transfer")
+        with db.get_db() as conn:
+            if not db_imei.user_in_imei_scope(conn, g.user):
+                return Response("forbidden", status=403)
+            if not _can_write(g.user["role"]):
+                flash("只读账号不能记调拨", "error")
+                return redirect(back)
+            action = (request.form.get("action") or "record").strip()
+            if action == "cancel":
+                if g.user["role"] != "admin":
+                    flash("只有管理员能撤销调拨", "error")
+                    return redirect(back)
+                tid = (request.form.get("transfer_id") or "").strip()
+                if not tid.isdigit():
+                    flash("撤销时传的调拨 id 不对", "error")
+                    return redirect(back)
+                if db_imei.cancel_transfer(
+                    conn, int(tid), user_id=g.user["id"], is_admin=True
+                ):
+                    flash("已撤销这条调拨，机器回到原店候选", "ok")
+                else:
+                    flash("这条调拨已经撤销过了", "warn")
+                return redirect(back)
+            imei = (request.form.get("imei") or "").strip()
+            to_raw = (request.form.get("to_store_id") or "").strip()
+            if not imei or not to_raw.isdigit():
+                flash("要填串码，并选调到哪家店", "error")
+                return redirect(back)
+            if not db.user_can_access_store(conn, g.user, int(to_raw)):
+                return Response("forbidden", status=403)
+            day_raw = (request.form.get("biz_date") or "").strip()
+            day = db.today_local()
+            if day_raw:
+                try:
+                    day = date.fromisoformat(day_raw[:10])
+                except ValueError:
+                    flash("日期格式不对", "error")
+                    return redirect(back)
+            from_raw = (request.form.get("from_store_id") or "").strip()
+            try:
+                result = db_imei.record_transfer(
+                    conn,
+                    imei=imei,
+                    to_store_id=int(to_raw),
+                    biz_date=day,
+                    from_store_id=int(from_raw) if from_raw.isdigit() else None,
+                    note=(request.form.get("note") or "").strip(),
+                    user_id=g.user["id"],
+                )
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(back)
+        if result["created"]:
+            flash(f"已记调拨：{imei[-6:]} 调入 {day.isoformat()}", "ok")
+        else:
+            flash("这台已经调给本店了，不用重复记", "warn")
+        return redirect(back)
 
     @app.route("/imei/report", methods=["POST"])
     @login_required

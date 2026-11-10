@@ -226,6 +226,11 @@
   —— 标过异网 / 点过已激活的机器，可逐行撤销，每次动作都有留痕。
 </p>
 <p class="muted">
+  <a href="{{ url_for('imei_transfer') }}">调拨台账</a>
+  —— 门店之间调货：<b>调入店</b>记一笔，调入店的触客下拉就会出现这台、调出店的看不到；
+  明天导库存清单时归属以清单为准，这里只留痕（管理员可撤销）。
+</p>
+<p class="muted">
   <a href="{{ url_for('imei_carryover') }}">{{ grace_label }} 存量结转清单{% if carryover_n %}（{{ carryover_n }} 台）{% endif %}</a>
   · <a href="{{ url_for('imei_export_carryover') }}">导出 CSV</a>
   —— 2026-11-09 前导入的存量（rule_ver=1），含清单剩余天数和截至日；不在最新清单的机器也在这里（标「不在最新清单」）。

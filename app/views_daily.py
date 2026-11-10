@@ -258,7 +258,7 @@ def register_daily(app) -> None:
             # 触客页「顺差串码」下拉：本店库存登记的在库顺差机（只读，不写库）
             imei_options: List[Dict[str, Any]] = []
             if editable and db_imei.user_in_imei_scope(conn, g.user):
-                imei_options = db_imei.pool_picker(conn, str(store["name"] or ""))
+                imei_options = db_imei.pool_picker(conn, store["id"])
             if request.method == "GET":
                 raw_deal_id = request.args.get("deal_id") or ""
                 edit_id = parse_int(raw_deal_id, None)

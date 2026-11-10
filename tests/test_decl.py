@@ -342,7 +342,7 @@ def test_deal_picker_lists_only_own_stock(client):
             ).encode(),
             asof="2026-11-02",
         )
-        opts = db_imei.pool_picker(conn, own)
+        opts = db_imei.pool_picker(conn, _store_id())
         assert {o["imei"] for o in opts} == {"861000000000001", "861000000000002"}
         # 下拉只给串码本身，不带机型（机型由页面回填到「机型」栏）
         assert "label" not in opts[0]
@@ -466,3 +466,166 @@ def test_deal_picker_writes_model_when_picked(client):
         row = conn.execute("SELECT model, imei FROM deal_posts ORDER BY id DESC LIMIT 1").fetchone()
         assert row["model"] == "Y600 Pro全网通(12+512G) 浮光金"
         assert row["imei"] == "861000000000041"
+
+
+# ---- 调拨（V0.4.05）：调入店记，只影响触客下拉，不改库存归属 -------------------
+
+OWN = "示例市甲街vivo体验店"
+OTHER = "示例市乙街vivo专卖店"
+
+
+def _import_two_stores(client):
+    """甲店一台 + 乙店一台，都在库顺差。"""
+    _login(client)
+    with db.get_db() as conn:
+        db_imei.import_rows(
+            conn,
+            (
+                "imei,store,model,sp,day,串码标签\n"
+                f"862000000000001,{OWN},S60元气版,小李,2026-11-01,移动顺差\n"
+                f"862000000000002,{OTHER},Y600 Pro,小李,2026-11-01,移动顺差\n"
+            ).encode(),
+            asof="2026-11-02",
+        )
+
+
+def _sid(code):
+    with db.get_db() as conn:
+        return conn.execute("SELECT id FROM stores WHERE code=?", (code,)).fetchone()["id"]
+
+
+def test_transfer_moves_picker_both_ways(client):
+    """调入店的候选出现这台，调出店的候选看不到它。"""
+    _import_two_stores(client)
+    a, b = _sid("store-alpha"), _sid("store-beta")
+    with db.get_db() as conn:
+        before_b = {o["imei"] for o in db_imei.pool_picker(conn, b)}
+        assert "862000000000001" not in before_b  # 乙店本来就看不到甲店那台
+        res = db_imei.record_transfer(
+            conn, imei="862000000000001", to_store_id=b, biz_date=date(2026, 11, 2), user_id=1
+        )
+        assert res["created"] is True
+        assert "862000000000001" in {o["imei"] for o in db_imei.pool_picker(conn, b)}
+        assert "862000000000001" not in {o["imei"] for o in db_imei.pool_picker(conn, a)}
+        # 不写 imei_todo：归属仍是甲店
+        own = conn.execute(
+            "SELECT own_store FROM imei_todo WHERE imei='862000000000001'"
+        ).fetchone()["own_store"]
+        assert own == OWN
+
+
+def test_transfer_cancel_returns_to_origin(client):
+    _import_two_stores(client)
+    a, b = _sid("store-alpha"), _sid("store-beta")
+    with db.get_db() as conn:
+        tid = db_imei.record_transfer(
+            conn, imei="862000000000001", to_store_id=b, biz_date=date(2026, 11, 2), user_id=1
+        )["id"]
+        assert db_imei.cancel_transfer(conn, tid, user_id=1, is_admin=True) is True
+        assert "862000000000001" in {o["imei"] for o in db_imei.pool_picker(conn, a)}
+        assert "862000000000001" not in {o["imei"] for o in db_imei.pool_picker(conn, b)}
+        assert conn.execute("SELECT COUNT(*) FROM imei_transfer").fetchone()[0] == 1  # 不删行
+
+
+def test_transfer_cancel_requires_admin(client):
+    _import_two_stores(client)
+    with db.get_db() as conn:
+        tid = db_imei.record_transfer(
+            conn, imei="862000000000001", to_store_id=_sid("store-beta"),
+            biz_date=date(2026, 11, 2), user_id=1
+        )["id"]
+        with pytest.raises(PermissionError):
+            db_imei.cancel_transfer(conn, tid, user_id=1, is_admin=False)
+
+
+def test_transfer_rejects_when_already_transferred(client):
+    """同一台同时只能有一条生效调拨：调给乙后再调给甲要报错，调回乙是幂等。"""
+    _import_two_stores(client)
+    a, b = _sid("store-alpha"), _sid("store-beta")
+    with db.get_db() as conn:
+        db_imei.record_transfer(
+            conn, imei="862000000000001", to_store_id=b, biz_date=date(2026, 11, 2), user_id=1
+        )
+        same = db_imei.record_transfer(
+            conn, imei="862000000000001", to_store_id=b, biz_date=date(2026, 11, 2), user_id=1
+        )
+        assert same["created"] is False and same["reason"] == "same_target"
+        with pytest.raises(ValueError):
+            db_imei.record_transfer(
+                conn, imei="862000000000001", to_store_id=a, biz_date=date(2026, 11, 2), user_id=1
+            )
+
+
+def test_transfer_rejects_sold_or_unknown_imei(client):
+    """已卖掉的机器、池子里没有的串码，都不许调。"""
+    _import_two_stores(client)
+    a, b = _sid("store-alpha"), _sid("store-beta")
+    with db.get_db() as conn:
+        # 先把甲店那台卖掉（成交 → 声明）
+        deal_id = _deal(conn, store_id=a, imei="862000000000001", phone="15500000061")
+        assert db_decl.deal_decl(conn, deal_id) is not None
+        with pytest.raises(ValueError):
+            db_imei.record_transfer(
+                conn, imei="862000000000001", to_store_id=b, biz_date=date(2026, 11, 2), user_id=1
+            )
+        with pytest.raises(ValueError):
+            db_imei.record_transfer(
+                conn, imei="869999999999999", to_store_id=b, biz_date=date(2026, 11, 2), user_id=1
+            )
+
+
+def test_transfer_page_records_and_lists(client):
+    """真实路由：门店账号在调拨页记一笔，列表能看到；只读账号不能记。"""
+    _import_two_stores(client)
+    a, b = _sid("store-alpha"), _sid("store-beta")
+    _login(client, "alpha", "123456")
+    page = client.get("/imei/transfer").get_data(as_text=True)
+    assert "调拨台账" in page
+    # 乙店那台调进甲店（甲店账号登记，调入店记）
+    resp = client.post(
+        "/imei/transfer",
+        data={
+            "imei": "862000000000002",
+            "to_store_id": str(a),
+            "biz_date": "2026-11-02",
+            "note": "从乙店调来",
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert "已记调拨" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        row = conn.execute("SELECT * FROM imei_transfer").fetchone()
+        assert row["imei"] == "862000000000002" and int(row["to_store_id"]) == a
+        assert row["from_store"] == OTHER  # 按库存清单自动认调出店
+        assert int(row["from_store_id"]) == b
+
+
+def test_transfer_expires_after_next_stock_snapshot(client):
+    """调拨只在「快照还没走到调拨日之后」时生效；新清单一到，归属以清单为准。"""
+    _import_two_stores(client)
+    a, b = _sid("store-alpha"), _sid("store-beta")
+    with db.get_db() as conn:
+        db_imei.record_transfer(
+            conn, imei="862000000000002", to_store_id=a, biz_date=date(2026, 11, 2), user_id=1
+        )
+        assert "862000000000002" in {o["imei"] for o in db_imei.pool_picker(conn, a)}
+        assert "862000000000002" not in {o["imei"] for o in db_imei.pool_picker(conn, b)}
+        # 次日库存清单（asof=11-03）把归属仍写成乙店 → 调拨不再影响候选
+        db_imei.import_rows(
+            conn,
+            (
+                "imei,store,model,sp,day,串码标签\n"
+                f"862000000000002,{OTHER},Y600 Pro,小李,2026-11-01,移动顺差\n"
+            ).encode(),
+            asof="2026-11-03",
+        )
+        assert "862000000000002" in {o["imei"] for o in db_imei.pool_picker(conn, b)}
+        assert "862000000000002" not in {o["imei"] for o in db_imei.pool_picker(conn, a)}
+        row = db_imei.transfer_rows(conn)[0]
+        assert row["taken_over"] == 1
+        # 接管后允许再调一次（不会撞唯一索引）
+        again = db_imei.record_transfer(
+            conn, imei="862000000000002", to_store_id=a, biz_date=date(2026, 11, 3), user_id=1
+        )
+        assert again["created"] is True

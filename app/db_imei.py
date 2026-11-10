@@ -360,6 +360,25 @@ _SCHEMA_STMTS = (
     # 一台机器同时只能有**一把**未释放的锁；释放后允许重新抢（历史行全部留着，释放不删行）
     "CREATE UNIQUE INDEX IF NOT EXISTS uniq_imei_pool_lock_open ON imei_pool_lock(imei) WHERE released_at IS NULL",
     "CREATE INDEX IF NOT EXISTS idx_imei_pool_lock_store ON imei_pool_lock(claim_store_id, released_at)",
+    """
+    CREATE TABLE IF NOT EXISTS imei_transfer (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        imei TEXT NOT NULL,
+        from_store_id INTEGER,
+        from_store TEXT NOT NULL DEFAULT '',
+        to_store_id INTEGER NOT NULL REFERENCES stores(id),
+        biz_date TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        user_id INTEGER,
+        created_at TEXT NOT NULL,
+        cancelled_at TEXT,
+        cancelled_by INTEGER
+    )
+    """,
+    # 一台机器同时只能有一条未撤销的调拨；撤销后允许再调（历史行全留着）
+    "CREATE UNIQUE INDEX IF NOT EXISTS uniq_imei_transfer_open ON imei_transfer(imei) WHERE cancelled_at IS NULL",
+    "CREATE INDEX IF NOT EXISTS idx_imei_transfer_to ON imei_transfer(to_store_id, cancelled_at)",
+    "CREATE INDEX IF NOT EXISTS idx_imei_transfer_date ON imei_transfer(biz_date)",
 )
 
 # ensure() 的快速路径要认全这些对象；新增审计表时同步加进来，否则老库会漏建。
@@ -379,6 +398,10 @@ _SCHEMA_OBJECTS = (
     "imei_pool_lock",
     "uniq_imei_pool_lock_open",
     "idx_imei_pool_lock_store",
+    "imei_transfer",
+    "uniq_imei_transfer_open",
+    "idx_imei_transfer_to",
+    "idx_imei_transfer_date",
 )
 
 # 老库上补列（表是懒建的，之前跑过的库没有这些列）
@@ -448,38 +471,208 @@ def find_stock_imei(conn: sqlite3.Connection, query: str) -> Optional[Dict[str, 
     return dict(rows[0])
 
 
-def pool_picker(
-    conn: sqlite3.Connection, store_name: str = "", limit: int = 120
+def open_transfer_sql(alias: str = "t", direction: str = "in") -> str:
+    """「这台有一条**还在生效**的调拨」的 SQL 片段（唯一来源）。
+
+    `direction='in'`：调到本店（调入店的候选要包含它）
+    `direction='out'`：从本店调出（调出店的候选要排除它）
+
+    生效条件：未撤销 **且 库存快照还没走到调拨日之后**（`asof <= biz_date`）。
+    一旦导入了更新日期的库存清单（`asof > biz_date`），归属就以清单为准，
+    这条调拨不再影响候选——记录仍留着当留痕，页面上标「已由清单接管」。
+    """
+    field = "to_store_id" if direction == "in" else "from_store_id"
+    return (
+        f"EXISTS (SELECT 1 FROM imei_transfer x "
+        f"WHERE x.imei={alias}.imei AND x.cancelled_at IS NULL "
+        f"AND x.{field}=s.id "
+        f"AND COALESCE(NULLIF({alias}.asof,''), '') <= x.biz_date)"
+    )
+
+
+def transfer_rows(
+    conn: sqlite3.Connection,
+    *,
+    store_ids: Optional[Sequence[int]] = None,
+    open_only: bool = True,
+    limit: int = 200,
 ) -> List[Dict[str, Any]]:
-    """触客页「顺差串码」下拉候选：**本店库存登记的在库顺差机**。
+    """调拨明细（管理员看全量，门店看与自己相关的）。"""
+    ensure(conn)
+    where = ["1=1"]
+    params: List[Any] = []
+    if open_only:
+        where.append("x.cancelled_at IS NULL")
+    if store_ids is not None:
+        clause, ids = _store_in("x.to_store_id", store_ids)
+        where.append(f"({clause} OR x.from_store_id IN ({','.join('?' * len(ids))}))")
+        params.extend(ids)
+        params.extend(ids)
+    sql = f"""
+        SELECT x.*, t.model AS model, t.status AS status,
+               CASE WHEN x.cancelled_at IS NULL
+                     AND COALESCE(NULLIF(t.asof,''), '') > x.biz_date
+                    THEN 1 ELSE 0 END AS taken_over,
+               fs.short_name AS from_short, fs.name AS from_name,
+               ts.short_name AS to_short, ts.name AS to_name,
+               u.display_name AS by_name,
+               cu.display_name AS cancel_name
+        FROM imei_transfer x
+        LEFT JOIN imei_todo t ON t.imei = x.imei
+        LEFT JOIN stores fs ON fs.id = x.from_store_id
+        LEFT JOIN stores ts ON ts.id = x.to_store_id
+        LEFT JOIN users u ON u.id = x.user_id
+        LEFT JOIN users cu ON cu.id = x.cancelled_by
+        WHERE {' AND '.join(where)}
+        ORDER BY x.biz_date DESC, x.id DESC
+        LIMIT ?
+    """
+    params.append(int(limit))
+    return [dict(row) for row in conn.execute(sql, params)]
+
+
+def record_transfer(
+    conn: sqlite3.Connection,
+    *,
+    imei: str,
+    to_store_id: int,
+    biz_date: date,
+    from_store_id: Optional[int] = None,
+    from_store: str = "",
+    note: str = "",
+    user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """调入店登记一条调拨（只增不改；撤销另写一行，不删历史）。
+
+    只认**池子里还在的那台**（`未售 + seen=1 + 无有效声明`）：
+    - 已卖掉的机器不允许再调（会被声明/成交挡掉）；
+    - 同一台同时只能有一条未撤销的调拨（唯一索引兜底）；
+    - **不写 `imei_todo.own_store`**：明天早上导库存，那份快照才是归属的权威，
+      写了也会被 UPSERT 覆盖。
+    """
+    ensure(conn)
+    imei = str(imei or "").strip()
+    if not imei:
+        raise ValueError("要填串码")
+    row = conn.execute(
+        f"""
+        SELECT t.imei, t.model, t.own_store FROM imei_todo t
+        WHERE t.imei=? AND t.seen=1 AND t.status=? AND {no_live_decl_sql()}
+        """,
+        (imei, STATUS_STOCK),
+    ).fetchone()
+    if row is None:
+        raise ValueError("这台不在池子里（可能已卖出、已调走或不在最新库存清单）")
+    old = conn.execute(
+        "SELECT x.*, COALESCE(NULLIF(t.asof,''), '') AS todo_asof FROM imei_transfer x "
+        "JOIN imei_todo t ON t.imei = x.imei "
+        "WHERE x.imei=? AND x.cancelled_at IS NULL",
+        (imei,),
+    ).fetchone()
+    if old is not None and str(old["todo_asof"] or "") > str(old["biz_date"] or ""):
+        # 旧调拨已经被更新的库存清单接管：自动失效（记原因），历史行保留，
+        # 这样同一台可以按新的归属再调一次（唯一索引也不会撞）。
+        conn.execute(
+            "UPDATE imei_transfer SET cancelled_at=?, cancelled_by=NULL, "
+            "note = CASE WHEN note='' THEN ? ELSE note || ' · ' || ? END "
+            "WHERE id=? AND cancelled_at IS NULL",
+            (_now(), "库存清单已接管，自动失效", "库存清单已接管，自动失效", int(old["id"])),
+        )
+        old = None
+    if old is not None:
+        if int(old["to_store_id"]) == int(to_store_id):
+            return {"created": False, "reason": "same_target", "id": int(old["id"])}
+        to_short = conn.execute(
+            "SELECT short_name, name FROM stores WHERE id=?", (int(old["to_store_id"]),)
+        ).fetchone()
+        who = (to_short["short_name"] or to_short["name"] or "") if to_short else ""
+        raise ValueError(f"这台已经调给 {who} 了，先撤销那条再改")
+    # 调出店：没传就按库存清单的登记店认；对不上档案就留空（别硬塞一个错的 id）
+    from_name = (from_store or str(row["own_store"] or "")).strip()
+    if not from_store_id and from_name:
+        hit = conn.execute(
+            "SELECT id FROM stores WHERE name=? OR short_name=?", (from_name, from_name)
+        ).fetchone()
+        if hit is not None:
+            from_store_id = int(hit["id"])
+    begin_immediate(conn)
+    cur = conn.execute(
+        """
+        INSERT INTO imei_transfer(
+            imei, from_store_id, from_store, to_store_id, biz_date, note, user_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            imei,
+            int(from_store_id) if from_store_id else None,
+            from_name[:80],
+            int(to_store_id),
+            biz_date.isoformat(),
+            (note or "").strip()[:200],
+            int(user_id) if user_id else None,
+            _now(),
+        ),
+    )
+    return {"created": True, "id": int(cur.lastrowid or 0)}
+
+
+def cancel_transfer(
+    conn: sqlite3.Connection,
+    transfer_id: int,
+    *,
+    user_id: Optional[int] = None,
+    is_admin: bool = False,
+) -> bool:
+    """撤销一条调拨：只写 `cancelled_at/cancelled_by`，不删行。"""
+    ensure(conn)
+    if not is_admin:
+        raise PermissionError("forbidden")
+    begin_immediate(conn)
+    cur = conn.execute(
+        "UPDATE imei_transfer SET cancelled_at=?, cancelled_by=? WHERE id=? AND cancelled_at IS NULL",
+        (_now(), int(user_id) if user_id else None, int(transfer_id)),
+    )
+    return bool(cur.rowcount)
+
+
+def pool_picker(
+    conn: sqlite3.Connection, store_id: Optional[int] = None, limit: int = 120
+) -> List[Dict[str, Any]]:
+    """触客页「顺差串码」下拉候选：**本店库存登记的 + 今天调入本店的**在库顺差机。
 
     为什么只给本店：池子是南通共享池，A 店可以卖 B 店库存的机器，但门店最常卖的
     还是自己店里那几台；把 900 多台全塞进下拉，手机端没法用。要卖别家的机器，
     照旧填尾号 6 位（服务端按 IMEI 模糊查，全池都能命中）。
 
-    下拉只给**串码本身**（用户 2026-11-10 拍板）：机型和颜色由页面在选中后回填到
-    「机型」那一栏，串码这一格只放串码，对上机器上的标签最快。
+    调拨（用户 2026-11-10 拍板「调入店记」）：调入店的候选**包含**它调进来的那几台，
+    调出店的候选**排除**已经调走的——两边下拉都跟着调拨走，不必等次日快照。
+
+    下拉只给**串码本身**：机型和颜色由页面在选中后回填到「机型」那一栏，
+    串码这一格只放串码，对上机器上的标签最快。
     """
     ensure(conn)
-    if not store_name:
+    if not store_id:
         return []
     rows = conn.execute(
         f"""
-        SELECT t.imei, t.model, t.own_store
+        SELECT t.imei, t.model
         FROM imei_todo t
+        JOIN stores s ON s.id = ?
         WHERE t.seen=1 AND t.status=?
           AND {no_live_decl_sql()}
-          AND t.own_store=?
+          AND (
+            (t.own_store = s.name AND NOT {open_transfer_sql("t", "out")})
+            OR {open_transfer_sql("t", "in")}
+          )
         ORDER BY t.imei
         LIMIT ?
         """,
-        (STATUS_STOCK, store_name, int(limit)),
+        (int(store_id), STATUS_STOCK, int(limit)),
     ).fetchall()
     out: List[Dict[str, Any]] = []
     for row in rows:
         out.append({"imei": str(row["imei"]), "model": str(row["model"] or "")})
     return out
-
 
 def ensure(conn: sqlite3.Connection) -> None:
     # 不用 executescript：sqlite3.executescript 会先发隐式 COMMIT，若外层正握着写事务会被提前提交；

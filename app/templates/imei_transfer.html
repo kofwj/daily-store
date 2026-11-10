@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}调拨台账 · 串码待办{% endblock %}
+{% block body_class %}imei-page{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div class="page-title">
+    <h1>调拨台账</h1>
+    <p class="muted">
+      调入店登记，系统只记事实 —— 库存归属仍以每天导入的库存清单为准
+      {% if scope.active %} · {{ scope.label }}{% endif %}
+    </p>
+  </div>
+  <form method="get" class="page-filters">
+    <label class="filter">
+      <span>范围</span>
+      <select name="show" onchange="this.form.submit()">
+        <option value="open" {{ 'selected' if open_only }}>只看生效中</option>
+        <option value="all" {{ 'selected' if not open_only }}>含已撤销</option>
+      </select>
+    </label>
+    <a class="btn ghost" href="{{ url_for('imei_page') }}">返回串码待办</a>
+    <a class="btn ghost" href="{{ url_for('imei_pool') }}">串码池（在库）</a>
+  </form>
+</div>
+
+<div class="flash-inline">
+  调拨只影响<b>今天谁来卖</b>：调入店的触客下拉会出现这几台，调出店的下拉里看不到它们。
+  明天早上导库存清单时，归属以那份清单为准，这里的记录只是留痕。
+  {% if is_admin %}撤销只有管理员能做，撤销后机器回到调出店的候选。{% endif %}
+</div>
+
+{% if can_write %}
+<div class="card">
+  <h2>记一笔调拨（调入店记）</h2>
+  <form method="post" action="{{ url_for('imei_transfer_post') }}" class="rules-form">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+    <label class="field">
+      <span>串码</span>
+      <input type="text" name="imei" inputmode="numeric" maxlength="32" required
+             placeholder="15 位串码（机器上的标签）" autocomplete="off">
+    </label>
+    <label class="field">
+      <span>调入哪家店</span>
+      <select name="to_store_id" required>
+        {% for s in stores %}
+        <option value="{{ s.id }}">{{ s.short_name or s.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field">
+      <span>从哪家店（可空）</span>
+      <select name="from_store_id">
+        <option value="">— 按库存清单自动认 —</option>
+        {% for s in stores %}
+        <option value="{{ s.id }}">{{ s.short_name or s.name }}</option>
+        {% endfor %}
+        <option value="0">（其他店 / 未建档店）</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>调拨日期</span>
+      <input type="date" name="biz_date" value="{{ today_iso }}">
+    </label>
+    <label class="field">
+      <span>说明（可空）</span>
+      <input type="text" name="note" maxlength="200" placeholder="如 5 台从海门金花调来" autocomplete="off">
+    </label>
+    <p class="muted">
+      只能登记<b>池子里还在的那台</b>（未售、在最新库存清单里、没卖出过）。
+      一台同时只能有一条生效中的调拨。
+    </p>
+    <div class="toolbar"><button type="submit">记调拨</button></div>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>
+    {{ '生效中的调拨' if open_only else '全部调拨记录' }}
+    <span class="muted">{{ rows|length }} 条</span>
+  </h2>
+  {% if rows %}
+  <div class="report-table-scroll">
+    <table class="data report-grid">
+      <thead>
+        <tr>
+          <th class="left">调拨日期</th>
+          <th class="left">串码</th>
+          <th class="left">机型</th>
+          <th class="left">调出店</th>
+          <th class="left">调入店</th>
+          <th class="left">登记人</th>
+          <th class="left">说明</th>
+          <th class="left">状态</th>
+          {% if is_admin %}<th></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td class="left">{{ r.biz_date }}</td>
+          <td class="left"><code>{{ r.imei }}</code></td>
+          <td class="left">{{ r.model or '—' }}</td>
+          <td class="left">{{ r.from_short or r.from_name or r.from_store or '—' }}</td>
+          <td class="left">{{ r.to_short or r.to_name or '—' }}</td>
+          <td class="left">{{ r.by_name or '—' }}</td>
+          <td class="left">{{ r.note or '—' }}</td>
+          <td class="left">
+            {% if r.cancelled_at %}
+            <span class="status done">已撤销</span>
+            <div class="muted">{{ r.cancel_name or '' }} {{ r.cancelled_at[:16] }}</div>
+            {% elif r.taken_over %}
+            <span class="status done">已由清单接管</span>
+            <div class="muted">库存清单已更新，归属以清单为准；再调一次会自动作废旧记录</div>
+            {% else %}
+            <span class="status wait">生效中</span>
+            {% endif %}
+          </td>
+          {% if is_admin %}
+          <td class="right">
+            {% if not r.cancelled_at and not r.taken_over %}
+            <form method="post" action="{{ url_for('imei_transfer_post') }}"
+                  onsubmit="return confirm('撤销后这台回到原店候选，历史记录保留。确定？')">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="action" value="cancel">
+              <input type="hidden" name="transfer_id" value="{{ r.id }}">
+              <button class="ghost del-day" type="submit">撤销</button>
+            </form>
+            {% else %}
+            <span class="muted">已撤</span>
+            {% endif %}
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">还没有调拨记录。门店之间调货时，由<b>调入店</b>在这里登记一笔即可。</p>
+  {% endif %}
+</div>
+{% endblock %}
