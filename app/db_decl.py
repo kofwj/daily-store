@@ -40,9 +40,12 @@ DECL_STATES = (DECL_PENDING, DECL_CONFIRMED, DECL_VOID)
 SRC_DEAL = "deal"
 SRC_REPORT = "report"
 
-# 触发垫资的业务类型：只有「顺差让利」是购机让利垫资。
-# AI手机合约 / 直降合约 / 送2G流量 只闭环待办，不产生购机让利垫资（口径见实施计划 §1）。
+# 触发垫资的业务类型：只有明确选了「顺差让利」才记购机让利垫资。
+# AI手机合约 / 直降合约 / 送2G流量 / 其他 / 没选 都只闭环待办（占声明=出池），不记钱
+# （口径见实施计划 §1）。
 REBATE_BIZ = "顺差让利"
+BIZ_OTHER = "其他"
+BIZ_SET = ("AI手机合约", "直降合约", "顺差让利", "送2G流量")
 
 # 让利档位（分）。默认 100 元/台，管理员可在设置页改。
 DEFAULT_REBATE_CENTS = 10000
@@ -58,6 +61,7 @@ _SCHEMA_STMTS = (
         deal_id INTEGER,
         report_id INTEGER,
         src TEXT NOT NULL DEFAULT 'deal',
+        biz_type TEXT NOT NULL DEFAULT '',
         biz_date TEXT NOT NULL,
         rebate_cents INTEGER NOT NULL DEFAULT 0,
         state TEXT NOT NULL DEFAULT '待核',
@@ -78,6 +82,30 @@ _SCHEMA_STMTS = (
 _SCHEMA_OBJECTS = ("imei_decl", "uniq_imei_decl_live", "idx_imei_decl_queue", "idx_imei_decl_advance")
 
 
+
+_ADDED_COLUMNS = {
+    # V0.4.06：这一单办的终端业务类型。老库补上后老数据是 ''。
+    "biz_type": "TEXT NOT NULL DEFAULT ''",
+}
+
+
+def norm_biz(value: Any) -> str:
+    """业务类型归一：只留已知取值，其余（含 ``None`` / 空）一律当空串。
+
+    空 = 没选（V0.4.06 之前的老单也没有这一栏）。空**不**算顺差让利：
+    只有明确选了才记钱——少记一笔能补，多记一笔要冲账。
+    """
+    text = str(value or "").strip()
+    if text in BIZ_SET:
+        return text
+    return BIZ_OTHER if text == BIZ_OTHER else ""
+
+
+def biz_gets_rebate(biz_type: Any) -> bool:
+    """这一单要不要生成让利垫资：只有明确选了「顺差让利」。"""
+    return norm_biz(biz_type) == REBATE_BIZ
+
+
 def ensure(conn: sqlite3.Connection) -> None:
     """懒建声明表（与 imei_todo / aux_queries 同款做法，不写迁移号）。"""
     existing = {
@@ -91,6 +119,11 @@ def ensure(conn: sqlite3.Connection) -> None:
     if len(existing) < len(_SCHEMA_OBJECTS):
         for stmt in _SCHEMA_STMTS:
             conn.execute(stmt)
+    # 老库补列（表是懒建的，V0.4.05 之前的库没有 biz_type）
+    have = {str(r[1]) for r in conn.execute("PRAGMA table_info(imei_decl)")}
+    for name, decl in _ADDED_COLUMNS.items():
+        if name not in have:
+            conn.execute(f"ALTER TABLE imei_decl ADD COLUMN {name} {decl}")
 
 
 def live_decl_sql(alias: str = "t") -> str:
@@ -146,19 +179,27 @@ def _insert_decl(
     store_id: int,
     own_store: str,
     src: str,
+    biz_type: str,
     biz_date: date,
     rebate: int,
     deal_id: Optional[int],
     report_id: Optional[int],
     user_id: Optional[int],
 ) -> int:
+    """落一条声明。
+
+    钱的判定只有一处：``rebate > 0`` 才进「待核」（== 明确选了顺差让利）；
+    其他业务类型 ``rebate=0`` 直接落「已确认」——**照样占唯一索引 = 照样出池**，
+    但不进待核队列、不发钱、不落垫资行。
+    """
+    state = DECL_PENDING if int(rebate) > 0 else DECL_CONFIRMED
     cur = conn.execute(
         """
         INSERT INTO imei_decl(
-            imei, store_id, own_store, deal_id, report_id, src, biz_date,
-            rebate_cents, state, user_id, created_at
+            imei, store_id, own_store, deal_id, report_id, src, biz_type, biz_date,
+            rebate_cents, state, advance_id, confirmed_by, confirmed_at, user_id, created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
         """,
         (
             str(imei).strip(),
@@ -167,9 +208,12 @@ def _insert_decl(
             int(deal_id) if deal_id else None,
             int(report_id) if report_id else None,
             src,
+            norm_biz(biz_type),
             biz_date.isoformat(),
             int(rebate),
-            DECL_PENDING,
+            state,
+            int(user_id) if (state == DECL_CONFIRMED and user_id) else None,
+            _now() if state == DECL_CONFIRMED else "",
             int(user_id) if user_id else None,
             _now(),
         ),
@@ -185,12 +229,17 @@ def create_from_deal(
     own_store: str = "",
     deal_id: int,
     biz_date: date,
+    biz_type: str = "",
     user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """触客成交生成（或复用）一条待核垫资声明。
+    """触客成交生成（或复用）一条声明。
+
+    业务类型是唯一门禁：``biz_type == "顺差让利"`` 才 ``rebate_cents=档位 / 待核``；
+    其他类型 ``rebate_cents=0 / 已确认``——照样占唯一索引（= 照样出池、照样防重），
+    但不进待核队列、不发钱。
 
     返回值给页面提示用：
-    - ``{"created": True, "decl_id": N, "rebate_cents": M}`` 新建；
+    - ``{"created": True, "decl_id": N, "rebate_cents": M}`` 新建（M=0 表示不记钱）；
     - ``{"created": False, "reason": "declared", "owner": "某店"}`` 这台已被别家声明卖出，
       **不报错、不影响触客保存**（触客条数是 KPI，不能因为串码撞了就丢）；
     - ``{"created": False, "reason": "duplicate"}`` 本单已经有一条有效声明（重复提交）。
@@ -209,13 +258,14 @@ def create_from_deal(
         ).fetchone()
         who = (owner["short_name"] or owner["name"] or "") if owner else ""
         return {"created": False, "reason": "declared", "owner": who}
-    rebate = rebate_cents(conn)
+    rebate = rebate_cents(conn) if biz_gets_rebate(biz_type) else 0
     decl_id = _insert_decl(
         conn,
         imei=imei,
         store_id=store_id,
         own_store=own_store,
         src=SRC_DEAL,
+        biz_type=biz_type,
         biz_date=biz_date,
         rebate=rebate,
         deal_id=deal_id,
@@ -233,10 +283,12 @@ def create_from_report(
     own_store: str = "",
     report_id: int,
     biz_date: Optional[date] = None,
+    biz_type: str = "",
     user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """串码待办自报「已办 + 顺差让利」生成待核垫资（兜底路）。
 
+    钱口径与触客同一条门禁（``biz_gets_rebate``），不另写一套。
     已经由成交闭环的机器不再生成第二条（幂等返回 ``duplicate``），
     门店看到的是「已由成交闭环」，不是报错。
     """
@@ -247,13 +299,14 @@ def create_from_report(
     cur = live_decl(conn, imei)
     if cur is not None:
         return {"created": False, "reason": "duplicate", "decl_id": int(cur["id"])}
-    rebate = rebate_cents(conn)
+    rebate = rebate_cents(conn) if biz_gets_rebate(biz_type) else 0
     decl_id = _insert_decl(
         conn,
         imei=imei,
         store_id=store_id,
         own_store=own_store,
         src=SRC_REPORT,
+        biz_type=biz_type,
         biz_date=biz_date or today_local(),
         rebate=rebate,
         deal_id=None,
@@ -347,6 +400,40 @@ def void_by_deal(
     return n
 
 
+def _retype_decl(conn: sqlite3.Connection, row: sqlite3.Row, biz_type: str) -> None:
+    """串码没变、只改了业务类型：改声明里的类型。
+
+    **类型没变就一个字都不动**——同店改个号码/备注也会走这里，若无条件重算，
+    管理员月中调档就会把已有待核的金额改掉，破坏「生成时快照」的口径。
+
+    金额什么时候能被改：只有**钱还没落进 ``advance_posts``** 时——
+    待核（``rebate>0`` 快照还没兑现）和「没记钱的已确认」（``rebate=0``）都算。
+    已确认**且金额 > 0** 的机器钱已经在垫资表里了，只改类型文字、不回头动账。
+    """
+    biz = norm_biz(biz_type)
+    if biz == str(row["biz_type"] or ""):
+        return
+    state = str(row["state"] or "")
+    rebate_old = int(row["rebate_cents"] or 0)
+    if state == DECL_CONFIRMED and rebate_old > 0:
+        conn.execute("UPDATE imei_decl SET biz_type=? WHERE id=?", (biz, int(row["id"])))
+        return
+    rebate = rebate_cents(conn) if biz_gets_rebate(biz) else 0
+    next_state = DECL_PENDING if rebate > 0 else DECL_CONFIRMED
+    conn.execute(
+        "UPDATE imei_decl SET biz_type=?, rebate_cents=?, state=?, "
+        "confirmed_by=?, confirmed_at=? WHERE id=?",
+        (
+            biz,
+            int(rebate),
+            next_state,
+            int(row["user_id"] or 0) if next_state == DECL_CONFIRMED else None,
+            _now() if next_state == DECL_CONFIRMED else "",
+            int(row["id"]),
+        ),
+    )
+
+
 def sync_deal(
     conn: sqlite3.Connection,
     *,
@@ -355,6 +442,7 @@ def sync_deal(
     imei: str,
     closed: bool,
     biz_date: date,
+    biz_type: str = "",
     user_id: Optional[int] = None,
     own_store: str = "",
 ) -> Dict[str, Any]:
@@ -362,6 +450,7 @@ def sync_deal(
 
     调用方是 ``record_deal_post``（同一个 ``BEGIN IMMEDIATE`` 事务内），
     所以触客与声明同生同死，不会只写一半。
+    串码没变但业务类型改了 → 就地改类型（待核的重算金额，已确认的只改文字）。
     """
     ensure(conn)
     imei = str(imei or "").strip()
@@ -372,6 +461,7 @@ def sync_deal(
     for row in rows:
         same = bool(closed) and str(row["imei"]) == imei
         if same:
+            _retype_decl(conn, row, biz_type)
             kept += 1
             continue
         void_decl(
@@ -391,6 +481,7 @@ def sync_deal(
         own_store=own_store,
         deal_id=deal_id,
         biz_date=biz_date,
+        biz_type=biz_type,
         user_id=user_id,
     )
 
@@ -521,13 +612,17 @@ def summary(conn: sqlite3.Connection, store_ids: Optional[Sequence[int]] = None)
 
 
 def confirmed_totals(conn: sqlite3.Connection, start: date, end: date) -> Dict[str, Any]:
-    """区间内已确认的笔数与快照金额（对账用，不读垫资表）。"""
+    """区间内已确认**且有金额**的笔数与快照金额（对账用，不读垫资表）。
+
+    ``rebate_cents > 0`` 是必须的：非顺差让利的单子落「已确认」但金额为 0，
+    那是「已办」的标记，不是钱。
+    """
     ensure(conn)
     row = conn.execute(
         """
         SELECT COUNT(*) AS n, SUM(rebate_cents) AS cents
         FROM imei_decl
-        WHERE state=? AND biz_date>=? AND biz_date<=?
+        WHERE state=? AND rebate_cents>0 AND biz_date>=? AND biz_date<=?
         """,
         (DECL_CONFIRMED, start.isoformat(), end.isoformat()),
     ).fetchone()

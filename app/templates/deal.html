@@ -41,26 +41,49 @@
         <input name="phone" value="{{ form.phone }}" inputmode="numeric" pattern="[0-9]{11}" maxlength="11" title="请输入11位手机号" placeholder="11位手机号" autocomplete="off">
       </p>
       <p>
+        <label>办理的终端业务</label>
+        <select name="biz_type" id="bizType" title="只有「顺差让利」进让利垫资">
+          <option value="">— 没办 / 未选 —</option>
+          {% for b in biz_choices %}
+          <option value="{{ b }}" {% if form.biz_type == b %}selected{% endif %}>{{ b }}</option>
+          {% endfor %}
+        </select>
+        <span class="muted" id="bizHint">只有选「顺差让利」才记让利垫资</span>
+      </p>
+      <p>
         <label>顺差串码<small class="muted">（可空）</small></label>
         {% if imei_options %}
-        <select name="imei_pick" id="imeiPick" title="选本店在库的顺差机；也可以在下面填尾号搜全池">
-          <option value="" data-model="">— 不关联 / 手填尾号 —</option>
+        <select name="imei_pick" id="imeiPick" title="选本店在库的顺差机">
+          <option value="" data-model="">— 本店在库顺差机（{{ imei_options|length }} 台）—</option>
           {% for o in imei_options %}
           <option value="{{ o.imei }}" data-model="{{ o.model }}" {% if form.imei == o.imei %}selected{% endif %}>{{ o.imei }}</option>
           {% endfor %}
         </select>
         <span class="muted">本店库存里还有 {{ imei_options|length }} 台在库顺差机</span>
         {% endif %}
-        <input name="imei" value="{{ form.imei }}" inputmode="numeric" pattern="[0-9]{6,20}" maxlength="20"
+        <input name="imei" id="imeiInput" value="{{ form.imei }}" inputmode="numeric" maxlength="20"
                title="填全 15 位或后 6 位；只在顺差池子里找得到才记"
-               placeholder="{{ '卖别店的机器？填尾号 6 位或完整串码' if imei_options else '尾号 6 位或完整串码，不填不影响成交' }}" autocomplete="off">
-        {% if form.imei %}
-        <span class="muted">已关联 {{ form.imei }}{% if form.imei_model %} · {{ form.imei_model }}{% endif %}</span>
-        {% elif imei_options %}
-        <span class="muted">上面选一台，或这里填尾号；填了才记 100 元让利垫资（待核）</span>
-        {% else %}
-        <span class="muted">填了才记 100 元让利垫资（待核）</span>
-        {% endif %}
+               placeholder="尾号 6 位或完整串码，不填不影响成交" autocomplete="off">
+        <div class="imei-find">
+          <input name="imei_q" id="imeiQuery" maxlength="24" autocomplete="off"
+                 placeholder="查串码尾号 / 机型关键字">
+          <button type="button" class="btn ghost" id="imeiFindBtn">查询</button>
+          <button type="button" class="btn ghost" id="imeiScanBtn" title="扫机器标签或包装盒上的条码">扫一扫</button>
+        </div>
+        <div class="imei-found" id="imeiFound" aria-live="polite"></div>
+        <div class="imei-cam" id="imeiCam" hidden>
+          <video id="imeiVideo" playsinline muted></video>
+          <button type="button" class="btn ghost" id="imeiScanStop">关掉摄像头</button>
+        </div>
+        <span class="muted" id="imeiHint">
+          {%- if form.imei -%}
+          已关联 {{ form.imei }}{% if form.imei_model %} · {{ form.imei_model }}{% endif %}
+          {%- elif imei_options -%}
+          上面选一台、或查尾号 / 扫一下；选「顺差让利」时填了才记让利垫资
+          {%- else -%}
+          填了才记让利垫资（待核），没办顺差让利可以不填
+          {%- endif -%}
+        </span>
       </p>
       <p>
         <label>消费</label>
@@ -98,6 +121,7 @@
     <div class="deal-grid">
       <p><label>机型</label><span>{{ form.model or '—' }}</span></p>
       <p><label>号码</label><span>{{ form.phone or '—' }}</span></p>
+      <p><label>办理的终端业务</label><span>{{ form.biz_type or '—' }}</span></p>
       <p><label>顺差串码</label><span>{{ form.imei or '—' }}</span></p>
       <p><label>消费</label><span>{{ form.spend or '—' }}</span></p>
       <p><label>推荐套餐</label><span>{{ form.recommend or '—' }}</span></p>
@@ -152,6 +176,162 @@ window.addEventListener('DOMContentLoaded', copyDeal);
       modelInput.value = model;
     }
   });
+})();
+
+// 串码查询 + 扫一扫：查到的机器点一下就填进「顺差串码」，机型回填到「机型」栏。
+// 服务端只认池子里还在的那台，这里查不到就是查不到，不做本地兜底猜测。
+(function () {
+  var input = document.getElementById('imeiInput');
+  var queryInput = document.getElementById('imeiQuery');
+  var findBtn = document.getElementById('imeiFindBtn');
+  var scanBtn = document.getElementById('imeiScanBtn');
+  var foundBox = document.getElementById('imeiFound');
+  var hint = document.getElementById('imeiHint');
+  var cam = document.getElementById('imeiCam');
+  var video = document.getElementById('imeiVideo');
+  var stopBtn = document.getElementById('imeiScanStop');
+  if (!input || !queryInput || !foundBox) { return; }
+  var form = input.form;
+  var modelInput = form ? form.querySelector('input[name=model]') : null;
+  var bizSel = document.getElementById('bizType');
+  var stream = null;
+  var timer = null;
+
+  function setHint(text) {
+    if (hint) { hint.textContent = text; }
+  }
+
+  function clearFound() {
+    foundBox.textContent = '';
+    foundBox.classList.remove('empty');
+  }
+
+  // 选中一台：填串码、带出机型，把「查」框也同步成这台尾号，方便复核
+  function pickRow(row) {
+    input.value = row.imei;
+    if (modelInput && row.model) { modelInput.value = row.model; }
+    queryInput.value = row.tail || row.imei.slice(-6);
+    setHint('已关联 ' + row.imei + (row.model ? ' · ' + row.model : '')
+      + (row.own_store ? ' · 库存登记：' + row.own_store : ''));
+    foundBox.textContent = '';
+    foundBox.classList.remove('empty');
+  }
+
+  function renderRows(rows, q) {
+    foundBox.textContent = '';
+    if (!rows.length) {
+      foundBox.classList.add('empty');
+      foundBox.textContent = '池子里没有「' + q + '」这台（可能已卖出，或不在最新库存清单）。'
+        + '照旧可以保存触客，只是这台不记让利垫资。';
+      return;
+    }
+    var list = document.createElement('div');
+    list.className = 'imei-found-list';
+    rows.forEach(function (row) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'imei-found-item';
+      var main = document.createElement('strong');
+      main.textContent = row.imei;
+      var sub = document.createElement('span');
+      sub.className = 'muted';
+      sub.textContent = (row.model || '未登记机型') + (row.own_store ? ' · ' + row.own_store : '');
+      btn.appendChild(main);
+      btn.appendChild(sub);
+      btn.addEventListener('click', function () { pickRow(row); });
+      list.appendChild(btn);
+    });
+    foundBox.appendChild(list);
+  }
+
+  function lookup(q, autoPick) {
+    q = (q || '').trim();
+    if (!q) {
+      foundBox.textContent = '先填串码尾号（至少 6 位）或机型关键字。';
+      foundBox.classList.add('empty');
+      return;
+    }
+    clearFound();
+    foundBox.textContent = '查询中…';
+    fetch('{{ url_for("imei_lookup") }}?q=' + encodeURIComponent(q), { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var rows = (data && data.rows) || [];
+        if (autoPick && rows.length === 1) { renderRows(rows, q); pickRow(rows[0]); return; }
+        renderRows(rows, q);
+      })
+      .catch(function () {
+        foundBox.classList.add('empty');
+        foundBox.textContent = '查询失败（网络或权限问题），可以直接手填串码。';
+      });
+  }
+
+  findBtn && findBtn.addEventListener('click', function () { lookup(queryInput.value, false); });
+  queryInput.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); lookup(queryInput.value, false); }
+  });
+  // 手填满 6 位以上数字就自动查一次，省一次点击（手机端少一步）
+  input.addEventListener('blur', function () {
+    var v = input.value.trim();
+    if (/^\d{6,20}$/.test(v)) { lookup(v, false); }
+  });
+
+  function stopScan() {
+    if (timer) { clearInterval(timer); timer = null; }
+    if (stream) {
+      stream.getTracks().forEach(function (t) { t.stop(); });
+      stream = null;
+    }
+    if (cam) { cam.hidden = true; }
+  }
+  stopBtn && stopBtn.addEventListener('click', stopScan);
+
+  // 扫一扫：优先用浏览器自带的 BarcodeDetector（安卓 Chrome 都有）。
+  // iOS Safari 目前没有，此时明确提示手填，不做假按钮。
+  scanBtn && scanBtn.addEventListener('click', function () {
+    var hasDetector = 'BarcodeDetector' in window;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !hasDetector) {
+      setHint('这台手机/浏览器不支持扫一扫（建议用安卓 Chrome），请直接填串码尾号。');
+      queryInput.focus();
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      .then(function (s) {
+        stream = s;
+        video.srcObject = s;
+        video.play();
+        cam.hidden = false;
+        setHint('把机器标签上的串码条码对准摄像头…');
+        var detector = new window.BarcodeDetector({ formats: ['code_128', 'code_39', 'ean_13', 'qr_code'] });
+        timer = setInterval(function () {
+          detector.detect(video).then(function (codes) {
+            if (!codes || !codes.length) { return; }
+            var raw = (codes[0].rawValue || '').replace(/\D/g, '');
+            if (!raw) { return; }
+            stopScan();
+            queryInput.value = raw;
+            lookup(raw, true);
+          }).catch(function () { /* 单帧识别失败不停，继续等下一帧 */ });
+        }, 400);
+      })
+      .catch(function () {
+        stopScan();
+        setHint('打不开摄像头（可检查浏览器是否允许）。请直接填串码尾号。');
+      });
+  });
+
+  // 业务类型：选顺差让利才提示进垫资；选其他就明说「不记垫资」，避免门店误会
+  if (bizSel) {
+    bizSel.addEventListener('change', function () {
+      if (bizSel.value === '顺差让利') {
+        setHint('顺差让利：填了串码会记让利垫资（待核）。');
+      } else if (bizSel.value) {
+        setHint('「' + bizSel.value + '」不记让利垫资，填了串码只把这台标成已办。');
+      } else {
+        setHint('没选业务类型就不记垫资。');
+      }
+    });
+  }
 })();
 {% endif %}
 </script>

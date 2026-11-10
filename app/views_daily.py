@@ -297,6 +297,7 @@ def register_daily(app) -> None:
                 # 成交时填了串码：只认池子里还在的那台（尾号 6 位也认）。
                 # 池子里没有就不记垫资，但触客照常保存——条数是 KPI，不能因为串码丢记录。
                 raw_imei = (values.get("imei") or "").strip()
+                biz_type = db_decl.norm_biz(values.get("biz_type") or "")
                 # 下拉选的（没手填串码）→ 机型和颜色一律按串码台账回填到「机型」那栏
                 picked_from_list = bool(
                     (request.form.get("imei_pick") or "").strip() and not raw_imei
@@ -304,9 +305,10 @@ def register_daily(app) -> None:
                 if raw_imei:
                     found = db_imei.find_stock_imei(conn, raw_imei)
                     if found is None:
+                        suffix = "，也不会记让利垫资" if db_decl.biz_gets_rebate(biz_type) else ""
                         flash(
                             f"池子里没有「{raw_imei}」这台（可能已卖出或不在最新清单），"
-                            "这条触客照常保存，但不会记让利垫资",
+                            f"这条触客照常保存{suffix}",
                             "warn",
                         )
                         values["imei"] = ""
@@ -335,6 +337,7 @@ def register_daily(app) -> None:
                         note=values["note"],
                         text=text,
                         imei=values.get("imei", ""),
+                        biz_type=biz_type,
                         deal_id=deal_id_int,
                         biz_date=today_d,
                     )
@@ -348,14 +351,20 @@ def register_daily(app) -> None:
                 editable = True
                 if values.get("imei"):
                     decl = db_decl.deal_decl(conn, saved_id)
-                    if decl is not None:
+                    if decl is None:
+                        flash("这台串码已被别家声明卖出，本条触客照常记，但没生成垫资", "warn")
+                    elif int(decl["rebate_cents"] or 0) > 0:
                         flash(
                             "已记让利垫资待核 "
                             f"{db_decl.cents_text(decl['rebate_cents'])} 元（管理员确认后进兑付）",
                             "ok",
                         )
                     else:
-                        flash("这台串码已被别家声明卖出，本条触客照常记，但没生成垫资", "warn")
+                        flash(
+                            f"已记「{decl['biz_type'] or '其他'}」，这台串码出池；"
+                            "这种业务不记让利垫资",
+                            "ok",
+                        )
                 # 先提交放写锁，企微播报的网络调用不拖住其他店保存
                 conn.commit()
                 from . import wecom
@@ -374,6 +383,7 @@ def register_daily(app) -> None:
                 stores=stores,
                 form=values,
                 imei_options=imei_options,
+                biz_choices=db_decl.BIZ_SET + (db_decl.BIZ_OTHER,),
                 deal_text=text,
                 is_admin=g.user["role"] == "admin",
                 mine_today=mine_today,
@@ -472,13 +482,14 @@ def register_daily(app) -> None:
         start = today_d - timedelta(days=days_int - 1)
         with db.get_db() as conn:
             rows = db.list_all_deal_posts(conn, start, today_d)
-        header = ["日期", "门店", "机型", "号码", "消费", "推荐套餐", "开口/导购", "结果", "备注"]
+        header = ["日期", "门店", "机型", "号码", "办理的终端业务", "消费", "推荐套餐", "开口/导购", "结果", "备注"]
         data_rows = [
             [
                 (r["biz_date"] or ""),
                 r["store_short"] or r["store_name"] or "",
                 r["model"] or "",
                 r["phone"] or "",
+                (r["biz_type"] or "") if "biz_type" in r.keys() else "",
                 r["spend"] or "",
                 r["recommend"] or "",
                 r["opener"] or r["submitter_name"] or "",

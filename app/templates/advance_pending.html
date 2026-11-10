@@ -45,6 +45,7 @@
             <th class="left">串码</th>
             <th class="left">机型</th>
             <th class="left">号码</th>
+            <th class="left">业务</th>
             <th class="left">来源</th>
             <th>金额</th>
           </tr>
@@ -58,6 +59,7 @@
             <td class="left"><code>{{ r.imei }}</code></td>
             <td class="left">{{ r.model or r.deal_model or '—' }}</td>
             <td class="left">{{ r.phone|mask_phone if r.phone else '—' }}</td>
+            <td class="left">{{ r.biz_type or '顺差让利' }}</td>
             <td class="left">{{ '触客成交' if r.src == 'deal' else '门店自报' }}</td>
             <td>{{ '%.2f'|format(r.rebate) }}</td>
           </tr>

@@ -471,6 +471,52 @@ def find_stock_imei(conn: sqlite3.Connection, query: str) -> Optional[Dict[str, 
     return dict(rows[0])
 
 
+def search_pool(
+    conn: sqlite3.Connection,
+    query: str,
+    *,
+    limit: int = 20,
+) -> List[Dict[str, Any]]:
+    """触客页串码查询框：按串码尾号 / 机型关键字搜池子里的在库顺差机。
+
+    与 ``find_stock_imei`` 的口径完全一致（`未售 + seen=1 + 无有效声明`），
+    只是这里**返回多条**给下拉/列表用，而那边要求唯一命中。
+
+    不按门店过滤：南通是共享池，A 店可以卖 B 店库存的机器，页面上标出
+    「库存登记店」让门店自己判断要不要跑一趟。要给下拉用请查完再按
+    ``own_store`` 过滤，别在这里写死。
+    """
+    ensure(conn)
+    q = re.sub(r"\s+", "", str(query or ""))
+    if not q:
+        return []
+    params: List[Any] = [STATUS_STOCK]
+    if q.isdigit():
+        # 串码只认数字：全 15 位或后 6 位都命中，短于 6 位不给做模糊搜索
+        if len(q) < 6:
+            return []
+        where = "t.imei LIKE ?"
+        params.append(f"%{q}")
+    else:
+        # 非数字当成机型关键字（门店常按「S60」找机器）
+        where = "t.model LIKE ?"
+        params.append(f"%{q}%")
+    params.append(int(limit))
+    rows = conn.execute(
+        f"""
+        SELECT t.imei, t.model, t.own_store, t.dispatch_store, t.asof
+        FROM imei_todo t
+        WHERE t.seen=1 AND t.status=?
+          AND {no_live_decl_sql()}
+          AND {where}
+        ORDER BY t.own_store, t.imei
+        LIMIT ?
+        """,
+        params,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def open_transfer_sql(alias: str = "t", direction: str = "in") -> str:
     """「这台有一条**还在生效**的调拨」的 SQL 片段（唯一来源）。
 

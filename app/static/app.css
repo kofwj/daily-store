@@ -2051,6 +2051,35 @@ table.board-table td { text-align: left; vertical-align: middle; }
   grid-column: 1 / -1;
 }
 .deal-flags .check { margin: 0; }
+/* 串码查询 + 扫一扫（V0.4.06）：查询行、命中列表、摄像头预览 */
+.imei-find {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+  margin-top: 6px;
+}
+.imei-find input { min-width: 0; }
+.imei-find button { height: 36px; padding: 0 12px; white-space: nowrap; }
+.imei-found { font-size: 12px; color: var(--muted); }
+.imei-found.empty { color: #b45309; }
+.imei-found-list { display: grid; gap: 4px; margin-top: 6px; }
+.imei-found-item {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fafafa;
+  color: var(--ink);
+  font-weight: 400;
+  height: auto;
+}
+.imei-found-item:hover { background: var(--accent-soft); }
+.imei-found-item strong { font-size: 13px; letter-spacing: 0.4px; }
+.imei-found-item .muted { font-size: 11px; }
+.imei-cam { display: grid; gap: 6px; margin-top: 6px; }
+.imei-cam video { width: 100%; max-height: 220px; border-radius: 8px; background: #000; }
 .deal-page #dealShot { margin: 0; }
 .deal-page #dealText { min-height: 180px; }
 .deal-log { margin: 0; }

@@ -208,7 +208,10 @@ def test_admin_exports_all_stores_deal_csv(client):
     ws = wb.active
     assert ws.title == "触客记录"
     header = [c.value for c in ws[1]]
-    assert header == ["日期", "门店", "机型", "号码", "消费", "推荐套餐", "开口/导购", "结果", "备注"]
+    assert header == [
+        "日期", "门店", "机型", "号码", "办理的终端业务",
+        "消费", "推荐套餐", "开口/导购", "结果", "备注",
+    ]
     cells = list(ws.iter_rows(min_row=2, values_only=True))
     flat = [str(v) for row in cells for v in row if v is not None]
     assert "S60" in flat and "13811110000" in flat  # 甲店

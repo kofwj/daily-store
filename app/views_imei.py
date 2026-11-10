@@ -20,6 +20,7 @@ from flask import (
     Response,
     flash,
     g,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -502,6 +503,36 @@ def register_imei(app) -> None:
             today_iso=db.today_local().isoformat(),
         )
 
+    @app.route("/imei/lookup")
+    @login_required
+    def imei_lookup():
+        """串码查询（触客页查询框 / 扫一扫用）：按尾号或机型关键字找池子里的机器。
+
+        只读、只返回池子里还在的（`未售 + seen=1 + 无有效声明`），
+        所以扫到一台已经卖掉的机器会返回空列表 —— 页面提示「池子里没有」，
+        不会把已售机器又拉回来卖一次。
+        """
+        q = (request.args.get("q") or "").strip()
+        with db.get_db() as conn:
+            if not db_imei.user_in_imei_scope(conn, g.user):
+                return jsonify({"ok": False, "error": "forbidden", "rows": []}), 403
+            rows = db_imei.search_pool(conn, q) if q else []
+        return jsonify(
+            {
+                "ok": True,
+                "q": q,
+                "rows": [
+                    {
+                        "imei": str(r["imei"]),
+                        "model": str(r["model"] or ""),
+                        "own_store": str(r["own_store"] or ""),
+                        "tail": str(r["imei"])[-6:],
+                    }
+                    for r in rows
+                ],
+            }
+        )
+
     @app.route("/imei/transfer", methods=["POST"])
     @login_required
     def imei_transfer_post():
@@ -667,18 +698,17 @@ def register_imei(app) -> None:
                         photo=photo,
                         user_id=g.user["id"],
                     )
-                # 自报「已办 + 顺差让利」= 兜底路：与触客成交汇到同一个出口，
-                # 生成同一条待核垫资。已有声明就幂等返回，门店看到的是「已由成交闭环」。
-                if (
-                    action == "已办"
-                    and db_imei.norm_biz_type(biz_type) == db_decl.REBATE_BIZ
-                ):
+                # 自报「已办」= 这台有结论了 → 落一条声明（占唯一索引 = 出池）。
+                # 钱只看业务类型：顺差让利 → 待核垫资；其他类型 → 金额 0、直接「已确认」。
+                # 与触客成交汇到同一个出口；已有声明就幂等返回，门店看到的是「已由成交闭环」。
+                if action == "已办":
                     decl = db_decl.create_from_report(
                         conn,
                         imei=imei,
                         store_id=store_id,
                         own_store=str(row["own_store"] or ""),
                         report_id=report_id,
+                        biz_type=biz_type,
                         user_id=g.user["id"],
                     )
                     decl_note = decl
@@ -687,7 +717,7 @@ def register_imei(app) -> None:
                 return redirect(back)
         norm_biz = db_imei.norm_biz_type(biz_type) if action == "已办" else ""
         suffix = f" · {norm_biz}" if norm_biz else ""
-        if decl_note and decl_note.get("created"):
+        if decl_note and decl_note.get("created") and int(decl_note.get("rebate_cents") or 0) > 0:
             suffix += f" · 已记让利垫资待核 {db_decl.cents_text(decl_note['rebate_cents'])} 元"
         if pool_row is not None:
             flash(f"已记下：{imei[-6:]} → {action}{suffix}（待建店 · 本店代办）", "ok")

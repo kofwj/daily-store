@@ -99,6 +99,8 @@ def form_values(raw: Mapping[str, str] | None = None, *, posted: bool = False) -
         "show_phone": raw.get("show_phone") or "0",
         "opener": (raw.get("opener") or "").strip(),
         "note": (raw.get("note") or "").strip(),
+        # 办理的终端业务：只有「顺差让利」进垫资，其他类型只闭环待办
+        "biz_type": (raw.get("biz_type") or "").strip()[:20],
         "deal_id": (raw.get("deal_id") or "").strip(),
     }
 
@@ -115,5 +117,6 @@ def form_from_row(row) -> dict:
         "show_phone": "0",
         "opener": row["opener"] or "",
         "note": row["note"] or "",
+        "biz_type": (row["biz_type"] or "") if "biz_type" in row.keys() else "",
         "deal_id": str(row["id"]),
     }

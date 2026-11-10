@@ -117,7 +117,8 @@ def create_app(*, testing: bool = False) -> Flask:
         resp.headers.setdefault("X-Content-Type-Options", "nosniff")
         resp.headers["Referrer-Policy"] = "same-origin"
         resp.headers["Content-Security-Policy"] = _SECURITY_CSP
-        resp.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        # camera=(self)：触客页「扫一扫」读串码要用本机摄像头；mic/geo 仍全程关闭
+        resp.headers["Permissions-Policy"] = "camera=(self), microphone=(), geolocation=()"
         if request.endpoint != "static":
             resp.headers["Cache-Control"] = "no-store"
         return resp

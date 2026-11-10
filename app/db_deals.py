@@ -23,6 +23,7 @@ def _deal_payload(
     note: str,
     text: str,
     imei: str = "",
+    biz_type: str = "",
 ) -> Dict[str, Any]:
     return {
         "user_id": user_id,
@@ -37,6 +38,7 @@ def _deal_payload(
         "note": (note or "").strip()[:1000],
         "text": (text or "").strip()[:2000],
         "imei": (imei or "").strip()[:32],
+        "biz_type": (biz_type or "").strip()[:20],
         "updated_at": _now(),
     }
 
@@ -54,6 +56,7 @@ _DEAL_SNAPSHOT_FIELDS = (
     "note",
     "text",
     "imei",
+    "biz_type",
 )
 
 
@@ -130,6 +133,7 @@ def _sync_decl(
     closed: bool,
     day: date,
     user_id: int,
+    biz_type: str = "",
 ) -> Dict[str, Any]:
     """成交与「顺差声明/待核垫资」同生同死（同一事务内调用）。
 
@@ -145,6 +149,7 @@ def _sync_decl(
         imei=imei,
         closed=bool(closed),
         biz_date=day,
+        biz_type=biz_type,
         user_id=int(user_id),
         own_store=_own_store_of(conn, imei),
     ))
@@ -166,6 +171,7 @@ def record_deal_post(
     note: str = "",
     text: str = "",
     imei: str = "",
+    biz_type: str = "",
     deal_id: Optional[int] = None,
     biz_date: Optional[date] = None,
 ) -> int:
@@ -184,6 +190,7 @@ def record_deal_post(
         note=note,
         text=text,
         imei=imei,
+        biz_type=biz_type,
     )
     existing_id = None
     existing_row = None
@@ -218,7 +225,8 @@ def record_deal_post(
             UPDATE deal_posts
             SET user_id=:user_id, updated_at=:updated_at, closed=:closed, model=:model,
                 phone=:phone, spend=:spend, hall_query=:hall_query, recommend=:recommend,
-                student=:student, opener=:opener, note=:note, text=:text, imei=:imei
+                student=:student, opener=:opener, note=:note, text=:text, imei=:imei,
+                biz_type=:biz_type
             WHERE id=:id
             """,
             {**payload, "id": existing_id},
@@ -233,16 +241,25 @@ def record_deal_post(
             before=before,
             after=after,
         )
-        _sync_decl(conn, store_id=store_id, deal_id=existing_id, imei=payload["imei"],
-                   closed=bool(closed), day=day, user_id=user_id)
+        _sync_decl(
+            conn,
+            store_id=store_id,
+            deal_id=existing_id,
+            imei=payload["imei"],
+            closed=bool(closed),
+            day=day,
+            user_id=user_id,
+            biz_type=payload["biz_type"],
+        )
         return existing_id
     cur = conn.execute(
         """
         INSERT INTO deal_posts(
             store_id, user_id, created_at, updated_at, biz_date, closed, model,
-            phone, spend, hall_query, recommend, student, opener, note, text, imei
+            phone, spend, hall_query, recommend, student, opener, note, text, imei,
+            biz_type
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             store_id,
@@ -261,6 +278,7 @@ def record_deal_post(
             payload["note"],
             payload["text"],
             payload["imei"],
+            payload["biz_type"],
         ),
     )
     new_id = require_lastrowid(cur)
@@ -282,6 +300,7 @@ def record_deal_post(
         closed=bool(closed),
         day=day,
         user_id=user_id,
+        biz_type=payload["biz_type"],
     )
     return new_id
 

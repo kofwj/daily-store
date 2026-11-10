@@ -62,7 +62,11 @@ def _make_store(client, imei="860000000000001"):
     return imei
 
 
-def _deal(conn, *, store_id, imei="", phone="15500000001", closed=True, day=None):
+def _deal(conn, *, store_id, imei="", phone="15500000001", closed=True, day=None, biz_type=None):
+    """默认按「顺差让利」发单——V0.4.06 之前的口径就是「有串码就记垫资」。
+
+    测非顺差让利的单子时显式传 ``biz_type``（传 ``""`` 就是「没选」）。
+    """
     return db.record_deal_post(
         conn,
         store_id=store_id,
@@ -72,6 +76,7 @@ def _deal(conn, *, store_id, imei="", phone="15500000001", closed=True, day=None
         phone=phone,
         text="",
         imei=imei,
+        biz_type="顺差让利" if biz_type is None else biz_type,
         biz_date=day or date(2026, 11, 2),
     )
 
@@ -255,12 +260,22 @@ def test_report_already_done_creates_pending(client):
             user_id=1,
         )
         decl = db_decl.create_from_report(
-            conn, imei=imei, store_id=sid, report_id=report_id, user_id=1
+            conn,
+            imei=imei,
+            store_id=sid,
+            report_id=report_id,
+            biz_type="顺差让利",
+            user_id=1,
         )
         assert decl["created"] is True
         assert db_decl.summary(conn)["n"] == 1
         again = db_decl.create_from_report(
-            conn, imei=imei, store_id=sid, report_id=report_id, user_id=1
+            conn,
+            imei=imei,
+            store_id=sid,
+            report_id=report_id,
+            biz_type="顺差让利",
+            user_id=1,
         )
         assert again["created"] is False and again["reason"] == "duplicate"
 
@@ -374,6 +389,7 @@ def test_deal_picker_selection_creates_pending(client):
             "model": "S60元气版",
             "phone": "15500000099",
             "closed": "1",
+            "biz_type": "顺差让利",
             "imei_pick": "861000000000011",
             "note": "客户看中元气版",
         },
@@ -629,3 +645,202 @@ def test_transfer_expires_after_next_stock_snapshot(client):
             conn, imei="862000000000002", to_store_id=a, biz_date=date(2026, 11, 3), user_id=1
         )
         assert again["created"] is True
+
+
+# ---- V0.4.06：办理的终端业务决定是否进垫资 + 串码查询 ----
+
+def test_non_rebate_biz_leaves_pool_without_money(client):
+    """选「AI手机合约」等非顺差让利 → 这台照样出池，但不记钱、不进待核。"""
+    sid = _store_id()
+    _login(client)
+    _import_stock(client, _stock_row("860000000000030"))
+
+    with db.get_db() as conn:
+        deal_id = _deal(
+            conn, store_id=sid, imei="860000000000030", phone="15500000030",
+            biz_type="AI手机合约",
+        )
+        decl = db_decl.deal_decl(conn, deal_id)
+        assert decl is not None
+        assert decl["biz_type"] == "AI手机合约"
+        assert int(decl["rebate_cents"]) == 0
+        assert decl["state"] == db_decl.DECL_CONFIRMED  # 已办，不是待核
+        assert decl["advance_id"] is None
+        # 出池：池子里看不到这台了
+        assert not any(r["imei"] == "860000000000030" for r in db_imei.pool_rows(conn))
+        # 一分钱不参与任何合计，也不进待核队列
+        assert db_decl.summary(conn)["n"] == 0
+        assert db_decl.confirmed_totals(conn, date(2026, 11, 2), date(2026, 11, 2))["total"] == 0.0
+        assert db.advance_month_totals(conn, [sid], date(2026, 11, 2))[sid]["total"] == 0.0
+        assert conn.execute("SELECT COUNT(*) FROM advance_posts").fetchone()[0] == 0
+
+
+def test_empty_biz_type_does_not_create_money(client):
+    """没选业务类型 → 有串码也不记钱（只把这台标成已办）。"""
+    sid = _store_id()
+    _login(client)
+    _import_stock(client, _stock_row("860000000000031"))
+    with db.get_db() as conn:
+        deal_id = _deal(conn, store_id=sid, imei="860000000000031", phone="15500000031", biz_type="")
+        decl = db_decl.deal_decl(conn, deal_id)
+        assert decl is not None
+        assert str(decl["biz_type"]) == ""
+        assert int(decl["rebate_cents"]) == 0
+        assert decl["state"] == db_decl.DECL_CONFIRMED
+
+
+def test_rebate_switch_after_deal_recounts_pending(client):
+    """串码没变、业务类型改成顺差让利 → 待核金额补上；改成别的 → 钱撤回。"""
+    sid = _store_id()
+    _login(client)
+    _import_stock(client, _stock_row("860000000000032"))
+    with db.get_db() as conn:
+        deal_id = _deal(conn, store_id=sid, imei="860000000000032", phone="15500000032", biz_type="")
+        assert db_decl.summary(conn)["n"] == 0
+        _deal(conn, store_id=sid, imei="860000000000032", phone="15500000032", biz_type="顺差让利")
+        decl = db_decl.deal_decl(conn, deal_id)
+        assert decl["state"] == db_decl.DECL_PENDING
+        assert int(decl["rebate_cents"]) == db_decl.DEFAULT_REBATE_CENTS
+        assert db_decl.summary(conn)["n"] == 1
+        # 改回去：钱撤回，声明仍有效（这台仍出池）
+        _deal(conn, store_id=sid, imei="860000000000032", phone="15500000032", biz_type="直降合约")
+        decl = db_decl.deal_decl(conn, deal_id)
+        assert int(decl["rebate_cents"]) == 0
+        assert decl["state"] == db_decl.DECL_CONFIRMED
+        assert db_decl.summary(conn)["n"] == 0
+
+
+def test_confirm_skips_non_rebate_decl(client):
+    """已确认的非顺差让利声明不会落垫资行（金额 0 不进 confirm）。"""
+    sid = _store_id()
+    _login(client)
+    _import_stock(client, _stock_row("860000000000033"))
+    with db.get_db() as conn:
+        deal_id = _deal(
+            conn, store_id=sid, imei="860000000000033", phone="15500000033", biz_type="送2G流量"
+        )
+        decl = db_decl.deal_decl(conn, deal_id)
+        result = db_decl.confirm(conn, [decl["id"]], user_id=1)
+        assert result == {"confirmed": 0, "skipped": 1}
+        assert conn.execute("SELECT COUNT(*) FROM advance_posts").fetchone()[0] == 0
+
+
+def test_deal_form_posts_biz_type_and_shows_choices(client):
+    """触客页有「办理的终端业务」下拉，选完能落库。"""
+    sid = _store_id()
+    _login(client)
+    page = client.get("/deal").get_data(as_text=True)
+    assert "办理的终端业务" in page
+    assert 'name="biz_type"' in page
+    for b in ("顺差让利", "AI手机合约", "直降合约", "送2G流量", "其他"):
+        assert b in page
+    _import_stock(client, _stock_row("860000000000034"))
+    resp = client.post(
+        "/deal",
+        data={
+            "store_id": sid,
+            "model": "S60",
+            "phone": "15500000034",
+            "closed": "1",
+            "biz_type": "直降合约",
+            "imei_pick": "860000000000034",
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert "不记让利垫资".encode() in resp.data
+    with db.get_db() as conn:
+        row = conn.execute("SELECT biz_type FROM deal_posts ORDER BY id DESC LIMIT 1").fetchone()
+        assert row["biz_type"] == "直降合约"
+
+
+def test_imei_lookup_finds_by_tail_and_model(client):
+    """查询接口：尾号 / 机型关键字都能命中，只返回池子里的机器。"""
+    _login(client)
+    own = "示例市甲街vivo体验店"
+    with db.get_db() as conn:
+        db_imei.import_rows(
+            conn,
+            (
+                "imei,store,model,sp,day,串码标签\n"
+                f"861000000000051,{own},S60元气版,小李,2026-11-01,移动顺差\n"
+                f"861000000000052,{own},Y600 Pro,小李,2026-11-01,移动顺差\n"
+            ).encode(),
+            asof="2026-11-02",
+        )
+    data = client.get("/imei/lookup?q=000051").get_json()
+    assert data["ok"] is True
+    assert [r["imei"] for r in data["rows"]] == ["861000000000051"]
+    assert data["rows"][0]["tail"] == "000051"
+    assert data["rows"][0]["model"] == "S60元气版"
+    # 机型关键字（非数字）
+    data = client.get("/imei/lookup?q=Y600").get_json()
+    assert [r["imei"] for r in data["rows"]] == ["861000000000052"]
+    # 太短的串码不做模糊搜索（避免 900 多台全返回）
+    assert client.get("/imei/lookup?q=12345").get_json()["rows"] == []
+    # 空查询不报错
+    assert client.get("/imei/lookup?q=").get_json()["rows"] == []
+
+
+def test_imei_lookup_excludes_sold_and_declared(client):
+    """已卖出 / 已被声明的机器查不到（避免把卖过的机器又拉回来卖）。"""
+    sid = _store_id()
+    _login(client)
+    imei = _make_store(client, "860000000000035")  # _make_store 已导这台
+    with db.get_db() as conn:
+        _deal(conn, store_id=sid, imei=imei, phone="15500000035", biz_type="顺差让利")
+    resp = client.get(f"/imei/lookup?q={imei}").get_json()
+    assert resp["rows"] == []
+
+
+def test_rebate_snapshot_not_recomputed_on_unrelated_edit(client):
+    """改号码/备注不该重算待核金额：档位是生成时的快照，月中调档不影响已有待核。"""
+    sid = _store_id()
+    _login(client)
+    _import_stock(client, _stock_row("860000000000037"))
+    with db.get_db() as conn:
+        deal_id = _deal(conn, store_id=sid, imei="860000000000037", phone="15500000037")
+        assert int(db_decl.deal_decl(conn, deal_id)["rebate_cents"]) == 10000
+        db_decl.set_rebate_cents(conn, 30000)  # 管理员月中调档
+        # 同店同日同号再存一次（只改备注）→ 金额仍应是 100
+        _deal(conn, store_id=sid, imei="860000000000037", phone="15500000037", biz_type="顺差让利")
+        assert int(db_decl.deal_decl(conn, deal_id)["rebate_cents"]) == 10000
+
+
+def test_report_non_rebate_leaves_pool_without_money(client):
+    """自报「已办 + AI手机合约」→ 出池但不记账（钱只看业务类型）。"""
+    imei = _make_store(client, "860000000000036")
+    _login(client, "alpha", "123456")
+    resp = client.post(
+        "/imei/report",
+        data={"imei": imei, "action": "已办", "biz_type": "AI手机合约", "note": "合约单 A1"},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert "让利垫资待核".encode() not in resp.data
+    with db.get_db() as conn:
+        decl = conn.execute("SELECT * FROM imei_decl").fetchone()
+        assert decl is not None
+        assert decl["biz_type"] == "AI手机合约"
+        assert int(decl["rebate_cents"]) == 0
+        assert decl["state"] == db_decl.DECL_CONFIRMED
+        assert db_decl.summary(conn)["n"] == 0
+        assert conn.execute("SELECT COUNT(*) FROM advance_posts").fetchone()[0] == 0
+        assert not any(r["imei"] == imei for r in db_imei.pool_rows(conn))
+
+
+def test_imei_lookup_requires_login(client):
+    """未登录不能查（接口也要登录态）。"""
+    resp = client.get("/imei/lookup?q=861000000000051")
+    assert resp.status_code == 302
+    assert "/login" in resp.headers["Location"]
+
+
+def test_deal_page_has_scan_button_and_camera_policy(client):
+    """扫一扫按钮与 camera 权限都准备好了（不支持时前端降级提示手填）。"""
+    _login(client)
+    client.get("/deal")  # 触发一次 after_request，拿下响应头
+    resp = client.get("/deal")
+    assert 'id="imeiScanBtn"' in resp.get_data(as_text=True)
+    assert 'id="imeiQuery"' in resp.get_data(as_text=True)
+    assert resp.headers["Permissions-Policy"] == "camera=(self), microphone=(), geolocation=()"
