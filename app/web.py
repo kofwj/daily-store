@@ -47,7 +47,8 @@ _SECURITY_CSP = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline'; "
     "style-src 'self' 'unsafe-inline'; "
-    "img-src 'self' data:; "
+    # blob: 给「扫一扫」：拍照后用 URL.createObjectURL 生成临时图喂给解码器
+    "img-src 'self' data: blob:; "
     "font-src 'self'; "
     "connect-src 'self'; "
     "frame-ancestors 'none'; "
@@ -117,8 +118,9 @@ def create_app(*, testing: bool = False) -> Flask:
         resp.headers.setdefault("X-Content-Type-Options", "nosniff")
         resp.headers["Referrer-Policy"] = "same-origin"
         resp.headers["Content-Security-Policy"] = _SECURITY_CSP
-        # camera=(self)：触客页「扫一扫」读串码要用本机摄像头；mic/geo 仍全程关闭
-        resp.headers["Permissions-Policy"] = "camera=(self), microphone=(), geolocation=()"
+        # 扫一扫走 <input capture>（系统相机）+ 本地解码，不需要网页摄像头权限，
+        # 三个能力全部关死。
+        resp.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         if request.endpoint != "static":
             resp.headers["Cache-Control"] = "no-store"
         return resp

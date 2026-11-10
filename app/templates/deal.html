@@ -62,19 +62,16 @@
         <span class="muted">本店库存里还有 {{ imei_options|length }} 台在库顺差机</span>
         {% endif %}
         <input name="imei" id="imeiInput" value="{{ form.imei }}" inputmode="numeric" maxlength="20"
-               title="填全 15 位或后 6 位；只在顺差池子里找得到才记"
-               placeholder="尾号 6 位或完整串码，不填不影响成交" autocomplete="off">
+               title="尾号 4 位起就查得到；撞车时会列出来让你选"
+               placeholder="尾号 4 位 / 完整串码，不填不影响成交" autocomplete="off">
         <div class="imei-find">
           <input name="imei_q" id="imeiQuery" maxlength="24" autocomplete="off"
-                 placeholder="查串码尾号 / 机型关键字">
+                 placeholder="查串码尾号（4 位起）/ 机型关键字">
           <button type="button" class="btn ghost" id="imeiFindBtn">查询</button>
-          <button type="button" class="btn ghost" id="imeiScanBtn" title="扫机器标签或包装盒上的条码">扫一扫</button>
+          <button type="button" class="btn ghost" id="imeiScanBtn" title="用手机相机拍机器背面的条码">扫一扫</button>
         </div>
+        <input type="file" id="imeiPhoto" accept="image/*" capture="environment" hidden>
         <div class="imei-found" id="imeiFound" aria-live="polite"></div>
-        <div class="imei-cam" id="imeiCam" hidden>
-          <video id="imeiVideo" playsinline muted></video>
-          <button type="button" class="btn ghost" id="imeiScanStop">关掉摄像头</button>
-        </div>
         <span class="muted" id="imeiHint">
           {%- if form.imei -%}
           已关联 {{ form.imei }}{% if form.imei_model %} · {{ form.imei_model }}{% endif %}
@@ -187,15 +184,10 @@ window.addEventListener('DOMContentLoaded', copyDeal);
   var scanBtn = document.getElementById('imeiScanBtn');
   var foundBox = document.getElementById('imeiFound');
   var hint = document.getElementById('imeiHint');
-  var cam = document.getElementById('imeiCam');
-  var video = document.getElementById('imeiVideo');
-  var stopBtn = document.getElementById('imeiScanStop');
   if (!input || !queryInput || !foundBox) { return; }
   var form = input.form;
   var modelInput = form ? form.querySelector('input[name=model]') : null;
   var bizSel = document.getElementById('bizType');
-  var stream = null;
-  var timer = null;
 
   function setHint(text) {
     if (hint) { hint.textContent = text; }
@@ -247,7 +239,7 @@ window.addEventListener('DOMContentLoaded', copyDeal);
   function lookup(q, autoPick) {
     q = (q || '').trim();
     if (!q) {
-      foundBox.textContent = '先填串码尾号（至少 6 位）或机型关键字。';
+      foundBox.textContent = '先填串码尾号（4 位起）或机型关键字。';
       foundBox.classList.add('empty');
       return;
     }
@@ -270,53 +262,100 @@ window.addEventListener('DOMContentLoaded', copyDeal);
   queryInput.addEventListener('keydown', function (ev) {
     if (ev.key === 'Enter') { ev.preventDefault(); lookup(queryInput.value, false); }
   });
-  // 手填满 6 位以上数字就自动查一次，省一次点击（手机端少一步）
+  // 手填满 4 位以上数字就自动查一次，省一次点击（手机端少一步）
   input.addEventListener('blur', function () {
     var v = input.value.trim();
-    if (/^\d{6,20}$/.test(v)) { lookup(v, false); }
+    if (/^\d{4,20}$/.test(v)) { lookup(v, false); }
   });
 
-  function stopScan() {
-    if (timer) { clearInterval(timer); timer = null; }
-    if (stream) {
-      stream.getTracks().forEach(function (t) { t.stop(); });
-      stream = null;
-    }
-    if (cam) { cam.hidden = true; }
-  }
-  stopBtn && stopBtn.addEventListener('click', stopScan);
+  // 扫一扫（V0.4.07 改）：**不再用 getUserMedia**。
+  // 生产是 HTTP 明文（http://192.168.100.5:8099），浏览器在非安全上下文里
+  // 直接不暴露 navigator.mediaDevices，getUserMedia / BarcodeDetector 全都不存在，
+  // 所以之前那个按钮在线上永远只弹一句提示。
+  // 改用 <input type="file" capture="environment">：唤起**手机系统相机**，
+  // HTTP 下也能用、iOS 也支持；拍完的照片在本机用 zxing 解码，不出网。
+  var photoInput = document.getElementById('imeiPhoto');
+  var zxingLoading = null;
 
-  // 扫一扫：优先用浏览器自带的 BarcodeDetector（安卓 Chrome 都有）。
-  // iOS Safari 目前没有，此时明确提示手填，不做假按钮。
+  function loadZXing() {
+    if (window.ZXing) { return Promise.resolve(window.ZXing); }
+    if (zxingLoading) { return zxingLoading; }
+    zxingLoading = new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = '{{ url_for("static", filename="vendor/zxing/zxing.min.js") }}';
+      s.onload = function () { resolve(window.ZXing); };
+      s.onerror = function () { reject(new Error('zxing_load_failed')); };
+      document.head.appendChild(s);
+    });
+    return zxingLoading;
+  }
+
+  // 从一张图里认条码：缩到合适宽度再解（原图 12MP 直接解很慢，也没必要）
+  function decodePhoto(file) {
+    return loadZXing().then(function (ZXing) {
+      return new Promise(function (resolve, reject) {
+        var url = URL.createObjectURL(file);
+        var img = new Image();
+        img.onload = function () {
+          try {
+            var maxW = 1400;
+            var scale = img.naturalWidth > maxW ? maxW / img.naturalWidth : 1;
+            var canvas = document.createElement('canvas');
+            canvas.width = Math.round(img.naturalWidth * scale);
+            canvas.height = Math.round(img.naturalHeight * scale);
+            var ctx = canvas.getContext('2d', { willReadFrequently: true });
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            // 必须用 HTMLCanvasElementLuminanceSource：RGBLuminanceSource 吃的是
+            // 灰度/RGB 排布，直接喂 getImageData 的 RGBA 会解不出来（踩过）。
+            var src = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
+            var bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(src));
+            var reader = new ZXing.MultiFormatReader();
+            var hints = new Map();
+            hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+              ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
+              ZXing.BarcodeFormat.CODE_93, ZXing.BarcodeFormat.EAN_13,
+              ZXing.BarcodeFormat.ITF, ZXing.BarcodeFormat.QR_CODE]);
+            hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+            reader.setHints(hints);
+            var res = reader.decode(bmp);
+            resolve(String(res.getText() || '').replace(/\D/g, ''));
+          } catch (e) {
+            reject(e);
+          } finally {
+            URL.revokeObjectURL(url);
+          }
+        };
+        img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('image_load_failed')); };
+        img.src = url;
+      });
+    });
+  }
+
   scanBtn && scanBtn.addEventListener('click', function () {
-    var hasDetector = 'BarcodeDetector' in window;
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !hasDetector) {
-      setHint('这台手机/浏览器不支持扫一扫（建议用安卓 Chrome），请直接填串码尾号。');
-      queryInput.focus();
-      return;
-    }
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-      .then(function (s) {
-        stream = s;
-        video.srcObject = s;
-        video.play();
-        cam.hidden = false;
-        setHint('把机器标签上的串码条码对准摄像头…');
-        var detector = new window.BarcodeDetector({ formats: ['code_128', 'code_39', 'ean_13', 'qr_code'] });
-        timer = setInterval(function () {
-          detector.detect(video).then(function (codes) {
-            if (!codes || !codes.length) { return; }
-            var raw = (codes[0].rawValue || '').replace(/\D/g, '');
-            if (!raw) { return; }
-            stopScan();
-            queryInput.value = raw;
-            lookup(raw, true);
-          }).catch(function () { /* 单帧识别失败不停，继续等下一帧 */ });
-        }, 400);
+    if (!photoInput) { return; }
+    // 每次点都清空，否则同一张照片选第二次不触发 change
+    photoInput.value = '';
+    photoInput.click();
+  });
+
+  photoInput && photoInput.addEventListener('change', function () {
+    var file = photoInput.files && photoInput.files[0];
+    if (!file) { return; }
+    setHint('识别中…');
+    decodePhoto(file)
+      .then(function (code) {
+        if (!code || code.length < 4) {
+          setHint('这张照片里没认出串码（4 位起）。对准机器背面的条码再拍一次，或直接填尾号。');
+          return;
+        }
+        queryInput.value = code;
+        input.value = code;
+        setHint('拍到 ' + code + '，正在查池子…');
+        lookup(code, true);
       })
-      .catch(function () {
-        stopScan();
-        setHint('打不开摄像头（可检查浏览器是否允许）。请直接填串码尾号。');
+      .catch(function (err) {
+        setHint('没认出条码（' + (err && err.message ? err.message : '识别失败')
+          + '）。可以重拍一张，或直接填串码尾号。');
       });
   });
 

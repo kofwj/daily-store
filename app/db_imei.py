@@ -445,14 +445,18 @@ _COLUMNS = {
 
 
 def find_stock_imei(conn: sqlite3.Connection, query: str) -> Optional[Dict[str, Any]]:
-    """触客成交时按串码找池子里那台（全 15 位或尾号 6 位都认）。
+    """保存时按串码认池子里那台（全 15 位或尾号 4 位起都认）。
 
     只认 `未售 + seen=1 + 无有效声明` 的机器——也就是真正还在池子里的。
-    返回 None 表示「池子里没有这台」，交给调用方提示，不自由手输建脏串码。
+    返回 None 表示「没有唯一命中」：要么池子里没有，要么尾号撞了多台。
+    调用方要区分这两件事就再调一次 ``search_pool``（页面本来就要显示候选）。
+
+    4 位尾号在生产池子（938 台）里实测撞车 65/868 个，所以保存路径只在
+    **唯一命中**时才认——宁可不填，也不能填错一台。
     """
     ensure(conn)
     q = re.sub(r"\s+", "", str(query or ""))
-    if not q.isdigit() or len(q) < 6:
+    if not q.isdigit() or len(q) < 4:
         return None
     rows = conn.execute(
         f"""
@@ -482,6 +486,10 @@ def search_pool(
     与 ``find_stock_imei`` 的口径完全一致（`未售 + seen=1 + 无有效声明`），
     只是这里**返回多条**给下拉/列表用，而那边要求唯一命中。
 
+    数字门槛 **4 位**：这是查询（给人挑），撞车不致命 —— 生产 938 台池子里
+    4 位尾号有 65/868 个尾号对应 2–3 台，列表摊开让人自己选就行；
+    保存路径（``find_stock_imei``）仍然只在唯一命中时才认。
+
     不按门店过滤：南通是共享池，A 店可以卖 B 店库存的机器，页面上标出
     「库存登记店」让门店自己判断要不要跑一趟。要给下拉用请查完再按
     ``own_store`` 过滤，别在这里写死。
@@ -492,8 +500,8 @@ def search_pool(
         return []
     params: List[Any] = [STATUS_STOCK]
     if q.isdigit():
-        # 串码只认数字：全 15 位或后 6 位都命中，短于 6 位不给做模糊搜索
-        if len(q) < 6:
+        # 串码只认数字：4 位尾号起就能查（撞车的多给几条让人自己挑，见 docstring）
+        if len(q) < 4:
             return []
         where = "t.imei LIKE ?"
         params.append(f"%{q}")

@@ -776,10 +776,88 @@ def test_imei_lookup_finds_by_tail_and_model(client):
     # 机型关键字（非数字）
     data = client.get("/imei/lookup?q=Y600").get_json()
     assert [r["imei"] for r in data["rows"]] == ["861000000000052"]
-    # 太短的串码不做模糊搜索（避免 900 多台全返回）
-    assert client.get("/imei/lookup?q=12345").get_json()["rows"] == []
+    # 太短的串码不做模糊搜索（4 位以下没意义）
+    assert client.get("/imei/lookup?q=123").get_json()["rows"] == []
     # 空查询不报错
     assert client.get("/imei/lookup?q=").get_json()["rows"] == []
+
+
+def test_imei_lookup_accepts_4_and_5_digit_tails(client):
+    """4 位 / 5 位尾号也要能查（用户 2026-11-11 反馈：为什么非得 6 位）。"""
+    _login(client)
+    own = "示例市甲街vivo体验店"
+    with db.get_db() as conn:
+        db_imei.import_rows(
+            conn,
+            (
+                "imei,store,model,sp,day,串码标签\n"
+                f"861000000000061,{own},S60元气版,小李,2026-11-01,移动顺差\n"
+                f"861000000000062,{own},Y600 Pro,小李,2026-11-01,移动顺差\n"
+            ).encode(),
+            asof="2026-11-02",
+        )
+    assert [r["imei"] for r in client.get("/imei/lookup?q=0061").get_json()["rows"]] == [
+        "861000000000061"
+    ]
+    assert [r["imei"] for r in client.get("/imei/lookup?q=00062").get_json()["rows"]] == [
+        "861000000000062"
+    ]
+
+
+def test_imei_lookup_returns_all_collisions(client):
+    """4 位尾号撞车时把几台全列出来，让人自己挑（不是报「没有这台」）。"""
+    _login(client)
+    own = "示例市甲街vivo体验店"
+    with db.get_db() as conn:
+        db_imei.import_rows(
+            conn,
+            (
+                "imei,store,model,sp,day,串码标签\n"
+                f"861000000000071,{own},S60元气版,小李,2026-11-01,移动顺差\n"
+                f"861000000010071,{own},Y600 Pro,小李,2026-11-01,移动顺差\n"
+            ).encode(),
+            asof="2026-11-02",
+        )
+        # 保存路径：撞车时不给唯一结果（宁可不填，也不能填错一台）
+        assert db_imei.find_stock_imei(conn, "0071") is None
+        # 但查询接口把两台都返回
+    rows = client.get("/imei/lookup?q=0071").get_json()["rows"]
+    assert {r["imei"] for r in rows} == {"861000000000071", "861000000010071"}
+
+
+def test_deal_post_with_ambiguous_tail_warns_instead_of_silent(client):
+    """手填的尾号撞车时，提示「命中 N 台，请点选」，而不是含糊说池子里没有。"""
+    _login(client)
+    own = "示例市甲街vivo体验店"
+    with db.get_db() as conn:
+        db_imei.import_rows(
+            conn,
+            (
+                "imei,store,model,sp,day,串码标签\n"
+                f"861000000000081,{own},S60元气版,小李,2026-11-01,移动顺差\n"
+                f"861000000010081,{own},Y600 Pro,小李,2026-11-01,移动顺差\n"
+            ).encode(),
+            asof="2026-11-02",
+        )
+    resp = client.post(
+        "/deal",
+        data={
+            "store_id": _store_id(),
+            "model": "S60",
+            "phone": "15500000081",
+            "closed": "1",
+            "biz_type": "顺差让利",
+            "imei": "0081",
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert "命中 2 台" in html
+    with db.get_db() as conn:
+        row = conn.execute("SELECT imei FROM deal_posts ORDER BY id DESC LIMIT 1").fetchone()
+        assert row["imei"] == ""  # 没瞎猜，先存空
+        assert conn.execute("SELECT COUNT(*) FROM imei_decl").fetchone()[0] == 0
 
 
 def test_imei_lookup_excludes_sold_and_declared(client):
@@ -837,10 +915,34 @@ def test_imei_lookup_requires_login(client):
 
 
 def test_deal_page_has_scan_button_and_camera_policy(client):
-    """扫一扫按钮与 camera 权限都准备好了（不支持时前端降级提示手填）。"""
+    """扫一扫用系统相机（input capture），不需要网页摄像头权限。
+
+    生产是 HTTP，`navigator.mediaDevices` 在非安全上下文里根本不存在，
+    getUserMedia 那条路线上永远打不开摄像头 —— 所以改成 <input capture>，
+    权限头也就可以继续全关。
+    """
     _login(client)
     client.get("/deal")  # 触发一次 after_request，拿下响应头
     resp = client.get("/deal")
-    assert 'id="imeiScanBtn"' in resp.get_data(as_text=True)
-    assert 'id="imeiQuery"' in resp.get_data(as_text=True)
-    assert resp.headers["Permissions-Policy"] == "camera=(self), microphone=(), geolocation=()"
+    html = resp.get_data(as_text=True)
+    assert 'id="imeiScanBtn"' in html
+    assert 'id="imeiQuery"' in html
+    assert 'capture="environment"' in html
+    assert 'id="imeiPhoto"' in html  # 系统相机拍照入口
+    assert "<video" not in html  # 不再有网页摄像头预览
+    assert resp.headers["Permissions-Policy"] == "camera=(), microphone=(), geolocation=()"
+    # blob: 要放行，否则拍照预览图会被 CSP 拦掉
+    assert "img-src 'self' data: blob:" in resp.headers["Content-Security-Policy"]
+
+
+def test_zxing_bundle_served(client):
+    """zxing 本地打包（不联网 CDN），并且能被静态路由取到。"""
+    _login(client)
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "app/static/vendor/zxing/zxing.min.js"
+    assert path.is_file(), "缺 zxing 打包文件"
+    assert path.stat().st_size > 200_000
+    resp = client.get("/static/vendor/zxing/zxing.min.js")
+    assert resp.status_code == 200
+    assert b"MultiFormatReader" in resp.data

@@ -306,11 +306,21 @@ def register_daily(app) -> None:
                     found = db_imei.find_stock_imei(conn, raw_imei)
                     if found is None:
                         suffix = "，也不会记让利垫资" if db_decl.biz_gets_rebate(biz_type) else ""
-                        flash(
-                            f"池子里没有「{raw_imei}」这台（可能已卖出或不在最新清单），"
-                            f"这条触客照常保存{suffix}",
-                            "warn",
-                        )
+                        # 4–5 位尾号会撞车（生产 938 台里有 65 个尾号对应 2–3 台），
+                        # 这不是「没有这台」，得让人回查询框里挑，不能含糊过去
+                        hits = db_imei.search_pool(conn, raw_imei) if raw_imei.isdigit() else []
+                        if len(hits) > 1:
+                            flash(
+                                f"尾号「{raw_imei}」命中 {len(hits)} 台，请用查询结果里点一台，"
+                                f"这次先按不关联保存{suffix}",
+                                "warn",
+                            )
+                        else:
+                            flash(
+                                f"池子里没有「{raw_imei}」这台（可能已卖出或不在最新清单），"
+                                f"这条触客照常保存{suffix}",
+                                "warn",
+                            )
                         values["imei"] = ""
                     else:
                         values["imei"] = found["imei"]
