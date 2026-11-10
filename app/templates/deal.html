@@ -41,6 +41,17 @@
         <input name="phone" value="{{ form.phone }}" inputmode="numeric" pattern="[0-9]{11}" maxlength="11" title="请输入11位手机号" placeholder="11位手机号" autocomplete="off">
       </p>
       <p>
+        <label>顺差串码<small class="muted">（可空）</small></label>
+        <input name="imei" value="{{ form.imei }}" inputmode="numeric" pattern="[0-9]{6,20}" maxlength="20"
+               title="填全 15 位或后 6 位；只在顺差池子里找得到才记"
+               placeholder="尾号 6 位或完整串码，不填不影响成交" autocomplete="off">
+        {% if form.imei %}
+        <span class="muted">已关联 {{ form.imei }}{% if form.imei_model %} · {{ form.imei_model }}{% endif %}</span>
+        {% else %}
+        <span class="muted">填了才记 100 元让利垫资（待核）</span>
+        {% endif %}
+      </p>
+      <p>
         <label>消费</label>
         <input name="spend" value="{{ form.spend }}" inputmode="decimal" pattern="\d+(\.\d{1,2})?" title="数字，最多两位小数" placeholder="如 99" autocomplete="off">
       </p>
@@ -76,6 +87,7 @@
     <div class="deal-grid">
       <p><label>机型</label><span>{{ form.model or '—' }}</span></p>
       <p><label>号码</label><span>{{ form.phone or '—' }}</span></p>
+      <p><label>顺差串码</label><span>{{ form.imei or '—' }}</span></p>
       <p><label>消费</label><span>{{ form.spend or '—' }}</span></p>
       <p><label>推荐套餐</label><span>{{ form.recommend or '—' }}</span></p>
       <p><label>开口人员</label><span>{{ form.opener or '—' }}</span></p>

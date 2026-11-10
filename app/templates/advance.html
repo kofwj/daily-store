@@ -18,6 +18,7 @@
     {% endif %}
     {% endif %}
     {% if is_admin %}
+    <a class="btn ghost" href="{{ url_for('advance_pending', month=month.strftime('%Y-%m')) }}">让利待核{% if pending_totals.n %} · {{ pending_totals.n }} 笔{% endif %}</a>
     <a class="btn ghost" href="{{ url_for('sesame_week_page') }}">芝麻周报 / 导入明细</a>
     <a class="btn ghost" href="{{ url_for('advance_pay', month=month.strftime('%Y-%m')) }}">去兑付</a>
     {% endif %}
@@ -69,6 +70,44 @@
     {% endif %}
   </div>
 </form>
+{% endif %}
+
+{% if pending %}
+<div class="card">
+  <div class="records-toolbar">
+    <strong>让利待核 · {{ pending|length }} 笔</strong>
+    <span class="muted">{{ '%.2f'|format(pending_totals.total) }} 元 · 确认后才进兑付，未确认不计入合计</span>
+  </div>
+  <div class="table-wrap">
+    <table class="data">
+      <thead>
+        <tr>
+          <th class="left">成交日</th>
+          {% if all_stores %}<th class="left">门店</th>{% endif %}
+          <th class="left">串码</th>
+          <th class="left">机型</th>
+          <th class="left">号码</th>
+          <th class="left">来源</th>
+          <th>让利</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in pending %}
+        <tr>
+          <td class="left">{{ r.biz_date }}</td>
+          {% if all_stores %}<td class="left">{{ r.store_short or r.store_name }}</td>{% endif %}
+          <td class="left"><code>{{ r.imei }}</code></td>
+          <td class="left">{{ r.model or r.deal_model or '—' }}</td>
+          <td class="left">{{ r.phone|mask_phone if r.phone else '—' }}</td>
+          <td class="left">{{ '触客成交' if r.src == 'deal' else '门店自报' }}</td>
+          <td>{{ '%.2f'|format(r.rebate) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted">这些是成交/自报自动生成的，别在这里手工再记一笔（会重复）。管理员在「让利待核」确认后才会进兑付。</p>
+</div>
 {% endif %}
 
 <div class="card deal-records">

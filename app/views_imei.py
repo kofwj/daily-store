@@ -26,7 +26,7 @@ from flask import (
     url_for,
 )
 
-from . import db, db_core, db_imei
+from . import db, db_core, db_decl, db_imei
 from .helpers import (
     accessible_stores,
     admin_required,
@@ -497,7 +497,7 @@ def register_imei(app) -> None:
                 flash("只读账号只能看，不能自报", "error")
                 return redirect(back)
             row = conn.execute(
-                "SELECT store_id FROM imei_todo WHERE imei=?", (imei,)
+                "SELECT store_id, own_store FROM imei_todo WHERE imei=?", (imei,)
             ).fetchone()
             if row is None:
                 flash("这条串码不在清单里，刷新后再试", "error")
@@ -519,6 +519,7 @@ def register_imei(app) -> None:
                 if not db.user_can_access_store(conn, g.user, store_id):
                     # 写路径不静默落到别家店：宁可拒绝，也不能把结论记到别的店
                     return Response("forbidden", status=403)
+            decl_note: dict = {}
             upload = request.files.get("photo")
             has_photo = upload is not None and bool(upload.filename)
             # 送2G流量 / 顺差让利 系统没有记录：仅在报「已办」时先拦一道，别白存图片再报错
@@ -564,7 +565,7 @@ def register_imei(app) -> None:
                     )
                     db_imei.attach_claim_report(conn, imei, report_id)
                 else:
-                    db_imei.add_report(
+                    report_id = db_imei.add_report(
                         conn,
                         imei=imei,
                         store_id=store_id,
@@ -574,11 +575,28 @@ def register_imei(app) -> None:
                         photo=photo,
                         user_id=g.user["id"],
                     )
+                # 自报「已办 + 顺差让利」= 兜底路：与触客成交汇到同一个出口，
+                # 生成同一条待核垫资。已有声明就幂等返回，门店看到的是「已由成交闭环」。
+                if (
+                    action == "已办"
+                    and db_imei.norm_biz_type(biz_type) == db_decl.REBATE_BIZ
+                ):
+                    decl = db_decl.create_from_report(
+                        conn,
+                        imei=imei,
+                        store_id=store_id,
+                        own_store=str(row["own_store"] or ""),
+                        report_id=report_id,
+                        user_id=g.user["id"],
+                    )
+                    decl_note = decl
             except ValueError as exc:
                 flash(str(exc), "error")
                 return redirect(back)
         norm_biz = db_imei.norm_biz_type(biz_type) if action == "已办" else ""
         suffix = f" · {norm_biz}" if norm_biz else ""
+        if decl_note and decl_note.get("created"):
+            suffix += f" · 已记让利垫资待核 {db_decl.cents_text(decl_note['rebate_cents'])} 元"
         if pool_row is not None:
             flash(f"已记下：{imei[-6:]} → {action}{suffix}（待建店 · 本店代办）", "ok")
         else:

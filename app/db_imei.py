@@ -33,6 +33,8 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .db_core import _now, begin_immediate, today_local
 from .db_core import sql_in as _store_in
+from .db_decl import ensure as _ensure_decl
+from .db_decl import no_live_decl_sql
 
 # 门店能自报的三种结论。前两种是「有答案」，待核是「我还得问」。
 # 「非本店」2026-11-09 用户拍板下线：新报不接受，老记录仍原样显示/导出。
@@ -419,6 +421,33 @@ _COLUMNS = {
 }
 
 
+def find_stock_imei(conn: sqlite3.Connection, query: str) -> Optional[Dict[str, Any]]:
+    """触客成交时按串码找池子里那台（全 15 位或尾号 6 位都认）。
+
+    只认 `未售 + seen=1 + 无有效声明` 的机器——也就是真正还在池子里的。
+    返回 None 表示「池子里没有这台」，交给调用方提示，不自由手输建脏串码。
+    """
+    ensure(conn)
+    q = re.sub(r"\s+", "", str(query or ""))
+    if not q.isdigit() or len(q) < 6:
+        return None
+    rows = conn.execute(
+        f"""
+        SELECT t.imei, t.model, t.own_store, t.dispatch_store, t.asof
+        FROM imei_todo t
+        WHERE t.seen=1 AND t.status=?
+          AND {no_live_decl_sql()}
+          AND t.imei LIKE ?
+        ORDER BY t.imei
+        LIMIT 2
+        """,
+        (STATUS_STOCK, f"%{q}"),
+    ).fetchall()
+    if len(rows) != 1:
+        return None
+    return dict(rows[0])
+
+
 def ensure(conn: sqlite3.Connection) -> None:
     # 不用 executescript：sqlite3.executescript 会先发隐式 COMMIT，若外层正握着写事务会被提前提交；
     # 先只读查 sqlite_master / table_info，表与索引齐备时零 DDL 执行、零表结构锁。
@@ -441,6 +470,8 @@ def ensure(conn: sqlite3.Connection) -> None:
         for name, decl in added.items():
             if name not in have:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+    # 声明表跟 imei 表同生：池子/待办谓词都引用它，查询前必须存在
+    _ensure_decl(conn)
 
 
 def user_in_imei_scope(conn: sqlite3.Connection, user: Any) -> bool:
@@ -776,7 +807,10 @@ def todo_rows(
     params: List[Any] = []
     if show != "all":
         marks = ",".join("?" * len(CLOSED_STATES))
-        where.append(f"t.state NOT IN ({marks}) AND COALESCE(r.action,'') NOT IN ('已办','已退货')")
+        where.append(
+            f"t.state NOT IN ({marks}) AND COALESCE(r.action,'') NOT IN ('已办','已退货')"
+            f" AND {no_live_decl_sql('t')}"
+        )
         params = [*CLOSED_STATES, *params]
     if rule_ver is not None:
         where.append("COALESCE(t.rule_ver,1)=?")
@@ -1211,6 +1245,7 @@ def mark_summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> List[Dic
         LEFT JOIN latest_r r ON r.imei = t.imei
         WHERE t.seen=1 AND t.status=? AND t.state NOT IN ({closed_marks})
           AND COALESCE(r.action, '') NOT IN ({closed_marks})
+          AND {no_live_decl_sql()}
           AND {clause}
         GROUP BY t.store_id
         ORDER BY pending_n DESC, open_n DESC
@@ -1309,11 +1344,12 @@ def pool_summary(
         ]
     rows = list(
         conn.execute(
-            """
+            f"""
             SELECT t.own_store, COUNT(*) AS n,
                    COUNT(DISTINCT CASE WHEN t.model<>'' THEN t.model END) AS models
             FROM imei_todo t
             WHERE t.seen=1 AND t.status=?
+              AND {no_live_decl_sql()}
             GROUP BY t.own_store ORDER BY n DESC
             """,
             (STATUS_STOCK,),
@@ -1321,9 +1357,10 @@ def pool_summary(
     )
     models: Dict[str, List[Dict[str, Any]]] = {}
     for row in conn.execute(
-        """
-        SELECT own_store, model, COUNT(*) AS n FROM imei_todo
-        WHERE seen=1 AND status=? GROUP BY own_store, model ORDER BY own_store, n DESC
+        f"""
+        SELECT own_store, model, COUNT(*) AS n FROM imei_todo t
+        WHERE t.seen=1 AND t.status=? AND {no_live_decl_sql()}
+        GROUP BY own_store, model ORDER BY own_store, n DESC
         """,
         (STATUS_STOCK,),
     ):
@@ -1382,12 +1419,13 @@ def pool_rows(
             sql += " LIMIT ?"
             pool_params = [*pool_params, int(limit)]
         return enrich([dict(row) for row in conn.execute(sql, pool_params)])
-    sql = """
+    sql = f"""
         SELECT t.imei, t.model, t.own_store, t.dispatch_store, t.store_id,
                t.sold_day, t.asof, s.name AS store_name, s.short_name AS store_short
         FROM imei_todo t
         LEFT JOIN stores s ON s.id = t.store_id
         WHERE t.seen=1 AND t.status=?
+          AND {no_live_decl_sql()}
         ORDER BY t.own_store, t.model, t.imei
     """
     params: List[Any] = [STATUS_STOCK]
@@ -1436,6 +1474,7 @@ def summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> Dict[str, Any
           WHERE t.seen=1 AND t.status=?
             AND t.state NOT IN ({closed_marks})
             AND COALESCE(r.action, '') NOT IN ({closed_marks})
+            AND {no_live_decl_sql()}
             AND {clause}
         ),
         calc AS (
@@ -1491,8 +1530,10 @@ def summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> Dict[str, Any
             where_params,
         ).fetchone()[0]
     pool = conn.execute(
-        "SELECT COUNT(*) FROM imei_todo WHERE seen=1 AND status=?", (STATUS_STOCK,)
+        f"SELECT COUNT(*) FROM imei_todo t WHERE t.seen=1 AND t.status=? AND {no_live_decl_sql()}",
+        (STATUS_STOCK,),
     ).fetchone()[0]
+
     # 本店代办：待建店池子里由**本店**（claim_store_id）已经锁定的台数（未释放）
     claimed = 0
     if ids:

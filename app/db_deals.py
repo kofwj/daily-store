@@ -22,6 +22,7 @@ def _deal_payload(
     opener: str,
     note: str,
     text: str,
+    imei: str = "",
 ) -> Dict[str, Any]:
     return {
         "user_id": user_id,
@@ -35,6 +36,7 @@ def _deal_payload(
         "opener": (opener or "").strip()[:40],
         "note": (note or "").strip()[:1000],
         "text": (text or "").strip()[:2000],
+        "imei": (imei or "").strip()[:32],
         "updated_at": _now(),
     }
 
@@ -51,6 +53,7 @@ _DEAL_SNAPSHOT_FIELDS = (
     "opener",
     "note",
     "text",
+    "imei",
 )
 
 
@@ -109,6 +112,44 @@ def record_deal_edit(
         ),
     )
 
+
+def _own_store_of(conn: sqlite3.Connection, imei: str) -> str:
+    """库存登记店（快照用）。对不上就留空，不猜。"""
+    if not imei:
+        return ""
+    row = conn.execute("SELECT own_store FROM imei_todo WHERE imei=?", (imei,)).fetchone()
+    return str(row["own_store"] or "") if row is not None else ""
+
+
+def _sync_decl(
+    conn: sqlite3.Connection,
+    *,
+    store_id: int,
+    deal_id: int,
+    imei: str,
+    closed: bool,
+    day: date,
+    user_id: int,
+) -> Dict[str, Any]:
+    """成交与「顺差声明/待核垫资」同生同死（同一事务内调用）。
+
+    只处理 `imei_decl`：**不写 `imei_todo`**（用户每天导库存会覆盖 status/sold_day，
+    写了也会被冲掉）。串码撞车不抛错——触客条数是 KPI，不能因为串码就丢记录。
+    """
+    from . import db_decl
+
+    return dict(db_decl.sync_deal(
+        conn,
+        store_id=int(store_id),
+        deal_id=int(deal_id),
+        imei=imei,
+        closed=bool(closed),
+        biz_date=day,
+        user_id=int(user_id),
+        own_store=_own_store_of(conn, imei),
+    ))
+
+
 def record_deal_post(
     conn: sqlite3.Connection,
     *,
@@ -124,6 +165,7 @@ def record_deal_post(
     opener: str = "",
     note: str = "",
     text: str = "",
+    imei: str = "",
     deal_id: Optional[int] = None,
     biz_date: Optional[date] = None,
 ) -> int:
@@ -141,6 +183,7 @@ def record_deal_post(
         opener=opener,
         note=note,
         text=text,
+        imei=imei,
     )
     existing_id = None
     existing_row = None
@@ -175,7 +218,7 @@ def record_deal_post(
             UPDATE deal_posts
             SET user_id=:user_id, updated_at=:updated_at, closed=:closed, model=:model,
                 phone=:phone, spend=:spend, hall_query=:hall_query, recommend=:recommend,
-                student=:student, opener=:opener, note=:note, text=:text
+                student=:student, opener=:opener, note=:note, text=:text, imei=:imei
             WHERE id=:id
             """,
             {**payload, "id": existing_id},
@@ -190,14 +233,16 @@ def record_deal_post(
             before=before,
             after=after,
         )
+        _sync_decl(conn, store_id=store_id, deal_id=existing_id, imei=payload["imei"],
+                   closed=bool(closed), day=day, user_id=user_id)
         return existing_id
     cur = conn.execute(
         """
         INSERT INTO deal_posts(
             store_id, user_id, created_at, updated_at, biz_date, closed, model,
-            phone, spend, hall_query, recommend, student, opener, note, text
+            phone, spend, hall_query, recommend, student, opener, note, text, imei
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             store_id,
@@ -215,6 +260,7 @@ def record_deal_post(
             payload["opener"],
             payload["note"],
             payload["text"],
+            payload["imei"],
         ),
     )
     new_id = require_lastrowid(cur)
@@ -228,7 +274,17 @@ def record_deal_post(
         before={},
         after=after,
     )
+    _sync_decl(
+        conn,
+        store_id=store_id,
+        deal_id=new_id,
+        imei=payload["imei"],
+        closed=bool(closed),
+        day=day,
+        user_id=user_id,
+    )
     return new_id
+
 
 def count_deal_posts(
     conn: sqlite3.Connection,
@@ -348,7 +404,17 @@ def delete_deal_post(
         after={},
         note="删除成交",
     )
+    # 触客删了，派生出来的声明与待核垫资跟着作废（已兑付的走负数冲账）
+    from . import db_decl
+
+    db_decl.void_by_deal(
+        conn,
+        deal_id=int(deal_id),
+        reason="触客删除",
+        user_id=int(user_id) if user_id is not None else int(row["user_id"] or 0),
+    )
     return True
+
 
 def deal_counts(
     conn: sqlite3.Connection,

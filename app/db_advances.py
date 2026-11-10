@@ -133,7 +133,8 @@ def record_advance(
         ).fetchone()
         if row is None:
             raise ValueError("missing")
-        if (row["source"] or "") == "sesame":
+        # 官方导入（芝麻）与系统自动生成（顺差让利）都不许手改：要改只能作废再来
+        if (row["source"] or "") in ("sesame", "imei"):
             raise ValueError("imported_locked")
         if int(row["paid"] or 0):
             raise ValueError("paid_locked")
@@ -204,10 +205,10 @@ def delete_advance(
     row = get_advance(conn, advance_id, store_id)
     if row is None:
         return False
-    is_sesame = (row["source"] or "") == "sesame"
-    if is_sesame and not allow_imported:
+    is_imported = (row["source"] or "") in ("sesame", "imei")
+    if is_imported and not allow_imported:
         raise ValueError("imported_locked")
-    if int(row["paid"] or 0) and not (is_sesame and allow_imported):
+    if int(row["paid"] or 0) and not (is_imported and allow_imported):
         return False
     before = _snapshot(row)  # get_advance() 已按元返回
     conn.execute("DELETE FROM advance_posts WHERE id=? AND store_id=?", (advance_id, store_id))
@@ -249,7 +250,8 @@ def set_advance_paid(
         else:
             # 芝麻导入的记录「导入即已兑」，不进取消兑付；与其他路径对 sesame 的保护一致
             cur = conn.execute(
-                "UPDATE advance_posts SET paid=0, paid_at='', paid_by=NULL, updated_at=? WHERE id=? AND paid=1 AND source!='sesame'",
+                "UPDATE advance_posts SET paid=0, paid_at='', paid_by=NULL, updated_at=? "
+                "WHERE id=? AND paid=1 AND source NOT IN ('sesame','imei')",
                 (now_s, old["id"]),
             )
         if cur.rowcount <= 0:
@@ -357,8 +359,8 @@ def advance_paid_totals(
             SUM(CASE WHEN IFNULL(paid, 0)=0 THEN 1 ELSE 0 END) AS unpaid_n,
             ROUND(SUM(CASE WHEN IFNULL(paid, 0)=0
                            THEN broadband + rebate + other + sesame ELSE 0 END) / 100.0, 2) AS unpaid_total,
-            SUM(CASE WHEN IFNULL(paid, 0)=1 AND source!='sesame' THEN 1 ELSE 0 END) AS revert_n,
-            ROUND(SUM(CASE WHEN IFNULL(paid, 0)=1 AND source!='sesame'
+            SUM(CASE WHEN IFNULL(paid, 0)=1 AND source NOT IN ('sesame','imei') THEN 1 ELSE 0 END) AS revert_n,
+            ROUND(SUM(CASE WHEN IFNULL(paid, 0)=1 AND source NOT IN ('sesame','imei')
                            THEN broadband + rebate + other + sesame ELSE 0 END) / 100.0, 2) AS revert_total
         FROM advance_posts
         WHERE {' AND '.join(where)}

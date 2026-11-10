@@ -239,6 +239,8 @@
         <div class="rules-grid">
           <p><label>小天才直降档位</label><input type="number" min="1" name="r_tier_xtc" value="{{ sesame_tier_rules['xtc'] }}"></p>
           <p><label>AI手机档位</label><input type="number" min="1" name="r_tier_ai" value="{{ sesame_tier_rules['ai'] }}"></p>
+          <p><label>顺差让利垫资（元/台）</label><input type="number" min="0" step="1" name="r_imei_rebate" value="{{ imei_rebate_yuan }}"></p>
+          <p class="muted span-2">成交时选了顺差串码就按这个数生成「待核」垫资；已生成的待核按当时的数，改这里不影响历史。</p>
         </div>
       </div>
       <div class="toolbar"><button type="submit">保存考核规则</button></div>

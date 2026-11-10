@@ -11,7 +11,7 @@ import openpyxl
 from flask import flash, g, redirect, render_template, request, session, url_for
 from openpyxl.styles import Alignment, Font, PatternFill
 
-from . import db, db_core, sesame
+from . import db, db_core, db_decl, sesame
 from .helpers import (
     _xlsx_safe,
     accessible_stores,
@@ -91,8 +91,17 @@ def _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d, *, 
         kpi_ids = scope["ids"] if scope["active"] else [s["id"] for s in stores]
         totals = _sum_totals(db.advance_month_totals(conn, kpi_ids, today_d).values())
     totals["unpaid"] = sum(1 for r in rows if not int(r["paid"] or 0))
+    # 待核（成交/自报自动生成，未确认前不计入任何垫资合计）
+    pending_ids = None if all_stores else [int(store["id"])]
+    if all_stores and scoped_ids is not None:
+        pending_ids = [int(s) for s in scoped_ids]
+    pending = db_decl.pending_rows(conn, store_ids=pending_ids, limit=200)
+    pending_totals = db_decl.summary(conn, pending_ids)
     return render_template(
         "advance.html",
+        pending=pending,
+        pending_totals=pending_totals,
+        rebate_text=db_decl.cents_text(db_decl.rebate_cents(conn)),
         store=store,
         stores=stores,
         all_stores=all_stores,
@@ -259,6 +268,73 @@ def register_advance(app) -> None:
         """当前请求的地市 / 经理范围（None = 不限门店）。跟页面显示同一套口径。"""
         city_scope = request_scope(accessible_stores(conn))
         return None if (sid or not city_scope["active"]) else city_scope["ids"]
+
+    @app.route("/advance/pending")
+    @admin_required
+    def advance_pending():
+        """待核让利垫资：成交/自报生成，管理员一键确认才进待兑付。
+
+        确认前一分钱不参与任何合计（声明待在 `imei_decl`，不进 `advance_posts`）。
+        确认时 `biz_date` 用成交日，所以 31 号的垫资 1、2 号确认照样算上月。
+        """
+        month_raw = (request.args.get("month") or "").strip()
+        month = parse_date(month_raw[:7] + "-01" if len(month_raw) >= 7 else "") or db.today_local()
+        month = month.replace(day=1)
+        month_end = _month_end(month)
+        with db.get_db() as conn:
+            stores = accessible_stores(conn)
+            city_scope = request_scope(stores)
+            store_ids = None
+            if city_scope["active"]:
+                store_ids = city_scope["ids"]
+            rows = db_decl.pending_rows(conn, start=month, end=month_end, store_ids=store_ids)
+            totals = db_decl.summary(conn, store_ids)
+            return render_template(
+                "advance_pending.html",
+                rows=rows,
+                month=month,
+                totals=totals,
+                pending_total=totals,
+                rebate=db_decl.cents_text(db_decl.rebate_cents(conn)),
+                scope=city_scope,
+            )
+
+    @app.route("/advance/pending", methods=["POST"])
+    @admin_required
+    def advance_pending_post():
+        action = (request.form.get("action") or "confirm").strip()
+        ids = request.form.getlist("decl_id")
+        if action == "confirm_all":
+            with db.get_db() as conn:
+                stores = accessible_stores(conn)
+                city_scope = request_scope(stores)
+                ids = [
+                    str(r["id"])
+                    for r in db_decl.pending_rows(
+                        conn, store_ids=city_scope["ids"] if city_scope["active"] else None
+                    )
+                ]
+        with db.get_db() as conn:
+            if action == "void":
+                n = 0
+                for one in ids:
+                    row = conn.execute(
+                        "SELECT * FROM imei_decl WHERE id=?", (int(one),)
+                    ).fetchone()
+                    if row is not None:
+                        db_decl.void_decl(
+                            conn, row, reason="管理员作废", user_id=g.user["id"]
+                        )
+                        n += 1
+                flash(f"已作废 {n} 笔待核", "ok")
+            else:
+                result = db_decl.confirm(conn, ids, user_id=g.user["id"])
+                msg = f"已确认 {result['confirmed']} 笔，进入待兑付"
+                if result["skipped"]:
+                    msg += f"；{result['skipped']} 笔状态已变，跳过"
+                flash(msg, "ok")
+        month = (request.form.get("month") or "").strip()
+        return redirect(url_for("advance_pending", month=month or None))
 
     @app.route("/advance/pay")
     @admin_required

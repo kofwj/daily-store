@@ -14,6 +14,12 @@ BACKUP_DIR_NAME = "backups"
 BACKUP_PREFIX = "store_daily_"
 MAX_KEEP = 20
 REQUIRED_TABLES = ("stores", "users", "metrics", "daily_reports", "daily_facts", "advance_posts")
+# V0.4.01 之后的表：备份里**有就校验结构，没有不算缺**。
+# 为什么不像上面那样硬要求：升级前的备份本来就没有这张表，硬要求会让老备份
+# 直接恢复不了；而那些备份里本来也没有声明，不存在丢数据的可能。
+OPTIONAL_TABLES = {
+    "imei_decl": {"id", "imei", "store_id", "biz_date", "rebate_cents", "state"},
+}
 MAX_RESTORE_BYTES = 32 * 1024 * 1024
 FINGERPRINT_NAME = ".last_offsite_fp"
 
@@ -153,6 +159,12 @@ def restore_bytes(data: bytes) -> Path:
             advance_cols = {row[1] for row in probe.execute("PRAGMA table_info(advance_posts)")}
             if not {"id", "store_id", "biz_date", "paid"} <= advance_cols:
                 raise ValueError("备份表结构不完整：advance_posts")
+            for table, need in OPTIONAL_TABLES.items():
+                if table not in names:
+                    continue
+                cols = {row[1] for row in probe.execute(f"PRAGMA table_info({table})")}
+                if not need <= cols:
+                    raise ValueError(f"备份表结构不完整：{table}")
         except sqlite3.DatabaseError as exc:
             # 魔数对但页损坏/加密/截断的文件会在这里炸，转成预期错误给用户看
             raise ValueError("备份文件损坏，读不出来") from exc

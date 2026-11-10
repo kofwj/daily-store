@@ -162,7 +162,8 @@ CREATE TABLE IF NOT EXISTS deal_posts (
     student INTEGER NOT NULL DEFAULT 0,
     opener TEXT NOT NULL DEFAULT '',
     note TEXT NOT NULL DEFAULT '',
-    text TEXT NOT NULL DEFAULT ''
+    text TEXT NOT NULL DEFAULT '',
+    imei TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_deal_posts_store_date ON deal_posts(store_id, biz_date);
 
@@ -348,6 +349,8 @@ _DEAL_POST_EXTRA_COLUMNS = {
     "opener": "ALTER TABLE deal_posts ADD COLUMN opener TEXT NOT NULL DEFAULT ''",
     "note": "ALTER TABLE deal_posts ADD COLUMN note TEXT NOT NULL DEFAULT ''",
     "text": "ALTER TABLE deal_posts ADD COLUMN text TEXT NOT NULL DEFAULT ''",
+    # V0.4.01：成交时选的顺差串码。空 = 这单没关联顺差机，行为与以前完全一致。
+    "imei": "ALTER TABLE deal_posts ADD COLUMN imei TEXT NOT NULL DEFAULT ''",
 }
 
 def _apply_new_columns(conn: sqlite3.Connection, statements: Dict[str, str], cols: set) -> None:
@@ -388,7 +391,8 @@ def _ensure_deal_posts(conn: sqlite3.Connection) -> None:
             student INTEGER NOT NULL DEFAULT 0,
             opener TEXT NOT NULL DEFAULT '',
             note TEXT NOT NULL DEFAULT '',
-            text TEXT NOT NULL DEFAULT ''
+            text TEXT NOT NULL DEFAULT '',
+            imei TEXT NOT NULL DEFAULT ''
         )
         """
     )

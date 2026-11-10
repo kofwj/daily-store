@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% from "_scope_filters.html" import scope_filters %}
+{% block title %}让利垫资 · 待核{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div class="page-title">
+    <h1>让利垫资待核</h1>
+  </div>
+  <form method="get" class="page-filters">
+    <label class="filter">
+      <span>月份</span>
+      <input type="month" name="month" value="{{ month.strftime('%Y-%m') }}" onchange="this.form.submit()">
+    </label>
+    {{ scope_filters(scope.cities, scope.managers, city=scope.city, manager=scope.manager) }}
+    <a class="btn ghost" href="{{ url_for('advance_page', store_id='all') }}">回垫资</a>
+    <a class="btn ghost" href="{{ url_for('advance_pay', month=month.strftime('%Y-%m')) }}">去兑付</a>
+  </form>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="muted">待核（全部月份）</div><div class="kpi-num">{{ pending_total.n }}</div><div class="muted">{{ '%.2f'|format(pending_total.total) }} 元</div></div>
+  <div class="kpi"><div class="muted">本月待核</div><div class="kpi-num">{{ rows|length }}</div></div>
+  <div class="kpi"><div class="muted">档位</div><div class="kpi-num">{{ rebate }}</div><div class="muted">元/台</div></div>
+</div>
+
+<div class="card">
+  <p class="muted">
+    待核<b>不计入</b>任何垫资合计与酬金；确认后才进兑付。金额是生成那一刻的快照，改档位不影响这里。
+    账记在<b>成交日</b>所在月——上月最后一天成交的，本月确认照样算上月。
+  </p>
+  {% if rows %}
+  <form method="post" onsubmit="return confirm('确认后这笔进入待兑付，勾选的多笔会一起进');">
+    <input type="hidden" name="month" value="{{ month.strftime('%Y-%m') }}">
+    <div class="records-toolbar">
+      <strong>本月待核 {{ rows|length }} 笔</strong>
+      <span class="muted">勾选后可确认或作废</span>
+    </div>
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th><input type="checkbox" onclick="document.querySelectorAll('input[name=decl_id]').forEach(c=>c.checked=this.checked)"></th>
+            <th class="left">成交日</th>
+            <th class="left">门店</th>
+            <th class="left">串码</th>
+            <th class="left">机型</th>
+            <th class="left">号码</th>
+            <th class="left">来源</th>
+            <th>金额</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td><input type="checkbox" name="decl_id" value="{{ r.id }}"></td>
+            <td class="left">{{ r.biz_date }}</td>
+            <td class="left">{{ r.store_short or r.store_name }}</td>
+            <td class="left"><code>{{ r.imei }}</code></td>
+            <td class="left">{{ r.model or r.deal_model or '—' }}</td>
+            <td class="left">{{ r.phone|mask_phone if r.phone else '—' }}</td>
+            <td class="left">{{ '触客成交' if r.src == 'deal' else '门店自报' }}</td>
+            <td>{{ '%.2f'|format(r.rebate) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="toolbar">
+      <button type="submit" name="action" value="confirm">确认勾选的（进待兑付）</button>
+      <button type="submit" name="action" value="void" class="ghost" onclick="return confirm('作废后这台会回到池子，已确认的会删掉或冲账，确定？')">作废勾选的</button>
+    </div>
+  </form>
+  <form method="post" onsubmit="return confirm('确认本月全部待核？')">
+    <input type="hidden" name="month" value="{{ month.strftime('%Y-%m') }}">
+    <div class="toolbar">
+      <button type="submit" name="action" value="confirm_all">全部确认（本月 {{ rows|length }} 笔）</button>
+    </div>
+  </form>
+  {% else %}
+  <p class="muted">这个月没有待核的让利垫资。门店成交时选了顺差串码、或在串码待办报「已办 + 顺差让利」，这里才会有东西。</p>
+  {% endif %}
+</div>
+{% endblock %}

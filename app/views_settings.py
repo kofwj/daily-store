@@ -19,7 +19,7 @@ from flask import (
     url_for,
 )
 
-from . import backup, bulletin, db, incentive, invoice, sesame
+from . import backup, bulletin, db, db_decl, incentive, invoice, sesame
 from .helpers import (
     admin_required,
     ascii_filename,
@@ -239,6 +239,7 @@ def _render_settings(conn, tab: str):
         },
         incentive_rules=incentive_rules(conn),
         sesame_tier_rules=sesame.tier_rules(conn),
+        imei_rebate_yuan=db_decl.cents_text(db_decl.rebate_cents(conn)),
         advisor_penalty_divisor=db.get_setting(conn, "advisor_penalty_divisor", "4000") or "4000",
         brand_form=brand_settings(conn),
         company_form=company_names(conn),
@@ -633,6 +634,13 @@ def _do_save_rules(conn):
     db.set_setting(conn, "incentive_rules", json.dumps(rules, ensure_ascii=False))
     divisor = max(1, parse_int(request.form.get("advisor_penalty_divisor"), 4000))
     db.set_setting(conn, "advisor_penalty_divisor", str(divisor))
+    # 顺差让利垫资档位（元/台）→ 按分存；只影响之后新生成的待核，已生成的是快照
+    raw_rebate = (request.form.get("r_imei_rebate") or "").strip()
+    if raw_rebate:
+        try:
+            db_decl.set_rebate_cents(conn, db.yuan_to_cents(raw_rebate))
+        except (ValueError, TypeError):
+            flash("顺差让利档位没改：要填数字", "error")
     # 芝麻档位：小天才 / AI 两个阈值，相等或非法视为没改用默认
     try:
         tier_xtc = int(request.form.get("r_tier_xtc") or sesame.TIER_DEFAULT_RULES["xtc"])

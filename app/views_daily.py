@@ -15,7 +15,7 @@ from flask import (
     url_for,
 )
 
-from . import broadcast, db, deal, policy
+from . import broadcast, db, db_decl, db_imei, deal, policy
 from .helpers import (
     admin_required,
     broadcast_compact_sections,
@@ -44,6 +44,20 @@ from .metrics_seed import (
     metric_step,
     rollup_pair,
     to_stored,
+)
+
+# render_deal 认的字段（串码不进群播报，避免泄露；imei_model 只是页面回显用）
+_DEAL_RENDER_KEYS = (
+    "model",
+    "phone",
+    "spend",
+    "hall_query",
+    "recommend",
+    "closed",
+    "student",
+    "show_phone",
+    "opener",
+    "note",
 )
 
 
@@ -249,7 +263,7 @@ def register_daily(app) -> None:
                         values = deal.form_from_row(row)
                         text = row["text"] or deal.render_deal(
                             broadcast_store_name(store),
-                            **{k: v for k, v in values.items() if k != "deal_id"},
+                            **{k: v for k, v in values.items() if k in _DEAL_RENDER_KEYS},
                         )
                         editable = deal.is_today_deal(row, today_d)
                 if not values["opener"]:
@@ -275,9 +289,26 @@ def register_daily(app) -> None:
                     dup = db.find_latest_deal_by_phone(conn, store["id"], today_d, values["phone"])
                     if dup is not None and int(dup["user_id"] or 0) != int(g.user["id"]):
                         flash("同日同号已有一条记录（他人填的），提交后按规则覆盖", "warn")
+                # 成交时填了串码：只认池子里还在的那台（尾号 6 位也认）。
+                # 池子里没有就不记垫资，但触客照常保存——条数是 KPI，不能因为串码丢记录。
+                raw_imei = (values.get("imei") or "").strip()
+                if raw_imei:
+                    found = db_imei.find_stock_imei(conn, raw_imei)
+                    if found is None:
+                        flash(
+                            f"池子里没有「{raw_imei}」这台（可能已卖出或不在最新清单），"
+                            "这条触客照常保存，但不会记让利垫资",
+                            "warn",
+                        )
+                        values["imei"] = ""
+                    else:
+                        values["imei"] = found["imei"]
+                        if not values["model"].strip():
+                            values["model"] = str(found["model"] or "")
+                        values["imei_model"] = str(found["model"] or "")
                 text = deal.render_deal(
                     broadcast_store_name(store),
-                    **{k: v for k, v in values.items() if k != "deal_id"},
+                    **{k: v for k, v in values.items() if k in _DEAL_RENDER_KEYS},
                 )
                 try:
                     saved_id = db.record_deal_post(
@@ -294,6 +325,7 @@ def register_daily(app) -> None:
                         opener=values["opener"],
                         note=values["note"],
                         text=text,
+                        imei=values.get("imei", ""),
                         deal_id=deal_id_int,
                         biz_date=today_d,
                     )
@@ -305,6 +337,16 @@ def register_daily(app) -> None:
                     return redirect(url_for("deal_records", store_id=store["id"]))
                 values["deal_id"] = saved_id
                 editable = True
+                if values.get("imei"):
+                    decl = db_decl.deal_decl(conn, saved_id)
+                    if decl is not None:
+                        flash(
+                            "已记让利垫资待核 "
+                            f"{db_decl.cents_text(decl['rebate_cents'])} 元（管理员确认后进兑付）",
+                            "ok",
+                        )
+                    else:
+                        flash("这台串码已被别家声明卖出，本条触客照常记，但没生成垫资", "warn")
                 # 先提交放写锁，企微播报的网络调用不拖住其他店保存
                 conn.commit()
                 from . import wecom

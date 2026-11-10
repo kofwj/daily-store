@@ -47,6 +47,7 @@ def render_deal(
     opener: str = "",
     note: str = "",
     show_phone: str = "0",
+    imei: str = "",
 ) -> str:
     store = (store_name or "").strip() or "未选门店"
     model = (model or "").strip()
@@ -89,6 +90,7 @@ def form_values(raw: Mapping[str, str] | None = None, *, posted: bool = False) -
         "hall_query": raw.get("hall_query") or default_on,
         "recommend": (raw.get("recommend") or "").strip(),
         "closed": raw.get("closed") or "0",
+        "imei": (raw.get("imei") or "").strip()[:32],
         "student": raw.get("student") or "0",
         "show_phone": raw.get("show_phone") or "0",
         "opener": (raw.get("opener") or "").strip(),
@@ -105,7 +107,7 @@ def form_from_row(row) -> dict:
         "hall_query": "1" if int(row["hall_query"] or 0) else "0",
         "recommend": row["recommend"] or "",
         "closed": "1" if int(row["closed"] or 0) else "0",
-        "student": "1" if int(row["student"] or 0) else "0",
+        "imei": (row["imei"] or "") if "imei" in row.keys() else "",
         "show_phone": "0",
         "opener": row["opener"] or "",
         "note": row["note"] or "",
