@@ -1,0 +1,545 @@
+From 874c808beaa9acba266ff436a4345a7cf29165ea Mon Sep 17 00:00:00 2001
+From: kofwj <kofwangj@gmail.com>
+Date: Wed, 11 Nov 2026 08:05:16 +0800
+Subject: [PATCH] =?UTF-8?q?V0.4.08:=20=E4=BF=AE=E4=B8=B2=E7=A0=81=E5=8C=BA?=
+ =?UTF-8?q?=20HTML=20=E9=9D=9E=E6=B3=95=E5=B5=8C=E5=A5=97=EF=BC=88?=
+ =?UTF-8?q?=E6=9F=A5=E8=AF=A2=E6=A1=86=E8=A2=AB=E6=8C=A4=E5=88=B0=2026px?=
+ =?UTF-8?q?=EF=BC=89+=20=E5=B8=83=E5=B1=80=E9=80=9A=E7=9B=98=E6=94=B6?=
+ =?UTF-8?q?=E6=8B=BE?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+前端评审指出触客页串码区挤压。核对后**结论对、根因错**：
+评审说「该格没加 .span-2」，真实原因是把 <div> 写进了 <p> 里——
+浏览器遇到块级元素会在那里提前闭合 <p>，整格被拆成 5 个网格单元
+（下拉+输入 / .imei-find / 文件框 / 候选列表 / 提示各自成一格），
+还多出一个空 <p> 占位。实测 360px 下 6 个格子全裂开、#imeiQuery 只剩 26px。
+光加 .span-2 治不了。
+
+触客页（deal.html）
+- 串码区改成 `<div class="span-2 imei-block">`，不再套在 <p> 里
+- 合并重复的两个尾号输入框（#imeiInput 与 #imeiQuery）：只留一个
+  「尾号/完整串码」框 + [查池子][扫一扫]，机型回填照旧
+- 字段重排成 3 行 × 2 列 + 串码跨整行，消除「左空右满」和落单格
+- 情况描述移出网格（.deal-note），旗标行也移出，不再靠 span-2 硬凑
+- 只读视图同步同样布局
+
+串码池（imei_pool.html）
+- 补上 `td.col-model`：`.imei-grid` 只给 `th:first-child` 和
+  `td.col-model` 上 sticky，缺这个类时手机横滑「表头吸住、数据滑走」，
+  实测两者 sticky 现在一致、横滑 200px 后左边界对齐
+- 补上提交门禁 + 防连点（原来只有 sync，没有 submit 拦截）：
+  送2G流量/顺差让利没凭证时前端先挡，不用传完图才被服务端退回
+
+触客记录（deal_records.html）
+- 手机端 10 列被压成最窄 29px 一条竖线（实测）。给表格 min-width: 720px
+  让它横向滑动，列宽保住可读性
+
+串码待办（imei.html）
+- 管理员 4 段带长解释的 <p> 收成一行胶囊导航（.sub-nav），
+  首屏第一次出现表格从 1083px 降到 904px
+- 手机端 5 张 KPI：第一张跨两列，其余 2×2，不再 2+2+1 孤一张
+- 状态列多个 chip 改成行内流式（.chip-flow），3 个标签不再占 3 行
+- 手机端最右操作列在 JS 接好抽屉后才隐藏（.imei-sheet-ready），
+  没 JS 时仍是唯一入口，功能不丢
+
+测试 493 passed（新增 `<p>` 内不得出现 `<div>` 的回归用例）；
+ruff / mypy 干净。实测量了 360/1280 两档、触客/记录/串码待办/串码池四页，
+横向溢出均为 0。
+---
+ app/static/app.css           | 58 +++++++++++++++++++++-
+ app/templates/deal.html      | 96 ++++++++++++++++++------------------
+ app/templates/imei.html      | 46 ++++++++---------
+ app/templates/imei_pool.html | 21 +++++++-
+ tests/test_decl.py           | 21 +++++++-
+ tests/test_imei.py           |  5 +-
+ 6 files changed, 172 insertions(+), 75 deletions(-)
+
+diff --git a/app/static/app.css b/app/static/app.css
+index 74e47ec..8b25c81 100644
+--- a/app/static/app.css
++++ b/app/static/app.css
+@@ -277,6 +277,14 @@ button.ghost:hover, .btn.ghost:hover { background: var(--accent-soft); }
+   font-size: 12px;
+   color: var(--muted);
+ }
++/* 一个格子里多个 chip 时行内流式排（原来每个 chip 各自套一层 <div>，
++   3 个标签就占 3 行，把整行高度撑起来） */
++.chip-flow {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 4px;
++  margin-top: 4px;
++}
+ .chip-mobile {
+   background: #e0f2fe;
+   color: #0369a1;
+@@ -372,10 +380,41 @@ table.data td.up { color: #166534; }
+ table.data td.down { color: #9f1239; }
+ @media (max-width: 800px) {
+   .kpi-row { grid-template-columns: 1fr 1fr; }
++  /* 串码待办有 5 张 KPI 卡：2+2+1 会让最后一张孤零零占半行。
++     让第一张（已售未办，主指标）跨两列，下面 4 张正好 2×2。 */
++  .imei-page .kpi-row > .kpi:first-child { grid-column: 1 / -1; }
+   .page-head { flex-direction: column; align-items: stretch; gap: 10px; }
+   .page-head .page-filters { width: 100%; }
+   .filter { min-width: 0; flex: 1 1 100%; }
+ }
++/* 管理员子台账导航（替代原来 4 段带长解释的 <p>） */
++.sub-nav {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 6px;
++  margin: 0 0 12px;
++}
++.sub-nav-item {
++  display: inline-flex;
++  align-items: center;
++  gap: 6px;
++  padding: 5px 10px;
++  border: 1px solid var(--line);
++  border-radius: 999px;
++  background: #fff;
++  color: var(--ink);
++  font-size: 12px;
++  text-decoration: none;
++  white-space: nowrap;
++}
++.sub-nav-item:hover { background: var(--accent-soft); }
++.sub-nav-item b {
++  font-variant-numeric: tabular-nums;
++  color: var(--muted);
++  font-weight: 650;
++}
++.sub-nav-item.warn { border-color: #fed7aa; background: #fff7ed; }
++
+ .check input { width: auto; }
+ 
+ table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+@@ -1995,6 +2034,11 @@ td.right form { display: inline; }
+ @media (max-width: 800px) {
+   .deal-records-kpis { grid-template-columns: 1fr 1fr; width: 100%; }
+   .deal-records-card .wrap { padding-bottom: calc(76px + var(--safe-bottom)); }
++  /* 触客记录 10 列：不设最小宽度会被压成一条 29px 的竖线（实测），
++     给表格兜个底，让 .table-wrap 横向滑动，列宽保住可读性。 */
++  .deal-records table.data { min-width: 720px; }
++  .deal-records table.data th,
++  .deal-records table.data td { white-space: nowrap; }
+ }
+ .board-rank { margin: 0; overflow: hidden; }
+ table.board-table { font-size: 13px; }
+@@ -2043,6 +2087,11 @@ table.board-table td { text-align: left; vertical-align: middle; }
+ .deal-grid p { margin: 0; }
+ .deal-grid .span-2 { grid-column: 1 / -1; }
+ .deal-grid textarea { min-height: 96px; font-family: inherit; }
++/* 串码区：跨满整行、内部纵向排（下拉 → 输入行 → 候选 → 提示）。
++   margin: 0 跟其它 <p> 对齐，别让这一格把行高撑歪。 */
++.deal-grid .imei-block { margin: 0; min-width: 0; }
++.deal-grid .imei-block select,
++.deal-grid .imei-block input { max-width: 100%; }
+ .deal-flags {
+   display: flex;
+   flex-wrap: wrap;
+@@ -2051,7 +2100,10 @@ table.board-table td { text-align: left; vertical-align: middle; }
+   grid-column: 1 / -1;
+ }
+ .deal-flags .check { margin: 0; }
+-/* 串码查询 + 扫一扫（V0.4.06）：查询行、命中列表、摄像头预览 */
++/* 情况描述：独立一行，跟网格分开放（原来是 .span-2 的 <p>） */
++.deal-note { margin-top: 12px; }
++.deal-note textarea { width: 100%; min-height: 96px; font-family: inherit; }
++/* 串码查询 + 扫一扫（V0.4.06）：输入框 + 两个按钮，同一行 */
+ .imei-find {
+   display: grid;
+   grid-template-columns: minmax(0, 1fr) auto auto;
+@@ -2292,6 +2344,10 @@ table.report-grid tr.act-pending td.num { color: var(--muted); }
+   }
+   .imei-grid thead th:first-child { z-index: 3; background: #f8fafc; }
+   .imei-grid tr.act-pending td.col-model { background: #fbfcfe; }
++  /* 手机端最右那列操作区默认还留着：没 JS 时它是唯一入口，不能一上来就藏。
++     JS 把抽屉接好之后会给 <html> 加 .imei-sheet-ready，这时才隐藏重复的一列，
++     少滑一段距离。 */
++  .imei-sheet-ready .imei-grid td.col-act { display: none; }
+   .imei-grid .imei-open {
+     display: inline-flex;
+     margin-top: 6px;
+diff --git a/app/templates/deal.html b/app/templates/deal.html
+index 92af8fc..18e9df5 100644
+--- a/app/templates/deal.html
++++ b/app/templates/deal.html
+@@ -40,6 +40,14 @@
+         <label>号码</label>
+         <input name="phone" value="{{ form.phone }}" inputmode="numeric" pattern="[0-9]{11}" maxlength="11" title="请输入11位手机号" placeholder="11位手机号" autocomplete="off">
+       </p>
++      <p>
++        <label>消费</label>
++        <input name="spend" value="{{ form.spend }}" inputmode="decimal" pattern="\d+(\.\d{1,2})?" title="数字，最多两位小数" placeholder="如 99" autocomplete="off">
++      </p>
++      <p>
++        <label>推荐套餐</label>
++        <input name="recommend" value="{{ form.recommend }}" placeholder="如 89 / 139" autocomplete="off">
++      </p>
+       <p>
+         <label>办理的终端业务</label>
+         <select name="biz_type" id="bizType" title="只有「顺差让利」进让利垫资">
+@@ -51,6 +59,12 @@
+         <span class="muted" id="bizHint">只有选「顺差让利」才记让利垫资</span>
+       </p>
+       <p>
++        <label>开口人员</label>
++        <input name="opener" value="{{ form.opener }}" placeholder="默认本店运营商顾问" autocomplete="off">
++      </p>
++      {# 串码区跨满整行，且必须用 <div>：里面是块级元素（下拉/输入/候选列表）。
++         写成 <p> 会被浏览器在第一个 <div> 处提前闭合，整格裂成好几个网格单元。 #}
++      <div class="span-2 imei-block">
+         <label>顺差串码<small class="muted">（可空）</small></label>
+         {% if imei_options %}
+         <select name="imei_pick" id="imeiPick" title="选本店在库的顺差机">
+@@ -59,15 +73,12 @@
+           <option value="{{ o.imei }}" data-model="{{ o.model }}" {% if form.imei == o.imei %}selected{% endif %}>{{ o.imei }}</option>
+           {% endfor %}
+         </select>
+-        <span class="muted">本店库存里还有 {{ imei_options|length }} 台在库顺差机</span>
+         {% endif %}
+-        <input name="imei" id="imeiInput" value="{{ form.imei }}" inputmode="numeric" maxlength="20"
+-               title="尾号 4 位起就查得到；撞车时会列出来让你选"
+-               placeholder="尾号 4 位 / 完整串码，不填不影响成交" autocomplete="off">
+         <div class="imei-find">
+-          <input name="imei_q" id="imeiQuery" maxlength="24" autocomplete="off"
+-                 placeholder="查串码尾号（4 位起）/ 机型关键字">
+-          <button type="button" class="btn ghost" id="imeiFindBtn">查询</button>
++          <input name="imei" id="imeiInput" value="{{ form.imei }}" inputmode="numeric" maxlength="20"
++                 title="尾号 4 位起就查得到；撞车时会列出来让你选"
++                 placeholder="尾号 4 位 / 完整串码（不填不影响成交）" autocomplete="off">
++          <button type="button" class="btn ghost" id="imeiFindBtn">查池子</button>
+           <button type="button" class="btn ghost" id="imeiScanBtn" title="用手机相机拍机器背面的条码">扫一扫</button>
+         </div>
+         <input type="file" id="imeiPhoto" accept="image/*" capture="environment" hidden>
+@@ -76,34 +87,22 @@
+           {%- if form.imei -%}
+           已关联 {{ form.imei }}{% if form.imei_model %} · {{ form.imei_model }}{% endif %}
+           {%- elif imei_options -%}
+-          上面选一台、或查尾号 / 扫一下；选「顺差让利」时填了才记让利垫资
++          本店在库 {{ imei_options|length }} 台：从上面下拉选，或填尾号 4 位点「查池子」
+           {%- else -%}
+-          填了才记让利垫资（待核），没办顺差让利可以不填
++          填尾号 4 位点「查池子」；选「顺差让利」时填了才记让利垫资
+           {%- endif -%}
+         </span>
+-      </p>
+-      <p>
+-        <label>消费</label>
+-        <input name="spend" value="{{ form.spend }}" inputmode="decimal" pattern="\d+(\.\d{1,2})?" title="数字，最多两位小数" placeholder="如 99" autocomplete="off">
+-      </p>
+-      <p>
+-        <label>推荐套餐</label>
+-        <input name="recommend" value="{{ form.recommend }}" placeholder="如 89 / 139" autocomplete="off">
+-      </p>
+-      <p>
+-        <label>开口人员</label>
+-        <input name="opener" value="{{ form.opener }}" placeholder="默认本店运营商顾问" autocomplete="off">
+-      </p>
+-      <div class="deal-flags">
+-        <label class="check"><input type="checkbox" name="hall_query" value="1" {% if form.hall_query == '1' %}checked{% endif %}> 掌厅已查</label>
+-        <label class="check"><input type="checkbox" name="closed" value="1" {% if form.closed == '1' %}checked{% endif %}> 已成交</label>
+-        <label class="check"><input type="checkbox" name="student" value="1" {% if form.student == '1' %}checked{% endif %}> 中高考学生</label>
+-        <label class="check"><input type="checkbox" name="show_phone" value="1" {% if form.show_phone == '1' %}checked{% endif %}> 显示完整号码</label>
+       </div>
+-      <p class="span-2">
+-        <label>情况描述</label>
+-        <textarea name="note" rows="3" placeholder="过程 + 为什么成交/没成（这一单是触客）">{{ form.note }}</textarea>
+-      </p>
++    </div>
++    <div class="deal-flags">
++      <label class="check"><input type="checkbox" name="hall_query" value="1" {% if form.hall_query == '1' %}checked{% endif %}> 掌厅已查</label>
++      <label class="check"><input type="checkbox" name="closed" value="1" {% if form.closed == '1' %}checked{% endif %}> 已成交</label>
++      <label class="check"><input type="checkbox" name="student" value="1" {% if form.student == '1' %}checked{% endif %}> 中高考学生</label>
++      <label class="check"><input type="checkbox" name="show_phone" value="1" {% if form.show_phone == '1' %}checked{% endif %}> 显示完整号码</label>
++    </div>
++    <div class="deal-note">
++      <label>情况描述</label>
++      <textarea name="note" rows="3" placeholder="过程 + 为什么成交/没成（这一单是触客）">{{ form.note }}</textarea>
+     </div>
+     <div class="toolbar desktop-save">
+       <button type="submit">生成播报</button>
+@@ -118,17 +117,23 @@
+     <div class="deal-grid">
+       <p><label>机型</label><span>{{ form.model or '—' }}</span></p>
+       <p><label>号码</label><span>{{ form.phone or '—' }}</span></p>
+-      <p><label>办理的终端业务</label><span>{{ form.biz_type or '—' }}</span></p>
+-      <p><label>顺差串码</label><span>{{ form.imei or '—' }}</span></p>
+       <p><label>消费</label><span>{{ form.spend or '—' }}</span></p>
+       <p><label>推荐套餐</label><span>{{ form.recommend or '—' }}</span></p>
++      <p><label>办理的终端业务</label><span>{{ form.biz_type or '—' }}</span></p>
+       <p><label>开口人员</label><span>{{ form.opener or '—' }}</span></p>
+-      <div class="deal-flags">
+-        <span class="chip">{{ '掌厅已查' if form.hall_query == '1' else '未查掌厅' }}</span>
+-        <span class="chip">{{ '已成交' if form.closed == '1' else '未成交' }}</span>
+-        <span class="chip">{{ '中高考学生' if form.student == '1' else '非中高考' }}</span>
++      <div class="span-2 imei-block">
++        <label>顺差串码</label>
++        <span>{{ form.imei or '—' }}</span>
+       </div>
+-      <p class="span-2"><label>情况描述</label><span>{{ form.note or '—' }}</span></p>
++    </div>
++    <div class="deal-flags">
++      <span class="chip">{{ '掌厅已查' if form.hall_query == '1' else '未查掌厅' }}</span>
++      <span class="chip">{{ '已成交' if form.closed == '1' else '未成交' }}</span>
++      <span class="chip">{{ '中高考学生' if form.student == '1' else '非中高考' }}</span>
++    </div>
++    <div class="deal-note">
++      <label>情况描述</label>
++      <span>{{ form.note or '—' }}</span>
+     </div>
+   </div>
+   {% endif %}
+@@ -179,12 +184,11 @@ window.addEventListener('DOMContentLoaded', copyDeal);
+ // 服务端只认池子里还在的那台，这里查不到就是查不到，不做本地兜底猜测。
+ (function () {
+   var input = document.getElementById('imeiInput');
+-  var queryInput = document.getElementById('imeiQuery');
+   var findBtn = document.getElementById('imeiFindBtn');
+   var scanBtn = document.getElementById('imeiScanBtn');
+   var foundBox = document.getElementById('imeiFound');
+   var hint = document.getElementById('imeiHint');
+-  if (!input || !queryInput || !foundBox) { return; }
++  if (!input || !foundBox) { return; }
+   var form = input.form;
+   var modelInput = form ? form.querySelector('input[name=model]') : null;
+   var bizSel = document.getElementById('bizType');
+@@ -198,11 +202,10 @@ window.addEventListener('DOMContentLoaded', copyDeal);
+     foundBox.classList.remove('empty');
+   }
+ 
+-  // 选中一台：填串码、带出机型，把「查」框也同步成这台尾号，方便复核
++  // 选中一台：填串码（就是那个唯一的输入框）、带出机型
+   function pickRow(row) {
+     input.value = row.imei;
+     if (modelInput && row.model) { modelInput.value = row.model; }
+-    queryInput.value = row.tail || row.imei.slice(-6);
+     setHint('已关联 ' + row.imei + (row.model ? ' · ' + row.model : '')
+       + (row.own_store ? ' · 库存登记：' + row.own_store : ''));
+     foundBox.textContent = '';
+@@ -258,11 +261,11 @@ window.addEventListener('DOMContentLoaded', copyDeal);
+       });
+   }
+ 
+-  findBtn && findBtn.addEventListener('click', function () { lookup(queryInput.value, false); });
+-  queryInput.addEventListener('keydown', function (ev) {
+-    if (ev.key === 'Enter') { ev.preventDefault(); lookup(queryInput.value, false); }
++  findBtn && findBtn.addEventListener('click', function () { lookup(input.value, false); });
++  input.addEventListener('keydown', function (ev) {
++    if (ev.key === 'Enter') { ev.preventDefault(); lookup(input.value, false); }
+   });
+-  // 手填满 4 位以上数字就自动查一次，省一次点击（手机端少一步）
++  // 手填满 4 位以上数字，离开就自动查一次，省一次点击（手机端少一步）
+   input.addEventListener('blur', function () {
+     var v = input.value.trim();
+     if (/^\d{4,20}$/.test(v)) { lookup(v, false); }
+@@ -348,7 +351,6 @@ window.addEventListener('DOMContentLoaded', copyDeal);
+           setHint('这张照片里没认出串码（4 位起）。对准机器背面的条码再拍一次，或直接填尾号。');
+           return;
+         }
+-        queryInput.value = code;
+         input.value = code;
+         setHint('拍到 ' + code + '，正在查池子…');
+         lookup(code, true);
+diff --git a/app/templates/imei.html b/app/templates/imei.html
+index 16a8292..4c2df03 100644
+--- a/app/templates/imei.html
++++ b/app/templates/imei.html
+@@ -37,10 +37,14 @@
+           {% endif %}
+         </td>
+         <td>{{ row.state }}{% if row.strength and row.strength != '无' %}<div class="muted">{{ row.strength }}</div>{% endif %}
+-          {% if row.in_grace %}<div><span class="chip">宽限已过（{{ grace_label }}）</span></div>{% endif %}
+-          {% if row.act_state %}<div><span class="chip">{{ row.user_type }}{% if row.act_state == '待激活' %}·待激活{% else %}·已激活 {{ row.manual_activated_at[5:] }}{% endif %}</span></div>{% endif %}
+-          {% if row.data_flag %}<div><span class="chip">{{ row.data_flag }}</span></div>{% endif %}
+-          {% if not row.store_id %}<div><span class="chip warn-chip">待建店 · 谁办算谁</span></div>{% endif %}
++          {% if row.in_grace or row.act_state or row.data_flag or not row.store_id %}
++          <div class="chip-flow">
++            {% if row.in_grace %}<span class="chip">宽限已过（{{ grace_label }}）</span>{% endif %}
++            {% if row.act_state %}<span class="chip">{{ row.user_type }}{% if row.act_state == '待激活' %}·待激活{% else %}·已激活 {{ row.manual_activated_at[5:] }}{% endif %}</span>{% endif %}
++            {% if row.data_flag %}<span class="chip">{{ row.data_flag }}</span>{% endif %}
++            {% if not row.store_id %}<span class="chip warn-chip">待建店 · 谁办算谁</span>{% endif %}
++          </div>
++          {% endif %}
+         </td>
+         <td>
+           {% if row.report_action %}
+@@ -221,24 +225,16 @@
+ {% endif %}
+ 
+ {% if is_admin %}
+-<p class="muted">
+-  <a href="{{ url_for('imei_marks') }}">门店标记清单{% if marked_n %}（{{ marked_n }} 台）{% endif %}</a>
+-  —— 标过异网 / 点过已激活的机器，可逐行撤销，每次动作都有留痕。
+-</p>
+-<p class="muted">
+-  <a href="{{ url_for('imei_transfer') }}">调拨台账</a>
+-  —— 门店之间调货：<b>调入店</b>记一笔，调入店的触客下拉就会出现这台、调出店的看不到；
+-  明天导库存清单时归属以清单为准，这里只留痕（管理员可撤销）。
+-</p>
+-<p class="muted">
+-  <a href="{{ url_for('imei_carryover') }}">{{ grace_label }} 存量结转清单{% if carryover_n %}（{{ carryover_n }} 台）{% endif %}</a>
+-  · <a href="{{ url_for('imei_export_carryover') }}">导出 CSV</a>
+-  —— 2026-11-09 前导入的存量（rule_ver=1），含清单剩余天数和截至日；不在最新清单的机器也在这里（标「不在最新清单」）。
+-</p>
+-<p class="muted">
+-  <a href="{{ url_for('imei_review') }}">异地异网超 30 天未激活核实清单{% if review_n %}（{{ review_n }} 台）{% endif %}</a>
+-  —— 门店端仍显示在「待激活」里，不计逾期、不催办，由管理员线下核实。
+-</p>
++{# 管理员子台账导航：原来这里是 4 段带长解释的 <p>，首屏要滚 1083px 才见到正文表格。
++   收成一行胶囊，解释留在各子页面顶部（那里本来就有）。 #}
++<nav class="sub-nav" aria-label="管理员子台账">
++  <a class="sub-nav-item" href="{{ url_for('imei_marks') }}">门店标记清单{% if marked_n %}<b>{{ marked_n }}</b>{% endif %}</a>
++  <a class="sub-nav-item" href="{{ url_for('imei_transfer') }}">调拨台账</a>
++  <a class="sub-nav-item" href="{{ url_for('imei_carryover') }}">{{ grace_label }} 存量结转{% if carryover_n %}<b>{{ carryover_n }}</b>{% endif %}</a>
++  <a class="sub-nav-item" href="{{ url_for('imei_export_carryover') }}">导出结转 CSV</a>
++  <a class="sub-nav-item" href="{{ url_for('imei_review') }}">超 30 天未激活核实{% if review_n %}<b>{{ review_n }}</b>{% endif %}</a>
++  {% if cards.unmapped %}<a class="sub-nav-item warn" href="{{ url_for('imei_pool', tab='unmapped') }}">待建店池子<b>{{ cards.unmapped }}</b></a>{% endif %}
++</nav>
+ {% endif %}
+ 
+ {% if is_admin %}
+@@ -421,12 +417,14 @@
+       wrap.scrollTop = 0;
+       sheet = wrap;
+     }
++    var wired = 0;
+     Array.prototype.forEach.call(
+       document.querySelectorAll(".imei-grid tbody tr"),
+       function (tr) {
+         var btn = tr.querySelector(".imei-open");
+         var wrap = tr.querySelector(".act-wrap");
+         if (!btn || !wrap) { return; }
++        wired += 1;
+         btn.addEventListener("click", function (e) {
+           e.preventDefault();
+           if (wrap.classList.contains("sheet-open")) { closeSheet(); } else { openSheet(wrap, btn); }
+@@ -435,6 +433,10 @@
+         if (close) { close.addEventListener("click", closeSheet); }
+       }
+     );
++    // 抽屉真接上了才允许隐藏最右那列（CSS 里 .imei-sheet-ready）。没 JS 时保留原入口。
++    if (wired > 0) {
++      document.documentElement.classList.add("imei-sheet-ready");
++    }
+     document.addEventListener("keydown", function (e) {
+       if (e.key === "Escape") { closeSheet(); }
+     });
+diff --git a/app/templates/imei_pool.html b/app/templates/imei_pool.html
+index 4dcd952..646717a 100644
+--- a/app/templates/imei_pool.html
++++ b/app/templates/imei_pool.html
+@@ -101,7 +101,7 @@
+       <tbody>
+         {% for row in group.rows %}
+         <tr>
+-          <td>{{ row.model or '—' }}{% if row.sp %}<div class="muted">{{ row.sp }}</div>{% endif %}</td>
++          <td class="col-model">{{ row.model or '—' }}{% if row.sp %}<div class="muted">{{ row.sp }}</div>{% endif %}</td>
+           <td class="num">{{ row.imei }}</td>
+           <td>{{ row.dispatch_store or row.sold_store or '—' }}</td>
+           <td class="num">{{ (row.sold_day or '')[:10] }}</td>
+@@ -214,9 +214,28 @@
+       function (form) {
+         var actEl = form.elements["action"];
+         var bizEl = form.elements["biz_type"];
++        var noteEl = form.elements["note"];
++        var photoEl = form.elements["photo"];
+         if (actEl) { actEl.addEventListener("change", function () { sync(form); }); }
+         if (bizEl) { bizEl.addEventListener("change", function () { sync(form); }); }
+         sync(form);
++        // 提交门禁 + 防连点：与 /imei 页保持同一套口径。
++        // 服务端也会拦，但手机端传完图才被退回＝白传一次流量，所以前端先挡。
++        form.addEventListener("submit", function (e) {
++          var isDone = !actEl || actEl.value === "已办";
++          if (isDone) {
++            var biz = bizEl.value;
++            if (!biz) { e.preventDefault(); alert("请先选业务类型"); return; }
++            var hasPhoto = photoEl && photoEl.files && photoEl.files.length > 0;
++            if (NEEDS.indexOf(biz) >= 0 && !noteEl.value.trim() && !hasPhoto) {
++              e.preventDefault();
++              alert(MSG);
++              return;
++            }
++          }
++          var btn = form.querySelector('button[type="submit"]');
++          if (btn) { btn.disabled = true; }
++        });
+       }
+     );
+   });
+diff --git a/tests/test_decl.py b/tests/test_decl.py
+index ed5ffd4..aeb5ef3 100644
+--- a/tests/test_decl.py
++++ b/tests/test_decl.py
+@@ -363,7 +363,7 @@ def test_deal_picker_lists_only_own_stock(client):
+         assert "label" not in opts[0]
+         assert opts[0]["model"]
+     page = client.get("/deal").get_data(as_text=True)
+-    assert "本店库存里还有 2 台在库顺差机" in page
++    assert "本店在库 2 台" in page
+     assert "861000000000001" in page
+     assert "861000000000003" not in page  # 别店的机器不进下拉，但可手填尾号
+ 
+@@ -926,7 +926,8 @@ def test_deal_page_has_scan_button_and_camera_policy(client):
+     resp = client.get("/deal")
+     html = resp.get_data(as_text=True)
+     assert 'id="imeiScanBtn"' in html
+-    assert 'id="imeiQuery"' in html
++    assert 'id="imeiInput"' in html
++    assert "imei_q" not in html  # 只有一个串码输入框（V0.4.08 合并了重复的两个）
+     assert 'capture="environment"' in html
+     assert 'id="imeiPhoto"' in html  # 系统相机拍照入口
+     assert "<video" not in html  # 不再有网页摄像头预览
+@@ -935,6 +936,22 @@ def test_deal_page_has_scan_button_and_camera_policy(client):
+     assert "img-src 'self' data: blob:" in resp.headers["Content-Security-Policy"]
+ 
+ 
++def test_deal_form_has_no_block_element_inside_p(client):
++    """`<p>` 里不能放 `<div>`：浏览器会在 `<div>` 处提前闭合 `<p>`。
++
++    V0.4.06 把串码区（下拉 + 输入 + 候选列表）塞进了 `<p>`，结果整格裂成
++    5 个网格单元、查询框被挤到 26px、还多出一个空 `<p>` 占位。这条守着自己。
++    """
++    import re
++
++    _login(client)
++    html = client.get("/deal").get_data(as_text=True)
++    for m in re.finditer(r"<p\b[^>]*>(.*?)</p>", html, re.S):
++        assert "<div" not in m.group(1), "deal.html 的 <p> 里出现了 <div>：%r" % m.group(1)[:80]
++    # 串码区必须是跨整行的 div
++    assert 'class="span-2 imei-block"' in html
++
++
+ def test_zxing_bundle_served(client):
+     """zxing 本地打包（不联网 CDN），并且能被静态路由取到。"""
+     _login(client)
+diff --git a/tests/test_imei.py b/tests/test_imei.py
+index 5e1d3de..bfb39e2 100644
+--- a/tests/test_imei.py
++++ b/tests/test_imei.py
+@@ -1593,7 +1593,8 @@ def test_review_page_lists_remote_pending_over_30_days(client):
+     _mark(client, "860000000000612", "异网")
+ 
+     main = client.get("/imei").get_data(as_text=True)
+-    assert "异地异网超 30 天未激活核实清单（1 台）" in main
++    # 管理员子台账原来是 4 段带长解释的 <p>，V0.4.08 收成一行胶囊导航
++    assert "超 30 天未激活核实<b>1</b>" in main
+ 
+     review = client.get("/imei/review")
+     assert review.status_code == 200
+@@ -1747,7 +1748,7 @@ def test_carryover_lists_all_rule_ver_1_even_unseen_and_exports(client):
+     assert "860000000000722" in html and "860000000000723" in html
+     assert "860000000000721" not in html
+     assert "不在最新清单" in html and "宽限至 11-16" in html
+-    assert "（2 台）" in client.get("/imei").get_data(as_text=True)
++    assert "存量结转<b>2</b>" in client.get("/imei").get_data(as_text=True)
+ 
+     csv_resp = client.get("/imei/export/carryover")
+     assert csv_resp.status_code == 200
+-- 
+2.54.0 (Apple Git-157)
+
