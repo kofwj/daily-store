@@ -5,9 +5,17 @@ from datetime import date
 from io import BytesIO
 
 import openpyxl
+import pytest
 from openpyxl import Workbook
 
 from app import db
+
+
+@pytest.fixture(autouse=True)
+def _sesame_module_on(tmp_db):
+    """芝麻周报默认收起（功能开关关闭），本文件用例显式打开再测导入与周报。"""
+    with db.get_db() as conn:
+        db.set_setting(conn, "module_sesame_week", "1")
 
 # 样本数据业务日：跟随机器当前月，避免跨月后「本月视图 / 本月合计」断言失配。
 # 取本月 15 号（月初则取今天，保证 ≤ 今天且在本月内）。

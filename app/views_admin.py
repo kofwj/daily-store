@@ -10,6 +10,7 @@ from flask import Response, flash, g, redirect, render_template, request, url_fo
 
 from . import bulletin, db, invoice, settlement
 from .helpers import (
+    _require_module,
     accessible_stores,
     admin_required,
     advisor_coeffs,
@@ -406,6 +407,7 @@ def register_admin(app) -> None:
     @login_required
     def advisors_page():
         """运营商顾问月度打分：主推奖惩自动带出，店长/区域经理/地市负责人分列打分。"""
+        _require_module("advisor_score")
         today_d = db.today_local()
         month, as_of = _incentive_month(advisor_score_month(today_d))
         month_text = month.strftime("%Y-%m")
@@ -453,6 +455,7 @@ def register_admin(app) -> None:
     def advisors_xlsx():
         month, as_of = _incentive_month()
         month_text = month.strftime("%Y-%m")
+        _require_module("advisor_score")
         with db.get_db() as conn:
             stores = accessible_stores(conn)
             rows = _advisor_table(conn, stores, as_of)

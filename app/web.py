@@ -30,6 +30,7 @@ from .helpers import (
     csrf_protect,
     limit_unauth_body,
     load_user,
+    module_flags,
     pin_change_required,
 )
 from .views_admin import register_admin
@@ -133,9 +134,11 @@ def create_app(*, testing: bool = False) -> Flask:
         info = app_version.current()
         brand = brand_settings()
         show_imei_nav = False
+        modules = {}
         if getattr(g, "user", None) is not None:
             with db.get_db() as conn:
                 show_imei_nav = db_imei.user_in_imei_scope(conn, g.user)
+                modules = module_flags(conn)
         return {
             "today_iso": db.today_local().isoformat(),
             "now": datetime.now(db.TZ),
@@ -145,6 +148,7 @@ def create_app(*, testing: bool = False) -> Flask:
             "app_summary": info["summary"],
             "brand": brand,
             "show_imei_nav": show_imei_nav,
+            "modules": modules,
         }
 
     register_auth(app)

@@ -129,6 +129,31 @@
     </form>
     {% endif %}
 
+    {% if tab == 'modules' and g.user['role'] == 'admin' %}
+    <div class="settings-page-head">
+      <h1>功能开关</h1>
+      <p class="muted">暂时不用的模块先从标题栏收起。代码和数据都留着，勾回来立即恢复，不用重新部署。</p>
+    </div>
+    <form method="post" class="card settings-card">
+      <input type="hidden" name="action" value="save_modules">
+      <input type="hidden" name="tab" value="modules">
+      <label class="settings-switch">
+        <span>
+          <strong>芝麻周报</strong>
+          <span class="muted">垫资页的「芝麻周报 / 导入明细」入口。关掉后标题栏和垫资页按钮都不再显示，直接访问网址返回 404；已导入的服务费明细原样留在库里。</span>
+        </span>
+        <input type="checkbox" name="module_sesame_week" value="1" {% if module_switches.get('sesame_week') %}checked{% endif %}>
+      </label>
+      <label class="settings-switch">
+        <span>
+          <strong>顾问打分</strong>
+          <span class="muted">月度打分与工资系数导出。关掉后入口隐藏、页面 404；历史打分记录保留在库里，重新打开就能看到。</span>
+        </span>
+        <input type="checkbox" name="module_advisor_score" value="1" {% if module_switches.get('advisor_score') %}checked{% endif %}>
+      </label>
+      <div class="toolbar"><button type="submit">保存功能开关</button></div>
+    </form>
+    {% endif %}
     {% if tab == 'broadcast' and g.user['role'] == 'admin' %}
     <div class="settings-page-head">
       <h1>播报设置</h1>

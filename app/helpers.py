@@ -15,7 +15,7 @@ from io import BytesIO
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import openpyxl
-from flask import Response, current_app, flash, g, redirect, request, session, url_for
+from flask import Response, abort, current_app, flash, g, redirect, request, session, url_for
 
 from . import broadcast, db, incentive
 from .metrics_seed import AUX_QUERY_CODE, rollup_amount
@@ -581,6 +581,33 @@ def advisor_penalty_divisor(conn) -> int:
         return max(1, int(db.get_setting(conn, "advisor_penalty_divisor", "4000") or 4000))
     except (TypeError, ValueError):
         return 4000
+
+
+# ---- 模块开关：标题栏入口 + 页面准入 ----
+# 芝麻周报、顾问打分暂时不用，先从标题栏收起；功能、数据都留在库里，不算下线。
+# 取值存在 app_meta（module_* 键），管理员在 设置 → 功能开关 勾一下即恢复，不用改代码重部署。
+MODULE_KEYS: Dict[str, str] = {
+    "sesame_week": "module_sesame_week",
+    "advisor_score": "module_advisor_score",
+}
+MODULE_DEFAULTS: Dict[str, str] = {"sesame_week": "0", "advisor_score": "0"}
+
+
+def module_flags(conn=None) -> Dict[str, bool]:
+    """各模块当前是否启用。不传 conn 就自开一次连接（点查 app_meta，开销可忽略）。"""
+    if conn is None:
+        with db.get_db() as owned:
+            return module_flags(owned)
+    return {
+        key: db.get_setting(conn, meta_key, MODULE_DEFAULTS[key]) == "1"
+        for key, meta_key in MODULE_KEYS.items()
+    }
+
+
+def _require_module(key: str) -> None:
+    """模块收起后页面不再对外开放：标题栏没入口，直接输网址也 404。"""
+    if not module_flags().get(key):
+        abort(404)
 
 
 def advisor_coeffs(base_coeff, fold_coeff, scores) -> Dict[str, Optional[float]]:

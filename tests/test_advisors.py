@@ -2,6 +2,8 @@
 
 from datetime import date
 
+import pytest
+
 from app import db
 from app.helpers import (
     advisor_coeffs,
@@ -9,6 +11,13 @@ from app.helpers import (
     advisor_score_month,
     advisor_score_open,
 )
+
+
+@pytest.fixture(autouse=True)
+def _advisor_module_on(tmp_db):
+    """顾问打分默认收起（功能开关关闭），本文件用例显式打开再测页面。"""
+    with db.get_db() as conn:
+        db.set_setting(conn, "module_advisor_score", "1")
 
 
 def _set_advisor(code="store-alpha", name="任阳"):

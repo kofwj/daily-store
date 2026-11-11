@@ -21,12 +21,14 @@ from flask import (
 
 from . import backup, bulletin, db, db_decl, incentive, invoice, sesame
 from .helpers import (
+    MODULE_KEYS,
     admin_required,
     ascii_filename,
     brand_settings,
     company_names,
     incentive_rules,
     login_required,
+    module_flags,
     parse_brand_form,
     parse_company_names,
     parse_int,
@@ -46,6 +48,7 @@ def _settings_tab() -> str:
         "permissions",
         "broadcast",
         "rules",
+        "modules",
         "review",
         "invoice",
         "brand",
@@ -238,6 +241,7 @@ def _render_settings(conn, tab: str):
             "泰州市": db.get_setting(conn, "wecom_city_泰州市", ""),
         },
         incentive_rules=incentive_rules(conn),
+        module_switches=module_flags(conn),
         sesame_tier_rules=sesame.tier_rules(conn),
         imei_rebate_yuan=db_decl.cents_text(db_decl.rebate_cents(conn)),
         advisor_penalty_divisor=db.get_setting(conn, "advisor_penalty_divisor", "4000") or "4000",
@@ -546,6 +550,14 @@ def _do_save_brand(conn):
     flash("登录页标题已保存", "ok")
 
 
+def _do_save_modules(conn):
+    """功能开关：收起/放出模块。数据、代码都不动，随时可以再打开。"""
+    for key, meta_key in MODULE_KEYS.items():
+        on = request.form.get(meta_key) == "1"
+        db.set_setting(conn, meta_key, "1" if on else "0")
+    flash("功能开关已保存", "ok")
+
+
 def _do_save_review(conn):
     names = parse_company_names(request.form)
     for key, value in names.items():
@@ -666,6 +678,7 @@ _SETTINGS_ACTIONS = {
     "toggle_user": _do_toggle_user,
     "set_targets": _do_set_targets,
     "save_permissions": _do_save_permissions,
+    "save_modules": _do_save_modules,
     "save_brand": _do_save_brand,
     "save_review": _do_save_review,
     "save_invoice": _do_save_invoice,

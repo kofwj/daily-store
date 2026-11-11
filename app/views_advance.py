@@ -13,6 +13,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 
 from . import db, db_core, db_decl, sesame
 from .helpers import (
+    _require_module,
     _xlsx_safe,
     accessible_stores,
     admin_required,
@@ -532,6 +533,7 @@ def register_advance(app) -> None:
     @app.route("/advance/sesame/week")
     @readonly_required
     def sesame_week_page():
+        _require_module("sesame_week")
         start, end, prev_start, prev_end, next_start, next_end, mode = _sesame_period()
         order = _sesame_order()
         with db.get_db() as conn:
@@ -595,6 +597,7 @@ def register_advance(app) -> None:
     @app.route("/advance/sesame/week.xlsx")
     @readonly_required
     def sesame_week_xlsx():
+        _require_module("sesame_week")
         start, end, _ps, _pe, _ns, _ne, mode = _sesame_period()
         order = _sesame_order()
         with db.get_db() as conn:
@@ -646,12 +649,14 @@ def register_advance(app) -> None:
     @app.route("/advance/sesame", methods=["GET"])
     @admin_required
     def advance_sesame_page():
+        _require_module("sesame_week")
         preview = sesame.load_preview(session.get("sesame_token") or "")
         return render_template("advance_sesame.html", preview=preview)
 
     @app.route("/advance/sesame/preview", methods=["POST"])
     @admin_required
     def advance_sesame_preview():
+        _require_module("sesame_week")
         uploaded = request.files.get("sesame_file")
         if uploaded is None or not uploaded.filename:
             flash("选芝麻服务费明细 xlsx", "error")
@@ -724,6 +729,7 @@ def register_advance(app) -> None:
     @app.route("/advance/sesame/confirm", methods=["POST"])
     @admin_required
     def advance_sesame_confirm():
+        _require_module("sesame_week")
         token = session.pop("sesame_token", None)
         preview = sesame.load_preview(token or "")
         sesame.drop_preview(token or "")
