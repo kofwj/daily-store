@@ -363,7 +363,7 @@ def test_deal_picker_lists_only_own_stock(client):
         assert "label" not in opts[0]
         assert opts[0]["model"]
     page = client.get("/deal").get_data(as_text=True)
-    assert "本店库存里还有 2 台在库顺差机" in page
+    assert "本店在库 2 台" in page
     assert "861000000000001" in page
     assert "861000000000003" not in page  # 别店的机器不进下拉，但可手填尾号
 
@@ -926,13 +926,30 @@ def test_deal_page_has_scan_button_and_camera_policy(client):
     resp = client.get("/deal")
     html = resp.get_data(as_text=True)
     assert 'id="imeiScanBtn"' in html
-    assert 'id="imeiQuery"' in html
+    assert 'id="imeiInput"' in html
+    assert "imei_q" not in html  # 只有一个串码输入框（V0.4.08 合并了重复的两个）
     assert 'capture="environment"' in html
     assert 'id="imeiPhoto"' in html  # 系统相机拍照入口
     assert "<video" not in html  # 不再有网页摄像头预览
     assert resp.headers["Permissions-Policy"] == "camera=(), microphone=(), geolocation=()"
     # blob: 要放行，否则拍照预览图会被 CSP 拦掉
     assert "img-src 'self' data: blob:" in resp.headers["Content-Security-Policy"]
+
+
+def test_deal_form_has_no_block_element_inside_p(client):
+    """`<p>` 里不能放 `<div>`：浏览器会在 `<div>` 处提前闭合 `<p>`。
+
+    V0.4.06 把串码区（下拉 + 输入 + 候选列表）塞进了 `<p>`，结果整格裂成
+    5 个网格单元、查询框被挤到 26px、还多出一个空 `<p>` 占位。这条守着自己。
+    """
+    import re
+
+    _login(client)
+    html = client.get("/deal").get_data(as_text=True)
+    for m in re.finditer(r"<p\b[^>]*>(.*?)</p>", html, re.S):
+        assert "<div" not in m.group(1), "deal.html 的 <p> 里出现了 <div>：%r" % m.group(1)[:80]
+    # 串码区必须是跨整行的 div
+    assert 'class="span-2 imei-block"' in html
 
 
 def test_zxing_bundle_served(client):

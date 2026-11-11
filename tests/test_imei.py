@@ -1593,7 +1593,8 @@ def test_review_page_lists_remote_pending_over_30_days(client):
     _mark(client, "860000000000612", "异网")
 
     main = client.get("/imei").get_data(as_text=True)
-    assert "异地异网超 30 天未激活核实清单（1 台）" in main
+    # 管理员子台账原来是 4 段带长解释的 <p>，V0.4.08 收成一行胶囊导航
+    assert "超 30 天未激活核实<b>1</b>" in main
 
     review = client.get("/imei/review")
     assert review.status_code == 200
@@ -1747,7 +1748,7 @@ def test_carryover_lists_all_rule_ver_1_even_unseen_and_exports(client):
     assert "860000000000722" in html and "860000000000723" in html
     assert "860000000000721" not in html
     assert "不在最新清单" in html and "宽限至 11-16" in html
-    assert "（2 台）" in client.get("/imei").get_data(as_text=True)
+    assert "存量结转<b>2</b>" in client.get("/imei").get_data(as_text=True)
 
     csv_resp = client.get("/imei/export/carryover")
     assert csv_resp.status_code == 200

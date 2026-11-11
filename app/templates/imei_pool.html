@@ -101,7 +101,7 @@
       <tbody>
         {% for row in group.rows %}
         <tr>
-          <td>{{ row.model or '—' }}{% if row.sp %}<div class="muted">{{ row.sp }}</div>{% endif %}</td>
+          <td class="col-model">{{ row.model or '—' }}{% if row.sp %}<div class="muted">{{ row.sp }}</div>{% endif %}</td>
           <td class="num">{{ row.imei }}</td>
           <td>{{ row.dispatch_store or row.sold_store or '—' }}</td>
           <td class="num">{{ (row.sold_day or '')[:10] }}</td>
@@ -214,9 +214,28 @@
       function (form) {
         var actEl = form.elements["action"];
         var bizEl = form.elements["biz_type"];
+        var noteEl = form.elements["note"];
+        var photoEl = form.elements["photo"];
         if (actEl) { actEl.addEventListener("change", function () { sync(form); }); }
         if (bizEl) { bizEl.addEventListener("change", function () { sync(form); }); }
         sync(form);
+        // 提交门禁 + 防连点：与 /imei 页保持同一套口径。
+        // 服务端也会拦，但手机端传完图才被退回＝白传一次流量，所以前端先挡。
+        form.addEventListener("submit", function (e) {
+          var isDone = !actEl || actEl.value === "已办";
+          if (isDone) {
+            var biz = bizEl.value;
+            if (!biz) { e.preventDefault(); alert("请先选业务类型"); return; }
+            var hasPhoto = photoEl && photoEl.files && photoEl.files.length > 0;
+            if (NEEDS.indexOf(biz) >= 0 && !noteEl.value.trim() && !hasPhoto) {
+              e.preventDefault();
+              alert(MSG);
+              return;
+            }
+          }
+          var btn = form.querySelector('button[type="submit"]');
+          if (btn) { btn.disabled = true; }
+        });
       }
     );
   });

@@ -37,10 +37,14 @@
           {% endif %}
         </td>
         <td>{{ row.state }}{% if row.strength and row.strength != '无' %}<div class="muted">{{ row.strength }}</div>{% endif %}
-          {% if row.in_grace %}<div><span class="chip">宽限已过（{{ grace_label }}）</span></div>{% endif %}
-          {% if row.act_state %}<div><span class="chip">{{ row.user_type }}{% if row.act_state == '待激活' %}·待激活{% else %}·已激活 {{ row.manual_activated_at[5:] }}{% endif %}</span></div>{% endif %}
-          {% if row.data_flag %}<div><span class="chip">{{ row.data_flag }}</span></div>{% endif %}
-          {% if not row.store_id %}<div><span class="chip warn-chip">待建店 · 谁办算谁</span></div>{% endif %}
+          {% if row.in_grace or row.act_state or row.data_flag or not row.store_id %}
+          <div class="chip-flow">
+            {% if row.in_grace %}<span class="chip">宽限已过（{{ grace_label }}）</span>{% endif %}
+            {% if row.act_state %}<span class="chip">{{ row.user_type }}{% if row.act_state == '待激活' %}·待激活{% else %}·已激活 {{ row.manual_activated_at[5:] }}{% endif %}</span>{% endif %}
+            {% if row.data_flag %}<span class="chip">{{ row.data_flag }}</span>{% endif %}
+            {% if not row.store_id %}<span class="chip warn-chip">待建店 · 谁办算谁</span>{% endif %}
+          </div>
+          {% endif %}
         </td>
         <td>
           {% if row.report_action %}
@@ -221,24 +225,16 @@
 {% endif %}
 
 {% if is_admin %}
-<p class="muted">
-  <a href="{{ url_for('imei_marks') }}">门店标记清单{% if marked_n %}（{{ marked_n }} 台）{% endif %}</a>
-  —— 标过异网 / 点过已激活的机器，可逐行撤销，每次动作都有留痕。
-</p>
-<p class="muted">
-  <a href="{{ url_for('imei_transfer') }}">调拨台账</a>
-  —— 门店之间调货：<b>调入店</b>记一笔，调入店的触客下拉就会出现这台、调出店的看不到；
-  明天导库存清单时归属以清单为准，这里只留痕（管理员可撤销）。
-</p>
-<p class="muted">
-  <a href="{{ url_for('imei_carryover') }}">{{ grace_label }} 存量结转清单{% if carryover_n %}（{{ carryover_n }} 台）{% endif %}</a>
-  · <a href="{{ url_for('imei_export_carryover') }}">导出 CSV</a>
-  —— 2026-11-09 前导入的存量（rule_ver=1），含清单剩余天数和截至日；不在最新清单的机器也在这里（标「不在最新清单」）。
-</p>
-<p class="muted">
-  <a href="{{ url_for('imei_review') }}">异地异网超 30 天未激活核实清单{% if review_n %}（{{ review_n }} 台）{% endif %}</a>
-  —— 门店端仍显示在「待激活」里，不计逾期、不催办，由管理员线下核实。
-</p>
+{# 管理员子台账导航：原来这里是 4 段带长解释的 <p>，首屏要滚 1083px 才见到正文表格。
+   收成一行胶囊，解释留在各子页面顶部（那里本来就有）。 #}
+<nav class="sub-nav" aria-label="管理员子台账">
+  <a class="sub-nav-item" href="{{ url_for('imei_marks') }}">门店标记清单{% if marked_n %}<b>{{ marked_n }}</b>{% endif %}</a>
+  <a class="sub-nav-item" href="{{ url_for('imei_transfer') }}">调拨台账</a>
+  <a class="sub-nav-item" href="{{ url_for('imei_carryover') }}">{{ grace_label }} 存量结转{% if carryover_n %}<b>{{ carryover_n }}</b>{% endif %}</a>
+  <a class="sub-nav-item" href="{{ url_for('imei_export_carryover') }}">导出结转 CSV</a>
+  <a class="sub-nav-item" href="{{ url_for('imei_review') }}">超 30 天未激活核实{% if review_n %}<b>{{ review_n }}</b>{% endif %}</a>
+  {% if cards.unmapped %}<a class="sub-nav-item warn" href="{{ url_for('imei_pool', tab='unmapped') }}">待建店池子<b>{{ cards.unmapped }}</b></a>{% endif %}
+</nav>
 {% endif %}
 
 {% if is_admin %}
@@ -421,12 +417,14 @@
       wrap.scrollTop = 0;
       sheet = wrap;
     }
+    var wired = 0;
     Array.prototype.forEach.call(
       document.querySelectorAll(".imei-grid tbody tr"),
       function (tr) {
         var btn = tr.querySelector(".imei-open");
         var wrap = tr.querySelector(".act-wrap");
         if (!btn || !wrap) { return; }
+        wired += 1;
         btn.addEventListener("click", function (e) {
           e.preventDefault();
           if (wrap.classList.contains("sheet-open")) { closeSheet(); } else { openSheet(wrap, btn); }
@@ -435,6 +433,10 @@
         if (close) { close.addEventListener("click", closeSheet); }
       }
     );
+    // 抽屉真接上了才允许隐藏最右那列（CSS 里 .imei-sheet-ready）。没 JS 时保留原入口。
+    if (wired > 0) {
+      document.documentElement.classList.add("imei-sheet-ready");
+    }
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape") { closeSheet(); }
     });

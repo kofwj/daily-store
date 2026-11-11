@@ -277,6 +277,14 @@ button.ghost:hover, .btn.ghost:hover { background: var(--accent-soft); }
   font-size: 12px;
   color: var(--muted);
 }
+/* 一个格子里多个 chip 时行内流式排（原来每个 chip 各自套一层 <div>，
+   3 个标签就占 3 行，把整行高度撑起来） */
+.chip-flow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
 .chip-mobile {
   background: #e0f2fe;
   color: #0369a1;
@@ -372,10 +380,41 @@ table.data td.up { color: #166534; }
 table.data td.down { color: #9f1239; }
 @media (max-width: 800px) {
   .kpi-row { grid-template-columns: 1fr 1fr; }
+  /* 串码待办有 5 张 KPI 卡：2+2+1 会让最后一张孤零零占半行。
+     让第一张（已售未办，主指标）跨两列，下面 4 张正好 2×2。 */
+  .imei-page .kpi-row > .kpi:first-child { grid-column: 1 / -1; }
   .page-head { flex-direction: column; align-items: stretch; gap: 10px; }
   .page-head .page-filters { width: 100%; }
   .filter { min-width: 0; flex: 1 1 100%; }
 }
+/* 管理员子台账导航（替代原来 4 段带长解释的 <p>） */
+.sub-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+.sub-nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.sub-nav-item:hover { background: var(--accent-soft); }
+.sub-nav-item b {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-weight: 650;
+}
+.sub-nav-item.warn { border-color: #fed7aa; background: #fff7ed; }
+
 .check input { width: auto; }
 
 table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -1995,6 +2034,11 @@ td.right form { display: inline; }
 @media (max-width: 800px) {
   .deal-records-kpis { grid-template-columns: 1fr 1fr; width: 100%; }
   .deal-records-card .wrap { padding-bottom: calc(76px + var(--safe-bottom)); }
+  /* 触客记录 10 列：不设最小宽度会被压成一条 29px 的竖线（实测），
+     给表格兜个底，让 .table-wrap 横向滑动，列宽保住可读性。 */
+  .deal-records table.data { min-width: 720px; }
+  .deal-records table.data th,
+  .deal-records table.data td { white-space: nowrap; }
 }
 .board-rank { margin: 0; overflow: hidden; }
 table.board-table { font-size: 13px; }
@@ -2043,6 +2087,11 @@ table.board-table td { text-align: left; vertical-align: middle; }
 .deal-grid p { margin: 0; }
 .deal-grid .span-2 { grid-column: 1 / -1; }
 .deal-grid textarea { min-height: 96px; font-family: inherit; }
+/* 串码区：跨满整行、内部纵向排（下拉 → 输入行 → 候选 → 提示）。
+   margin: 0 跟其它 <p> 对齐，别让这一格把行高撑歪。 */
+.deal-grid .imei-block { margin: 0; min-width: 0; }
+.deal-grid .imei-block select,
+.deal-grid .imei-block input { max-width: 100%; }
 .deal-flags {
   display: flex;
   flex-wrap: wrap;
@@ -2051,7 +2100,10 @@ table.board-table td { text-align: left; vertical-align: middle; }
   grid-column: 1 / -1;
 }
 .deal-flags .check { margin: 0; }
-/* 串码查询 + 扫一扫（V0.4.06）：查询行、命中列表、摄像头预览 */
+/* 情况描述：独立一行，跟网格分开放（原来是 .span-2 的 <p>） */
+.deal-note { margin-top: 12px; }
+.deal-note textarea { width: 100%; min-height: 96px; font-family: inherit; }
+/* 串码查询 + 扫一扫（V0.4.06）：输入框 + 两个按钮，同一行 */
 .imei-find {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -2292,6 +2344,10 @@ table.report-grid tr.act-pending td.num { color: var(--muted); }
   }
   .imei-grid thead th:first-child { z-index: 3; background: #f8fafc; }
   .imei-grid tr.act-pending td.col-model { background: #fbfcfe; }
+  /* 手机端最右那列操作区默认还留着：没 JS 时它是唯一入口，不能一上来就藏。
+     JS 把抽屉接好之后会给 <html> 加 .imei-sheet-ready，这时才隐藏重复的一列，
+     少滑一段距离。 */
+  .imei-sheet-ready .imei-grid td.col-act { display: none; }
   .imei-grid .imei-open {
     display: inline-flex;
     margin-top: 6px;

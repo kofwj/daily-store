@@ -41,6 +41,14 @@
         <input name="phone" value="{{ form.phone }}" inputmode="numeric" pattern="[0-9]{11}" maxlength="11" title="请输入11位手机号" placeholder="11位手机号" autocomplete="off">
       </p>
       <p>
+        <label>消费</label>
+        <input name="spend" value="{{ form.spend }}" inputmode="decimal" pattern="\d+(\.\d{1,2})?" title="数字，最多两位小数" placeholder="如 99" autocomplete="off">
+      </p>
+      <p>
+        <label>推荐套餐</label>
+        <input name="recommend" value="{{ form.recommend }}" placeholder="如 89 / 139" autocomplete="off">
+      </p>
+      <p>
         <label>办理的终端业务</label>
         <select name="biz_type" id="bizType" title="只有「顺差让利」进让利垫资">
           <option value="">— 没办 / 未选 —</option>
@@ -51,6 +59,12 @@
         <span class="muted" id="bizHint">只有选「顺差让利」才记让利垫资</span>
       </p>
       <p>
+        <label>开口人员</label>
+        <input name="opener" value="{{ form.opener }}" placeholder="默认本店运营商顾问" autocomplete="off">
+      </p>
+      {# 串码区跨满整行，且必须用 <div>：里面是块级元素（下拉/输入/候选列表）。
+         写成 <p> 会被浏览器在第一个 <div> 处提前闭合，整格裂成好几个网格单元。 #}
+      <div class="span-2 imei-block">
         <label>顺差串码<small class="muted">（可空）</small></label>
         {% if imei_options %}
         <select name="imei_pick" id="imeiPick" title="选本店在库的顺差机">
@@ -59,15 +73,12 @@
           <option value="{{ o.imei }}" data-model="{{ o.model }}" {% if form.imei == o.imei %}selected{% endif %}>{{ o.imei }}</option>
           {% endfor %}
         </select>
-        <span class="muted">本店库存里还有 {{ imei_options|length }} 台在库顺差机</span>
         {% endif %}
-        <input name="imei" id="imeiInput" value="{{ form.imei }}" inputmode="numeric" maxlength="20"
-               title="尾号 4 位起就查得到；撞车时会列出来让你选"
-               placeholder="尾号 4 位 / 完整串码，不填不影响成交" autocomplete="off">
         <div class="imei-find">
-          <input name="imei_q" id="imeiQuery" maxlength="24" autocomplete="off"
-                 placeholder="查串码尾号（4 位起）/ 机型关键字">
-          <button type="button" class="btn ghost" id="imeiFindBtn">查询</button>
+          <input name="imei" id="imeiInput" value="{{ form.imei }}" inputmode="numeric" maxlength="20"
+                 title="尾号 4 位起就查得到；撞车时会列出来让你选"
+                 placeholder="尾号 4 位 / 完整串码（不填不影响成交）" autocomplete="off">
+          <button type="button" class="btn ghost" id="imeiFindBtn">查池子</button>
           <button type="button" class="btn ghost" id="imeiScanBtn" title="用手机相机拍机器背面的条码">扫一扫</button>
         </div>
         <input type="file" id="imeiPhoto" accept="image/*" capture="environment" hidden>
@@ -76,34 +87,22 @@
           {%- if form.imei -%}
           已关联 {{ form.imei }}{% if form.imei_model %} · {{ form.imei_model }}{% endif %}
           {%- elif imei_options -%}
-          上面选一台、或查尾号 / 扫一下；选「顺差让利」时填了才记让利垫资
+          本店在库 {{ imei_options|length }} 台：从上面下拉选，或填尾号 4 位点「查池子」
           {%- else -%}
-          填了才记让利垫资（待核），没办顺差让利可以不填
+          填尾号 4 位点「查池子」；选「顺差让利」时填了才记让利垫资
           {%- endif -%}
         </span>
-      </p>
-      <p>
-        <label>消费</label>
-        <input name="spend" value="{{ form.spend }}" inputmode="decimal" pattern="\d+(\.\d{1,2})?" title="数字，最多两位小数" placeholder="如 99" autocomplete="off">
-      </p>
-      <p>
-        <label>推荐套餐</label>
-        <input name="recommend" value="{{ form.recommend }}" placeholder="如 89 / 139" autocomplete="off">
-      </p>
-      <p>
-        <label>开口人员</label>
-        <input name="opener" value="{{ form.opener }}" placeholder="默认本店运营商顾问" autocomplete="off">
-      </p>
-      <div class="deal-flags">
-        <label class="check"><input type="checkbox" name="hall_query" value="1" {% if form.hall_query == '1' %}checked{% endif %}> 掌厅已查</label>
-        <label class="check"><input type="checkbox" name="closed" value="1" {% if form.closed == '1' %}checked{% endif %}> 已成交</label>
-        <label class="check"><input type="checkbox" name="student" value="1" {% if form.student == '1' %}checked{% endif %}> 中高考学生</label>
-        <label class="check"><input type="checkbox" name="show_phone" value="1" {% if form.show_phone == '1' %}checked{% endif %}> 显示完整号码</label>
       </div>
-      <p class="span-2">
-        <label>情况描述</label>
-        <textarea name="note" rows="3" placeholder="过程 + 为什么成交/没成（这一单是触客）">{{ form.note }}</textarea>
-      </p>
+    </div>
+    <div class="deal-flags">
+      <label class="check"><input type="checkbox" name="hall_query" value="1" {% if form.hall_query == '1' %}checked{% endif %}> 掌厅已查</label>
+      <label class="check"><input type="checkbox" name="closed" value="1" {% if form.closed == '1' %}checked{% endif %}> 已成交</label>
+      <label class="check"><input type="checkbox" name="student" value="1" {% if form.student == '1' %}checked{% endif %}> 中高考学生</label>
+      <label class="check"><input type="checkbox" name="show_phone" value="1" {% if form.show_phone == '1' %}checked{% endif %}> 显示完整号码</label>
+    </div>
+    <div class="deal-note">
+      <label>情况描述</label>
+      <textarea name="note" rows="3" placeholder="过程 + 为什么成交/没成（这一单是触客）">{{ form.note }}</textarea>
     </div>
     <div class="toolbar desktop-save">
       <button type="submit">生成播报</button>
@@ -118,17 +117,23 @@
     <div class="deal-grid">
       <p><label>机型</label><span>{{ form.model or '—' }}</span></p>
       <p><label>号码</label><span>{{ form.phone or '—' }}</span></p>
-      <p><label>办理的终端业务</label><span>{{ form.biz_type or '—' }}</span></p>
-      <p><label>顺差串码</label><span>{{ form.imei or '—' }}</span></p>
       <p><label>消费</label><span>{{ form.spend or '—' }}</span></p>
       <p><label>推荐套餐</label><span>{{ form.recommend or '—' }}</span></p>
+      <p><label>办理的终端业务</label><span>{{ form.biz_type or '—' }}</span></p>
       <p><label>开口人员</label><span>{{ form.opener or '—' }}</span></p>
-      <div class="deal-flags">
-        <span class="chip">{{ '掌厅已查' if form.hall_query == '1' else '未查掌厅' }}</span>
-        <span class="chip">{{ '已成交' if form.closed == '1' else '未成交' }}</span>
-        <span class="chip">{{ '中高考学生' if form.student == '1' else '非中高考' }}</span>
+      <div class="span-2 imei-block">
+        <label>顺差串码</label>
+        <span>{{ form.imei or '—' }}</span>
       </div>
-      <p class="span-2"><label>情况描述</label><span>{{ form.note or '—' }}</span></p>
+    </div>
+    <div class="deal-flags">
+      <span class="chip">{{ '掌厅已查' if form.hall_query == '1' else '未查掌厅' }}</span>
+      <span class="chip">{{ '已成交' if form.closed == '1' else '未成交' }}</span>
+      <span class="chip">{{ '中高考学生' if form.student == '1' else '非中高考' }}</span>
+    </div>
+    <div class="deal-note">
+      <label>情况描述</label>
+      <span>{{ form.note or '—' }}</span>
     </div>
   </div>
   {% endif %}
@@ -179,12 +184,11 @@ window.addEventListener('DOMContentLoaded', copyDeal);
 // 服务端只认池子里还在的那台，这里查不到就是查不到，不做本地兜底猜测。
 (function () {
   var input = document.getElementById('imeiInput');
-  var queryInput = document.getElementById('imeiQuery');
   var findBtn = document.getElementById('imeiFindBtn');
   var scanBtn = document.getElementById('imeiScanBtn');
   var foundBox = document.getElementById('imeiFound');
   var hint = document.getElementById('imeiHint');
-  if (!input || !queryInput || !foundBox) { return; }
+  if (!input || !foundBox) { return; }
   var form = input.form;
   var modelInput = form ? form.querySelector('input[name=model]') : null;
   var bizSel = document.getElementById('bizType');
@@ -198,11 +202,10 @@ window.addEventListener('DOMContentLoaded', copyDeal);
     foundBox.classList.remove('empty');
   }
 
-  // 选中一台：填串码、带出机型，把「查」框也同步成这台尾号，方便复核
+  // 选中一台：填串码（就是那个唯一的输入框）、带出机型
   function pickRow(row) {
     input.value = row.imei;
     if (modelInput && row.model) { modelInput.value = row.model; }
-    queryInput.value = row.tail || row.imei.slice(-6);
     setHint('已关联 ' + row.imei + (row.model ? ' · ' + row.model : '')
       + (row.own_store ? ' · 库存登记：' + row.own_store : ''));
     foundBox.textContent = '';
@@ -258,11 +261,11 @@ window.addEventListener('DOMContentLoaded', copyDeal);
       });
   }
 
-  findBtn && findBtn.addEventListener('click', function () { lookup(queryInput.value, false); });
-  queryInput.addEventListener('keydown', function (ev) {
-    if (ev.key === 'Enter') { ev.preventDefault(); lookup(queryInput.value, false); }
+  findBtn && findBtn.addEventListener('click', function () { lookup(input.value, false); });
+  input.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); lookup(input.value, false); }
   });
-  // 手填满 4 位以上数字就自动查一次，省一次点击（手机端少一步）
+  // 手填满 4 位以上数字，离开就自动查一次，省一次点击（手机端少一步）
   input.addEventListener('blur', function () {
     var v = input.value.trim();
     if (/^\d{4,20}$/.test(v)) { lookup(v, false); }
@@ -348,7 +351,6 @@ window.addEventListener('DOMContentLoaded', copyDeal);
           setHint('这张照片里没认出串码（4 位起）。对准机器背面的条码再拍一次，或直接填尾号。');
           return;
         }
-        queryInput.value = code;
         input.value = code;
         setHint('拍到 ' + code + '，正在查池子…');
         lookup(code, true);
