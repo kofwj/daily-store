@@ -247,6 +247,9 @@ OUT_CITIES = tuple(
 # 串码状态
 STATUS_SOLD = "已售"
 STATUS_STOCK = "未售"
+# 台账侧的「已退货」：机器卖出去又退回来了，物理上回到库存。
+# 它再出现在最新库存快照里时，允许把 status 从「已售」改回「未售」（见 import_rows 的退货回池）。
+STATE_RETURNED = "已退货"
 
 # 账上店名 → 门店档案店名（改名 / 别名）。
 # 空着是故意的：改名要人确认，代码不替人猜（见「待确认映射表」）。
@@ -439,6 +442,8 @@ _COLUMNS = {
     "evidence": ("evidence", "证据"),
     "pos_type": ("pos_biz_type", "POS业务类型", "业务类型", "合约类型", "合约名称"),
     "data_flag": ("data_flag", "数据标记"),
+    # 台账状态（确认未办 / 已办 / 已退货 …）：只在需要判断「退货回池」时由调用方带上，不入库。
+    "ledger_state": ("ledger_state", "台账状态"),
     "tag": ("串码标签", "标签"),
     "city": ("市", "城市"),
 }
@@ -903,6 +908,7 @@ def import_rows(
     now = _now()
     rows_total = 0
     written = 0
+    returned_pool = 0   # 因「台账=已退货 + 出现在最新快照」从已售回到未售的台数
     bad_imei = 0
     skipped_city = 0
     unmapped: Dict[str, int] = {}
@@ -937,17 +943,41 @@ def import_rows(
         if _looks_out_of_scope(dispatch, city):
             skipped_city += 1
             continue
-        # 库存导出往往滞后于 POS 销售：已在在跟台账里的已售机器（status='已售' AND seen=1）绝不被未售库存覆盖回池子
-        conflict_guard = (
-            f" WHERE imei_todo.status <> '{STATUS_SOLD}' OR imei_todo.seen = 0"
-            if stock_mode
-            else ""
-        )
+        # 库存导出往往滞后于 POS 销售：已在跟台账里的已售机器（status='已售' AND seen=1）绝不被未售库存覆盖回池子。
+        #
+        # 唯一例外（2026-11-12 用户拍板）：**台账状态=已退货，且它又出现在这份最新快照里** ——
+        # 机器卖出去又退回来了，物理上回到库存，得允许改回「未售」才能重新派给门店。
+        # 两个附加条件防止被旧快照钻空子：
+        #   1) 快照的 asof 不早于原售出日（`excluded.asof >= sold_day`）——退货不可能发生在售出之前；
+        #   2) 只认 CSV 显式带「台账状态=已退货」的行（台账没这么说的一律沿用原拦截）。
+        ledger_state = _text(row.get(cols["ledger_state"]), 20) if cols["ledger_state"] else ""
+        returned_back = stock_mode and ledger_state == STATE_RETURNED
+        if not stock_mode:
+            conflict_guard = ""
+        elif returned_back:
+            conflict_guard = (
+                f" WHERE imei_todo.status <> '{STATUS_SOLD}'"
+                " OR imei_todo.seen = 0"
+                " OR excluded.asof >= COALESCE(NULLIF(imei_todo.sold_day, ''), '0000')"
+            )
+        else:
+            conflict_guard = f" WHERE imei_todo.status <> '{STATUS_SOLD}' OR imei_todo.seen = 0"
         # data_flag 只在 CSV 真含「数据标记」列时写：INSERT 带上，DO UPDATE 才更新；
         # 没有该列就用默认 ''，DO UPDATE 不碰 data_flag，保住库里的原值（回填走独立 UPDATE）。
-        data_flag_set = ", data_flag=excluded.data_flag" if cols["data_flag"] else ""
-        # rule_ver 故意不在 UPSERT 里更新：老行永远保持 1，重导不能把存量升成 2，
-        # 否则 11-16 宽限当天就失效、27 台会跳成逾期。只有全新 IMEI 的 INSERT 写 2。
+        # 例外：退货回池的行，机器已经出现在快照里，「台账无此串码」不再成立，清掉它。
+        if cols["data_flag"]:
+            data_flag_set = ", data_flag=excluded.data_flag"
+        elif returned_back:
+            data_flag_set = ", data_flag=''"
+        else:
+            data_flag_set = ""
+        # 退货回池前先看原状态：只有「从已售改回未售」才算回池（新机器不算）
+        prev_sold = False
+        if returned_back:
+            prev = conn.execute(
+                "SELECT status FROM imei_todo WHERE imei=?", (imei,)
+            ).fetchone()
+            prev_sold = bool(prev and prev["status"] == STATUS_SOLD)
         cur = conn.execute(
             f"""
             INSERT INTO imei_todo(
@@ -993,6 +1023,8 @@ def import_rows(
         )
         if cur.rowcount > 0:
             written += 1
+            if returned_back and prev_sold:
+                returned_pool += 1
             if not store_id:
                 unmapped[dispatch or "(空)"] = unmapped.get(dispatch or "(空)", 0) + 1
     return {
@@ -1005,6 +1037,8 @@ def import_rows(
         "mode": "stock" if stock_mode else "ledger",
         # 页面提示用：这次是增量还是全量（全量才会把清单外的行 seen=0）
         "incremental": not mark_seen,
+        # 「退货回池」生效台数（台账=已退货 + 出现在最新快照 → 已售改回未售）
+        "returned_pool": returned_pool,
     }
 
 

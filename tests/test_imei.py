@@ -2705,3 +2705,97 @@ def test_report_export_has_claim_columns(client):
     head, line = body.strip().splitlines()
     assert head.endswith("原售出店,是否本店代办")
     assert "不存在的店" in line and "是（其他店售出）" in line
+
+
+# ---------------- 退货回池（2026-11-12 用户拍板） ----------------
+STOCK_HEAD_RET = STOCK_HEAD.rstrip("\n") + ",台账状态\n"
+
+
+def _stock_csv_ret(*rows):
+    """带「台账状态」列的库存快照（末列 = 已退货 / 确认未办 / 空）。"""
+    return BytesIO((STOCK_HEAD_RET + "".join(r + "\n" for r in rows)).encode("utf-8"))
+
+
+def _import_stock(client, body, asof):
+    return client.post(
+        "/imei/import",
+        data={"csv_file": (body, "stock.csv"), "asof": asof},
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+
+def test_returned_machine_goes_back_to_pool(client):
+    """台账=已退货 + 出现在更晚的库存快照里 → 从「已售」改回「未售」，可以重新派。"""
+    _login(client)
+    _upload(client, _row("860000000003101", ALPHA), asof="2026-11-02")
+    with db.get_db() as conn:
+        assert conn.execute(
+            "SELECT status FROM imei_todo WHERE imei='860000000003101'"
+        ).fetchone()["status"] == "已售"
+    # 11-06 退回，11-06 的快照里又出现
+    resp = _import_stock(
+        client,
+        _stock_csv_ret("860000000003101,示例市,示例市乙街vivo专卖店,Y600 Pro,移动顺差,2026-11-06,,1,已退货"),
+        "2026-11-06",
+    )
+    assert "入库 1 台" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT status, seen, own_store, dispatch_store, sold_day, data_flag "
+            "FROM imei_todo WHERE imei='860000000003101'"
+        ).fetchone()
+    assert row["status"] == "未售" and row["seen"] == 1
+    # 回池后按库存登记门店派（不能还挂在原销售店上）
+    assert row["own_store"] == BETA and row["dispatch_store"] == BETA
+    assert row["sold_day"] == "2026-11-06"
+    assert row["data_flag"] == ""
+
+
+def test_returned_machine_does_not_resurrect_with_older_snapshot(client):
+    """快照日期早于售出日 → 不是退货，只是旧库存导出，仍按原拦截（保持已售）。"""
+    _login(client)
+    # 售出 11-10，却拿 11-02 的旧快照来说「已退货」——时序不成立，必须挡掉
+    _upload(
+        client,
+        f"860000000003102,{ALPHA},Y600 Pro,小李,2026-11-10,0,7,D0-2,确认未办,无,",
+        asof="2026-11-10",
+    )
+    _import_stock(
+        client,
+        _stock_csv_ret("860000000003102,示例市,示例市乙街vivo专卖店,Y600 Pro,移动顺差,2026-11-02,,1,已退货"),
+        "2026-11-02",
+    )
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT status, seen FROM imei_todo WHERE imei='860000000003102'"
+        ).fetchone()
+    assert row["status"] == "已售" and row["seen"] == 1
+
+def test_stock_import_with__not_returned_state_still_blocked(client):
+    """台账状态不是「已退货」（这里是确认未办）→ 沿用原拦截，不把活跃已售拉回池子。"""
+    _login(client)
+    _upload(client, _row("860000000003103", ALPHA), asof="2026-11-02")
+    _import_stock(
+        client,
+        _stock_csv_ret("860000000003103,示例市,示例市乙街vivo专卖店,Y600 Pro,移动顺差,2026-11-09,,1,确认未办"),
+        "2026-11-09",
+    )
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT status, seen FROM imei_todo WHERE imei='860000000003103'"
+        ).fetchone()
+    assert row["status"] == "已售" and row["seen"] == 1
+
+
+def test_returned_pool_count_reported(client):
+    """导入回显里要能看出这次有几台是「退货回池」。"""
+    _login(client)
+    _upload(client, _row("860000000003104", ALPHA), asof="2026-11-02")
+    body = _stock_csv_ret(
+        "860000000003104,示例市,示例市乙街vivo专卖店,Y600 Pro,移动顺差,2026-11-06,,1,已退货"
+    )
+    with db.get_db() as conn:
+        res = db_imei.import_rows(conn, body.getvalue(), asof="2026-11-06", mark_seen=False)
+    assert res["returned_pool"] == 1
+    assert res["written"] == 1
