@@ -142,7 +142,17 @@
         <tr>
           <td class="left">{{ r.biz_date }}</td>
           {% if all_stores %}<td class="left">{{ row_store_name }}</td>{% endif %}
-          <td class="left">{% if is_admin %}{{ r.phone or '—' }}{% else %}{{ r.phone|mask_phone or '—' }}{% endif %}</td>
+          <td class="left">
+            {% if is_admin %}{{ r.phone or '—' }}{% else %}{{ r.phone|mask_phone or '—' }}{% endif %}
+            {% if not is_viewer and not r.phone %}
+            <form method="post" action="{{ url_for('advance_phone') }}" class="pending-phone">
+              <input type="hidden" name="store_id" value="{{ row_store_id }}">
+              <input type="hidden" name="advance_id" value="{{ r.id }}">
+              <input type="tel" name="phone" inputmode="numeric" maxlength="11" placeholder="补号码" aria-label="补客户号码">
+              <button class="ghost" type="submit">存</button>
+            </form>
+            {% endif %}
+          </td>
           <td>{{ '%.2f'|format(r.broadband) if r.broadband else '—' }}</td>
           <td>{{ '%.2f'|format(r.rebate) if r.rebate else '—' }}</td>
           <td>{{ '%.2f'|format(r.other) if r.other else '—' }}</td>
@@ -194,6 +204,14 @@
         <div>
           <strong>{{ r.biz_date }}{% if all_stores %} · {{ row_store_name }}{% endif %}</strong>
           <div class="muted">{% if is_admin %}{{ r.phone or '无号码' }}{% else %}{{ r.phone|mask_phone or '无号码' }}{% endif %}</div>
+          {% if not is_viewer and not r.phone %}
+          <form method="post" action="{{ url_for('advance_phone') }}" class="pending-phone">
+            <input type="hidden" name="store_id" value="{{ row_store_id }}">
+            <input type="hidden" name="advance_id" value="{{ r.id }}">
+            <input type="tel" name="phone" inputmode="numeric" maxlength="11" placeholder="补号码" aria-label="补客户号码">
+            <button class="ghost" type="submit">存</button>
+          </form>
+          {% endif %}
         </div>
         <div class="advance-card-sum">
           <div class="kpi-num">{{ '%.2f'|format(r.total) }}</div>

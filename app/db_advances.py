@@ -216,6 +216,50 @@ def delete_advance(
     return True
 
 
+def set_advance_phone(
+    conn: sqlite3.Connection, advance_id: int, store_id: int, phone: str, *, user_id: int
+) -> str:
+    """只写 `phone` 一个字段，任何金额都不碰。
+
+    顺差让利确认时自动生成的行（`source='imei'`）和芝麻官方导入的行金额锁死是
+    对的——那是钱。但号码回答的只是「这笔钱付给了谁」，漏了就逼人作废重录，代价
+    远大于收益：作废会把已经兑付的流水冲开，还要用负数冲账把账做平。
+
+    所以这里开一条窄路径：只 UPDATE `phone`，`broadband/rebate/other/sesame/paid/
+    source/ext_id` 一个字段都不动，改动照常落 `advance_edits`（action='update_phone'）。
+    返回 missing / empty / unchanged / ok，由视图翻成人话。
+    """
+    row = conn.execute(
+        "SELECT * FROM advance_posts WHERE id=? AND store_id=?",
+        (int(advance_id), int(store_id)),
+    ).fetchone()
+    if row is None:
+        return "missing"
+    new_phone = (phone or "").strip()[:20]
+    if not new_phone:
+        return "empty"
+    if new_phone == str(row["phone"] or ""):
+        return "unchanged"
+    before = _snapshot(row, cents=True)
+    conn.execute(
+        "UPDATE advance_posts SET phone=?, updated_at=?, user_id=? WHERE id=?",
+        (new_phone, _now(), user_id, int(advance_id)),
+    )
+    after = conn.execute(
+        "SELECT * FROM advance_posts WHERE id=?", (int(advance_id),)
+    ).fetchone()
+    _audit(
+        conn,
+        after,
+        user_id=user_id,
+        action="update_phone",
+        before=before,
+        after=_snapshot(after, cents=True),
+        note="只补号码，金额未动",
+    )
+    return "ok"
+
+
 def set_advance_paid(
     conn: sqlite3.Connection,
     advance_ids: Iterable[int | str],

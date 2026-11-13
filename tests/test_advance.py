@@ -632,3 +632,114 @@ def test_advance_paid_view_has_no_checkbox_for_sesame(tmp_db, admin_client):
     assert "js-pick" not in sesame_row
     assert "芝麻服务费导入即已兑" in sesame_row
     assert 'class="js-pick"' in normal_row
+
+
+def test_set_advance_phone_only_touches_phone(tmp_db):
+    """补号码不是改成：金额、兑付、来源、ext_id 一个都不许动，改动要留痕。"""
+    sid, admin_id = _seed_advances([(None, 10.0)])
+    with db.get_db() as conn:
+        aid = db.record_advance(
+            conn,
+            store_id=sid,
+            user_id=admin_id,
+            biz_date=db.today_local(),
+            rebate=100.0,
+            source="imei",
+            ext_id="imei:863678088410831:7",
+        )
+    with db.get_db() as conn:
+        before = dict(conn.execute("SELECT * FROM advance_posts WHERE id=?", (aid,)).fetchone())
+    with db.get_db() as conn:
+        assert db.set_advance_phone(conn, aid, sid, " 13800001234 ", user_id=admin_id) == "ok"
+    with db.get_db() as conn:
+        after = dict(conn.execute("SELECT * FROM advance_posts WHERE id=?", (aid,)).fetchone())
+        last = dict(conn.execute("SELECT * FROM advance_edits ORDER BY id DESC LIMIT 1").fetchone())
+    assert after["phone"] == "13800001234"
+    for field in ("biz_date", "broadband", "rebate", "other", "sesame", "paid", "paid_at", "source", "ext_id"):
+        assert after[field] == before[field], field
+    assert last["action"] == "update_phone"
+    assert last["note"] == "只补号码，金额未动"
+
+
+def test_set_advance_phone_states(tmp_db):
+    """空号 / 同号 / 不存在 / 别家店的行：都不许写库，也不许留痕。"""
+    sid, admin_id = _seed_advances([(None, 10.0)])
+    with db.get_db() as conn:
+        aid = db.record_advance(
+            conn, store_id=sid, user_id=admin_id, biz_date=db.today_local(), phone="13800001234", rebate=10.0
+        )
+        other_sid = conn.execute("SELECT id FROM stores WHERE code='store-delta'").fetchone()["id"]
+    with db.get_db() as conn:
+        assert db.set_advance_phone(conn, aid, sid, "   ", user_id=admin_id) == "empty"
+        assert db.set_advance_phone(conn, aid, sid, "13800001234", user_id=admin_id) == "unchanged"
+        assert db.set_advance_phone(conn, aid + 999, sid, "13900005678", user_id=admin_id) == "missing"
+        assert db.set_advance_phone(conn, aid, other_sid, "13900005678", user_id=admin_id) == "missing"
+    with db.get_db() as conn:
+        assert conn.execute("SELECT phone FROM advance_posts WHERE id=?", (aid,)).fetchone()["phone"] == "13800001234"
+        n = conn.execute("SELECT COUNT(*) FROM advance_edits WHERE action='update_phone'").fetchone()[0]
+        assert n == 0
+
+
+def test_advance_phone_route_fills_missing_phone(tmp_db, admin_client):
+    """顺差让利自动生成、当初没号码的行：列表里直接补，钱一分不动。"""
+    c = admin_client
+    today = db.today_local()
+    sid, admin_id = _seed_advances([(None, 10.0)])
+    with db.get_db() as conn:
+        aid = db.record_advance(
+            conn,
+            store_id=sid,
+            user_id=admin_id,
+            biz_date=today,
+            rebate=100.0,
+            source="imei",
+            ext_id="imei:869209088418535:3",
+        )
+    page = c.get("/advance").get_data(as_text=True)
+    assert 'action="/advance/phone"' in page
+    assert 'placeholder="补号码"' in page
+    body = c.post(
+        "/advance/phone",
+        data={"store_id": str(sid), "advance_id": str(aid), "phone": "13800001234"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "号码补上了，金额没动" in body
+    assert "13800001234" in body
+    with db.get_db() as conn:
+        row = conn.execute("SELECT * FROM advance_posts WHERE id=?", (aid,)).fetchone()
+    assert row["phone"] == "13800001234"
+    assert row["rebate"] == 10000  # 100 元，一分没动
+    assert row["source"] == "imei" and row["ext_id"] == "imei:869209088418535:3"
+
+
+def test_advance_phone_route_refuses_other_store(tmp_db, filler_client):
+    """号码按钮不能当越权后门：别家店的行一律不认。"""
+    c = filler_client
+    with db.get_db() as conn:
+        other = conn.execute("SELECT id FROM stores WHERE code='store-delta'").fetchone()["id"]
+        admin_id = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()["id"]
+        aid = db.record_advance(
+            conn,
+            store_id=other,
+            user_id=admin_id,
+            biz_date=db.today_local(),
+            rebate=10.0,
+            source="imei",
+            ext_id="imei:1:1",
+        )
+    resp = c.post(
+        "/advance/phone",
+        data={"store_id": str(other), "advance_id": str(aid), "phone": "13800001234"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    with db.get_db() as conn:
+        assert conn.execute("SELECT phone FROM advance_posts WHERE id=?", (aid,)).fetchone()["phone"] == ""
+
+    c.post("/logout")
+    resp = c.post(
+        "/advance/phone",
+        data={"store_id": str(other), "advance_id": str(aid), "phone": "13800001234"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302 and "/login" in (resp.headers.get("Location") or "")

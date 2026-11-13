@@ -140,10 +140,13 @@ def _locked_msg(source: str, *, for_delete: bool = False) -> str:
                 "这条是顺差让利确认时自动生成的，不能手删；"
                 "要撤请到待核页作废那笔声明（已兑付的走负数冲账）"
             )
-        return "这条是顺差让利确认时自动生成的，金额不能改；要改请先作废再重录"
+        return (
+            "这条是顺差让利确认时自动生成的，金额不能改；"
+            "缺号码可以在号码那一格直接补，其余要改请先作废再重录"
+        )
     if for_delete:
         return "芝麻服务费是官方导入的，店员不能删"
-    return "芝麻服务费是官方导入的，不能改"
+    return "芝麻服务费是官方导入的，不能改；缺号码可以在号码那一格直接补"
 
 
 def register_advance(app) -> None:
@@ -273,6 +276,39 @@ def register_advance(app) -> None:
                         raise
                 else:
                     flash("已删除这条垫资" if ok else "这条垫资不存在，或已删除", "ok" if ok else "error")
+        return redirect(url_for("advance_page", store_id=sid))
+
+    @app.route("/advance/phone", methods=["POST"])
+    @login_required
+    @viewer_only
+    def advance_phone():
+        """只补号码：金额锁死的行（顺差让利自动生成 / 芝麻官方导入）也能填。
+
+        号码不是钱，写它不动账。所以这里不设 `imported_locked`、也不要求先取消
+        兑付——逼人作废重录会把已经兑付的流水冲开，代价比补一个号码大得多。
+        金额/兑付状态由 `db.set_advance_phone` 保证一个字段都不碰。
+        """
+        try:
+            sid = int(request.form.get("store_id") or "")
+            aid = int(request.form.get("advance_id") or "")
+        except (TypeError, ValueError):
+            flash("参数不对", "error")
+            return redirect(url_for("advance_page"))
+        with db.get_db() as conn:
+            if not db.user_can_access_store(conn, g.user, sid):
+                flash("没有这家店的权限", "error")
+                return redirect(url_for("advance_page"))
+            result = db.set_advance_phone(
+                conn, aid, sid, request.form.get("phone") or "", user_id=g.user["id"]
+            )
+        if result == "ok":
+            flash("号码补上了，金额没动", "ok")
+        elif result == "unchanged":
+            flash("号码没变", "ok")
+        elif result == "empty":
+            flash("请先填号码", "error")
+        else:
+            flash("这条垫资不存在，或已删除", "error")
         return redirect(url_for("advance_page", store_id=sid))
 
     def _advance_filters():
