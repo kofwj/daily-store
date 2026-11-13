@@ -11,7 +11,7 @@ from io import BytesIO
 
 import pytest
 
-from app import db, db_core, db_imei, views_imei
+from app import db, db_core, db_decl, db_imei, views_imei
 
 CSV_HEAD = "imei,store,model,sp,day,age,remain,stage,state,strength,evidence\n"
 
@@ -497,6 +497,7 @@ def test_report_alias_normalized(client):
             "action": "已办",
             "biz_type": "顺差让利",
             "note": "受理单 G204",
+            "phone": "15500000204",
         },
         follow_redirects=True,
     )
@@ -701,6 +702,7 @@ def test_shuncha_requires_note_or_photo(client):
             "action": "已办",
             "biz_type": "顺差让利",
             "note": "受理单 S311",
+            "phone": "15500000311",
         },
         follow_redirects=True,
     )
@@ -765,6 +767,7 @@ def test_list_shows_evidence_label(client):
             "action": "已办",
             "biz_type": "顺差让利",
             "note": "受理单 S342",
+            "phone": "15500000342",
         },
         follow_redirects=True,
     )
@@ -785,7 +788,14 @@ def test_export_never_flags_no_evidence_types(client):
     for imei, biz in (("860000000000351", "送2G流量"), ("860000000000352", "顺差让利")):
         client.post(
             "/imei/report",
-            data={"imei": imei, "action": "已办", "biz_type": biz, "note": "受理单 T"},
+            data={
+                "imei": imei,
+                "action": "已办",
+                "biz_type": biz,
+                "note": "受理单 T",
+                # 顺差让利现在必须带号码（垫资按号码付给人），取串码后 8 位凑一个
+                "phone": "155" + imei[-8:],
+            },
             follow_redirects=True,
         )
     _login(client)
@@ -1339,6 +1349,7 @@ def test_photo_exif_orientation_transposed(client):
             "imei": "860000000000570",
             "action": "已办",
             "biz_type": "顺差让利",
+            "phone": "15500000570",
             "photo": (buf, "cam.jpg"),
         },
         content_type="multipart/form-data",
@@ -2455,6 +2466,54 @@ def test_pool_page_unmapped_tab_renders_overdue_rows_without_gate(client):
     assert row_seg
     assert '<button type="submit">提交</button>' in row_seg[0]
     assert "二次确认" not in row_seg[0] and "需确认" not in row_seg[0]
+
+
+def test_pool_unmapped_form_has_phone_and_claims_shuncha(client):
+    """池子代办表单也必须能填号码（V0.4.13）。
+
+    两个表单提交到同一个 /imei/report。只给 /imei 页加号码框，等于门店在池子页
+    选「已办 + 顺差让利」时无处填号，被服务端拦下还找不到地方补。
+    """
+    _login(client)
+    _upload(client, _row("860000000002081", "不存在的店", remain=2))
+    html = client.get(
+        "/imei/pool", query_string={"tab": "unmapped", "store": "不存在的店"}
+    ).get_data(as_text=True)
+    row_seg = [seg for seg in html.split("<tr") if "860000000002081" in seg]
+    assert row_seg
+    assert 'name="phone"' in row_seg[0]
+
+    _login(client, "alpha")
+    sid = _store_id("store-alpha")
+    base = {
+        "imei": "860000000002081",
+        "action": "已办",
+        "biz_type": "顺差让利",
+        "note": "受理单号 A1",
+        "target_store_id": sid,
+    }
+    # 没号码 → 服务端拦下，一行都不落库
+    resp = client.post("/imei/report", data=base, follow_redirects=True)
+    assert "顺差让利要填客户手机号码" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM imei_reports").fetchone()[0] == 0
+
+    # 带号码 → 自报落库，号码一路进待核声明
+    client.post(
+        "/imei/report",
+        data={**base, "phone": "15500000281"},
+        follow_redirects=True,
+    )
+    with db.get_db() as conn:
+        rep = conn.execute(
+            "SELECT phone FROM imei_reports WHERE imei=?", ("860000000002081",)
+        ).fetchone()
+        assert rep is not None and rep["phone"] == "15500000281"
+        decl = conn.execute(
+            "SELECT phone, state FROM imei_decl WHERE imei=?", ("860000000002081",)
+        ).fetchone()
+        assert decl is not None and decl["phone"] == "15500000281"
+        assert decl["state"] == db_decl.DECL_PENDING
 
 
 def test_pool_unmapped_shows_data_flag_but_does_not_filter(client):

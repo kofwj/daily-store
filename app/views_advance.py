@@ -117,6 +117,35 @@ def _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d, *, 
     )
 
 
+def _advance_source(conn, advance_id) -> str:
+    """这条垫资的来源（'' = 手工 / sesame / imei …）。查不到回空串。"""
+    try:
+        row = conn.execute(
+            "SELECT source FROM advance_posts WHERE id=?", (int(advance_id),)
+        ).fetchone()
+    except (TypeError, ValueError):
+        return ""
+    return str(row["source"] or "") if row is not None else ""
+
+
+def _locked_msg(source: str, *, for_delete: bool = False) -> str:
+    """自动生成 / 官方导入的行不许手改——按来源说清是哪一种。
+
+    V0.4.13 之前这里一律甩「芝麻服务费是官方导入的」，门店在顺差让利自动行
+    上点「改」也会看到这句，等于说谎。现在按 source 分流。
+    """
+    if (source or "") == "imei":
+        if for_delete:
+            return (
+                "这条是顺差让利确认时自动生成的，不能手删；"
+                "要撤请到待核页作废那笔声明（已兑付的走负数冲账）"
+            )
+        return "这条是顺差让利确认时自动生成的，金额不能改；要改请先作废再重录"
+    if for_delete:
+        return "芝麻服务费是官方导入的，店员不能删"
+    return "芝麻服务费是官方导入的，不能改"
+
+
 def register_advance(app) -> None:
     @app.route("/advance", methods=["GET", "POST"])
     @login_required
@@ -199,7 +228,7 @@ def register_advance(app) -> None:
                     if str(exc) == "paid_locked":
                         flash("已兑付的垫资不能改，先取消兑付", "error")
                     elif str(exc) == "imported_locked":
-                        flash("芝麻服务费是官方导入的，不能改", "error")
+                        flash(_locked_msg(_advance_source(conn, aid)), "error")
                     else:
                         flash("这条垫资不存在", "error")
                     return _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d)
@@ -238,7 +267,7 @@ def register_advance(app) -> None:
                     )
                 except ValueError as exc:
                     if str(exc) == "imported_locked":
-                        flash("芝麻服务费是官方导入的，店员不能删", "error")
+                        flash(_locked_msg(row["source"], for_delete=True), "error")
                         ok = False
                     else:
                         raise
@@ -305,6 +334,26 @@ def register_advance(app) -> None:
     def advance_pending_post():
         action = (request.form.get("action") or "confirm").strip()
         ids = request.form.getlist("decl_id")
+        # 行内补号码：待核页每行一个小输入框，按钮带 action="phone:<decl_id>"。
+        # 不走嵌套表单（那一页整张表都在一个 form 里），只按 action 前缀分流。
+        if action.startswith("phone:"):
+            raw_id = action.split(":", 1)[1].strip()
+            phone = (request.form.get(f"phone_{raw_id}") or "").strip()
+            if not raw_id.isdigit():
+                flash("这条待核不存在，刷新后再试", "error")
+            else:
+                with db.get_db() as conn:
+                    result = db_decl.set_decl_phone(conn, int(raw_id), phone)
+                if result.get("ok"):
+                    flash("号码已保存", "ok")
+                elif result.get("reason") == "not_pending":
+                    flash("这笔已经确认，号码在待核页改不了：钱已经进了垫资行，要改得先作废这笔再重录", "error")
+                elif result.get("reason") == "empty":
+                    flash("号码不能留空", "error")
+                else:
+                    flash("这条待核不存在，刷新后再试", "error")
+            month = (request.form.get("month") or "").strip()
+            return redirect(url_for("advance_pending", month=month or None))
         if action == "confirm_all":
             with db.get_db() as conn:
                 stores = accessible_stores(conn)

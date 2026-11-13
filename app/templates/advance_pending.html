@@ -29,7 +29,8 @@
     账记在<b>成交日</b>所在月——上月最后一天成交的，本月确认照样算上月。
   </p>
   {% if rows %}
-  <form method="post" onsubmit="return confirm('确认后这笔进入待兑付，勾选的多笔会一起进');">
+  {# event.submitter：点「存号码」时不弹确认框，只有确认/作废才弹 #}
+  <form method="post" onsubmit="var s=(typeof event!=='undefined')?event.submitter:null;if(s&&(s.value||'').indexOf('phone:')===0)return true;return confirm('确认后这笔进入待兑付，勾选的多笔会一起进');">
     <input type="hidden" name="month" value="{{ month.strftime('%Y-%m') }}">
     <div class="records-toolbar">
       <strong>本月待核 {{ rows|length }} 笔</strong>
@@ -58,7 +59,13 @@
             <td class="left">{{ r.store_short or r.store_name }}</td>
             <td class="left"><code>{{ r.imei }}</code></td>
             <td class="left">{{ r.model or r.deal_model or '—' }}</td>
-            <td class="left">{{ r.phone|mask_phone if r.phone else '—' }}</td>
+            <td class="left">
+              <div class="pending-phone">
+                <input type="tel" name="phone_{{ r.id }}" value="{{ r.phone }}" inputmode="numeric" maxlength="11" placeholder="缺号码">
+                <button type="submit" class="ghost" name="action" value="phone:{{ r.id }}" onclick="return pendingPhone(this, 'phone_{{ r.id }}')">存号码</button>
+              </div>
+              {% if r.phone and not r.decl_phone %}<div class="muted phone-src">{{ '来自触客单' if r.deal_phone else '来自移动回传' }}</div>{% endif %}
+            </td>
             <td class="left">{{ r.biz_type or '顺差让利' }}</td>
             <td class="left">{{ '触客成交' if r.src == 'deal' else '门店自报' }}</td>
             <td>{{ '%.2f'|format(r.rebate) }}</td>
@@ -82,4 +89,13 @@
   <p class="muted">这个月没有待核的让利垫资。门店成交时选了顺差串码、或在串码待办报「已办 + 顺差让利」，这里才会有东西。</p>
   {% endif %}
 </div>
+<script>
+  // 只校验「存号码」这一个按钮；上面那个 form 还带着确认/作废，别让号码规则把它们卡住。
+  function pendingPhone(btn, field) {
+    var el = btn.form.elements[field];
+    var v = (el && el.value || '').trim();
+    if (!/^\d{11}$/.test(v)) { alert('号码要 11 位数字，垫资付款才对得上人'); return false; }
+    return true;
+  }
+</script>
 {% endblock %}

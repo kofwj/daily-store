@@ -650,6 +650,7 @@ def register_imei(app) -> None:
         action = (request.form.get("action") or "").strip()
         biz_type = (request.form.get("biz_type") or "").strip()
         note = (request.form.get("note") or "").strip()
+        phone = (request.form.get("phone") or "").strip()
         target_raw = (request.form.get("target_store_id") or "").strip()
         back = request.form.get("back") or url_for("imei_page")
         if not back.startswith("/") or back.startswith("//"):
@@ -699,6 +700,14 @@ def register_imei(app) -> None:
                     "error",
                 )
                 return redirect(back)
+            # 顺差让利必带号码：垫资的钱是按号码付给人的，没号码只能人工翻截图
+            if (
+                action == "已办"
+                and db_imei.norm_biz_type(biz_type) == "顺差让利"
+                and not phone
+            ):
+                flash("顺差让利要填客户手机号码（垫资付款要对得上人）", "error")
+                return redirect(back)
             photo = ""
             if has_photo:
                 try:
@@ -724,6 +733,7 @@ def register_imei(app) -> None:
                         biz_type=biz_type,
                         note=note,
                         photo=photo,
+                        phone=phone,
                         user_id=g.user["id"],
                         begin=False,
                     )
@@ -737,6 +747,7 @@ def register_imei(app) -> None:
                         biz_type=biz_type,
                         note=note,
                         photo=photo,
+                        phone=phone,
                         user_id=g.user["id"],
                     )
                 # 自报「已办」= 这台有结论了 → 落一条声明（占唯一索引 = 出池）。
@@ -750,6 +761,7 @@ def register_imei(app) -> None:
                         own_store=str(row["own_store"] or ""),
                         report_id=report_id,
                         biz_type=biz_type,
+                        phone=phone,
                         user_id=g.user["id"],
                     )
                     decl_note = decl

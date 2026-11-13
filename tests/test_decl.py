@@ -257,6 +257,7 @@ def test_report_already_done_creates_pending(client):
             action="已办",
             biz_type="顺差让利",
             note="受理单 123",
+            phone="15500000016",
             user_id=1,
         )
         decl = db_decl.create_from_report(
@@ -265,6 +266,7 @@ def test_report_already_done_creates_pending(client):
             store_id=sid,
             report_id=report_id,
             biz_type="顺差让利",
+            phone="15500000016",
             user_id=1,
         )
         assert decl["created"] is True
@@ -275,6 +277,7 @@ def test_report_already_done_creates_pending(client):
             store_id=sid,
             report_id=report_id,
             biz_type="顺差让利",
+            phone="15500000016",
             user_id=1,
         )
         assert again["created"] is False and again["reason"] == "duplicate"
@@ -963,3 +966,123 @@ def test_zxing_bundle_served(client):
     resp = client.get("/static/vendor/zxing/zxing.min.js")
     assert resp.status_code == 200
     assert b"MultiFormatReader" in resp.data
+
+
+# ---- 手机号：自报 → 声明 → 确认 → 垫资（V0.4.13）----
+
+
+def test_report_requires_phone_for_shuncha(client):
+    """「已办 + 顺差让利」必须带号码：垫资的钱是按号码付给人的。"""
+    imei = _make_store(client, "860000000000040")
+    sid = _store_id()
+    with db.get_db() as conn:
+        with pytest.raises(ValueError):
+            db_imei.add_report(
+                conn,
+                imei=imei,
+                store_id=sid,
+                action="已办",
+                biz_type="顺差让利",
+                note="受理单 X",
+                user_id=1,
+            )
+        # 别的业务类型不受这条规则影响
+        assert db_imei.add_report(
+            conn, imei=imei, store_id=sid, action="已办", biz_type="直降合约", user_id=1
+        )
+
+
+def test_pending_row_shows_phone_from_deal(client):
+    """声明快照没号码时，待核页显示触客单上的号码（不是空白）。"""
+    imei = _make_store(client, "860000000000041")
+    sid = _store_id()
+    with db.get_db() as conn:
+        _deal(conn, store_id=sid, imei=imei, phone="15500000041")
+        rows = db_decl.pending_rows(conn)
+        assert rows and rows[0]["phone"] == "15500000041"
+        assert rows[0]["decl_phone"] == ""
+        assert rows[0]["deal_phone"] == "15500000041"
+
+
+def test_pending_row_falls_back_to_mobile_table(client):
+    """声明和触客单都没号码时，退到移动回传表。"""
+    imei = _make_store(client, "860000000000042")
+    sid = _store_id()
+    with db.get_db() as conn:
+        db_imei.import_mobile(conn, f"串号,号码\n{imei},15500000042\n".encode("utf-8"))
+        _deal(conn, store_id=sid, imei=imei, phone="")
+        rows = db_decl.pending_rows(conn)
+        assert rows and rows[0]["phone"] == "15500000042"
+
+
+def test_pending_rows_survive_missing_mobile_table(client):
+    """辅助表 imei_mobile 不存在（老库/空库）也不能让待核页整页打不开。"""
+    imei = _make_store(client, "860000000000043")
+    sid = _store_id()
+    with db.get_db() as conn:
+        conn.execute("DROP TABLE IF EXISTS imei_mobile")
+        _deal(conn, store_id=sid, imei=imei, phone="15500000043")
+        rows = db_decl.pending_rows(conn)
+        assert rows and rows[0]["phone"] == "15500000043"
+        assert rows[0]["mobile_phone"] == ""
+
+
+def test_set_decl_phone_only_touches_pending(client):
+    """待核能补号码；已确认的补不了（钱已经在垫资行上了），空号码不收。"""
+    imei = _make_store(client, "860000000000044")
+    sid = _store_id()
+    with db.get_db() as conn:
+        _deal(conn, store_id=sid, imei=imei, phone="")
+        decl_id = int(db_decl.pending_rows(conn)[0]["id"])
+        assert db_decl.set_decl_phone(conn, decl_id, "")["reason"] == "empty"
+        assert db_decl.set_decl_phone(conn, 999999, "15500000044")["reason"] == "missing"
+        got = db_decl.set_decl_phone(conn, decl_id, "15500000044")
+        assert got["ok"] is True and got["phone"] == "15500000044"
+        assert db_decl.set_decl_phone(conn, decl_id, "15500000044")["reason"] == "unchanged"
+        # 号码不是钱：金额快照零改动
+        assert int(db_decl.pending_rows(conn)[0]["rebate_cents"]) == db_decl.DEFAULT_REBATE_CENTS
+        db_decl.confirm(conn, [decl_id], user_id=1)
+        assert db_decl.set_decl_phone(conn, decl_id, "15500000099")["reason"] == "not_pending"
+        adv = conn.execute("SELECT phone, paid, source FROM advance_posts").fetchone()
+        assert adv["phone"] == "15500000044"
+        assert int(adv["paid"]) == 0 and adv["source"] == "imei"
+
+
+def test_pending_page_saves_phone_inline(client, filler_client):
+    """待核页行内补号码：店员存不了，管理员存完直接带到确认后的垫资行。"""
+    imei = _make_store(client, "860000000000045")
+    sid = _store_id()
+    with db.get_db() as conn:
+        _deal(conn, store_id=sid, imei=imei, phone="")
+        decl_id = int(db_decl.pending_rows(conn)[0]["id"])
+    payload = {"action": f"phone:{decl_id}", f"phone_{decl_id}": "15500000045"}
+    _login(client, "alpha", "123456")
+    assert client.post("/advance/pending", data=payload).status_code == 302
+    with db.get_db() as conn:
+        assert conn.execute("SELECT phone FROM imei_decl WHERE id=?", (decl_id,)).fetchone()["phone"] == ""
+    _login(client, "admin", "123456")
+    resp = client.post("/advance/pending", data=payload, follow_redirects=True)
+    assert "号码已保存".encode() in resp.data
+    with db.get_db() as conn:
+        assert conn.execute("SELECT phone FROM imei_decl WHERE id=?", (decl_id,)).fetchone()["phone"] == "15500000045"
+    client.post(
+        "/advance/pending",
+        data={"action": "confirm", "decl_id": [str(decl_id)]},
+        follow_redirects=True,
+    )
+    with db.get_db() as conn:
+        adv = conn.execute("SELECT phone FROM advance_posts WHERE source='imei'").fetchone()
+        assert adv["phone"] == "15500000045"
+
+
+def test_pending_page_renders_inline_phone_input(client):
+    """待核页每行要有号码输入框 + 存号码按钮（否则补号码还得绕去别处）。"""
+    imei = _make_store(client, "860000000000046")
+    sid = _store_id()
+    with db.get_db() as conn:
+        _deal(conn, store_id=sid, imei=imei, phone="")
+        decl_id = int(db_decl.pending_rows(conn)[0]["id"])
+    _login(client, "admin", "123456")
+    html = client.get("/advance/pending").get_data(as_text=True)
+    assert f'name="phone_{decl_id}"' in html
+    assert f'value="phone:{decl_id}"' in html

@@ -62,6 +62,7 @@ _SCHEMA_STMTS = (
         report_id INTEGER,
         src TEXT NOT NULL DEFAULT 'deal',
         biz_type TEXT NOT NULL DEFAULT '',
+        phone TEXT NOT NULL DEFAULT '',
         biz_date TEXT NOT NULL,
         rebate_cents INTEGER NOT NULL DEFAULT 0,
         state TEXT NOT NULL DEFAULT '待核',
@@ -86,6 +87,9 @@ _SCHEMA_OBJECTS = ("imei_decl", "uniq_imei_decl_live", "idx_imei_decl_queue", "i
 _ADDED_COLUMNS = {
     # V0.4.06：这一单办的终端业务类型。老库补上后老数据是 ''。
     "biz_type": "TEXT NOT NULL DEFAULT ''",
+    # V0.4.13：客户手机号码。以前只在 deal_posts 上有，自报路（src='report'）
+    # 一直是空号，垫资页只能人工补。现在三条路都在声明上留一份快照。
+    "phone": "TEXT NOT NULL DEFAULT ''",
 }
 
 
@@ -185,6 +189,7 @@ def _insert_decl(
     deal_id: Optional[int],
     report_id: Optional[int],
     user_id: Optional[int],
+    phone: str = "",
 ) -> int:
     """落一条声明。
 
@@ -196,10 +201,10 @@ def _insert_decl(
     cur = conn.execute(
         """
         INSERT INTO imei_decl(
-            imei, store_id, own_store, deal_id, report_id, src, biz_type, biz_date,
+            imei, store_id, own_store, deal_id, report_id, src, biz_type, phone, biz_date,
             rebate_cents, state, advance_id, confirmed_by, confirmed_at, user_id, created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
         """,
         (
             str(imei).strip(),
@@ -209,6 +214,7 @@ def _insert_decl(
             int(report_id) if report_id else None,
             src,
             norm_biz(biz_type),
+            (phone or "").strip()[:20],
             biz_date.isoformat(),
             int(rebate),
             state,
@@ -230,6 +236,7 @@ def create_from_deal(
     deal_id: int,
     biz_date: date,
     biz_type: str = "",
+    phone: str = "",
     user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """触客成交生成（或复用）一条声明。
@@ -266,6 +273,7 @@ def create_from_deal(
         own_store=own_store,
         src=SRC_DEAL,
         biz_type=biz_type,
+        phone=phone,
         biz_date=biz_date,
         rebate=rebate,
         deal_id=deal_id,
@@ -284,6 +292,7 @@ def create_from_report(
     report_id: int,
     biz_date: Optional[date] = None,
     biz_type: str = "",
+    phone: str = "",
     user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """串码待办自报「已办 + 顺差让利」生成待核垫资（兜底路）。
@@ -307,6 +316,7 @@ def create_from_report(
         own_store=own_store,
         src=SRC_REPORT,
         biz_type=biz_type,
+        phone=phone,
         biz_date=biz_date or today_local(),
         rebate=rebate,
         deal_id=None,
@@ -434,6 +444,18 @@ def _retype_decl(conn: sqlite3.Connection, row: sqlite3.Row, biz_type: str) -> N
     )
 
 
+def _sync_phone(conn: sqlite3.Connection, row: sqlite3.Row, phone: str) -> None:
+    """触客那头改了号码，声明上的快照跟着改。
+
+    号码不是钱：改了不影响任何合计，也跟唯一索引无关，所以不看作废重开。
+    传空串 = 这次没给号码（别把已经登记好的抹掉）。
+    """
+    want = (phone or "").strip()[:20]
+    if not want or want == str(row["phone"] or ""):
+        return
+    conn.execute("UPDATE imei_decl SET phone=? WHERE id=?", (want, int(row["id"])))
+
+
 def sync_deal(
     conn: sqlite3.Connection,
     *,
@@ -443,6 +465,7 @@ def sync_deal(
     closed: bool,
     biz_date: date,
     biz_type: str = "",
+    phone: str = "",
     user_id: Optional[int] = None,
     own_store: str = "",
 ) -> Dict[str, Any]:
@@ -462,6 +485,7 @@ def sync_deal(
         same = bool(closed) and str(row["imei"]) == imei
         if same:
             _retype_decl(conn, row, biz_type)
+            _sync_phone(conn, row, phone)
             kept += 1
             continue
         void_decl(
@@ -482,8 +506,98 @@ def sync_deal(
         deal_id=deal_id,
         biz_date=biz_date,
         biz_type=biz_type,
+        phone=phone,
         user_id=user_id,
     )
+
+
+def _field(row: Any, name: str, default: Any = "") -> Any:
+    """从 sqlite3.Row / dict 里取一列；缺列或 NULL 都回 default。"""
+    try:
+        value = row[name]
+    except (KeyError, IndexError, TypeError):
+        return default
+    return default if value is None else value
+
+
+def _has_mobile(conn: sqlite3.Connection) -> bool:
+    """这套库有没有「移动串码回传」那张表。
+
+    它是辅助表（由 ``db_imei.import_mobile`` 落），老库和单测里不一定有；
+    缺了只影响号码兜底，不能让待核页整页打不开。
+    """
+    return (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='imei_mobile'"
+        ).fetchone()
+        is not None
+    )
+
+
+def _mobile_join(conn: sqlite3.Connection) -> tuple[str, str, str]:
+    """(JOIN 片段, 号码表达式, 「移动回传号码」输出列)。"""
+    if _has_mobile(conn):
+        return (
+            "LEFT JOIN imei_mobile mb ON mb.imei = d.imei",
+            "COALESCE(NULLIF(d.phone, ''), NULLIF(dp.phone, ''), NULLIF(mb.phone, ''))",
+            "mb.phone AS mobile_phone",
+        )
+    return ("", "COALESCE(NULLIF(d.phone, ''), NULLIF(dp.phone, ''))", "'' AS mobile_phone")
+
+
+def _resolve_phone(conn: sqlite3.Connection, row: Any) -> str:
+    """确认付款时究竟用哪个号码：声明快照 → 触客单 → 移动回传。
+
+    按「谁离这笔钱最近」排：声明上的快照就是确认那一刻的记录；自报路
+    （``src='report'``）没有触客单，只能靠移动回传兜底；三处都空就空着，
+    垫资页显示空号，管理员点「改」补——宁可留空也不猜一个号。
+    """
+    own = str(_field(row, "phone", "") or "").strip()
+    if own:
+        return own[:20]
+    deal_id = _field(row, "deal_id", None)
+    if deal_id:
+        deal = conn.execute(
+            "SELECT phone FROM deal_posts WHERE id=?", (int(deal_id),)
+        ).fetchone()
+        if deal is not None:
+            value = str(deal["phone"] or "").strip()
+            if value:
+                return value[:20]
+    imei = str(_field(row, "imei", "") or "").strip()
+    if imei and _has_mobile(conn):
+        mb = conn.execute("SELECT phone FROM imei_mobile WHERE imei=?", (imei,)).fetchone()
+        if mb is not None:
+            value = str(mb["phone"] or "").strip()
+            if value:
+                return value[:20]
+    return ""
+
+
+def set_decl_phone(conn: sqlite3.Connection, decl_id: int, phone: str) -> Dict[str, Any]:
+    """给**待核**的声明补/改号码（待核页行内那一个小输入框）。
+
+    只动 ``phone`` 一列：金额是生成时的快照，号码不是钱，改它不影响任何合计，
+    也不碰唯一索引（还是那一条声明）。
+    已确认的走不通（钱已经落在 ``advance_posts`` 上），返回
+    ``reason='not_pending'``，由页面说人话。
+    """
+    ensure(conn)
+    row = conn.execute("SELECT * FROM imei_decl WHERE id=?", (int(decl_id),)).fetchone()
+    if row is None:
+        return {"ok": False, "reason": "missing"}
+    if str(row["state"] or "") != DECL_PENDING:
+        return {"ok": False, "reason": "not_pending", "state": str(row["state"] or "")}
+    want = (phone or "").strip()[:20]
+    if not want:
+        return {"ok": False, "reason": "empty"}
+    if want == str(row["phone"] or ""):
+        return {"ok": True, "reason": "unchanged", "phone": want}
+    conn.execute(
+        "UPDATE imei_decl SET phone=? WHERE id=? AND state=?",
+        (want, int(decl_id), DECL_PENDING),
+    )
+    return {"ok": True, "phone": want}
 
 
 def confirm(
@@ -516,13 +630,8 @@ def confirm(
         if amount <= 0:
             skipped += 1
             continue
-        phone = ""
-        if row["deal_id"]:
-            deal = conn.execute(
-                "SELECT phone, model FROM deal_posts WHERE id=?", (int(row["deal_id"]),)
-            ).fetchone()
-            if deal is not None:
-                phone = str(deal["phone"] or "")
+        # 号码优先级：声明快照 → 触客单 → 移动回传（见 _resolve_phone）
+        phone = _resolve_phone(conn, row)
         model = ""
         todo = conn.execute("SELECT model FROM imei_todo WHERE imei=?", (str(row["imei"]),)).fetchone()
         if todo is not None:
@@ -572,22 +681,34 @@ def pending_rows(
         clause, ids = _store_in("d.store_id", store_ids)
         where.append(clause)
         params.extend(ids)
+    m_join, m_phone, m_col = _mobile_join(conn)
+    # 别名必须唯一：d.* 里已经有一列 phone，再写 ``AS phone`` 会让 sqlite3.Row
+    # 出现两个同名键，dict(row) 只认第一个（等于把兜底链悄悄丢掉）。
     sql = f"""
         SELECT d.*, st.name AS store_name, st.short_name AS store_short,
                t.model AS model, t.own_store AS todo_own_store,
-               dp.phone AS phone, dp.model AS deal_model,
+               {m_phone} AS phone_resolved,
+               d.phone AS decl_phone, dp.phone AS deal_phone, {m_col},
+               dp.model AS deal_model,
                ROUND(d.rebate_cents / 100.0, 2) AS rebate
         FROM imei_decl d
         LEFT JOIN stores st ON st.id = d.store_id
         LEFT JOIN imei_todo t ON t.imei = d.imei
         LEFT JOIN deal_posts dp ON dp.id = d.deal_id
+        {m_join}
         WHERE {' AND '.join(where)}
         ORDER BY d.biz_date, d.id
     """
     if limit:
         sql += " LIMIT ?"
         params.append(int(limit))
-    return [dict(row) for row in conn.execute(sql, params)]
+    out: List[Dict[str, Any]] = []
+    for row in conn.execute(sql, params):
+        item = dict(row)
+        # 页面只认 r.phone：这里是「谁离这笔钱最近」的最终答案（见 _resolve_phone）。
+        item["phone"] = str(item.pop("phone_resolved", "") or "").strip()
+        out.append(item)
+    return out
 
 
 def summary(conn: sqlite3.Connection, store_ids: Optional[Sequence[int]] = None) -> Dict[str, Any]:

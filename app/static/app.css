@@ -184,7 +184,7 @@ h2 { font-size: 15px; }
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
 label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 500; }
 input, select, textarea, button { font: inherit; color: var(--ink); }
-input:not([type]), input[type="text"], input[type="password"], input[type="number"], input[type="date"], input[type="month"], select, textarea {
+input:not([type]), input[type="text"], input[type="password"], input[type="number"], input[type="date"], input[type="month"], input[type="tel"], select, textarea {
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -2437,3 +2437,20 @@ table.report-grid tr.act-pending td.num { color: var(--muted); }
   .act-wrap.sheet-open form.imei-report-form .muted { margin: 0; }
   body.imei-sheet-lock { overflow: hidden; }
 }
+
+/* ===== 让利垫资待核：行内补号码 =====
+   号码是垫资付款唯一能对上人的字段，缺了就排在待核页上原地补，不用绕去别处。 */
+.pending-phone { display: flex; align-items: center; gap: 6px; }
+.pending-phone input {
+  width: 11ch;
+  padding: 4px 6px;
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+}
+.pending-phone button {
+  padding: 4px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.pending-phone input::placeholder { color: var(--err); opacity: .75; }
+table.data .phone-src { font-size: 11px; margin-top: 2px; }

@@ -110,6 +110,7 @@
                 {% for b in biz_choices %}<option value="{{ b }}">{{ b }}</option>{% endfor %}
               </select>
               <div class="muted biz-hint" hidden></div>
+              <input type="tel" name="phone" inputmode="numeric" maxlength="11" placeholder="客户手机号（顺差让利必填，11 位）">
               <input type="text" name="note" maxlength="200" placeholder="说明（选「其他」必填，其他情况可写受理单号）">
               <input type="file" name="photo" accept="image/png,image/jpeg,image/webp">
               <button type="submit">提交</button>
@@ -296,6 +297,7 @@
     var actEl = form.elements["action"];
     var bizEl = form.elements["biz_type"];
     var noteEl = form.elements["note"];
+    var phoneEl = form.elements["phone"];
     var hint = form.querySelector(".biz-hint");
     var isDone = !actEl || actEl.value === "已办";
     if (!isDone) {
@@ -307,6 +309,7 @@
       hint.hidden = true;
       hint.textContent = "";
       noteEl.placeholder = "说明（可选，如退货单号、调往哪家店、待核原因）";
+      if (phoneEl) { phoneEl.disabled = true; phoneEl.hidden = true; phoneEl.required = false; }
       return;
     }
     bizEl.hidden = false;
@@ -315,6 +318,11 @@
     var biz = bizEl.value;
     noteEl.required = biz === OTHER;
     var need = NEEDS.indexOf(biz) >= 0;
+    if (phoneEl) {
+      phoneEl.hidden = false;
+      phoneEl.disabled = false;
+      phoneEl.required = biz === "顺差让利";
+    }
     hint.hidden = !need;
     hint.textContent = need ? MSG : "";
     noteEl.placeholder = need
@@ -342,6 +350,14 @@
               e.preventDefault();
               alert(MSG);
               return;
+            }
+            if (biz === "顺差让利") {
+              var tel = ((form.elements["phone"] || {}).value || "").trim();
+              if (!/^\d{11}$/.test(tel)) {
+                e.preventDefault();
+                alert("顺差让利要填客户手机号，11 位数字（垫资付款要对得上人）");
+                return;
+              }
             }
           }
           var btn = form.querySelector('button[type="submit"]');

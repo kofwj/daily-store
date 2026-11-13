@@ -430,6 +430,7 @@ _SCHEMA_STMTS = (
         store_id INTEGER NOT NULL REFERENCES stores(id),
         action TEXT NOT NULL,
         biz_type TEXT NOT NULL DEFAULT '',
+        phone TEXT NOT NULL DEFAULT '',
         note TEXT NOT NULL DEFAULT '',
         photo TEXT NOT NULL DEFAULT '',
         user_id INTEGER,
@@ -610,6 +611,9 @@ _ADDED_COLUMNS = {
 # 自报表也要能给老库补列（生产上表已经建了，新版加了 biz_type）
 _REPORTS_ADDED_COLUMNS = {
     "biz_type": "TEXT NOT NULL DEFAULT ''",
+    # V0.4.13：自报登记手机号码。顺差让利要靠它把钱付给谁对上人，
+    # 所以「已办 + 顺差让利」这一条必填（见 add_report）。
+    "phone": "TEXT NOT NULL DEFAULT ''",
 }
 
 _COLUMNS = {
@@ -2834,6 +2838,7 @@ def add_report(
     biz_type: str = "",
     note: str = "",
     photo: str = "",
+    phone: str = "",
     user_id: Optional[int] = None,
     begin: bool = True,
 ) -> int:
@@ -2861,16 +2866,32 @@ def add_report(
                 f"「{biz}」这类业务系统记录不全，查到就能对上，查不到也算正常，"
                 "请务必上传受理单或截图（说明、截图任填一项）"
             )
+        # 顺差让利要给谁付款，全靠这个号码对上人。没号码的记账只能靠人工翻截图，
+        # 所以在这一条上必填（其他业务类型不涉及付钱，不强求）。
+        if biz == "顺差让利" and not (phone or "").strip():
+            raise ValueError("顺差让利要填客户手机号码（垫资付款靠它对上人）")
     else:
         biz = ""
     if begin:
         begin_immediate(conn)
     cur = conn.execute(
         """
-        INSERT INTO imei_reports(imei, store_id, action, biz_type, note, photo, user_id, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO imei_reports(
+            imei, store_id, action, biz_type, phone, note, photo, user_id, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (imei, store_id, action, biz, _text(note, 200), photo, user_id, _now()),
+        (
+            imei,
+            store_id,
+            action,
+            biz,
+            _text(phone, 20),
+            _text(note, 200),
+            photo,
+            user_id,
+            _now(),
+        ),
     )
     return int(cur.lastrowid or 0)
 
