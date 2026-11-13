@@ -986,7 +986,8 @@ def test_admin_sees_per_store_mark_counts(client):
     b = [m for m in marks.values() if m["open_n"] == 3][0]
     assert a["pending_n"] == 2 and a["ratio"] == 50 and not a["suspicious"]
     assert b["pending_n"] == 3 and b["ratio"] == 100 and b["suspicious"]
-    page = client.get("/imei").get_data(as_text=True)
+    # 2026-11-12 改版：各店标记台数从门店页搬到管理员工作台
+    page = client.get("/imei/admin").get_data(as_text=True)
     assert "各店标记台数" in page and "偏高" in page and "100%" in page
 
 
@@ -1592,8 +1593,9 @@ def test_review_page_lists_remote_pending_over_30_days(client):
     _mark(client, "860000000000611", "异网")
     _mark(client, "860000000000612", "异网")
 
-    main = client.get("/imei").get_data(as_text=True)
-    # 管理员子台账原来是 4 段带长解释的 <p>，V0.4.08 收成一行胶囊导航
+    # 管理员子台账原来是 4 段带长解释的 <p>，V0.4.08 收成一行胶囊导航，
+    # 2026-11-12 起这行导航整块搬到 /imei/admin
+    main = client.get("/imei/admin").get_data(as_text=True)
     assert "超 30 天未激活核实<b>1</b>" in main
 
     review = client.get("/imei/review")
@@ -1748,7 +1750,8 @@ def test_carryover_lists_all_rule_ver_1_even_unseen_and_exports(client):
     assert "860000000000722" in html and "860000000000723" in html
     assert "860000000000721" not in html
     assert "不在最新清单" in html and "宽限至 11-16" in html
-    assert "存量结转<b>2</b>" in client.get("/imei").get_data(as_text=True)
+    # 2026-11-12 改版：子台账导航整块搬到 /imei/admin
+    assert "存量结转<b>2</b>" in client.get("/imei/admin").get_data(as_text=True)
 
     csv_resp = client.get("/imei/export/carryover")
     assert csv_resp.status_code == 200
@@ -1819,11 +1822,17 @@ def test_todo_keeps_seen1_across_month_boundary(client, monkeypatch):
 
 
 def test_page_kpi_label_says_latest_list_not_month(client):
-    """P1-1：待办统计卡写「已售未办（最新清单内）」，不写「本月」。"""
+    """P1-1：待办统计卡只说「最新清单内」这一批，不写「本月」。
+    2026-11-12 改版后卡片换成 今天要办 / 待激活 / 已报待回传 / 待核对，
+    口径没变：页头写「清单截至 <asof>」，任何地方都不出现「本月」。
+    """
     _login(client)
     _upload(client, _row("860000000000903", ALPHA))
     page = client.get("/imei").get_data(as_text=True)
-    assert "已售未办（最新清单内）" in page
+    assert "清单截至" in page
+    for label in ("今天要办", "待激活", "已报待回传", "待核对"):
+        assert label in page
+    assert "本月" not in page
 
 
 def test_import_with_data_flag_column_sets_flag(client):
@@ -2183,7 +2192,7 @@ def test_carry_is_admin_only(client, monkeypatch):
         assert {r["imei"] for r in db_imei.carryover_rows(conn, sid, scope="grace")} == {imei}
 
 
-def test_carry_data_layer_refuses_non_admin():
+def test_carry_data_layer_refuses_non_admin(tmp_db):
     """数据层双保险：is_admin=False 直接 PermissionError，不留半条记录。"""
     with db.get_db() as conn:
         db_imei.ensure(conn)
@@ -2799,3 +2808,307 @@ def test_returned_pool_count_reported(client):
         res = db_imei.import_rows(conn, body.getvalue(), asof="2026-11-06", mark_seen=False)
     assert res["returned_pool"] == 1
     assert res["written"] == 1
+
+
+# ---------------- V0.4.11 退货回池的 3 个断口（2026-11-12 修） ----------------
+def _sid(conn, code="store-alpha"):
+    return conn.execute("SELECT id FROM stores WHERE code=?", (code,)).fetchone()["id"]
+
+
+def _decl(conn, imei, store_id, *, state="待核", biz_date="2026-11-02"):
+    conn.execute(
+        "INSERT INTO imei_decl(imei, store_id, biz_type, biz_date, state, created_at)"
+        " VALUES (?,?,?,?,?,?)",
+        (imei, store_id, "顺差让利", biz_date, state, "2026-11-02 10:00:00"),
+    )
+
+
+def _report(conn, imei, store_id, action, created_at):
+    conn.execute(
+        "INSERT INTO imei_reports(imei, store_id, action, created_at) VALUES (?,?,?,?)",
+        (imei, store_id, action, created_at),
+    )
+
+
+def test_returned_pool_resets_first_owner_activation(client):
+    """回池要把「首买主」的激活日清掉：不清的话第二任买家从第一天起就算逾期。
+
+    顺带把改动写进 `imei_mark_log`（action=退货回池），管理员查得到是谁改的。
+    """
+    _login(client)
+    _upload(client, _row("860000000003111", ALPHA), asof="2026-11-02")
+    with db.get_db() as conn:
+        conn.execute(
+            "UPDATE imei_todo SET user_type='异地异网', manual_activated_at='2026-11-03'"
+            " WHERE imei='860000000003111'"
+        )
+    body = _stock_csv_ret(
+        "860000000003111,示例市,示例市乙街vivo专卖店,Y600 Pro,移动顺差,2026-11-06,,1,已退货"
+    )
+    with db.get_db() as conn:
+        res = db_imei.import_rows(conn, body.getvalue(), asof="2026-11-06", mark_seen=False)
+        row = conn.execute(
+            "SELECT status, user_type, manual_activated_at FROM imei_todo"
+            " WHERE imei='860000000003111'"
+        ).fetchone()
+        log = conn.execute(
+            "SELECT action, old_user_type, old_activated_at, new_user_type"
+            " FROM imei_mark_log WHERE imei='860000000003111'"
+        ).fetchall()
+    assert res["returned_pool"] == 1
+    assert row["status"] == "未售"
+    assert row["user_type"] == "本地移动" and row["manual_activated_at"] == ""
+    assert len(log) == 1
+    assert log[0]["action"] == "退货回池"
+    assert log[0]["old_user_type"] == "异地异网"
+    assert log[0]["old_activated_at"] == "2026-11-03"
+    assert log[0]["new_user_type"] == "本地移动"
+
+
+def test_returned_pool_voids_live_decl(client):
+    """回池时旧的成交声明必须作废，否则 `no_live_decl_sql()` 把机器挡在池子外：
+    `returned_pool` 记了 1 台，池子和触客下拉里却看不见、选不了。"""
+    _login(client)
+    _upload(client, _row("860000000003112", ALPHA), asof="2026-11-02")
+    with db.get_db() as conn:
+        _decl(conn, "860000000003112", _sid(conn))
+        assert db_imei.pool_rows(conn) == []          # 有有效声明 → 池子里看不见
+    body = _stock_csv_ret(
+        "860000000003112,示例市,示例市乙街vivo专卖店,Y600 Pro,移动顺差,2026-11-06,,1,已退货"
+    )
+    with db.get_db() as conn:
+        res = db_imei.import_rows(conn, body.getvalue(), asof="2026-11-06", mark_seen=False)
+        decl = conn.execute(
+            "SELECT state, void_reason FROM imei_decl WHERE imei='860000000003112'"
+        ).fetchone()
+        pool = [r["imei"] for r in db_imei.pool_rows(conn)]
+    assert res["voided_decls"] == 1
+    assert decl["state"] == "作废" and "退货回池" in decl["void_reason"]
+    assert "860000000003112" in pool
+
+
+def test_second_sale_not_blocked_by_first_sale_report(client):
+    """二销看不见的根因：`MAX(id)` 取最新自报时没看售出日，首销的「已退货」压掉二销待办。"""
+    _login(client)
+    _upload(client, _row("860000000003113", ALPHA), asof="2026-11-02")
+    with db.get_db() as conn:
+        _report(conn, "860000000003113", _sid(conn), "已退货", "2026-11-03 10:00:00")
+    # 11-06 退货回池，11-15 第二次卖出
+    _import_stock(
+        client,
+        _stock_csv_ret("860000000003113,示例市,示例市乙街vivo专卖店,Y600 Pro,移动顺差,2026-11-06,,1,已退货"),
+        "2026-11-06",
+    )
+    _upload(
+        client,
+        f"860000000003113,{ALPHA},Y600 Pro,小李,2026-11-15,0,7,D0-2,确认未办,无,",
+        asof="2026-11-15",
+    )
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT status, sold_day FROM imei_todo WHERE imei='860000000003113'"
+        ).fetchone()
+        assert row["status"] == "已售" and row["sold_day"] == "2026-11-15"
+        rows = db_imei.todo_rows(conn, [_sid(conn)])
+    shown = [r for r in rows if r["imei"] == "860000000003113"]
+    assert shown, "二销的机器必须重新出现在门店待办里"
+    assert shown[0]["report_action"] in (None, "")
+
+
+# ---------------- 第二轮审查 4 处收口（2026-11-12 修） ----------------
+LEDGER_HEAD = (
+    "imei,门店,机型,营业员,售出日期,已售天数,剩余天数,阶段,状态,台账状态,证据强度,证据\n"
+)
+
+
+def _csv_ledger(*rows):
+    """双列 CSV：`状态` 给门店看（已售/在库），`台账状态` 给判定层看（已办/确认未办）。"""
+    return BytesIO((LEDGER_HEAD + "".join(r + "\n" for r in rows)).encode("utf-8"))
+
+
+def test_ledger_done_state_is_not_open_even_when_state_is_sold(client):
+    """`state` 存门店四值状态，`ledger_state` 存台账结论，只看 `t.state` 会漏。
+
+    `状态=已售 + 台账状态=已办` 的机器按老逻辑一路算「还要动手」，
+    门店页和页头都在催一台台账早就结案的机器。
+    """
+    _login(client)
+    resp = client.post(
+        "/imei/import",
+        data={
+            "csv_file": (
+                _csv_ledger(
+                    f"860000000003131,{ALPHA},Y600 Pro,小李,2026-10-29,4,3,D3-6,已售,已办,无,",
+                    f"860000000003132,{ALPHA},Y600 Pro,小李,2026-10-29,4,3,D3-6,已售,确认未办,无,",
+                ),
+                "todo.csv",
+            ),
+            "asof": "2026-11-02",
+            "import_mode": "incremental",
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert "入库 2 台" in resp.get_data(as_text=True)
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT state, ledger_state FROM imei_todo WHERE imei='860000000003131'"
+        ).fetchone()
+        rows = db_imei.todo_rows(conn, [_sid(conn)])
+        head = db_imei.summary(conn, [_sid(conn)])
+    assert row["state"] == "已售" and row["ledger_state"] == "已办"
+    assert [r["imei"] for r in rows] == ["860000000003132"]
+    assert head["open"] == 1
+
+
+def test_import_accepts_pos_sold_day_and_age_headers(client):
+    """台账工具导出的表头是 `POS售出日 / 账龄 / 账龄段`，`售出日期` 那套一个都认不上。
+
+    认不上的后果：`sold_day` 空、`age_days` 恒 0、`stage` 空 → 全部挤进
+    `todo_board()` 的 `band="未知"`，账龄排序也全乱。
+    """
+    _login(client)
+    body = BytesIO(
+        (
+            "imei,门店,机型,POS售出日,账龄,账龄段,状态\n"
+            f"860000000003133,{BETA},Y600 Pro,2026-11-05,12,D31-60,已售\n"
+        ).encode("utf-8")
+    )
+    with db.get_db() as conn:
+        res = db_imei.import_rows(conn, body.getvalue(), asof="2026-11-05", mark_seen=False)
+        row = conn.execute(
+            "SELECT sold_day, age_days, stage FROM imei_todo WHERE imei='860000000003133'"
+        ).fetchone()
+    assert res["written"] == 1
+    assert (row["sold_day"], row["age_days"], row["stage"]) == ("2026-11-05", 12, "D31-60")
+
+
+def test_import_normalizes_slash_sold_day(client):
+    """`2026/11/5` 必须归一成 `2026-11-05`。
+
+    `todo_rows()` 与 `_LATEST_R_CTE` 里是字符串比较 `r.created_at >= t.sold_day`；
+    `'2026-11-06 10:00:00' >= '2026/11/5'` 因为 `'-' < '/'` 恒为 False，
+    二销的自报守卫会整个失效。
+    """
+    _login(client)
+    body = BytesIO(
+        ("imei,门店,售出日,状态\n" f"860000000003134,{BETA},2026/11/5,已售\n").encode("utf-8")
+    )
+    with db.get_db() as conn:
+        db_imei.import_rows(conn, body.getvalue(), asof="2026-11-05", mark_seen=False)
+        row = conn.execute(
+            "SELECT sold_day FROM imei_todo WHERE imei='860000000003134'"
+        ).fetchone()
+    assert row["sold_day"] == "2026-11-05"
+
+
+def test_summary_reported_ignores_first_sale_report(client):
+    """`summary()` 的「已自报」也要带售出日守卫。
+
+    退货回池后再卖的机器，首销那条 `已退货` 自报还在（这是对的，历史不能删），
+    但不能再算成「这一轮门店已经报过」—— 否则页头把没报的当成报过。
+    """
+    _login(client)
+    _upload(client, _row("860000000003135", ALPHA), asof="2026-11-02")
+    with db.get_db() as conn:
+        _report(conn, "860000000003135", _sid(conn), "已退货", "2026-11-03 10:00:00")
+        assert db_imei.summary(conn, [_sid(conn)])["reported"] == 1
+    _import_stock(
+        client,
+        _stock_csv_ret(
+            f"860000000003135,示例市,{BETA},Y600 Pro,移动顺差,2026-11-06,,1,已退货"
+        ),
+        "2026-11-06",
+    )
+    _upload(
+        client,
+        f"860000000003135,{ALPHA},Y600 Pro,小李,2026-11-15,0,7,D0-2,确认未办,无,",
+        asof="2026-11-15",
+    )
+    with db.get_db() as conn:
+        assert db_imei.summary(conn, [_sid(conn)])["reported"] == 0
+
+
+def test_admin_workbench_rejects_store_user(client):
+    """2026-11-12：管理员工作台从门店页拆出来，门店账号进不去。"""
+    _login(client)
+    _upload(client, _row("860000000003201", ALPHA))
+    _login(client, "alpha")
+    resp = client.get("/imei/admin")
+    assert resp.status_code == 302
+    followed = client.get("/imei/admin", follow_redirects=True).get_data(as_text=True)
+    assert "需要管理员权限" in followed
+    assert "导入清单" not in followed and "各店标记台数" not in followed
+
+
+def test_store_page_keeps_only_report_action(client):
+    """门店页只剩「今天该办哪几台 + 自报」；导入/台账/标记台数都在 /imei/admin。"""
+    _login(client)
+    _upload(client, _row("860000000003202", ALPHA))
+    _login(client, "alpha")
+    page = client.get("/imei").get_data(as_text=True)
+    assert "860000000003202" in page  # 门店自己的机器照旧看得到
+    for gone in ("导入清单", "各店标记台数", "导出结转", "管理员工作台", "/imei/import"):
+        assert gone not in page
+
+    _login(client)
+    admin = client.get("/imei/admin").get_data(as_text=True)
+    for kept in ("导入清单", "各店标记台数", "回门店页"):
+        assert kept in admin
+
+
+# ------------------------------------- 2026-11-13 第四轮外部审查 3 条的回归
+
+def test_pending_row_never_renders_none_days(client):
+    """待激活行的「已售」列不能渲染成字面的「None 天」。
+
+    `effective_days_asof()` 对异地异网未激活的行返回 `age_eff=None`（起算日确实
+    算不出来），旧模板无条件写 `{{ row.age_eff }} 天`，页面就出现了「None 天」。
+    现在模板退回账龄（`row.age`），账龄也认不出才给破折号。
+    """
+    _login(client)
+    _upload(client, _row("860000000000921", ALPHA))
+    _mark(client, "860000000000921", "异网")
+    page = client.get("/imei").get_data(as_text=True)
+    assert "None 天" not in page
+    assert "等激活" in page          # 真进了「待激活」折叠区
+    assert "860000000000921" in page
+
+
+def test_legacy_rule_ver_1_row_never_renders_none_days(client):
+    """存量老行（rule_ver=1、没有激活日）同样不能显示「None 天」。
+
+    这一类的 age_eff 也是 None（剩余天数按清单冻结），但账龄照常现算，页面上要
+    显示「已售 N 天」而不是空值。
+    """
+    _login(client)
+    _upload(client, _row("860000000000922", ALPHA))
+    with db.get_db() as conn:
+        conn.execute(
+            "UPDATE imei_todo SET rule_ver=1, manual_activated_at='' WHERE imei=?",
+            ("860000000000922",),
+        )
+    page = client.get("/imei").get_data(as_text=True)
+    assert "None 天" not in page
+    assert "860000000000922" in page
+    assert "剩" in page or "宽限" in page
+
+
+def test_admin_first_card_excludes_pending(client):
+    """管理员首卡与门店页「今天要办」必须同一个数：待激活不混进来。
+
+    旧版管理员首卡取 `board["urge"]`（= active_rows + pending_rows）。一家店只要
+    有一台「异地异网待激活」，门店页显示「今天要办 0 / 待激活 1」，管理员页却显示
+    「要催 1」，两个页面对不上。`board["urge"]` 本身的口径（主表行数）没变。
+    """
+    _login(client)
+    _upload(client, _row("860000000000931", ALPHA), _row("860000000000932", ALPHA))
+    _mark(client, "860000000000931", "异网")
+    with db.get_db() as conn:
+        board = db_imei.todo_board(conn, None)
+    assert len(board["active_rows"]) == 1
+    assert len(board["pending_rows"]) == 1
+    assert board["urge"] == 2
+    admin = client.get("/imei/admin").get_data(as_text=True)
+    assert "今天要办" in admin
+    assert "1 台待激活" in admin

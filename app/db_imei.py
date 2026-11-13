@@ -33,8 +33,15 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .db_core import _now, begin_immediate, today_local
 from .db_core import sql_in as _store_in
-from .db_decl import ensure as _ensure_decl
-from .db_decl import no_live_decl_sql
+from .db_decl import (
+    DECL_VOID,
+    live_decl_sql,
+    no_live_decl_sql,
+    void_decl,
+)
+from .db_decl import (
+    ensure as _ensure_decl,
+)
 
 # 门店能自报的三种结论。前两种是「有答案」，待核是「我还得问」。
 # 「非本店」2026-11-09 用户拍板下线：新报不接受，老记录仍原样显示/导出。
@@ -150,6 +157,79 @@ def effective_days(
     remain = int(row.get("remain_days") or 0)
     return age, remain, ("待激活" if state == "待激活" else str(row.get("stage") or "") or _stage_of(age)), ""
 
+
+def effective_days_asof(
+    row: Dict[str, Any], asof: str = "",
+) -> Tuple[Optional[int], Optional[int], str, str, bool]:
+    """`effective_days()` 的 asof 版：(生效天数, 剩余天数, 待激活/已激活, 起算日, 是否冻结)。
+
+    第 5 项 `frozen` = 剩余天数用的是清单里的冻结值（存量宽限），页面要据此显示
+    「剩余天数不随日期递减」，别把它当成实时算出来的数。
+
+    与 `effective_days()` 的差别只有日期来源：这里按 `asof`（默认今天）算，
+    管理员回放/补跑时不会跟实时日子打架。分支顺序与 `summary()` 里那段
+    `remain_eff` SQL 逐条对齐 —— 页面「剩余/逾期」只认这一个口径：
+
+      1. 异地异网且没填激活日      -> 待激活，剩余天数给 None（不算逾期）
+      2. `rule_ver<=1` 且没填激活日 -> 存量，用清单里的 `remain_days` 冻结值
+                                      （页头承诺「剩余天数不随日期递减」）
+      3. 算得出起算日              -> `ACT_WINDOW_DAYS - 生效天数`
+      4. 都算不出                  -> 剩余天数给 None（页面显示「算不出」），不冒充 0
+
+    生效天数（`age_eff`）：有手动激活日就从激活日算，否则 `rule_ver>=2` 才从
+    售出日算；存量（`rule_ver=1`）没有激活日时算不出，给 None。注意这是
+    **页面显示口径**，和 `todo_board()` 行上按 `sold_day` 现算的 `age`（账龄，
+    用来分 D0-2/D7-30 档）不是一回事：存量机器的账龄照常走，剩余天数仍冻结。
+    """
+    base = _parse_day(asof) or today_local()
+    act_raw = str(row.get("manual_activated_at") or "").strip()
+    act = _parse_day(act_raw)
+    pending = (
+        norm_user_type(str(row.get("user_type") or "")) == USER_REMOTE and not act_raw
+    )
+    if pending:
+        return None, None, "待激活", "", False
+
+    try:
+        rule_ver = int(row.get("rule_ver") or 1)
+    except (TypeError, ValueError):
+        rule_ver = 1
+    frozen = _int_or_zero(row.get("remain_days"))
+
+    age_eff: Optional[int] = None
+    start = ""
+    if act:
+        age_eff, start = max(0, (base - act).days), act.isoformat()
+    elif rule_ver >= 2:
+        sold = _parse_day(str(row.get("sold_day") or ""))
+        if sold:
+            age_eff, start = max(0, (base - sold).days), sold.isoformat()
+
+    if rule_ver <= 1 and not act_raw:
+        # 存量宽限：剩余天数按清单冻结，不随今天递减
+        return age_eff, frozen, _act_state(row), "", True
+    if age_eff is not None:
+        return age_eff, ACT_WINDOW_DAYS - age_eff, _act_state(row), start, False
+    # 起算日算不出来（rule_ver>=2 却没 sold_day，或激活日写了但认不出）：
+    # 剩余天数给 None，页面显示「算不出（售出日缺）」。绝不能拿清单里的
+    # remain_days（整数 0）冒充「剩 0 天」—— 那会让门店以为窗口已经用完了。
+    return None, None, _act_state(row), "", False
+
+
+def _int_or_zero(value: Any) -> int:
+    """把可能为 None / 空串 / 脏文本的整数列读成 int，读不出按 0。"""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _act_state(row: Dict[str, Any]) -> str:
+    """行上的「待激活 / 已激活 / 空」：`activation_state()` 的按行取值版。"""
+    return activation_state(
+        str(row.get("user_type") or ""), str(row.get("manual_activated_at") or "")
+    )
+
 def norm_biz_type(value: str) -> str:
     """业务类型归一：去空格、全角括号转半角、别名归到标准写法，再比对。"""
     text = (value or "").strip().replace("（", "(").replace("）", ")")
@@ -250,9 +330,61 @@ STATUS_STOCK = "未售"
 # 台账侧的「已退货」：机器卖出去又退回来了，物理上回到库存。
 # 它再出现在最新库存快照里时，允许把 status 从「已售」改回「未售」（见 import_rows 的退货回池）。
 STATE_RETURNED = "已退货"
+# 台账侧认「合约已经办完」的两种结论。POS 侧硬证据，不是门店自报。
+# 用途：这次没问过移动的机器，别因为账龄大就把已办完的重新压回门店催（见 todo_board）。
+LEDGER_DONE_STATES = ("已办", "疑似已办")
+
+# 移动串码系统导出的状态。口径由 2026-11-12 的 2614 行真实导出核定。
+# 这三个状态决定「这台机器还要不要门店去办」，跟库里的 status（已售/未售，那是 POS 口径）不是一回事。
+#
+# 【重要】只有「状态」字段是权威。销售时间 / 是否激活 / 号码 三个字段与状态只是相关，不是定义：
+#   已售   690 台里 157 台「未激活且无号码」，仍算已售；
+#   待售   1231 台里 18 台有号码且激活、1 台有销售时间，仍算待售；
+#   退省库 688 台里 7 台未激活无号码，仍算退省库。
+# 所以 mobile_verdict() 只看 state，不要反推。早先 18 行小样本得出的「三态 × 时间字段一一对应」是巧合。
+MOBILE_ON_SALE = "待售"      # 机器还在移动库存里，合约没办 → 要催
+MOBILE_RETURNED = "退省库"   # 退回去了，移动侧终态 → 结案（不是门店动作）
+MOBILE_SOLD = "已售"         # 合约已办完 → 结案
+MOBILE_STATES = (MOBILE_ON_SALE, MOBILE_RETURNED, MOBILE_SOLD)
+
+# 移动侧已经给出结论的两种：已售（合约办完）、退省库（退回去了）。
+# 只有「待售」还需要门店动手 —— 判断「POS 有售出 AND 移动=待售」就靠这个元组。
+MOBILE_CLOSED = (MOBILE_SOLD, MOBILE_RETURNED)
+
+# 移动那边的写法不一定跟样本一模一样（空格、全角、多字后缀），比对前先归一。
+_MOBILE_STATE_ALIAS = {
+    "待售": MOBILE_ON_SALE,
+    "待销售": MOBILE_ON_SALE,
+    "在售": MOBILE_ON_SALE,
+    "库存": MOBILE_ON_SALE,
+    "退省库": MOBILE_RETURNED,
+    "退省库存": MOBILE_RETURNED,
+    "省库退货": MOBILE_RETURNED,
+    "已售": MOBILE_SOLD,
+    "已销售": MOBILE_SOLD,
+    "已售出": MOBILE_SOLD,
+
+# 已知但故意不收的枚举（2026-11-12 真实导出里出现过）：
+#   维修     3 台 —— 机器送修，不在门店手上，但也不等于合约已办
+#   调拨在途 2 台 —— 在店里之间路上
+# 两者的共同点是「非终态」：既不能结案，也不该催门店。所以不映射，
+# 让 mobile_verdict() 返回「未查」（不下结论），并让 import_mobile 的
+# unknown_states 每次导入都报出来，等人确认语义后再决定怎么归。
+}
+
+
+def norm_mobile_state(value: str) -> str:
+    """移动状态归一成三种；认不出返回原值（保留原样，不猜）。"""
+    text = re.sub(r"\s+", "", str(value or ""))
+    if not text:
+        return ""
+    return _MOBILE_STATE_ALIAS.get(text, text)
 
 # 账上店名 → 门店档案店名（改名 / 别名）。
 # 空着是故意的：改名要人确认，代码不替人猜（见「待确认映射表」）。
+# 已确认**不是**别名、必须保持分开的（2026-11-12 用户拍板，别再"顺手合并"）：
+#   TZ南通中南大有镜vivo体验店  ≠  崇川大有镜（库里 id=8）—— 两家店
+# 所以那 16 台保持 `store_id IS NULL`，按待建店/未匹配门店单独成组。
 # 填法：{"TZ南通某某vivo体验店": "TZ南通现有店vivo体验店"}
 ALIASES: Dict[str, str] = {}
 
@@ -382,6 +514,49 @@ _SCHEMA_STMTS = (
     "CREATE UNIQUE INDEX IF NOT EXISTS uniq_imei_transfer_open ON imei_transfer(imei) WHERE cancelled_at IS NULL",
     "CREATE INDEX IF NOT EXISTS idx_imei_transfer_to ON imei_transfer(to_store_id, cancelled_at)",
     "CREATE INDEX IF NOT EXISTS idx_imei_transfer_date ON imei_transfer(biz_date)",
+    """
+    CREATE TABLE IF NOT EXISTS imei_mobile (
+        imei TEXT PRIMARY KEY,
+        state TEXT NOT NULL DEFAULT '',
+        usable TEXT NOT NULL DEFAULT '',
+        frozen TEXT NOT NULL DEFAULT '',
+        activated TEXT NOT NULL DEFAULT '',
+        act_day TEXT NOT NULL DEFAULT '',
+        act_city TEXT NOT NULL DEFAULT '',
+        sale_day TEXT NOT NULL DEFAULT '',
+        phone TEXT NOT NULL DEFAULT '',
+        brand TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL DEFAULT '',
+        cat TEXT NOT NULL DEFAULT '',
+        subcat TEXT NOT NULL DEFAULT '',
+        store_code TEXT NOT NULL DEFAULT '',
+        store_name TEXT NOT NULL DEFAULT '',
+        city TEXT NOT NULL DEFAULT '',
+        warehouse TEXT NOT NULL DEFAULT '',
+        last_op TEXT NOT NULL DEFAULT '',
+        query_day TEXT NOT NULL DEFAULT '',
+        batch TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_imei_mobile_store ON imei_mobile(store_code)",
+    "CREATE INDEX IF NOT EXISTS idx_imei_mobile_state ON imei_mobile(state, query_day)",
+    # 「这批问了哪些串号」——`imei_mobile` 只存回来有记录的，查不到的串号没有行，
+    # 所以光看 `imei_mobile` 分不清「移动没有这台」和「这次根本没问它」。
+    # 两者处置相反（前者=串码另用要剔除，后者=还没查要等），必须记下问过谁。
+    # hit=1 移动返回了记录；hit=0 问了但那份导出里没这台。
+    """
+    CREATE TABLE IF NOT EXISTS imei_mobile_query (
+        imei TEXT NOT NULL,
+        batch TEXT NOT NULL,
+        query_day TEXT NOT NULL DEFAULT '',
+        hit INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (imei, batch)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_imei_mobile_query_batch ON imei_mobile_query(batch, hit)",
+    "CREATE INDEX IF NOT EXISTS idx_imei_mobile_query_imei ON imei_mobile_query(imei)",
 )
 
 # ensure() 的快速路径要认全这些对象；新增审计表时同步加进来，否则老库会漏建。
@@ -405,6 +580,12 @@ _SCHEMA_OBJECTS = (
     "uniq_imei_transfer_open",
     "idx_imei_transfer_to",
     "idx_imei_transfer_date",
+    "imei_mobile",
+    "idx_imei_mobile_store",
+    "idx_imei_mobile_state",
+    "imei_mobile_query",
+    "idx_imei_mobile_query_batch",
+    "idx_imei_mobile_query_imei",
 )
 
 # 老库上补列（表是懒建的，之前跑过的库没有这些列）
@@ -416,6 +597,10 @@ _ADDED_COLUMNS = {
     "pos_biz_type": "TEXT NOT NULL DEFAULT ''",
     "data_flag": "TEXT NOT NULL DEFAULT ''",
     "user_type": "TEXT NOT NULL DEFAULT '本地移动'",
+    # 台账侧的流程结论（确认未办 / 已办 / 已退货 / 待观察 / 待核 / 疑似已办）。
+    # `state` 存的是门店看的四值状态（在库/已售/待激活/去向不明），两者不能合用一列：
+    # 判定层要「已办」，门店要「在库/已售」。空串 = 这份 CSV 没带台账结论，退回看 state。
+    "ledger_state": "TEXT NOT NULL DEFAULT ''",
     "manual_activated_at": "TEXT NOT NULL DEFAULT ''",
     # 1 = 2026-11 存量宽限（用库里 remain_days，不随今天跳变）；2 = 新导入，按起算日+7 实时算。
     # 老库补这一列时所有存量自动是 1，正是要的效果。
@@ -433,20 +618,73 @@ _COLUMNS = {
     "own_store": ("own_store", "库存登记门店", "库存门店"),
     "model": ("model", "机型", "商品(SKU)"),
     "sp": ("sp", "营业员", "顾问"),
-    "day": ("day", "sold_day", "售出日期", "开单日期", "库存日期"),
-    "age": ("age", "age_days", "已售天数"),
+    "day": ("day", "sold_day", "售出日期", "开单日期", "库存日期", "售出日", "POS售出日"),
+    "age": ("age", "age_days", "已售天数", "账龄"),
     "remain": ("remain", "remain_days", "剩余天数"),
-    "stage": ("stage", "阶段"),
+    "stage": ("stage", "阶段", "账龄段"),
     "state": ("state", "状态"),
     "strength": ("strength", "证据强度"),
     "evidence": ("evidence", "证据"),
     "pos_type": ("pos_biz_type", "POS业务类型", "业务类型", "合约类型", "合约名称"),
     "data_flag": ("data_flag", "数据标记"),
-    # 台账状态（确认未办 / 已办 / 已退货 …）：只在需要判断「退货回池」时由调用方带上，不入库。
+    # 台账状态（确认未办 / 已办 / 已退货 / 待观察 …）：写进 imei_todo.ledger_state。
+    # 与 `state` 分工——`state` 是门店看的四值状态（在库/已售/待激活/去向不明），
+    # `ledger_state` 才是在跟台账的流程结论；判定层「台账已办就不催」读的是这一列。
     "ledger_state": ("ledger_state", "台账状态"),
     "tag": ("串码标签", "标签"),
     "city": ("市", "城市"),
 }
+# 移动串码系统导出的列名 → 表字段。中英文都认，方便对方导出时列名不统一。
+# 完整的 39 列样本见 `南通待查_20261111/给移动的查询说明.md`；这里只挑判定要用的。
+_MOBILE_COLUMNS = {
+    "imei": ("串号", "imei", "IMEI", "串码", "终端串号"),
+    "state": ("状态", "state", "串码状态", "库存状态"),
+    "usable": ("是否可用",),
+    "frozen": ("是否冻结",),
+    "activated": ("是否激活",),
+    "act_day": ("入网时间", "激活时间", "激活日期"),
+    "act_city": ("入网地市",),
+    "sale_day": ("销售时间", "售出时间", "销售日期", "售出日期"),
+    "phone": ("号码", "电话号码", "手机号码"),
+    "brand": ("品牌",),
+    # 商品名称带配置（"X500 Pro全网通(12+512G)"），跟台账的机型对得上；型号只有代号
+    "model": ("商品名称", "型号", "机型"),
+    "cat": ("商品大类",),
+    "subcat": ("商品子类",),
+    "store_code": ("归属组织机构编码", "组织机构编码", "营业厅编号", "门店编码"),
+    "store_name": ("归属组织机构名称", "组织机构名称", "营业厅名称", "门店名称"),
+    "city": ("地市名称", "地市", "所属地市"),
+    "warehouse": ("仓库名称", "仓库"),
+    "last_op": ("最后操作时间", "最后操作日期"),
+}
+
+# 移动导出里这些都可能是 "2026-11-05 04:04:05"，库里只留日期部分
+_MOBILE_DAY_FIELDS = ("act_day", "sale_day")
+
+
+# 移动导出里日期可能是 "2026-11-05 04:04:05" / "2026/11/5"，取年月日归一成 ISO。
+_MOBILE_DAY_RE = re.compile(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})")
+
+
+def _day_text(value: str) -> str:
+    """只留日期部分：认 2026-11-05、2026/11/5、2026.11.5 后面跟不跟时间都行。"""
+    text = str(value or "").strip()
+    m = _MOBILE_DAY_RE.search(text)
+    if m:
+        return "%04d-%02d-%02d" % (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    return text[:10]
+
+
+def _sold_day_text(value: Any) -> str:
+    """售出日入库前统一成 `YYYY-MM-DD`；认不出的原样保留（不截断，交给 `_days_between` 判未知）。
+
+    必须归一的理由：`todo_rows()` 与 `_LATEST_R_CTE` 里写的是字符串比较
+    `r.created_at >= t.sold_day`。CSV 里给 `2026/11/5` 时 `'-' < '/'` 恒成立条件
+    反掉了，二销的自报过滤会失效。`2026-11-05 10:00` 这类带时间的也一并收到日期。
+    """
+    text = _text(value, 20)
+    return _day_text(text) if _MOBILE_DAY_RE.search(text) else text
+
 
 
 def find_stock_imei(conn: sqlite3.Connection, query: str) -> Optional[Dict[str, Any]]:
@@ -838,6 +1076,16 @@ def _looks_out_of_scope(name: str, city: str = "") -> bool:
     return any(hint in (name or "") for hint in _OUT_OF_SCOPE_HINT)
 
 
+
+def _ledger_state_sql(alias: str = "t") -> str:
+    """「这台的流程结论是什么」的 SQL 写法：台账结论优先，空则退回 `state`。
+
+    `state` 存的是门店看的四值状态（在库/已售/待激活/去向不明），台账结论
+    （确认未办 / 已办 / 已退货 …）落在 `ledger_state`。ledger 模式导进来时
+    `state` 一律是「已售」，只看 `state` 会把「已办」的机器继续当待办压给门店。
+    """
+    return "COALESCE(NULLIF(%s.ledger_state, ''), %s.state)" % (alias, alias)
+
 def _pick(header: Sequence[str], names: Sequence[str]) -> Optional[str]:
     """按候选列名找真实列名（容忍 BOM / 空格 / 大小写）。"""
     normalized = {(h or "").strip().lower(): h for h in header}
@@ -861,6 +1109,46 @@ def _resolve_store(
     if store_id is None and key != raw:
         store_id = index.get(raw) or index.get(_norm_store_name(raw))
     return store_id, (cities.get(store_id, "") if store_id else "")
+
+
+def _reset_returned_pool(conn: sqlite3.Connection, imei: str, now: str) -> int:
+    """退货回池时把「首买主」的痕迹清掉，返回作废掉的成交声明台数。
+
+    只清两样，都是 V0.4.11「退货回池」漏掉的断口（2026-11-12 补）：
+    - `user_type` 回「本地移动」、`manual_activated_at` 清空：激活日是第一任买家的，
+      不重置的话第二任买家永远被锁在首买主的起算日上，逾期从第一天就开始算；
+    - 未作废的 `imei_decl` 作废掉：声明还在，`pool_rows()` / `pool_picker()` /
+      `find_stock_imei()` 里的 `no_live_decl_sql()` 就把这台挡在池子外 ——
+      `returned_pool` 记了 1 台，池子和触客下拉里却看不见、选不了。
+    改客户的动作用 `imei_mark_log` 留审计（action=退货回池，user_id 为空 = 系统），
+    与门店手动标记同一张表，管理员查得到是谁改的。
+    """
+    row = conn.execute(
+        "SELECT store_id, user_type, manual_activated_at FROM imei_todo WHERE imei=?",
+        (imei,),
+    ).fetchone()
+    if row is not None:
+        old_type = str(row["user_type"] or "")
+        old_act = str(row["manual_activated_at"] or "")
+        if old_type != USER_DEFAULT or old_act:
+            conn.execute(
+                "UPDATE imei_todo SET user_type=?, manual_activated_at='', updated_at=?"
+                " WHERE imei=?",
+                (USER_DEFAULT, now, imei),
+            )
+            conn.execute(
+                "INSERT INTO imei_mark_log(imei, store_id, user_id, action,"
+                " old_user_type, old_activated_at, new_user_type, new_activated_at,"
+                " created_at) VALUES (?, ?, NULL, '退货回池', ?, ?, ?, '', ?)",
+                (imei, row["store_id"], old_type, old_act, USER_DEFAULT, now),
+            )
+    voided = 0
+    for decl in conn.execute(
+        "SELECT * FROM imei_decl WHERE imei=? AND state<>?", (imei, DECL_VOID)
+    ).fetchall():
+        void_decl(conn, decl, reason="退货回池，自动作废")
+        voided += 1
+    return voided
 
 
 def import_rows(
@@ -909,6 +1197,7 @@ def import_rows(
     rows_total = 0
     written = 0
     returned_pool = 0   # 因「台账=已退货 + 出现在最新快照」从已售回到未售的台数
+    voided_decls = 0    # 回池时作废掉的旧成交声明台数（见 _reset_returned_pool）
     bad_imei = 0
     skipped_city = 0
     unmapped: Dict[str, int] = {}
@@ -943,7 +1232,7 @@ def import_rows(
         if _looks_out_of_scope(dispatch, city):
             skipped_city += 1
             continue
-        # 库存导出往往滞后于 POS 销售：已在跟台账里的已售机器（status='已售' AND seen=1）绝不被未售库存覆盖回池子。
+        # 库存导出往往滞后于 POS 销售：已在在跟台账里的已售机器（status='已售' AND seen=1）绝不被未售库存覆盖回池子。
         #
         # 唯一例外（2026-11-12 用户拍板）：**台账状态=已退货，且它又出现在这份最新快照里** ——
         # 机器卖出去又退回来了，物理上回到库存，得允许改回「未售」才能重新派给门店。
@@ -978,14 +1267,16 @@ def import_rows(
                 "SELECT status FROM imei_todo WHERE imei=?", (imei,)
             ).fetchone()
             prev_sold = bool(prev and prev["status"] == STATUS_SOLD)
+        # rule_ver 故意不在 UPSERT 里更新：老行永远保持 1，重导不能把存量升成 2，
+        # 否则 11-16 宽限当天就失效、27 台会跳成逾期。只有全新 IMEI 的 INSERT 写 2。
         cur = conn.execute(
             f"""
             INSERT INTO imei_todo(
                 imei, status, store_id, sold_store, own_store, dispatch_store,
                 model, sp, sold_day, age_days, remain_days,
-                stage, state, strength, evidence, pos_biz_type, data_flag,
+                stage, state, ledger_state, strength, evidence, pos_biz_type, data_flag,
                 asof, rule_ver, seen, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
             ON CONFLICT(imei) DO UPDATE SET
                 status=excluded.status, store_id=excluded.store_id,
                 sold_store=excluded.sold_store, own_store=excluded.own_store,
@@ -993,7 +1284,8 @@ def import_rows(
                 model=excluded.model, sp=excluded.sp,
                 sold_day=excluded.sold_day, age_days=excluded.age_days,
                 remain_days=excluded.remain_days, stage=excluded.stage,
-                state=excluded.state, strength=excluded.strength,
+                state=excluded.state, ledger_state=excluded.ledger_state,
+                strength=excluded.strength,
                 evidence=excluded.evidence, pos_biz_type=excluded.pos_biz_type{data_flag_set},
                 asof=excluded.asof,
                 seen=1, updated_at=excluded.updated_at{conflict_guard}
@@ -1007,11 +1299,12 @@ def import_rows(
                 dispatch,
                 _text(row.get(cols["model"])) if cols["model"] else "",
                 _text(row.get(cols["sp"]), 40) if cols["sp"] else "",
-                _text(row.get(cols["day"]), 20) if cols["day"] else "",
+                _sold_day_text(row.get(cols["day"])) if cols["day"] else "",
                 _int(row.get(cols["age"])) if cols["age"] else 0,
                 _int(row.get(cols["remain"])) if cols["remain"] else 0,
                 _text(row.get(cols["stage"]), 20) if cols["stage"] else "",
                 _text(row.get(cols["state"]), 20) if cols["state"] else "",
+                _text(row.get(cols["ledger_state"]), 20) if cols["ledger_state"] else "",
                 _text(row.get(cols["strength"]), 20) if cols["strength"] else "",
                 _text(row.get(cols["evidence"]), 200) if cols["evidence"] else "",
                 _text(row.get(cols["pos_type"]), 40) if cols["pos_type"] else "",
@@ -1025,6 +1318,7 @@ def import_rows(
             written += 1
             if returned_back and prev_sold:
                 returned_pool += 1
+                voided_decls += _reset_returned_pool(conn, imei, now)
             if not store_id:
                 unmapped[dispatch or "(空)"] = unmapped.get(dispatch or "(空)", 0) + 1
     return {
@@ -1039,7 +1333,646 @@ def import_rows(
         "incremental": not mark_seen,
         # 「退货回池」生效台数（台账=已退货 + 出现在最新快照 → 已售改回未售）
         "returned_pool": returned_pool,
+        # 回池时作废掉的旧声明台数（不作废的话，池子 / 触客下拉里永远看不见这台）
+        "voided_decls": voided_decls,
     }
+
+def _mobile_delimiter(sample: str) -> str:
+    """移动导出多是 TSV（Excel 另存也可能是 CSV），首行有制表符就按 tab 切。"""
+    head = sample.split("\n", 1)[0]
+    return "\t" if "\t" in head else ","
+
+
+def import_mobile(
+    conn: sqlite3.Connection,
+    data: bytes,
+    *,
+    query_day: str = "",
+    batch: str = "",
+    expected: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
+    """导入一份移动串码系统导出，按串号 upsert 到 `imei_mobile`。
+
+    这张表存的是**查询结果**，不是全量台账：一次问一批串号，回来多少存多少。
+    查不到的串号不留记录 —— 所以「表里没有」不等于「移动那边没有这台」，
+    只是「这次没问它」。判断某台结没结案前先确认它被问过（看 `query_day`）。
+
+    同一个串号重复导入按最新一次覆盖；某次导出缺了某列，那一列保留库里的旧值
+    （不能因为这次没给「号码」就把上次查到的号码清空）。
+
+    格式：TSV / CSV 都认，列名用中文原名即可（别名见 `_MOBILE_COLUMNS`）。
+    """
+    ensure(conn)
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = data.decode("gbk", errors="replace")
+    reader = csv.DictReader(io.StringIO(text), delimiter=_mobile_delimiter(text))
+    header = reader.fieldnames or []
+    cols = {key: _pick(header, names) for key, names in _MOBILE_COLUMNS.items()}
+    if not cols["imei"]:
+        raise ValueError("导出里找不到「串号」列（也认 imei / IMEI / 串码）")
+
+    stamp = (query_day or "").strip() or today_local().isoformat()
+    label = (batch or "").strip() or stamp
+    now = _now()
+    # 只更新本次真有值的列：本次导出没带「最后操作时间」，就别把上次的抹掉
+    present = [k for k in _MOBILE_COLUMNS if cols.get(k)]
+    insert_cols = ["imei", *[k for k in present if k != "imei"]]
+    update_set = (
+        ", ".join(f"{k}=excluded.{k}" for k in insert_cols if k != "imei")
+        or "imei=excluded.imei"
+    )
+    all_cols = [*insert_cols, "query_day", "batch", "updated_at"]
+    placeholders = ",".join("?" * len(all_cols))
+    sql = (
+        f"INSERT INTO imei_mobile({','.join(all_cols)}) VALUES ({placeholders})"
+        f" ON CONFLICT(imei) DO UPDATE SET {update_set},"
+        f" query_day=excluded.query_day, batch=excluded.batch,"
+        f" updated_at=excluded.updated_at"
+    )
+
+    rows_total = 0
+    written = 0
+    bad_imei = 0
+    blank_state = 0
+    states: Dict[str, int] = {}
+    unknown: Dict[str, int] = {}
+    hits: set = set()
+    # 「问过谁」按批次记一行；hit=1 移动返回了记录，hit=0 问了但导出里没这台。
+    asked_sql = (
+        "INSERT INTO imei_mobile_query(imei, batch, query_day, hit, updated_at)"
+        " VALUES (?,?,?,?,?)"
+        " ON CONFLICT(imei, batch) DO UPDATE SET"
+        " query_day=excluded.query_day, hit=excluded.hit,"
+        " updated_at=excluded.updated_at"
+    )
+    begin_immediate(conn)
+    for row in reader:
+        imei = _text(row.get(cols["imei"]), 32)
+        if not imei:
+            bad_imei += 1
+            continue
+        rows_total += 1
+        values = []
+        for key in insert_cols:
+            if key == "imei":
+                values.append(imei)
+                continue
+            raw = _text(row.get(cols[key]), 200)
+            if key in _MOBILE_DAY_FIELDS:
+                raw = _day_text(raw)
+            elif key == "state":
+                raw = norm_mobile_state(raw)
+            values.append(raw)
+        values.extend([stamp, label, now])
+
+        state = norm_mobile_state(_text(row.get(cols["state"]), 40)) if cols["state"] else ""
+        if not state:
+            blank_state += 1
+        elif state in MOBILE_STATES:
+            states[state] = states.get(state, 0) + 1
+        else:
+            unknown[state] = unknown.get(state, 0) + 1
+
+        hits.add(imei)
+        cur = conn.execute(sql, values)
+        if cur.rowcount > 0:
+            written += 1
+    # 记「这批问了哪些串号」：给了 expected 就按清单算「问了没回来」的（= 串码另用），
+    # 没给 expected 就只记命中过的，不猜哪些没问。
+    orphan: List[str] = []
+    if expected is not None:
+        want = {str(x).strip() for x in expected if str(x).strip()}
+        orphan = sorted(want - hits)
+        for k in want:
+            conn.execute(asked_sql, (k, label, stamp, 1 if k in hits else 0, now))
+    else:
+        for k in hits:
+            conn.execute(asked_sql, (k, label, stamp, 1, now))
+    conn.commit()
+    return {
+        "rows": rows_total,
+        "written": written,
+        "bad_imei": bad_imei,
+        "blank_state": blank_state,
+        "states": states,
+        "unknown_states": sorted(unknown.items(), key=lambda kv: -kv[1]),
+        "query_day": stamp,
+        "batch": label,
+        "columns_found": sorted(present),
+        # 「问了没回来」= 移动侧查无此机 = 串码另用（2026-11-12 用户拍板：剔除，不再压门店）
+        "asked": len(hits),
+        "orphan": len(orphan),
+        "orphan_imeis": orphan,
+    }
+
+
+def mobile_verdict(row: Optional[Dict[str, Any]]) -> str:
+    """一台机器在移动侧是什么结论：`已结案` / `要催` / `未查`。
+
+    这是「还要不要门店动手」的唯一判据（2026-11-11 用户拍板）：
+
+    - 已售   = 合约已办完（含送流量那类）→ 结案
+    - 退省库 = 移动侧终态，门店去退库走完流程 → 结案
+    - 待售   = 机器还在移动账上挂着没激活 → 要催
+    - 状态认不出（维修 / 调拨在途 这类非终态）→ 未查，不下结论，别拿它冤枉门店
+
+    `row is None` 表示「这次导出里没有这个串号」。本函数照样返回「未查」，但**两种
+    未查的处置相反**，所以调用方必须自己分清（见 TODO 说明）：
+
+    - 移动有记录、状态认不出 → 挂起，等移动确认语义
+    - 移动根本没这个串号     → 串码另用了，从待办剔除（2026-11-12 用户拍板）
+
+    本函数拿不到「清单里本来该有哪些串号」，分不了这件事，判据留在调用方。
+    """
+    if not row:
+        return "未查"
+    state = norm_mobile_state(str(row.get("state") or ""))
+    if state in MOBILE_CLOSED:
+        return "已结案"
+    if state == MOBILE_ON_SALE:
+        return "要催"
+    return "未查"
+
+
+def mobile_map(conn: sqlite3.Connection, imeis: Sequence[str]) -> Dict[str, Dict[str, Any]]:
+    """按串号批量取移动侧状态（对账 / 页面标注用）。没查过的串号不在返回里。"""
+    ensure(conn)
+    keys = [str(x).strip() for x in imeis if str(x).strip()]
+    if not keys:
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for i in range(0, len(keys), 500):
+        chunk = keys[i:i + 500]
+        clause, params = sql_in_text(chunk)
+        rows = conn.execute(
+            f"""
+            SELECT imei, state, activated, act_day, sale_day, phone,
+                   store_code, store_name, last_op, query_day
+            FROM imei_mobile WHERE imei IN ({clause})
+            """,
+            params,
+        ).fetchall()
+        for r in rows:
+            out[str(r["imei"])] = dict(r)
+    return out
+
+
+def mobile_summary(conn: sqlite3.Connection) -> Dict[str, Any]:
+    """移动数据覆盖情况：问过多少台、三种状态各多少、最后一次查询是哪天。"""
+    ensure(conn)
+    rows = conn.execute(
+        """
+        SELECT state, COUNT(*) AS n, MAX(query_day) AS last_day
+        FROM imei_mobile GROUP BY state ORDER BY n DESC
+        """
+    ).fetchall()
+    total = 0
+    by_state: Dict[str, int] = {}
+    last_day = ""
+    for r in rows:
+        n = int(r["n"])
+        total += n
+        by_state[str(r["state"] or "(空)")] = n
+        last_day = max(last_day, str(r["last_day"] or ""))
+    return {"total": total, "by_state": by_state, "last_query_day": last_day}
+
+# ---------------------------------------------------------------- 判定层
+#
+# 2026-11-12 用户拍板「先改判断」。
+# 旧逻辑（外部 offline_ledger.py）只看 POS 证据和账龄来判「办没办」：
+# 账龄 3-6 天进待办，第 7 天起跳成「确认未办」然后从待办里消失。
+# 真实移动数据回来后暴露两处硬伤：
+#   1) 台账说「确认未办」的 2539 台里，1357 台（53.4%）移动侧已经结案；
+#   2) 越严重的越看不见 —— D7+ 未结案 4121 台全部掉出待办清单。
+# 所以判定改成「移动状态为准、账龄只排序」，见 todo_verdict()。
+
+TODO_CLOSED = "已结案"
+TODO_URGE = "要催"
+TODO_HOLD = "挂起"
+TODO_ORPHAN = "串码另用"
+TODO_PENDING = "待核对"
+TODO_VERDICTS = (TODO_URGE, TODO_CLOSED, TODO_HOLD, TODO_ORPHAN, TODO_PENDING)
+
+# 移动数据超过这么多天没更新就提示（页面顶部变黄 / 变红）
+MOBILE_WARN_DAYS = 7
+MOBILE_STALE_DAYS = 14
+
+
+def _days_between(day_text: str, base: str = "") -> Optional[int]:
+    """两个日期差几天；认不出返回 None（不拿 0 冒充「就是今天」）。"""
+    a = _day_text(day_text)
+    b = _day_text(base) or today_local().isoformat()
+    if not a:
+        return None
+    try:
+        return (date.fromisoformat(b) - date.fromisoformat(a)).days
+    except ValueError:
+        return None
+
+
+def age_band(age: int) -> str:
+    """账龄分档。只用于排序和高亮，不再当「办没办」的判据。
+
+    移动登记平均滞后几十天（这次样本里 D7-30 档 133 台、D90+ 487 台），
+    拿 D7 一刀切必然误报，所以账龄只决定「先催谁」，不决定「催不催」。
+    """
+    if age <= 2:
+        return "D0-2"
+    if age <= 6:
+        return "D3-6"
+    if age <= 30:
+        return "D7-30"
+    if age <= 60:
+        return "D31-60"
+    if age <= 90:
+        return "D61-90"
+    return "D90+"
+
+
+def mobile_freshness(
+    conn: sqlite3.Connection,
+    *,
+    warn_days: int = MOBILE_WARN_DAYS,
+    stale_days: int = MOBILE_STALE_DAYS,
+) -> Dict[str, Any]:
+    """移动数据新鲜不新鲜：最后一次查询是哪天、几天前、页面要不要标黄标红。
+
+    `level`：ok / warn（超 warn_days）/ stale（超 stale_days）/ none（从没导过）。
+    门店页顶部那句「移动数据更新至 11-12（3 天前）」就靠这个。
+    """
+    ensure(conn)
+    row = conn.execute("SELECT MAX(query_day) AS d FROM imei_mobile").fetchone()
+    last = str((row["d"] if row else "") or "")
+    days = _days_between(last) if last else None
+    if not last or days is None:
+        level = "none"
+    elif days > stale_days:
+        level = "stale"
+    elif days > warn_days:
+        level = "warn"
+    else:
+        level = "ok"
+    return {
+        "last_query_day": last,
+        "days_ago": days,
+        "level": level,
+        "warn_days": warn_days,
+        "stale_days": stale_days,
+    }
+
+
+def mobile_asked(
+    conn: sqlite3.Connection, imeis: Sequence[str]
+) -> Dict[str, Dict[str, Any]]:
+    """每个串号「最近一次被移动问过」的结果：{imei: {hit, query_day, batch}}。
+
+    `hit=0` 才是「查无此机」（那批里确实没这台），才能判串码另用；
+    表里完全没有记录 = 还没问过，不能当查无此机处理（两者处置相反）。
+    只认最近一次，旧批次的结论让位给新批次。
+    """
+    ensure(conn)
+    keys = [str(x).strip() for x in imeis if str(x).strip()]
+    if not keys:
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for i in range(0, len(keys), 500):
+        chunk = keys[i:i + 500]
+        clause, params = sql_in_text(chunk)
+        rows = conn.execute(
+            "SELECT imei, hit, query_day, batch FROM imei_mobile_query"
+            " WHERE imei IN (%s)"
+            # 同日导两批时不能按 batch 名字排（中文 batch 名按 Unicode 比大小，
+            # 「第三轮」< 「第二轮」，旧批次会盖掉新批次）；用写入时间，再退化到 rowid。
+            " ORDER BY query_day ASC, updated_at ASC, rowid ASC" % clause,
+            params,
+        ).fetchall()
+        for r in rows:
+            out[str(r["imei"])] = {
+                "hit": int(r["hit"] or 0),
+                "query_day": str(r["query_day"] or ""),
+                "batch": str(r["batch"] or ""),
+            }
+    return out
+
+
+def todo_verdict(
+    todo_row: Optional[Dict[str, Any]],
+    mobile_row: Optional[Dict[str, Any]],
+    asked: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, str]:
+    """一台机器现在该不该催门店。返回 (结论, 理由)。
+
+    判定顺序（2026-11-12 定）：移动状态是权威，台账证据只在移动没数据时兜底。
+      1. 台账已退货            -> 已结案（机器物理上回库了）
+      2. 移动已售 / 退省库      -> 已结案
+      3. 移动待售              -> 要催（哪怕台账认已办，那是要去补登记）
+      4. 移动有记录但状态认不出 -> 挂起（维修 / 调拨在途，非终态，别冤枉门店）
+      5. 移动查过但没这台      -> 串码另用（剔除，不再压门店）
+      6. 还没问过移动          -> 待核对（调用方按账龄决定要不要先催）
+    """
+    state = str((todo_row or {}).get("state") or "").strip()
+    if state == STATE_RETURNED:
+        return TODO_CLOSED, "POS 已退货，机器回库"
+    if mobile_row:
+        mobile_state = norm_mobile_state(str(mobile_row.get("state") or ""))
+        verdict = mobile_verdict(mobile_row)
+        if verdict == "已结案":
+            return TODO_CLOSED, "移动侧：%s" % (mobile_state or "(空)")
+        if verdict == "要催":
+            if state in ("已办", "疑似已办", "待核"):
+                return TODO_URGE, "移动侧待售，台账认%s —— 要去补登记" % state
+            return TODO_URGE, "移动侧待售"
+        return TODO_HOLD, "移动侧状态未定：%s" % (mobile_state or "(空)")
+    if asked and int(asked.get("hit") or 0) == 0:
+        return TODO_ORPHAN, "移动 %s 查无此机" % (asked.get("query_day") or "")
+    return TODO_PENDING, "未与移动核对"
+
+
+_BAND_FIELDS = {
+    "D0-2": "d0_2",
+    "D3-6": "d3_6",
+    "D7-30": "d7_30",
+    "D31-60": "d31_60",
+    "D61-90": "d61_90",
+    "D90+": "d90",
+    # 售出日认不出来时账龄算不出来，单列一档：不塞进 D0-2 冒充「刚卖出」
+    "未知": "unknown_days",
+}
+
+
+def todo_board(
+    conn: sqlite3.Connection,
+    store_ids: Optional[Iterable[int]] = None,
+    *,
+    min_age: int = 3,
+    asof: str = "",
+    fresh: Optional[Dict[str, Any]] = None,
+    include_unmapped: bool = False,
+) -> Dict[str, Any]:
+    """门店该办的清单：台账（POS 侧）配移动状态，只留「要催」。
+
+    这是页面唯一的数据来源。判定只在这里做一次，门店端只读不判。
+
+    账龄现算（`sold_day` 到今天），不用 `imei_todo.age_days` —— 那是导入时写死的，
+    第二天就过时了。没核对过移动的（`待核对`）在账龄够 min_age 时按账龄先催，
+    理由里写明「未与移动核对」，不冒充移动结论。
+
+    行上还带齐门店页要的三组只读字段（判定逻辑不受影响）：
+    - 页面口径的天数：`act_state` / `age_eff` / `remain_eff` / `overdue`，
+      与 `summary()` 同一套（见 `effective_days_asof`）；
+    - 门店自报：`report_action` / `report_at` / `reporter` / `has_decl`；
+    - 移动侧：`mobile_state` / `mobile_query_day`（这批移动数据的问询日）。
+
+    判定为「要催」但门店已经交卷的（自报 已办/已退货，或有未作废的成交声明），
+    不留在主表：进 `reported_rows`、计进 `reported`，主表 `urge` 相应减少。
+    `verdicts` 仍是纯判定口径（含这些台），别拿它当「今天要办」的数字。
+
+    返回的四个桶就是门店页的四块折叠区，模板不再自己挑行（数字与台数 1:1）：
+    `active_rows`（今天要办）、`pending_rows`（待激活·不算逾期）、
+    `reported_rows`（已报待回传）、`held_rows`（待核对：台账已办但没问过移动）。
+    """
+    ensure(conn)
+    base = _day_text(asof) or today_local().isoformat()
+    ids = [int(x) for x in (store_ids or [])]
+    # 只算已售：`imei_todo` 同时存着未售库存池（status='未售'，生产上 900+ 台），
+    # 那批是「还没卖出去」，导库存时 `库存日期` 又写进了 sold_day，不拦就会拿
+    # 库存天数当账龄去催门店办合约（实测 urge 从 50 涨到 987）。同 todo_rows()。
+    where = ["t.seen = 1", "t.status = '%s'" % STATUS_SOLD]
+    params: List[Any] = []
+    # `store_ids=None` = 调用方明确要全库（离线脚本 / 单测）；只要传了列表就必须按它
+    # 过滤，**哪怕列表是空的**。空列表的意思是「这个人一家店都看不到」（没绑店，或
+    # 城市 + 区域经理组合没有匹配门店），过滤条件得让结果为空；退化成「不加过滤」
+    # 就会把全站串码漏给他。与 `summary()` 的 `("1=0", [])` 同一口径。
+    if store_ids is not None:
+        if ids:
+            clause, p = _store_in("t.store_id", ids)
+            # 档案里没有的店（store_id 为空，管理员视角的「待建店」）在只按 ids 过滤时
+            # 会被整体丢掉。与 todo_rows(include_unmapped=...) 同一个开关。
+            where.append(
+                ("(%s OR t.store_id IS NULL)" % clause) if include_unmapped else clause
+            )
+            params.extend(p)
+        else:
+            where.append("t.store_id IS NULL" if include_unmapped else "1=0")
+    rows = conn.execute(
+        _LATEST_R_CTE
+        + " SELECT t.imei, t.store_id, t.sold_store, t.own_store, t.dispatch_store,"
+        " t.model, t.sp, t.sold_day, t.status, t.strength, t.evidence, t.user_type,"
+        # 页面要的「剩余/逾期」「待激活」：这两列 + rule_ver 是 effective_days_asof 的入参
+        " t.manual_activated_at, t.remain_days, t.age_days, t.stage, t.rule_ver,"
+        " t.data_flag, s.short_name AS store_short,"
+        # 门店刚报过什么：判「已报待回传」要 action + 时间，别再催一遍
+        " r.action AS report_action, r.created_at AS report_at,"
+        " u.display_name AS reporter,"
+        # 行内要显示的「报了什么业务 / 说明 / 截图」一次带出，模板不再回查
+        " r.biz_type AS report_biz_type, r.note AS report_note,"
+        " r.photo AS report_photo,"
+        # 存量结转：`in_grace` 谓词要 carry_action（与 carryover scope=grace 同源）
+        " c.action AS carry_action,"
+        # 有效成交声明 = 视同已办（与 todo_rows / summary 同一个 live_decl_sql 口径）
+        " CASE WHEN " + live_decl_sql("t") + " THEN 1 ELSE 0 END AS has_decl,"
+        # 判定要的是「台账结论」（确认未办 / 已办 / 疑似已办 / 已退货），
+        # 但 imei_todo.state 在真实链路里被 store_daily_csv.py 的 `状态` 列
+        # （库存口径：在库 / 已售 / 待激活 / 去向不明）占住了，台账结论落在
+        # ledger_state。优先 ledger_state，空则退回 state（老数据 / 直接把
+        # 离线台账 CSV 导入，那种情况的 state 本来就是台账结论）。
+        " COALESCE(NULLIF(t.ledger_state, ''), t.state) AS state"
+        " FROM imei_todo t"
+        " LEFT JOIN stores s ON s.id = t.store_id"
+        " LEFT JOIN latest_r r ON r.imei = t.imei"
+        " LEFT JOIN users u ON u.id = r.user_id"
+        " LEFT JOIN imei_carry_log c ON c.id ="
+        " (SELECT MAX(id) FROM imei_carry_log WHERE imei = t.imei)"
+        " WHERE " + " AND ".join(where),
+        params,
+    ).fetchall()
+    keys = [str(r["imei"]) for r in rows]
+    mob = mobile_map(conn, keys)
+    asked = mobile_asked(conn, keys)
+    freshness = fresh or mobile_freshness(conn)
+
+    counts: Dict[str, int] = {v: 0 for v in TODO_VERDICTS}
+    stores: Dict[Any, Dict[str, Any]] = {}
+    out: List[Dict[str, Any]] = []
+    held_rows: List[Dict[str, Any]] = []   # 台账已办 + 没问过移动：不催不结案，单独成桶
+    degraded = 0        # 「待核对」按账龄降级成要催的台数：结论是推出来的，不是移动给的
+    held_done = 0       # 「待核对」但台账已办：不催，也不结案（这次没问移动，没有权威结论）
+    reported = 0        # 判定为「要催」但门店已经交卷（自报 已办/已退货 / 有效声明）
+    reported_rows: List[Dict[str, Any]] = []
+    for r in rows:
+        imei = str(r["imei"])
+        sold_day = str(r["sold_day"] or "")
+        age = _days_between(sold_day, base)
+        if age is not None and age < 0:
+            age = 0         # 售出日在未来（快照日期 / 时钟误差），按今天算
+        verdict, reason = todo_verdict(dict(r), mob.get(imei), asked.get(imei))
+        # 台账已办 / 疑似已办是 POS 侧硬证据。这次又没问过移动，就没有任何权威说
+        # 「它没办」——按账龄催等于把已办完的重新压回门店（未问门店实测 521 台）。
+        # 既不催也不结案：整台进「待核对」桶，等下次移动回传给结论。
+        held = (verdict == TODO_PENDING
+                and str(r["state"] or "").strip() in LEDGER_DONE_STATES)
+        if verdict == TODO_PENDING and not held:
+            # sold_day 认不出时 age 是 None，绝不能当 0 天：0 < min_age 会被静默跳过，
+            # 等于把「售出日缺了」当成「刚卖出的新机」漏催。
+            if age is not None and age < min_age:
+                continue        # 刚卖出去还没到催的账龄，先观察
+            degraded += 1
+            verdict, reason = TODO_URGE, (
+                "未与移动核对，按账龄 %d 天先催" % age if age is not None
+                else "未与移动核对，售出日认不出，先催")
+        counts[verdict] = counts.get(verdict, 0) + 1
+        if verdict != TODO_URGE and not held:
+            continue
+        band = age_band(age) if age is not None else "未知"
+        # 待建店（store_id 为空）按店名各自算一行：只拿 store_id 当主键的话，10 家
+        # 未建档店会塌成一行，明细里的店名还会被统一改写成第一家碰到的店名。
+        # 店名取 dispatch_store 优先（= 已售按 POS 销售店派活，见 import_rows）。
+        store_name = str(r["dispatch_store"] or r["sold_store"]
+                         or r["own_store"] or "")
+        key = r["store_id"] if r["store_id"] is not None else "?" + store_name
+        age_eff, remain_eff, act_state, start_day, frozen = effective_days_asof(
+            dict(r), base
+        )
+        qday = str((asked.get(imei) or {}).get("query_day") or "")
+        report_action = str(r["report_action"] or "")
+        report_at = str(r["report_at"] or "")
+        has_decl = bool(_int_or_zero(r["has_decl"]))
+        # 「待激活」+ 售出已超 REVIEW_DAYS：就是管理员核实清单里的那批
+        review_due = bool(act_state == "待激活" and age is not None
+                          and age > REVIEW_DAYS)
+        # 「宽限已过」chip 与 carryover scope=grace 共用同一个谓词，不另写一份
+        in_grace = is_grace_row({
+            "carry_action": str(r["carry_action"] or ""),
+            "rule_ver": r["rule_ver"], "seen": 1,
+            "user_type": r["user_type"], "state": str(r["state"] or ""),
+            "report_action": report_action,
+            "manual_activated_at": r["manual_activated_at"],
+        }, _parse_day(base))
+        item = {
+            "imei": imei,
+            "store_id": r["store_id"],
+            "store": store_name,
+            "store_short": str(r["store_short"] or ""),
+            "model": str(r["model"] or ""),
+            "sp": str(r["sp"] or ""),
+            "sold_day": sold_day,
+            "age": age,
+            "band": band,
+            "state": str(r["state"] or ""),
+            "verdict": verdict,
+            "reason": reason,
+            "mobile_state": norm_mobile_state(
+                str((mob.get(imei) or {}).get("state") or "")
+            ),
+            # 这批移动数据的问询日：自报分流要拿它跟 report_at 比先后
+            "mobile_query_day": qday,
+            "evidence": str(r["evidence"] or ""),
+            # 页面「剩余：逾期 5 天 / 待激活不算逾期」的口径，与 summary() 同一套
+            "age_eff": age_eff,
+            "remain_eff": remain_eff,
+            "remain_frozen": frozen,
+            "act_state": act_state,
+            "start_day": start_day,
+            "overdue": (act_state != "待激活" and remain_eff is not None
+                        and remain_eff < 0),
+            "sold_days": age,
+            "user_type": str(r["user_type"] or ""),
+            "manual_activated_at": str(r["manual_activated_at"] or ""),
+            "rule_ver": _int_or_zero(r["rule_ver"]) or 1,
+            "data_flag": str(r["data_flag"] or ""),
+            # 门店自报 / 成交声明：门店页「已报待回传」和行内 chip 都读这几项
+            "report_action": report_action,
+            "report_at": report_at,
+            "reporter": str(r["reporter"] or ""),
+            "has_decl": has_decl,
+            # 行内 chip / 「待激活」分组 / 自报明细要的
+            "strength": str(r["strength"] or ""),
+            "in_grace": in_grace,
+            "carried": str(r["carry_action"] or "") == CARRY_ACTIONS[0],
+            "review_due": review_due,
+            "age_days": _int_or_zero(r["age_days"]),
+            "report_biz_type": str(r["report_biz_type"] or ""),
+            "report_note": str(r["report_note"] or ""),
+            "report_photo": str(r["report_photo"] or ""),
+        }
+        if held:
+            held_done += 1
+            item["reason"] = "台账已办，这次没问移动：不催，等下次移动到这台再给结论"
+            held_rows.append(item)
+            continue
+        # ── 门店已经交卷的，别再催一遍 ────────────────────────────────────
+        # 自报 已办/已退货、或有未作废的成交声明 = 门店这边做完了，只是在等
+        # 移动/台账回传核销。继续压在主表里，门店会以为「我报的没存上」。
+        # 唯一退回主表的情形：自报之后移动又回了一批、看下去还是待售 ——
+        # 那是自报没办成，要把「移动 X 日仍待售」写进理由再催。
+        if report_action in CLOSED_STATES or has_decl:
+            if qday and report_at and report_at[:10] < qday:
+                item["reason"] = (
+                    "移动 %s 仍待售（%s 报过%s，请核实受理单）"
+                    % (qday, report_at[:10], report_action or "成交声明"))
+            else:
+                reported += 1
+                reported_rows.append(item)
+                continue
+        s = stores.get(key)
+        if s is None:
+            s = stores[key] = {
+                "store_id": r["store_id"],
+                "store": store_name,
+                "urge": 0, "over30": 0, "over60": 0, "over90": 0, "oldest": 0,
+                "d0_2": 0, "d3_6": 0, "d7_30": 0, "d31_60": 0, "d61_90": 0,
+                "d90": 0, "unknown_days": 0,
+            }
+        s["urge"] += 1
+        s[_BAND_FIELDS[band]] += 1
+        if age is not None:
+            s["oldest"] = max(s["oldest"], age)
+            if age > 30:
+                s["over30"] += 1
+            if age > 60:
+                s["over60"] += 1
+            if age > 90:
+                s["over90"] += 1
+        out.append(item)
+
+    # 账龄认不出的排最后（不冒充 0 天冲到最前面），其余按账龄从旧到新。
+    out.sort(key=lambda x: (x["age"] is None, -(x["age"] or 0),
+                            x["store"], x["imei"]))
+    reported_rows.sort(key=lambda x: (x["age"] is None, -(x["age"] or 0),
+                                      x["store"], x["imei"]))
+    held_rows.sort(key=lambda x: (x["age"] is None, -(x["age"] or 0),
+                                  x["store"], x["imei"]))
+    store_list = sorted(stores.values(), key=lambda s: (-s["urge"], s["store"]))
+    return {
+        "asof": base,
+        "mode": "移动核对" if freshness["level"] not in ("stale", "none")
+                else "降级：按账龄",
+        "freshness": freshness,
+        # 各档判定台数。注意 `verdicts[要催]` 是**判定**口径，里面含已报待回传的
+        # 那些台（它们判定上仍是要催，只是门店已经交卷）；门店页「今天要办」要
+        # 用 `urge`（= 主表行数，已扣掉 reported），别直接拿 verdicts 去显示。
+        "verdicts": counts,
+        "total": len(rows),
+        "urge": len(out),
+        "reported": reported,
+        "degraded": degraded,
+        "held_done": held_done,
+        "over30": sum(1 for x in out if (x["age"] or 0) > 30),
+        "over60": sum(1 for x in out if (x["age"] or 0) > 60),
+        "over90": sum(1 for x in out if (x["age"] or 0) > 90),
+        "stores": store_list,
+        # 门店页按桶直接渲染，模板不再自己挑行：卡片数字与折叠区台数 1:1
+        "rows": out,
+        "active_rows": [x for x in out if x["act_state"] != "待激活"],
+        "pending_rows": [x for x in out if x["act_state"] == "待激活"],
+        # 待核对：台账已办 / 疑似已办，但这次没问过移动。不催，也不结案。
+        "held_rows": held_rows,
+        # 已报待回传：门店点过 已办/已退货 或有效成交声明，还在等移动/台账核销
+        "reported_rows": reported_rows,
+    }
+
 
 
 def update_data_flags(
@@ -1130,7 +2063,7 @@ def todo_rows(
     if show != "all":
         marks = ",".join("?" * len(CLOSED_STATES))
         where.append(
-            f"t.state NOT IN ({marks}) AND COALESCE(r.action,'') NOT IN ('已办','已退货')"
+            f"{_ledger_state_sql()} NOT IN ({marks}) AND COALESCE(r.action,'') NOT IN ('已办','已退货')"
             f" AND {no_live_decl_sql('t')}"
         )
         params = [*CLOSED_STATES, *params]
@@ -1141,6 +2074,9 @@ def todo_rows(
         clause, raw_params = _store_in("t.store_id", ids)
         params = [*params, *raw_params]
         where.append(f"({clause} OR t.store_id IS NULL)" if include_unmapped else clause)
+    else:
+        # 空集合 = 一家店都看不到：与 `todo_board()` 同一个口径，别退化成不过滤
+        where.append("t.store_id IS NULL" if include_unmapped else "1=0")
     rows = conn.execute(
         f"""
         SELECT t.*, s.name AS store_name, s.short_name AS store_short,
@@ -1152,7 +2088,11 @@ def todo_rows(
         FROM imei_todo t
         LEFT JOIN stores s ON s.id = t.store_id
         LEFT JOIN imei_reports r ON r.id = (
-            SELECT MAX(id) FROM imei_reports WHERE imei = t.imei
+            -- 只认这台机器「这次售出之后」的自报：首销留下的「已退货」不能把
+            -- 退货回池后二次卖出的待办屏蔽掉（V0.4.11 断口，2026-11-12 补）。
+            SELECT MAX(id) FROM imei_reports
+            WHERE imei = t.imei
+              AND (t.sold_day = '' OR created_at >= t.sold_day)
         )
         LEFT JOIN users u ON u.id = r.user_id
         LEFT JOIN imei_carry_log c ON c.id = (
@@ -1553,11 +2493,7 @@ def mark_summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> List[Dic
     closed_marks = ",".join("?" * len(CLOSED_STATES))
     rows = conn.execute(
         f"""
-        WITH latest_r AS (
-          SELECT imei, action
-          FROM imei_reports
-          WHERE id IN (SELECT MAX(id) FROM imei_reports GROUP BY imei)
-        )
+{_LATEST_R_CTE}
         SELECT t.store_id, s.short_name AS short, s.name AS name,
                COUNT(*) AS open_n,
                SUM(CASE WHEN t.user_type=? AND t.manual_activated_at='' THEN 1 ELSE 0 END) AS pending_n,
@@ -1565,7 +2501,7 @@ def mark_summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> List[Dic
         FROM imei_todo t
         LEFT JOIN stores s ON s.id = t.store_id
         LEFT JOIN latest_r r ON r.imei = t.imei
-        WHERE t.seen=1 AND t.status=? AND t.state NOT IN ({closed_marks})
+        WHERE t.seen=1 AND t.status=? AND {_ledger_state_sql()} NOT IN ({closed_marks})
           AND COALESCE(r.action, '') NOT IN ({closed_marks})
           AND {no_live_decl_sql()}
           AND {clause}
@@ -1599,17 +2535,26 @@ def _unmapped_where() -> Tuple[str, List[Any]]:
     marks = ",".join("?" * len(CLOSED_STATES))
     sql = (
         "t.seen=1 AND t.status=? AND t.store_id IS NULL"
-        f" AND t.state NOT IN ({marks})"
+        f" AND {_ledger_state_sql()} NOT IN ({marks})"
         f" AND COALESCE(r.action,'') NOT IN ({marks})"
     )
     return sql, [STATUS_SOLD, *CLOSED_STATES, *CLOSED_STATES]
 
 
+# 每台 IMEI 的「最后一条自报」——但只算**这台机器当前这次售出之后**的。
+# 退货回池后再次售出（二销）时，首销那次留下的「已退货」自报会把二销待办永久屏蔽，
+# 门店再也看不到这台机器（V0.4.11 退货回池的断口，2026-11-12 补）。
 _LATEST_R_CTE = """
         WITH latest_r AS (
-          SELECT imei, action, created_at, user_id
-          FROM imei_reports
-          WHERE id IN (SELECT MAX(id) FROM imei_reports GROUP BY imei)
+          SELECT r.imei, r.action, r.created_at, r.user_id,
+                 r.biz_type, r.note, r.photo
+          FROM imei_reports r
+          JOIN imei_todo td ON td.imei = r.imei
+          WHERE r.id = (
+            SELECT MAX(r2.id) FROM imei_reports r2
+            WHERE r2.imei = r.imei
+              AND (td.sold_day = '' OR r2.created_at >= td.sold_day)
+          )
         )
 """
 
@@ -1775,11 +2720,7 @@ def summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> Dict[str, Any
     today_iso = today_local().isoformat()
     row = conn.execute(
         f"""
-        WITH latest_r AS (
-          SELECT imei, action
-          FROM imei_reports
-          WHERE id IN (SELECT MAX(id) FROM imei_reports GROUP BY imei)
-        ),
+{_LATEST_R_CTE.rstrip()},
         base AS (
           SELECT t.store_id, t.user_type, t.manual_activated_at,
                  COALESCE(t.rule_ver, 1) AS rule_ver,
@@ -1794,7 +2735,7 @@ def summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> Dict[str, Any
           FROM imei_todo t
           LEFT JOIN latest_r r ON r.imei = t.imei
           WHERE t.seen=1 AND t.status=?
-            AND t.state NOT IN ({closed_marks})
+            AND {_ledger_state_sql()} NOT IN ({closed_marks})
             AND COALESCE(r.action, '') NOT IN ({closed_marks})
             AND {no_live_decl_sql()}
             AND {clause}
@@ -1840,6 +2781,7 @@ def summary(conn: sqlite3.Connection, store_ids: Sequence[int]) -> Dict[str, Any
         SELECT COUNT(DISTINCT r.imei) FROM imei_reports r
         JOIN imei_todo t ON t.imei = r.imei
         WHERE t.seen=1 AND t.status=? AND {clause}
+          AND (t.sold_day = '' OR r.created_at >= t.sold_day)
         """,
         [STATUS_SOLD, *params],
     ).fetchone()[0]
@@ -2143,17 +3085,12 @@ def todo_stores(conn: sqlite3.Connection, store_ids: Iterable[int]) -> List[sqli
     return list(
         conn.execute(
             f"""
-            WITH latest_r AS (
-              SELECT imei, action
-              FROM imei_reports
-              WHERE id IN (SELECT MAX(id) FROM imei_reports GROUP BY imei)
-            )
-            SELECT s.id, s.name, s.short_name, COUNT(*) AS n
+{_LATEST_R_CTE}
             FROM imei_todo t
             JOIN stores s ON s.id = t.store_id
             LEFT JOIN latest_r r ON r.imei = t.imei
             WHERE t.seen=1 AND t.status=?
-              AND t.state NOT IN ({closed_marks})
+              AND {_ledger_state_sql()} NOT IN ({closed_marks})
               AND COALESCE(r.action, '') NOT IN ({closed_marks})
               AND {clause}
             GROUP BY s.id ORDER BY n DESC

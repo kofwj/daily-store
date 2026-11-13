@@ -292,6 +292,11 @@ button.ghost:hover, .btn.ghost:hover { background: var(--accent-soft); }
   font-weight: 700;
   vertical-align: middle;
 }
+/* 串码行里的提醒胶囊：待建店 / 宽限已过这类「要多看一眼」的标 */
+.chip-warn {
+  background: #fff7ed;
+  color: #b45309;
+}
 .check {
   display: flex;
   align-items: center;
@@ -326,6 +331,10 @@ button.ghost:hover, .btn.ghost:hover { background: var(--accent-soft); }
 .review-switch { margin: 8px 0 10px; }
 .kpi-ok { background: #ecfdf5; border-color: #a7f3d0; }
 .kpi-warn { background: #fff7ed; border-color: #fed7aa; }
+/* 串码待办：整张卡可点（<a class="kpi">），当前页签给个看得出来的边界 */
+a.kpi { display: block; text-decoration: none; color: inherit; }
+a.kpi:hover { border-color: #cbd5e1; }
+a.kpi.kpi-current { background: #eff6ff; border-color: #1d4ed8; }
 .insight-store { font-weight: 600; }
 .insight-stores .insight-metric,
 .insight-stores .insight-metric-h {

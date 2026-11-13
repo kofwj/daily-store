@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% from "_scope_filters.html" import scope_filters %}
+{% block title %}串码待办 · 管理员工作台{% endblock %}
+{% block body %}
+{#
+  管理员工作台（2026-11-12 新增）：从门店页搬出来的那一整套。
+
+  门店页现在只有「今天该办哪几台 + 一个自报按钮」；导入清单、各子台账、
+  各店标记台数、导出都在这边，门店账号看不到（`@admin_required`）。
+
+  这里**不判定**：`board` 直接来自 `db_imei.todo_board()`，数字与门店页同源。
+#}
+<div class="page-head">
+  <div class="page-title">
+    <h1>串码待办 · 管理员</h1>
+    <p class="muted">
+      导入清单、核销台账、看各店标记都在这页
+      · 清单截至 {{ board.asof }}
+      {% if board.freshness.level == 'none' %}
+        · 还没跟移动核对过
+      {% else %}
+        · 移动数据 {{ board.freshness.last_query_day }}{% if board.freshness.days_ago is not none %}（{{ board.freshness.days_ago }} 天前）{% endif %}
+      {% endif %}
+      {% if scope.active %} · {{ scope.label }}{% endif %}
+    </p>
+  </div>
+  <form method="get" class="page-filters">
+    {{ scope_filters(scope.cities, scope.managers, city=scope.city, manager=scope.manager) }}
+    <a class="btn ghost" href="{{ url_for('imei_page') }}">← 回门店页</a>
+  </form>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi">
+    <div class="muted">今天要办</div>
+    <div class="kpi-num">{{ board.active_rows|length }}</div>
+    <div class="muted">{{ board.pending_rows|length }} 台待激活 · {{ board.stores|length }} 家店</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">已结案</div>
+    <div class="kpi-num">{{ board.verdicts['已结案'] }}</div>
+    <div class="muted">移动已售 / 退省库 / 台账已退货</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">已报待回传</div>
+    <div class="kpi-num">{{ board.reported }}</div>
+    <div class="muted">门店交卷，等核销</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">挂起 / 串码另用</div>
+    <div class="kpi-num">{{ board.verdicts['挂起'] }} / {{ board.verdicts['串码另用'] }}</div>
+    <div class="muted">状态非终态 / 移动查无此机</div>
+  </div>
+  <div class="kpi">
+    <div class="muted">待核对</div>
+    <div class="kpi-num">{{ board.held_done }}</div>
+    <div class="muted">台账已办但没问过移动</div>
+  </div>
+</div>
+
+{% if board.degraded %}
+<p class="muted">
+  其中 <strong>{{ board.degraded }} 台</strong> 是「没跟移动核对过，按账龄先催」——
+  结论是推出来的，不是移动给的。要让它变准，跑一批移动查询再导入。
+</p>
+{% endif %}
+
+{% if cards.unmapped %}
+<p class="flash-inline warn">
+  <strong>{{ cards.unmapped }} 台</strong> 的销售门店在门店档案里没有（在营但没建账号），
+  这些机器在 <a href="{{ url_for('imei_pool', tab='unmapped') }}">待建店池子</a> 里，任何门店都能代办（谁办算谁）。
+  补门店档案或确认改名后重新导入即可自动归位。
+  <br><span class="muted">注意：待建店不计入门店页「今天要办」的统计（那些只算已建档门店），所以列表里有行而上面对应的数字不涨属于正常。</span>
+</p>
+{% endif %}
+
+{# 子台账导航：原来铺在门店页首屏，2026-11-12 整体搬到这里 #}
+<nav class="sub-nav" aria-label="管理员子台账">
+  <a class="sub-nav-item" href="{{ url_for('imei_marks') }}">门店标记清单{% if marked_n %}<b>{{ marked_n }}</b>{% endif %}</a>
+  <a class="sub-nav-item" href="{{ url_for('imei_transfer') }}">调拨台账</a>
+  <a class="sub-nav-item" href="{{ url_for('imei_carryover') }}">{{ grace_label }} 存量结转{% if carryover_n %}<b>{{ carryover_n }}</b>{% endif %}</a>
+  <a class="sub-nav-item" href="{{ url_for('imei_export_carryover') }}">导出结转 CSV</a>
+  <a class="sub-nav-item" href="{{ url_for('imei_review') }}">超 30 天未激活核实{% if review_n %}<b>{{ review_n }}</b>{% endif %}</a>
+  {% if cards.unmapped %}<a class="sub-nav-item warn" href="{{ url_for('imei_pool', tab='unmapped') }}">待建店池子<b>{{ cards.unmapped }}</b></a>{% endif %}
+</nav>
+
+<details class="card" open>
+  <summary>导入清单</summary>
+  <form method="post" action="{{ url_for('imei_import') }}" enctype="multipart/form-data" class="rules-form">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+    <label class="field">
+      <span>清单 CSV（台账全量或当日待办都行）</span>
+      <input type="file" name="csv_file" accept=".csv" required>
+    </label>
+    <label class="field">
+      <span>导入方式</span>
+      <select name="import_mode" onchange="
+        var full=this.value==='full';
+        document.getElementById('modeHint').textContent = full
+          ? '全量快照：这份必须是完整清单，清单里没出现的同类机器会被撤下、不再推给门店。'
+          : '增量：只写这份清单里的机器，清单外的机器一律不动（日常日更选这个）。';
+      ">
+        <option value="incremental" selected>增量（推荐：只加这次清单里的）</option>
+        <option value="full">全量快照（完整清单才选）</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>数据截至</span>
+      <input type="date" name="asof" value="{{ today_iso }}">
+    </label>
+    <p class="muted" id="modeHint">
+      增量：只写这份清单里的机器，清单外的机器一律不动（日常日更选这个）。
+    </p>
+    <p class="muted">
+      台账（已售）CSV 一般只带已建档门店，选增量；库存（未售）导出一般是整份快照，选全量才能把已卖掉的库存机撤下。
+      按 IMEI 覆盖、行不删；店名对不上的机器挂在「待建店」（仅管理员可见），补档案后重导即可归位。
+    </p>
+    <button type="submit" onclick="
+      if (this.form.import_mode.value === 'full') {
+        return confirm('全量快照会把这份清单里没出现的已售/未售机器从门店视图撤下（行还在，只是不再推给门店）。确认这是完整清单？');
+      }
+      return true;
+    ">导入</button>
+  </form>
+  <p class="muted">门店报完的结论在这里导出，回灌台账用：<a href="{{ url_for('imei_export') }}">导出门店自报 CSV</a>
+    · <a href="{{ url_for('imei_export_todo') }}">导出待办清单（含客户类型 / 激活日）</a></p>
+</details>
+
+<details class="card" {{ 'open' if marks and marks[0].pending_n }}>
+  <summary>各店标记台数{{ '· 有店标得多' if marks and marks[0].suspicious }}</summary>
+  {% if marks %}
+  <div class="report-table-scroll">
+    <table class="data report-grid">
+      <thead>
+        <tr><th>门店</th><th>待办</th><th>待激活</th><th>已激活</th><th>待激活占比</th></tr>
+      </thead>
+      <tbody>
+        {% for m in marks %}
+        <tr>
+          <td>{{ m.short or m.name }}{% if m.suspicious %} <span class="chip">偏高</span>{% endif %}</td>
+          <td class="num">{{ m.open_n }}</td>
+          <td class="num">{{ m.pending_n }}</td>
+          <td class="num">{{ m.activated_n }}</td>
+          <td class="num">{{ m.ratio }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted">待激活 = 门店标了「异地异网」但还没点「已激活」。台数多、占比过半（≥3 台）会标「偏高」，问一句再算。</p>
+  {% else %}
+  <p class="muted">还没有门店标记。</p>
+  {% endif %}
+</details>
+
+<details class="card">
+  <summary>判定分布（这台机器现在算哪一档）</summary>
+  <div class="report-table-scroll">
+    <table class="data report-grid">
+      <thead><tr><th>判定</th><th>台数</th><th>什么意思</th></tr></thead>
+      <tbody>
+        <tr><td>要催</td><td class="num">{{ board.verdicts['要催'] }}</td><td>移动侧还是待售，得让门店去办</td></tr>
+        <tr><td>已结案</td><td class="num">{{ board.verdicts['已结案'] }}</td><td>移动已售 / 退省库，或台账已退货</td></tr>
+        <tr><td>挂起</td><td class="num">{{ board.verdicts['挂起'] }}</td><td>移动状态非终态（维修 / 调拨在途），先别催</td></tr>
+        <tr><td>串码另用</td><td class="num">{{ board.verdicts['串码另用'] }}</td><td>问过移动、查无此机，从待办剔除</td></tr>
+        <tr><td>待核对</td><td class="num">{{ board.verdicts['待核对'] }}</td><td>还没跟移动核过（台账已办的不催）</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="muted">
+    合计 {{ board.verdicts.values()|sum }} 台 / 清单内 {{ board.total }} 台（差的是还没到催的账龄）。
+    「要催」是判定口径，含已报待回传那 {{ board.reported }} 台；门店页「今天要办」用的是扣掉之后的数。
+  </p>
+</details>
+{% endblock %}

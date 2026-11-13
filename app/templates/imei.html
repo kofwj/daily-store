@@ -3,6 +3,15 @@
 {% block title %}串码待办 · 顺差合约{% endblock %}
 {% block body_class %}imei-page{% endblock %}
 {% block body %}
+{#
+  门店页（2026-11-12 改版）：只回答「今天该办哪几台」。
+
+  - 数据只有一个来源 `db_imei.todo_board()`：四个桶 = 四个折叠区，模板不再挑行，
+    卡片数字与折叠区台数 1:1（判定规则全在应用层，模板不判）；
+  - 每行只有**一个**入口「自报」：手机端点开是全屏抽屉，桌面端是行尾展开区；
+    「客户类型」（异网 / 已激活）收进同一个抽屉，不再单独占一列；
+  - 管理员那套（导入清单 / 各子台账 / 各店标记台数 / 导出）整体搬到 `/imei/admin`。
+#}
 {% macro todo_table(rows, pending=False) %}
 <div class="report-table-scroll">
   <table class="data report-grid imei-grid">
@@ -12,7 +21,7 @@
         <th>串码</th>
         <th>已售</th>
         <th>剩余</th>
-        <th>清单状态</th>
+        <th>状态</th>
         <th>门店自报</th>
         <th></th>
       </tr>
@@ -25,26 +34,36 @@
           {% if can_write %}<a class="btn imei-open" href="#act-{{ row.imei }}" aria-expanded="false" aria-label="填报 {{ row.imei }}">自报</a>{% endif %}
         </td>
         <td class="num">{{ row.imei }}</td>
-        <td class="num">{{ row.age_eff }} 天</td>
-        <td class="num {{ 'neg' if row.remain_eff < 0 and not pending else '' }}">
+        <td class="num">
+          {# 已售天数：有起算日就用页面口径 age_eff；算不出（存量老行 / 待激活 /
+             激活日认不出）退回账龄 age；两个都算不出才给破折号，绝不渲染「None 天」 #}
+          {% if row.age_eff is not none %}{{ row.age_eff }} 天{% elif row.age is not none %}{{ row.age }} 天{% else %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td class="num {{ 'neg' if row.remain_eff is not none and row.remain_eff < 0 and not pending else '' }}">
           {% if pending %}
             <span class="muted">等激活</span>
             <div class="muted">售出 {{ row.sold_days if row.sold_days is not none else row.age_days }} 天</div>
             {% if row.review_due %}<div><span class="chip">超30天·管理员核实</span></div>{% endif %}
+          {% elif row.remain_eff is none %}
+            {# 售出日记不出来时剩余天数算不出来：不能冒充「剩 0 天」 #}
+            <span class="muted">算不出（售出日缺）</span>
           {% else %}
             {% if row.remain_eff < 0 %}逾期 {{ -row.remain_eff }} 天{% else %}剩 {{ row.remain_eff }} 天{% endif %}
             {% if row.manual_activated_at %}<div class="muted">自 {{ row.manual_activated_at[5:] }} 起算</div>{% endif %}
           {% endif %}
         </td>
-        <td>{{ row.state }}{% if row.strength and row.strength != '无' %}<div class="muted">{{ row.strength }}</div>{% endif %}
+        <td>{{ row.state }}
+          {% if row.mobile_state %}<div class="muted">移动：{{ row.mobile_state }}</div>{% endif %}
+          {% if row.strength and row.strength != '无' %}<div class="muted">{{ row.strength }}</div>{% endif %}
           {% if row.in_grace or row.act_state or row.data_flag or not row.store_id %}
           <div class="chip-flow">
             {% if row.in_grace %}<span class="chip">宽限已过（{{ grace_label }}）</span>{% endif %}
             {% if row.act_state %}<span class="chip">{{ row.user_type }}{% if row.act_state == '待激活' %}·待激活{% else %}·已激活 {{ row.manual_activated_at[5:] }}{% endif %}</span>{% endif %}
             {% if row.data_flag %}<span class="chip">{{ row.data_flag }}</span>{% endif %}
-            {% if not row.store_id %}<span class="chip warn-chip">待建店 · 谁办算谁</span>{% endif %}
+            {% if not row.store_id %}<span class="chip chip-warn">待建店 · 谁办算谁</span>{% endif %}
           </div>
           {% endif %}
+          {% if row.verdict != '要催' %}<div class="muted">{{ row.reason }}</div>{% endif %}
         </td>
         <td>
           {% if row.report_action %}
@@ -54,6 +73,8 @@
             {% if row.report_photo %}
               <a href="{{ url_for('imei_photo', filename=row.report_photo) }}" target="_blank" rel="noopener">看截图</a>
             {% endif %}
+          {% elif row.has_decl %}
+            <span class="chip">成交声明</span>
           {% else %}
             <span class="muted">未报</span>
           {% endif %}
@@ -95,6 +116,7 @@
             </form>
           </details>
           {% if is_admin or row.act_state != '已激活' %}
+          {# 客户类型：异地异网 / 手动激活日。收在抽屉里，页面上不再单独占一列 #}
           <details class="mark-form">
             <summary>{{ '待激活' if pending else ('客户类型' if not row.act_state else '已激活') }}</summary>
             {% if not pending %}
@@ -135,66 +157,107 @@
   </table>
 </div>
 {% endmacro %}
+
+{# 一张卡 = 一家店（或一家待建店）；台数直接取行数，不再另算一个数 #}
+{% macro store_block(groups, pending=False) %}
+{% for group in groups %}
+<div class="card" id="store-{{ group.id }}">
+  <h2>{{ group.short }} <span class="muted">{{ group.rows|length }} 台</span>{% if group.unmapped %} <span class="chip">待建店</span>{% endif %}</h2>
+  {% if group.short != group.name %}<p class="muted">{{ group.name }}</p>{% endif %}
+  {{ todo_table(group.rows, pending) }}
+</div>
+{% endfor %}
+{% endmacro %}
+
+{% set link_open = url_for('imei_page', show='open', city=scope.city, manager=scope.manager) %}
+{% set link_reported = url_for('imei_page', show='reported', city=scope.city, manager=scope.manager) %}
+{% set link_held = url_for('imei_page', show='held', city=scope.city, manager=scope.manager) %}
 <div class="page-head">
   <div class="page-title">
     <h1>串码待办</h1>
     <p class="muted">
-      顺差机器办没办移动合约{% if cards.asof %} · 清单截至 {{ cards.asof }}{% endif %}
-      · 存量宽限至 {{ grace_label }}（剩余天数不随日期递减）
+      顺差机器办没办移动合约 · 清单截至 {{ board.asof }}
+      {% if board.freshness.level == 'none' %}
+        · 还没跟移动核对过（按台账账龄排）
+      {% else %}
+        · 移动数据 {{ board.freshness.last_query_day }}{% if board.freshness.days_ago is not none %}（{{ board.freshness.days_ago }} 天前）{% endif %}
+      {% endif %}
       {% if scope.active %} · {{ scope.label }}{% endif %}
     </p>
   </div>
   <form method="get" class="page-filters">
     {{ scope_filters(scope.cities, scope.managers, city=scope.city, manager=scope.manager) }}
-    <label class="filter">
-      <span>范围</span>
-      <select name="show" onchange="this.form.submit()">
-        <option value="open" {{ 'selected' if show == 'open' }}>只看要办的</option>
-        <option value="all" {{ 'selected' if show == 'all' }}>全部（含已办）</option>
-      </select>
-    </label>
+    <input type="hidden" name="show" value="{{ show }}">
     <a class="btn ghost" href="{{ url_for('imei_pool') }}">串码池（在库）{{ cards.pool }} 台</a>
     {% if is_admin %}
-    <a class="btn ghost" href="{{ url_for('imei_pool', tab='unmapped') }}">待建店待办 {{ cards.pool_unmapped }} 台</a>
+    <a class="btn ghost" href="{{ url_for('imei_admin') }}">管理员工作台</a>
     {% endif %}
   </form>
 </div>
 
+{% if board.freshness.level in ('warn', 'stale') %}
+<p class="flash-inline warn">
+  移动数据停在 {{ board.freshness.last_query_day }}（{{ board.freshness.days_ago }} 天前）。
+  超过 {{ board.freshness.stale_days }} 天没更新，下面的「移动：待售」可能已经不成立，请让人重新跑一批再催门店。
+</p>
+{% elif board.freshness.level == 'none' %}
+<p class="flash-inline warn">
+  还没跟移动核对过：下面的天数按台账账龄算，可能把已经办好的机器算成要办。
+</p>
+{% endif %}
+
 <div class="kpi-row">
-  <div class="kpi">
-    <div class="muted">已售未办（最新清单内）</div>
-    <div class="kpi-num">{{ cards.open }}</div>
-    <div class="muted">{{ cards.stores }} 家店在跟</div>
-  </div>
-  <div class="kpi">
-    <div class="muted">过了 7 天</div>
-    <div class="kpi-num">{{ cards.overdue }}</div>
-    <div class="muted">已退省库风险</div>
-  </div>
-  <div class="kpi">
-    <div class="muted">7 天内到期</div>
-    <div class="kpi-num">{{ cards.soon }}</div>
-    <div class="muted">这几天要催</div>
-  </div>
-  <div class="kpi">
+  <a class="kpi {{ 'kpi-current' if show in ('open', 'all') }}" href="{{ link_open }}">
+    <div class="muted">今天要办</div>
+    <div class="kpi-num">{{ board.active_rows|length }}</div>
+    <div class="muted">{{ groups|length }} 家店在跟</div>
+  </a>
+  <a class="kpi {{ 'kpi-current' if show in ('open', 'all') }}" href="{{ link_open }}">
     <div class="muted">待激活</div>
-    <div class="kpi-num">{{ cards.pending }}</div>
+    <div class="kpi-num">{{ board.pending_rows|length }}</div>
     <div class="muted">异地异网，改串机激活</div>
-  </div>
-  <div class="kpi">
-    <div class="muted">门店已自报</div>
-    <div class="kpi-num">{{ cards.reported }}</div>
-    <div class="muted">{% if cards.claimed %}＋本店代办 {{ cards.claimed }} 台{% else %}含截图{% endif %}</div>
-  </div>
+  </a>
+  <a class="kpi {{ 'kpi-current' if show in ('reported', 'all') }}" href="{{ link_reported }}">
+    <div class="muted">已报待回传</div>
+    <div class="kpi-num">{{ board.reported }}</div>
+    <div class="muted">报完了，等移动/台账核销</div>
+  </a>
+  <a class="kpi {{ 'kpi-current' if show in ('held', 'all') }}" href="{{ link_held }}">
+    <div class="muted">待核对</div>
+    <div class="kpi-num">{{ board.held_done }}</div>
+    <div class="muted">台账已办，没跟移动核过</div>
+  </a>
 </div>
 
-{% if is_admin and cards.unmapped %}
-<p class="flash-inline warn">
-  <strong>{{ cards.unmapped }} 台</strong> 的销售门店在门店档案里没有（在营但没建账号），
-  这些机器在 <a href="{{ url_for('imei_pool', tab='unmapped') }}">待建店池子</a> 里，任何门店都能代办（谁办算谁）。
-  补门店档案或确认改名后重新导入即可自动归位。
-  <br><span class="muted">注意：待建店不计入上面「已售未办」「过了 7 天」的统计（那些只算已建档门店），所以列表里有逾期行而上面的数字是 0 属于正常。</span>
-</p>
+{% if show in ('open', 'all') and not groups and not pending_groups and not board.reported and not board.held_done %}
+<p class="muted">没有要处理的串码。清单每天导入一次，导入前这里是空的。</p>
+{% endif %}
+
+{% if show in ('open', 'all') %}
+{% if can_write and groups %}<p class="imei-mobile-tip">每行机型下面的「自报」直接点，不用往左滑；想看串码、状态再滑表格。</p>{% endif %}
+{{ store_block(groups) }}
+{% if pending_groups %}
+<h2 class="pending-head">待激活 <span class="muted">{{ board.pending_rows|length }} 台 · 异地异网，等激活（门店用改串机），不算逾期；超 30 天由管理员核实</span></h2>
+{{ store_block(pending_groups, true) }}
+{% endif %}
+{% endif %}
+
+{% if show in ('reported', 'all') %}
+<h2 class="pending-head">已报待回传 <span class="muted">{{ board.reported }} 台 · 门店已经报过，等移动回传或台账核销，不用再报一遍</span></h2>
+{% if board.reported %}
+{{ store_block(reported_groups) }}
+{% else %}
+<p class="muted">没有等回传的机器。</p>
+{% endif %}
+{% endif %}
+
+{% if show in ('held', 'all') %}
+<h2 class="pending-head">待核对 <span class="muted">{{ board.held_done }} 台 · 台账写着已办，但这批没问过移动：不催门店，等下次移动回传给结论</span></h2>
+{% if board.held_done %}
+{{ store_block(held_groups) }}
+{% else %}
+<p class="muted">没有待核对的机器。</p>
+{% endif %}
 {% endif %}
 
 {% if claims %}
@@ -203,7 +266,7 @@
   <div class="report-table-scroll">
     <table class="data report-grid">
       <thead>
-        <tr><th>串码</th><th>机型</th><th>原售出店</th><th>售出日</th><th>代办店</th><th>提交结论</th><th>时间</th></tr>
+        <tr><th>串码</th><th>机型</th><th>售出店</th><th>售出日</th><th>代办店</th><th>提交结论</th><th>时间</th></tr>
       </thead>
       <tbody>
         {% for c in claims %}
@@ -224,106 +287,6 @@
 </details>
 {% endif %}
 
-{% if is_admin %}
-{# 管理员子台账导航：原来这里是 4 段带长解释的 <p>，首屏要滚 1083px 才见到正文表格。
-   收成一行胶囊，解释留在各子页面顶部（那里本来就有）。 #}
-<nav class="sub-nav" aria-label="管理员子台账">
-  <a class="sub-nav-item" href="{{ url_for('imei_marks') }}">门店标记清单{% if marked_n %}<b>{{ marked_n }}</b>{% endif %}</a>
-  <a class="sub-nav-item" href="{{ url_for('imei_transfer') }}">调拨台账</a>
-  <a class="sub-nav-item" href="{{ url_for('imei_carryover') }}">{{ grace_label }} 存量结转{% if carryover_n %}<b>{{ carryover_n }}</b>{% endif %}</a>
-  <a class="sub-nav-item" href="{{ url_for('imei_export_carryover') }}">导出结转 CSV</a>
-  <a class="sub-nav-item" href="{{ url_for('imei_review') }}">超 30 天未激活核实{% if review_n %}<b>{{ review_n }}</b>{% endif %}</a>
-  {% if cards.unmapped %}<a class="sub-nav-item warn" href="{{ url_for('imei_pool', tab='unmapped') }}">待建店池子<b>{{ cards.unmapped }}</b></a>{% endif %}
-</nav>
-{% endif %}
-
-{% if is_admin %}
-<details class="card">
-  <summary>导入清单（管理员）</summary>
-  <form method="post" action="{{ url_for('imei_import') }}" enctype="multipart/form-data" class="rules-form">
-    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-    <label class="field">
-      <span>清单 CSV（台账全量或当日待办都行）</span>
-      <input type="file" name="csv_file" accept=".csv" required>
-    </label>
-    <label class="field">
-      <span>导入方式</span>
-      <select name="import_mode" onchange="
-        var full=this.value==='full';
-        document.getElementById('modeHint').textContent = full
-          ? '全量快照：这份必须是完整清单，清单里没出现的同类机器会被撤下、不再推给门店。'
-          : '增量：只写这份清单里的机器，清单外的机器一律不动（日常日更选这个）。';
-      ">
-        <option value="incremental" selected>增量（推荐：只加这次清单里的）</option>
-        <option value="full">全量快照（完整清单才选）</option>
-      </select>
-    </label>
-    <label class="field">
-      <span>数据截至</span>
-      <input type="date" name="asof" value="{{ today_iso }}">
-    </label>
-    <p class="muted" id="modeHint">
-      增量：只写这份清单里的机器，清单外的机器一律不动（日常日更选这个）。
-    </p>
-    <p class="muted">
-      台账（已售）CSV 一般只带已建档门店，选增量；库存（未售）导出一般是整份快照，选全量才能把已卖掉的库存机撤下。
-      按 IMEI 覆盖、行不删；店名对不上的机器挂在「待建店」（仅管理员可见），补档案后重导即可归位。
-    </p>
-    <button type="submit" onclick="
-      if (this.form.import_mode.value === 'full') {
-        return confirm('全量快照会把这份清单里没出现的已售/未售机器从门店视图撤下（行还在，只是不再推给门店）。确认这是完整清单？');
-      }
-      return true;
-    ">导入</button>
-  </form>
-  <p class="muted">门店报完的结论在这里导出，回灌台账用：<a href="{{ url_for('imei_export') }}">导出门店自报 CSV</a>
-    · <a href="{{ url_for('imei_export_todo') }}">导出待办清单（含客户类型 / 激活日）</a></p>
-</details>
-
-<details class="card" {{ 'open' if marks and marks[0].pending_n }}>
-  <summary>各店标记台数（管理员）{{ '· 有店标得多' if marks and marks[0].suspicious }}</summary>
-  {% if marks %}
-  <div class="report-table-scroll">
-    <table class="data report-grid">
-      <thead>
-        <tr><th>门店</th><th>待办</th><th>待激活</th><th>已激活</th><th>待激活占比</th></tr>
-      </thead>
-      <tbody>
-        {% for m in marks %}
-        <tr>
-          <td>{{ m.short or m.name }}{% if m.suspicious %} <span class="chip">偏高</span>{% endif %}</td>
-          <td class="num">{{ m.open_n }}</td>
-          <td class="num">{{ m.pending_n }}</td>
-          <td class="num">{{ m.activated_n }}</td>
-          <td class="num">{{ m.ratio }}%</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <p class="muted">待激活 = 门店标了「异地异网」但还没点「已激活」。台数多、占比过半（≥3 台）会标「偏高」，问一句再算。</p>
-  {% else %}
-  <p class="muted">还没有门店标记。</p>
-  {% endif %}
-</details>
-{% endif %}
-
-{% if not groups %}
-<p class="muted">没有要处理的串码。清单每天导入一次，导入前这里是空的。</p>
-{% endif %}
-
-{% for group in groups %}
-<div class="card" id="store-{{ group.id }}">
-  <h2>{{ group.short }} <span class="muted">{{ group.rows|length + group.pending|length }} 台</span>
-    {% if group.unmapped %}<span class="chip">待建店</span>{% endif %}</h2>
-  {% if group.short != group.name %}<p class="muted">{{ group.name }}</p>{% endif %}
-  {% if group.rows %}{% if can_write %}<p class="imei-mobile-tip">每行机型下面的「自报」直接点，不用往左滑；想看串码、状态再滑表格。</p>{% endif %}{{ todo_table(group.rows) }}{% endif %}
-  {% if group.pending %}
-  <h3 class="pending-head">待激活 <span class="muted">{{ group.pending|length }} 台 · 异地异网，等激活（门店用改串机），不算逾期；超 30 天由管理员核实</span></h3>
-  {{ todo_table(group.pending, true) }}
-  {% endif %}
-</div>
-{% endfor %}
 <script>
 (function () {
   var NEEDS = {{ needs_evidence|tojson }};

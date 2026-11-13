@@ -11,7 +11,7 @@
     <p class="muted">当前待激活 / 已激活 {{ rows|length }} 台 · 截至 {{ today_iso }}{% if scope.active %} · {{ scope.label }}{% endif %}</p>
   </div>
   <div class="page-filters">
-    <a class="btn ghost" href="{{ url_for('imei_page') }}">返回串码待办</a>
+    <a class="btn ghost" href="{{ url_for('imei_admin') }}">返回管理员工作台</a>
   </div>
 </div>
 

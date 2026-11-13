@@ -157,12 +157,51 @@ def _claim_target_store(conn, raw: str, back: str) -> Optional[int]:
     flash("这条是待建店（销售门店还没建账号），先在行里选「本店代办」要记到哪家店", "error")
     return None
 
+def _group_by_store(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """把 `todo_board()` 的扁平行按门店折成模板要的 group 列表（保持 board 的排序）。
+
+    `todo_board()` 已经把「哪台归哪家店」算完（含待建店按店名各自成组），这里只做
+    分桶，不再挑行、不再判断——卡片数字与折叠区台数必须 1:1。
+    """
+    groups: List[Dict[str, Any]] = []
+    by_key: Dict[Any, Dict[str, Any]] = {}
+    for row in rows:
+        # 待建店（store_id 为空）用 store 名当键，否则 10 家未建档店会塌成一组
+        key: Any = row["store_id"] if row["store_id"] is not None else "?" + row["store"]
+        group = by_key.get(key)
+        if group is None:
+            group = {
+                "id": key,
+                "name": row["store"] or "门店档案里没有",
+                "short": row["store_short"] or row["store"] or "待建店",
+                "unmapped": row["store_id"] is None,
+                "rows": [],
+            }
+            by_key[key] = group
+            groups.append(group)
+        group["rows"].append(row)
+    return groups
+
 
 def register_imei(app) -> None:
     @app.route("/imei")
     @login_required
     def imei_page():
-        show = "all" if request.args.get("show") == "all" else "open"
+        """门店页：只回答「今天该办哪几台」，每行一个「自报」按钮。
+
+        数据只有一个来源 `db_imei.todo_board()`（判定只在那里做一次），模板不再自己
+        挑行：`active_rows` / `pending_rows` / `reported_rows` / `held_rows` 四个桶
+        直接对应四个折叠区，卡片数字与折叠区台数 1:1。
+
+        管理员那套（导入清单 / 结转 / 标记台数 / 各子台账）全部在 `/imei/admin`，
+        门店页看不到，也不再吃首屏。
+
+        `show` 决定这次渲染哪几块（默认 open = 今天要办 + 待激活）：
+        open / reported / held / all。
+        """
+        show = request.args.get("show") or "open"
+        if show not in ("open", "reported", "held", "all"):
+            show = "open"
         is_admin = g.user["role"] == "admin"
         with db.get_db() as conn:
             if not db_imei.user_in_imei_scope(conn, g.user):
@@ -170,65 +209,26 @@ def register_imei(app) -> None:
             stores = accessible_stores(conn)
             scope = request_scope(stores)
             ids = scope["ids"]
-            # 店员只盯自己店：默认不铺全站，页头直接给「还剩几天」；筛选了具体地市/区域经理时不混入待建店
-            rows = db_imei.todo_rows(
-                conn, ids, show=show, include_unmapped=(is_admin and not scope["active"])
-            )
-            cards = db_imei.summary(conn, ids)
-            # 各店标了多少台异网/已激活：管理员用来发现「全标异网躲催办」
-            marks = db_imei.mark_summary(conn, ids) if is_admin else []
-            # 异地异网超过 30 天还没激活：管理员人工核实，门店端只显示不再催
-            review_n = (
-                len(db_imei.review_rows(conn, ids, include_unmapped=not scope["active"]))
-                if is_admin
-                else 0
-            )
-            # 管理员两个台账：11-16 存量结转（rule_ver=1）、门店标记清单
+            # 待建店（store_id 为空）只在管理员看全站时并进来：店员不该看到他办不了的表
             include_unmapped = is_admin and not scope["active"]
-            carryover_n = (
-                len(db_imei.carryover_rows(conn, ids, include_unmapped=include_unmapped))
-                if is_admin
-                else 0
-            )
-            marked_n = (
-                len(db_imei.marked_rows(conn, ids, include_unmapped=include_unmapped))
-                if is_admin
-                else 0
-            )
+            board = db_imei.todo_board(conn, ids, include_unmapped=include_unmapped)
+            # 串码池（在库）那两个台数还挂在页头按钮上，仍从 summary 取
+            cards = db_imei.summary(conn, ids)
             # 本店代办过（未释放）的待建店机器：归属只认锁表，不写回 imei_todo.store_id
             claims = db_imei.pool_claims(conn, ids)
             # 「本店代办」下拉只列本人可写的门店（不受页面 city/manager 筛选影响）
             target_stores = stores
-        groups: List[Dict[str, Any]] = []
-        by_store: Dict[Any, Dict[str, Any]] = {}
-        for row in rows:
-            # store_id 为空的 = 在营但档案里没有的门店（待建店），只在管理员视图出现
-            key: Any = int(row["store_id"]) if row["store_id"] else "unmapped"
-            group = by_store.get(key)
-            if group is None:
-                group = {
-                    "id": key,
-                    "name": row["store_name"] or row.get("dispatch_store") or "门店档案里没有",
-                    "short": row["store_short"] or row.get("dispatch_store") or "待建店",
-                    "unmapped": not row["store_id"],
-                    "rows": [],
-                    "pending": [],
-                }
-                by_store[key] = group
-                groups.append(group)
-            group["pending" if row["act_state"] == "待激活" else "rows"].append(row)
         return render_template(
             "imei.html",
-            groups=groups,
+            board=board,
+            groups=_group_by_store(board["active_rows"]),
+            pending_groups=_group_by_store(board["pending_rows"]),
+            reported_groups=_group_by_store(board["reported_rows"]),
+            held_groups=_group_by_store(board["held_rows"]),
             cards=cards,
             claims=claims,
             target_stores=target_stores,
-            marks=marks,
-            review_n=review_n,
-            carryover_n=carryover_n,
-            marked_n=marked_n,
             today_iso=db.today_local().isoformat(),
-            user_types=db_imei.USER_TYPES,
             grace_label=db_imei.grace_label(),
             scope=scope,
             show=show,
@@ -239,6 +239,47 @@ def register_imei(app) -> None:
             needs_evidence=list(db_imei.NO_SYSTEM_EVIDENCE),
             evidence_label=db_imei.evidence_label,
             is_admin=is_admin,
+        )
+
+    @app.route("/imei/admin")
+    @admin_required
+    def imei_admin():
+        """管理员工作台：导入清单 + 各子台账入口 + 各店标记台数 + 导出。
+
+        原来这些都铺在门店页首屏（要滚 1083px 才见到正文），2026-11-12 整体搬过来：
+        门店页只留一个自报按钮，进出货/核实的活在管理员这边做。
+        """
+        with db.get_db() as conn:
+            stores = accessible_stores(conn)
+            scope = request_scope(stores)
+            ids = scope["ids"]
+            include_unmapped = not scope["active"]
+            cards = db_imei.summary(conn, ids)
+            board = db_imei.todo_board(conn, ids, include_unmapped=include_unmapped)
+            # 各店标了多少台异网/已激活：用来发现「全标异网躲催办」
+            marks = db_imei.mark_summary(conn, ids)
+            # 异地异网超过 30 天还没激活：人工核实清单
+            review_n = len(
+                db_imei.review_rows(conn, ids, include_unmapped=include_unmapped)
+            )
+            # 两个台账：11-16 存量结转（rule_ver=1）、门店标记清单
+            carryover_n = len(
+                db_imei.carryover_rows(conn, ids, include_unmapped=include_unmapped)
+            )
+            marked_n = len(
+                db_imei.marked_rows(conn, ids, include_unmapped=include_unmapped)
+            )
+        return render_template(
+            "imei_admin.html",
+            cards=cards,
+            board=board,
+            marks=marks,
+            review_n=review_n,
+            carryover_n=carryover_n,
+            marked_n=marked_n,
+            today_iso=db.today_local().isoformat(),
+            grace_label=db_imei.grace_label(),
+            scope=scope,
         )
 
     @app.route("/imei/review")
