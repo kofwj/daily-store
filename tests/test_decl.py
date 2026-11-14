@@ -1086,3 +1086,101 @@ def test_pending_page_renders_inline_phone_input(client):
     html = client.get("/advance/pending").get_data(as_text=True)
     assert f'name="phone_{decl_id}"' in html
     assert f'value="phone:{decl_id}"' in html
+
+
+def test_deal_closed_rebate_without_phone_is_refused(client):
+    """成交 + 顺差让利却没号码：不落库、钱行不生成，表单原样退回让人当场补。
+
+    这一步号码最好拿——店员正对着客户。等到月末管理员在垫资页补，顺序是反的。
+    """
+    imei = _make_store(client, "862000000000001")
+    sid = _store_id()
+    blocked = client.post(
+        "/deal",
+        data={
+            "store_id": str(sid),
+            "model": "Y600 Pro",
+            "phone": "",
+            "closed": "1",
+            "biz_type": "顺差让利",
+            "imei": imei,
+            "note": "客户急着走",
+        },
+        follow_redirects=True,
+    )
+    html = blocked.get_data(as_text=True)
+    assert blocked.status_code == 200
+    assert "顺差让利成交要填客户手机号码" in html
+    assert "客户急着走" in html  # 填过的内容不丢，补个号再交
+    with db.get_db() as conn:
+        assert conn.execute("SELECT COUNT(*) AS n FROM deal_posts").fetchone()["n"] == 0
+        assert conn.execute("SELECT COUNT(*) AS n FROM imei_decl").fetchone()["n"] == 0
+        assert any(r["imei"] == imei for r in db_imei.pool_rows(conn))
+
+    ok = client.post(
+        "/deal",
+        data={
+            "store_id": str(sid),
+            "model": "Y600 Pro",
+            "phone": "15500000123",
+            "closed": "1",
+            "biz_type": "顺差让利",
+            "imei": imei,
+            "note": "客户急着走",
+        },
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "已记让利垫资待核" in ok
+    with db.get_db() as conn:
+        decl = conn.execute("SELECT imei, state FROM imei_decl").fetchone()
+        assert decl["imei"] == imei and decl["state"] == db_decl.DECL_PENDING
+
+
+def test_deal_saves_without_phone_when_no_money_is_involved(client):
+    """没号码只拦「要生钱」的那一种单：未成交、或业务不记让利，照常保存。"""
+    imei = _make_store(client, "862000000000002")
+    sid = _store_id()
+    for closed, biz in (("0", "顺差让利"), ("1", "AI手机合约")):
+        client.post(
+            "/deal",
+            data={
+                "store_id": str(sid),
+                "model": "Y600 Pro",
+                "phone": "",
+                "closed": closed,
+                "biz_type": biz,
+                "imei": imei,
+            },
+            follow_redirects=True,
+        )
+    with db.get_db() as conn:
+        assert conn.execute("SELECT COUNT(*) AS n FROM deal_posts").fetchone()["n"] == 2
+        money = conn.execute(
+            "SELECT COUNT(*) AS n FROM imei_decl WHERE state=? AND rebate_cents>0",
+            (db_decl.DECL_PENDING,),
+        ).fetchone()["n"]
+        assert money == 0
+
+
+def test_pending_page_flags_missing_phone_and_takes_inline_fix(client):
+    """待核页：缺号的要有标记 + 顶部计数，并且能在本页补完再确认。"""
+    imei = _make_store(client, "862000000000003")
+    sid = _store_id()
+    with db.get_db() as conn:
+        _deal(conn, store_id=sid, imei=imei, phone="")
+        decl_id = int(db_decl.pending_rows(conn)[0]["id"])
+    _login(client, "admin", "123456")
+    html = client.get("/advance/pending").get_data(as_text=True)
+    assert "还没有客户号码" in html
+    assert '<div class="muted phone-src warn">缺号码</div>' in html
+    after = client.post(
+        "/advance/pending",
+        data={"action": f"phone:{decl_id}", f"phone_{decl_id}": "15500000124"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "号码已保存" in after
+    assert "还没有客户号码" not in after
+    assert '<div class="muted phone-src warn">缺号码</div>' not in after
+    with db.get_db() as conn:
+        got = conn.execute("SELECT phone FROM imei_decl WHERE id=?", (decl_id,)).fetchone()["phone"]
+        assert got == "15500000124"

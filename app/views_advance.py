@@ -98,10 +98,16 @@ def _render_advance(conn, store, stores, form, is_admin, is_viewer, today_d, *, 
         pending_ids = [int(s) for s in scoped_ids]
     pending = db_decl.pending_rows(conn, store_ids=pending_ids, limit=200)
     pending_totals = db_decl.summary(conn, pending_ids)
+    # 号码缺口：没号码的垫资行付款时对不上人。这里只用来提示，不拦任何操作
+    # ——号码格就在列表里，店员自己就能补（/advance/phone），不用等管理员。
+    missing_phone = sum(1 for r in rows if not str(r["phone"] or "").strip())
+    pending_missing = sum(1 for r in pending if not str(r["phone"] or "").strip())
     return render_template(
         "advance.html",
         pending=pending,
         pending_totals=pending_totals,
+        missing_phone=missing_phone,
+        pending_missing=pending_missing,
         rebate_text=db_decl.cents_text(db_decl.rebate_cents(conn)),
         store=store,
         stores=stores,
@@ -355,12 +361,16 @@ def register_advance(app) -> None:
                 store_ids = city_scope["ids"]
             rows = db_decl.pending_rows(conn, start=month, end=month_end, store_ids=store_ids)
             totals = db_decl.summary(conn, store_ids)
+            # 缺号码：确认后这笔钱就进了垫资行，付钱时对不上人。号码格就在本页，
+            # 确认前补齐最省事——事后补得去垫资页逐条改。
+            missing_phone = sum(1 for r in rows if not str(r.get("phone") or "").strip())
             return render_template(
                 "advance_pending.html",
                 rows=rows,
                 month=month,
                 totals=totals,
                 pending_total=totals,
+                missing_phone=missing_phone,
                 rebate=db_decl.cents_text(db_decl.rebate_cents(conn)),
                 scope=city_scope,
             )

@@ -18,7 +18,7 @@
     {% endif %}
     {% endif %}
     {% if is_admin %}
-    <a class="btn ghost" href="{{ url_for('advance_pending', month=month.strftime('%Y-%m')) }}">让利待核{% if pending_totals.n %} · {{ pending_totals.n }} 笔{% endif %}</a>
+    <a class="btn ghost" href="{{ url_for('advance_pending', month=month.strftime('%Y-%m')) }}">让利待核{% if pending_totals.n %} · {{ pending_totals.n }} 笔{% endif %}{% if pending_missing %} · 缺号 {{ pending_missing }}{% endif %}</a>
     {% if modules.get('sesame_week') %}
     <a class="btn ghost" href="{{ url_for('sesame_week_page') }}">芝麻周报 / 导入明细</a>
     {% endif %}
@@ -33,6 +33,12 @@
   <div class="kpi"><div class="muted">其他</div><div class="kpi-num">{{ '%.2f'|format(totals.other) }}</div></div>
   <div class="kpi"><div class="muted">芝麻服务费</div><div class="kpi-num">{{ '%.2f'|format(totals.sesame) }}</div></div>
 </div>
+{% if missing_phone %}
+<p class="flash-inline warn">
+  这张表有 <b>{{ missing_phone }}</b> 笔没填客户号码 —— 在号码那一格直接补，金额一分不动，不用作废重录。
+  {% if pending_missing %}待核里还有 {{ pending_missing }} 笔缺号，确认前在<b>让利待核</b>页补齐更省事。{% endif %}
+</p>
+{% endif %}
 
 {% if not is_viewer and not all_stores %}
 <form method="post" class="card advance-form">

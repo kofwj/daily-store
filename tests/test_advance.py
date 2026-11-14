@@ -743,3 +743,26 @@ def test_advance_phone_route_refuses_other_store(tmp_db, filler_client):
         follow_redirects=False,
     )
     assert resp.status_code == 302 and "/login" in (resp.headers.get("Location") or "")
+
+
+def test_advance_page_warns_missing_phone_and_filler_can_fix(tmp_db, filler_client):
+    """缺号提示要放在店员自己看得见的地方：列表顶上一条，号码格直接补。
+
+    以前只有管理员知道缺号，得逐条补——号码本来就该在成交那一步拿到，
+    至少不能只有管理员能动。
+    """
+    c = filler_client
+    sid, _admin_id = _seed_advances([(None, 10.0)])
+    page = c.get("/advance").get_data(as_text=True)
+    assert "笔没填客户号码" in page
+    with db.get_db() as conn:
+        aid = conn.execute(
+            "SELECT id FROM advance_posts WHERE store_id=?", (sid,)
+        ).fetchone()["id"]
+    body = c.post(
+        "/advance/phone",
+        data={"store_id": str(sid), "advance_id": str(aid), "phone": "13800001234"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "号码补上了，金额没动" in body
+    assert "笔没填客户号码" not in body  # 表里没缺号的了，提示自己收起来

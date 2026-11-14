@@ -255,6 +255,30 @@ def register_daily(app) -> None:
             text = ""
             today_d = db.today_local()
             editable = True
+
+            def _render_deal(text_out: str, *, editable_flag: bool = True) -> str:
+                # 尾部和「拦下不落库」两处共用同一套模板参数，计数口径只有一份
+                month_first = today_d.replace(day=1)
+                store_ids = [s["id"] for s in stores]
+                today_counts = db.deal_counts(conn, store_ids, today_d, today_d)
+                month_counts = db.deal_counts(conn, store_ids, month_first, today_d)
+                return render_template(
+                    "deal.html",
+                    store=store,
+                    stores=stores,
+                    form=values,
+                    imei_options=imei_options,
+                    biz_choices=db_decl.BIZ_SET + (db_decl.BIZ_OTHER,),
+                    deal_text=text_out,
+                    is_admin=g.user["role"] == "admin",
+                    mine_today=with_close_rate(
+                        today_counts.get(store["id"], {"total": 0, "closed": 0})
+                    ),
+                    mine_month=with_close_rate(
+                        month_counts.get(store["id"], {"total": 0, "closed": 0})
+                    ),
+                    editable=editable_flag,
+                )
             # 触客页「顺差串码」下拉：本店库存登记的在库顺差机（只读，不写库）
             imei_options: List[Dict[str, Any]] = []
             if editable and db_imei.user_in_imei_scope(conn, g.user):
@@ -302,6 +326,23 @@ def register_daily(app) -> None:
                 picked_from_list = bool(
                     (request.form.get("imei_pick") or "").strip() and not raw_imei
                 )
+                # 顺差让利成交＝马上要生成钱行，号码就是付款对象。这一步店员正对着客户，
+                # 是拿号码最自然的时点；留到垫资页再补就变成管理员的事了。
+                if (
+                    deal.yn(values["closed"], "1", "0") == "1"
+                    and db_decl.biz_gets_rebate(biz_type)
+                    and not (values.get("phone") or "").strip()
+                ):
+                    flash(
+                        "顺差让利成交要填客户手机号码 —— 垫资就付到这个号，没号这笔钱没人可付。"
+                        "号码还没拿到就先按「未成交」存，拿到号再回来改成成交。",
+                        "error",
+                    )
+                    preview = deal.render_deal(
+                        broadcast_store_name(store),
+                        **{k: v for k, v in values.items() if k in _DEAL_RENDER_KEYS},
+                    )
+                    return _render_deal(preview)
                 if raw_imei:
                     found = db_imei.find_stock_imei(conn, raw_imei)
                     if found is None:
@@ -381,25 +422,7 @@ def register_daily(app) -> None:
 
                 if wecom.get_webhook(conn, store):
                     wecom.send_text(conn, store, text, source="deal")
-            month_start = today_d.replace(day=1)
-            store_ids = [s["id"] for s in stores]
-            today_counts = db.deal_counts(conn, store_ids, today_d, today_d)
-            month_counts = db.deal_counts(conn, store_ids, month_start, today_d)
-            mine_today = with_close_rate(today_counts.get(store["id"], {"total": 0, "closed": 0}))
-            mine_month = with_close_rate(month_counts.get(store["id"], {"total": 0, "closed": 0}))
-            return render_template(
-                "deal.html",
-                store=store,
-                stores=stores,
-                form=values,
-                imei_options=imei_options,
-                biz_choices=db_decl.BIZ_SET + (db_decl.BIZ_OTHER,),
-                deal_text=text,
-                is_admin=g.user["role"] == "admin",
-                mine_today=mine_today,
-                mine_month=mine_month,
-                editable=editable,
-            )
+            return _render_deal(text, editable_flag=editable)
 
     @app.route("/deal/delete", methods=["POST"])
     @admin_required

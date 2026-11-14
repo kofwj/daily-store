@@ -28,6 +28,11 @@
     待核<b>不计入</b>任何垫资合计与酬金；确认后才进兑付。金额是生成那一刻的快照，改档位不影响这里。
     账记在<b>成交日</b>所在月——上月最后一天成交的，本月确认照样算上月。
   </p>
+  {% if missing_phone %}
+  <p class="flash-inline warn">
+    这 {{ missing_phone }} 笔还没有客户号码 —— 确认后钱就进了垫资行，付的时候对不上人。号码格里直接补，或让门店报一下手机号。
+  </p>
+  {% endif %}
   {% if rows %}
   {# event.submitter：点「存号码」时不弹确认框，只有确认/作废才弹 #}
   <form method="post" onsubmit="var s=(typeof event!=='undefined')?event.submitter:null;if(s&&(s.value||'').indexOf('phone:')===0)return true;return confirm('确认后这笔进入待兑付，勾选的多笔会一起进');">
@@ -64,7 +69,7 @@
                 <input type="tel" name="phone_{{ r.id }}" value="{{ r.phone }}" inputmode="numeric" maxlength="11" placeholder="缺号码">
                 <button type="submit" class="ghost" name="action" value="phone:{{ r.id }}" onclick="return pendingPhone(this, 'phone_{{ r.id }}')">存号码</button>
               </div>
-              {% if r.phone and not r.decl_phone %}<div class="muted phone-src">{{ '来自触客单' if r.deal_phone else '来自移动回传' }}</div>{% endif %}
+              {% if not r.phone %}<div class="muted phone-src warn">缺号码</div>{% elif not r.decl_phone %}<div class="muted phone-src">{{ '来自触客单' if r.deal_phone else '来自移动回传' }}</div>{% endif %}
             </td>
             <td class="left">{{ r.biz_type or '顺差让利' }}</td>
             <td class="left">{{ '触客成交' if r.src == 'deal' else '门店自报' }}</td>
